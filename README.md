@@ -39,6 +39,11 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 - **Sessions** — a UDP-like datagram link keyed on a cryptographic address (so it
   survives roaming), plus a simple QUIC-style Go-Back-N reliable stream for
   SSH/git-shaped needs. Reliability is endpoint state, never a network property.
+- **Double Ratchet** (§7) — forward-secret sessions: a fresh per-message key from a
+  BLAKE2b chain, X25519 ratchet turns on each reply, skipped-key caching for
+  out-of-order arrival, replay rejection. X25519 + ChaCha20-Poly1305.
+- **Mix mode** (§9) — onion routing as nested sealed envelopes through 2–3 mixes,
+  padded to size classes; sender + recipient anonymity, each mix peels one layer.
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
   directed unicast, dedup, store with eviction, the full `on_rx` router.
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
@@ -53,7 +58,7 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test               # 17 tests: envelope, fountain, send, files, sessions, reliable, bridges, seal, KISS, armor, sync
+cargo test               # 19 tests: envelope, fountain, send, files, sessions, reliable, ratchet, onion, bridges, seal, KISS, armor
 cargo run                # in-memory mesh demo (A — B — C — D)
 cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
 cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
@@ -74,6 +79,7 @@ SPORE demo — line topology  A — B — C — D
 [5] FOUNTAIN over 40% loss, one-way: 21 data chunks needed; 25 survived of 53 sent; reassembled + signature-verified: true
 [6] DATAGRAM session A->D over 3 directed hops: D decrypts Some("interactive hello over a udp-like link")
 [7] FILE 'field-notes.txt' (9000 B) published as magnet 8ac320df4f09…; B pulled + verified: true
+[8] MIX onion A~>D via 2 mixes (B,C): D opens Some("burn the ledgers")
 ```
 
 ## Layout

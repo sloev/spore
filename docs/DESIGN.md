@@ -67,7 +67,7 @@ that the message is addressed to.
 | `0x05` | feed/event | planned |
 | `0x06` | receipt/ACK (spec §8) | planned |
 | `0x07` | file chunk | ✅ implemented |
-| `'O'` (0x4F) | mix onion (spec §9) | planned |
+| `'O'` (0x4F) | mix onion (spec §9) | ✅ implemented |
 
 Fragments are the one exception: they're recognised by the `FRAGMENT` header flag,
 not a tag, and their payload is `[orig_id:16][index:1][count:1][chunk]`. The chunk
@@ -263,6 +263,64 @@ already does. An ergonomic wrapper (subscribe callbacks, watermark cursors) is t
 only thing left to add.
 </details>
 
+## Forward-secret sessions — Double Ratchet  ✅ implemented
+
+The sealed box (§7 baseline) already gives you privacy, but if a device is seized
+its prekey can read every message sent to it that week. The Double Ratchet fixes
+that: each message uses a brand-new key that's thrown away immediately, and the
+whole key schedule "turns" every time the other side replies. Crack one message and
+you learn nothing about the ones before it or after the next turn.
+
+<details>
+<summary>Deep dive: chains, turns, and out-of-order handling</summary>
+
+Two chains and a root. A BLAKE2b **chain KDF** produces one message key per message
+and then advances, so every message key is unique and deleted after use (forward
+secrecy within a chain). When a message carries a new **X25519 ratchet public** in
+its header, both sides run the **root KDF** over a fresh DH — a *ratchet turn* that
+reseeds the chains with new entropy (recovery from compromise). The wire form is the
+spec's `[dh_pub:32][n:2][pn:2][ct]`, with `ct = ChaCha20-Poly1305(mk, nonce=n,
+ad=header)`.
+
+Out-of-order arrival is normal in SPORE, so a receiver caches the keys it skips
+(bounded by `MAX_SKIP`) and opens the stragglers when they arrive; a replay of an
+already-consumed message is refused. In `src/lib.rs` as
+`ratchet::Ratchet::{init_alice, init_bob, encrypt, decrypt}`, tested through a DH
+turn, out-of-order delivery, and a rejected replay. In practice the root bootstraps
+from the first sealed message and each device keeps its own ratchet key — never
+share one ratchet across devices.
+</details>
+
+## Anonymity — mix mode  ✅ implemented
+
+If you need to hide *who is talking to whom* (not just the contents), wrap your
+message in an onion: layers of encryption addressed to a chain of volunteer relays
+("mixes"). Each mix can peel only its own layer, learning just the next hop, so no
+single relay sees both ends. Make the innermost layer public and everyone carries it
+while only the true recipient can open it.
+
+<details>
+<summary>Deep dive: onion construction, padding, and what it defeats</summary>
+
+An onion is nested sealed envelopes. Each layer is a DATA envelope addressed to one
+mix, its payload sealed to that mix as `'O' ‖ next_full_envelope`. `mix::onion_wrap`
+builds it inside-out through 2–3 mixes (learned from ANNOUNCEs on topic `mix`) and
+pads each layer to a **256 / 1024 / 4096-byte size class** so onion depth never
+shows on the wire. A mix runs `Node::onion_peel` — open, check the `'O'` marker,
+re-inject the inner envelope as its own traffic.
+
+- **Sender anonymity:** outer layers are left unsigned.
+- **Recipient anonymity:** the innermost `dest` is `0x00..00` and its payload is
+  sealed to the recipient — every node carries it, one node opens it.
+
+Honest limits (from the spec): this beats local observers and any subset of mixes,
+but a *global* passive observer is only defeated while cover traffic flows. The
+timing side — Poisson delay, batching ≥ 3, decoy onions — is the mix *runner's* job
+(a policy layer), like CSMA on a shared bus; the crypto transform is what's
+implemented here. Tested end-to-end through two mixes: each peels one layer, the wire
+carries no plaintext, and only the recipient opens the payload.
+</details>
+
 ## Bridges & bindings — SPORE rides everything
 
 A bridge is *not part of the protocol*. It only moves envelope bytes in and out of
@@ -312,6 +370,8 @@ the rest is designed and slots into the same tag/endpoint model.
 | L3 sessions — datagram link + reliable stream | ✅ implemented |
 | L4 request/response — RPC convention | ▢ designed |
 | L5 feeds — pub/sub over topics | ◑ works via topics; ergonomic API pending |
+| §7 crypto — Double Ratchet forward secrecy | ✅ implemented |
+| §9 anonymity — mix-mode onion | ✅ implemented |
 | Bridges — UDP, HTTP bag, folder, KISS framer, armor | ✅ implemented (TCP/CSMA runners next) |
 
 Every layer is additive and endpoint-only. The transport underneath never learns
