@@ -39,6 +39,10 @@ pub const DEFAULT_MTU: usize = 1400;
 /// 16 orig_id + 1 index + 1 count. `chunk = mtu - FRAG_OVERHEAD`.
 const FRAG_OVERHEAD: usize = 36;
 
+/// Datagrams are ephemeral: a short expiry keeps interactive session traffic
+/// out of anyone's long-term store.
+pub const SESSION_EXPIRY_SECS: u32 = 300;
+
 /// address = SHA-256(pubkey)[..8]
 pub fn addr_of(pubkey: &[u8; 32]) -> Addr {
     let d = Sha256::digest(pubkey);
@@ -910,6 +914,296 @@ impl Node {
     pub fn has(&self, id: &Id) -> bool {
         self.store.contains_key(id)
     }
+
+    // ---- datagram sessions (§ application layer, tag 0x04) ---------------
+
+    /// Open a UDP-like session to `peer` on `port`. Returns `None` until we've
+    /// heard the peer's prekey (from an ANNOUNCE). No handshake: identity is the
+    /// address, so the "connection" is just soft local state.
+    pub fn dial(&self, peer: Addr, port: u16) -> Option<session::Session> {
+        Some(session::Session::new(self.addr, peer, port, self.peer_prekey(&peer)?))
+    }
+
+    /// Send one datagram on a session: seal the bytes to the peer's prekey, wrap
+    /// them with a replay sequence, sign the envelope, and hand the transport the
+    /// `Forward`s. Best-effort and unordered, exactly like UDP.
+    pub fn dg_send(&mut self, s: &mut session::Session, data: &[u8], now: u32) -> Vec<Forward> {
+        let seq = s.next_tx_seq();
+        let sealed = seal(data, &s.peer_prekey());
+        let mut payload = Vec::with_capacity(11 + sealed.len());
+        payload.push(session::TAG_DGRAM);
+        payload.extend_from_slice(&s.port().to_be_bytes());
+        payload.extend_from_slice(&seq.to_be_bytes());
+        payload.extend_from_slice(&sealed);
+
+        let mut e = Envelope::new(ty::DATA, s.peer(), now + SESSION_EXPIRY_SECS, payload);
+        // No path yet -> flood to discover it; the signed reply teaches the
+        // reverse path, and subsequent datagrams go directed (§5.6).
+        if self.paths.fresh(&s.peer(), now).is_none() {
+            e.flags |= fl::FLOOD;
+        }
+        e.sign(&self.sk);
+        // Dedup our own copy off the flood, but don't clog the store with
+        // ephemeral session traffic.
+        self.mark_seen(&e);
+        self.forward_intents(&e, NO_IFACE, now)
+    }
+
+    /// Parse an inbound datagram envelope for session `s`: check the port,
+    /// authenticate the sender (its key must hash to the session peer), verify
+    /// the signature, reject replays, and decrypt. `None` if it isn't a valid,
+    /// fresh datagram for this session.
+    pub fn dg_recv(&self, s: &mut session::Session, e: &Envelope) -> Option<Vec<u8>> {
+        if e.typ != ty::DATA || e.payload.len() < 11 || e.payload[0] != session::TAG_DGRAM {
+            return None;
+        }
+        if u16::from_be_bytes([e.payload[1], e.payload[2]]) != s.port() {
+            return None;
+        }
+        let Src::Full(pk) = &e.src else { return None };
+        if addr_of(pk) != s.peer() || !e.verify() {
+            return None;
+        }
+        let mut sb = [0u8; 8];
+        sb.copy_from_slice(&e.payload[3..11]);
+        let seq = u64::from_be_bytes(sb);
+        let data = self.open(&e.payload[11..])?;
+        if !s.accept_rx(seq) {
+            return None; // replay or too old
+        }
+        Some(data)
+    }
+
+    /// Wrap a session in a simple QUIC-style reliable, ordered byte stream.
+    pub fn reliable(&self, s: session::Session) -> session::Reliable {
+        let max_frame = self.mtu.saturating_sub(200).max(1);
+        session::Reliable::new(s, max_frame)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sessions — a UDP-like bidirectional link, and a simple reliable stream on it.
+//
+// A datagram is an ordinary sealed+signed unicast envelope carrying an app tag,
+// a port, and a replay sequence. It is best-effort and unordered, like UDP; the
+// peer is a cryptographic address, so the "connection" survives roaming and NAT
+// changes with no handshake. `Reliable` layers a small Go-Back-N ARQ on top for
+// when you need an ordered byte stream (SSH, git) — reliability is endpoint
+// state, never a network property, exactly as QUIC rides UDP.
+// ---------------------------------------------------------------------------
+
+pub mod session {
+    use super::*;
+
+    /// Application tag marking a datagram payload (§ application layer).
+    pub const TAG_DGRAM: u8 = 0x04;
+
+    /// One end of a UDP-like link. Pure local state: peer address, port, the
+    /// peer's prekey (to seal to), a TX counter and a 64-wide replay window.
+    pub struct Session {
+        me: Addr,
+        peer: Addr,
+        port: u16,
+        peer_prekey: [u8; 32],
+        tx_seq: u64,
+        rx_hi: u64,
+        rx_win: u64,
+    }
+
+    impl Session {
+        pub fn new(me: Addr, peer: Addr, port: u16, peer_prekey: [u8; 32]) -> Self {
+            Session { me, peer, port, peer_prekey, tx_seq: 0, rx_hi: 0, rx_win: 0 }
+        }
+        pub fn me(&self) -> Addr {
+            self.me
+        }
+        pub fn peer(&self) -> Addr {
+            self.peer
+        }
+        pub fn port(&self) -> u16 {
+            self.port
+        }
+        pub fn peer_prekey(&self) -> [u8; 32] {
+            self.peer_prekey
+        }
+        /// Next outbound sequence (1-based; 0 means "nothing sent/seen").
+        pub fn next_tx_seq(&mut self) -> u64 {
+            self.tx_seq += 1;
+            self.tx_seq
+        }
+        /// DTLS-style sliding replay window over the last 64 sequences. Returns
+        /// false for a replayed or too-old datagram; true (and records it) for a
+        /// fresh one.
+        pub fn accept_rx(&mut self, seq: u64) -> bool {
+            const W: u64 = 64;
+            if seq == 0 {
+                return false;
+            }
+            if self.rx_hi == 0 {
+                self.rx_hi = seq;
+                self.rx_win = 1; // bit 0 == rx_hi seen
+                return true;
+            }
+            if seq > self.rx_hi {
+                let shift = seq - self.rx_hi;
+                self.rx_win = if shift >= W { 1 } else { (self.rx_win << shift) | 1 };
+                self.rx_hi = seq;
+                return true;
+            }
+            let diff = self.rx_hi - seq;
+            if diff >= W {
+                return false; // fell off the window
+            }
+            let bit = 1u64 << diff;
+            if self.rx_win & bit != 0 {
+                return false; // replay
+            }
+            self.rx_win |= bit;
+            true
+        }
+    }
+
+    // Reliable-stream frames, carried inside a datagram's sealed payload.
+    const F_DATA: u8 = 0x00; // [0x00][offset:8][len:2][bytes]
+    const F_ACK: u8 = 0x01; //  [0x01][recv_next:8]
+
+    fn data_frame(offset: u64, bytes: &[u8]) -> Vec<u8> {
+        let mut f = Vec::with_capacity(11 + bytes.len());
+        f.push(F_DATA);
+        f.extend_from_slice(&offset.to_be_bytes());
+        f.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
+        f.extend_from_slice(bytes);
+        f
+    }
+    fn ack_frame(recv_next: u64) -> Vec<u8> {
+        let mut f = Vec::with_capacity(9);
+        f.push(F_ACK);
+        f.extend_from_slice(&recv_next.to_be_bytes());
+        f
+    }
+
+    /// A simple QUIC-style reliable, ordered byte stream over a `Session`.
+    ///
+    /// Go-Back-N: the sender streams `F_DATA` frames within a fixed window and,
+    /// on an ACK-progress timeout, rewinds to the last acknowledged offset and
+    /// resends. The receiver accepts only in-order bytes and cumulatively ACKs
+    /// the next offset it needs. No fancy congestion control — a fixed window and
+    /// a fixed retransmit timeout, on purpose.
+    pub struct Reliable {
+        s: Session,
+        // send side
+        send_base: u64, // absolute offset of the first unacked byte
+        send_next: u64, // absolute offset of the next byte to put on the wire
+        out: Vec<u8>,   // buffered bytes; out[0] is byte at absolute send_base
+        last_progress: u32,
+        // recv side
+        recv_next: u64,
+        inbox: Vec<u8>, // delivered, in-order, awaiting read()
+        // params
+        max_frame: usize,
+        window: usize,
+        rto: u32,
+    }
+
+    impl Reliable {
+        pub fn new(s: Session, max_frame: usize) -> Self {
+            Reliable {
+                s,
+                send_base: 0,
+                send_next: 0,
+                out: Vec::new(),
+                last_progress: 0,
+                recv_next: 0,
+                inbox: Vec::new(),
+                max_frame: max_frame.max(1),
+                window: max_frame.max(1) * 8,
+                rto: 1,
+            }
+        }
+        pub fn session(&self) -> &Session {
+            &self.s
+        }
+
+        /// Queue bytes and send whatever the window allows now.
+        pub fn write(&mut self, node: &mut Node, data: &[u8], now: u32) -> Vec<Forward> {
+            self.out.extend_from_slice(data);
+            self.flush(node, now)
+        }
+
+        /// Hand an inbound datagram envelope to the stream. Decrypts it, applies
+        /// the frame, and returns any ACK or windowed sends that result.
+        pub fn deliver(&mut self, node: &mut Node, e: &Envelope, now: u32) -> Vec<Forward> {
+            match node.dg_recv(&mut self.s, e) {
+                Some(frame) => self.on_frame(node, &frame, now),
+                None => Vec::new(),
+            }
+        }
+
+        /// Drain the in-order bytes delivered so far.
+        pub fn read(&mut self) -> Vec<u8> {
+            std::mem::take(&mut self.inbox)
+        }
+
+        /// Drive retransmission timers. Call periodically with a monotonic `now`.
+        pub fn poll(&mut self, node: &mut Node, now: u32) -> Vec<Forward> {
+            if self.send_next > self.send_base && now.saturating_sub(self.last_progress) >= self.rto {
+                self.send_next = self.send_base; // Go-Back-N: rewind and resend
+                self.last_progress = now;
+                return self.flush(node, now);
+            }
+            Vec::new()
+        }
+
+        fn flush(&mut self, node: &mut Node, now: u32) -> Vec<Forward> {
+            let mut fwd = Vec::new();
+            while (self.send_next - self.send_base) < self.window as u64 {
+                let start = (self.send_next - self.send_base) as usize;
+                if start >= self.out.len() {
+                    break;
+                }
+                let end = (start + self.max_frame).min(self.out.len());
+                let frame = data_frame(self.send_next, &self.out[start..end]);
+                fwd.append(&mut node.dg_send(&mut self.s, &frame, now));
+                self.send_next += (end - start) as u64;
+                self.last_progress = now;
+            }
+            fwd
+        }
+
+        fn on_frame(&mut self, node: &mut Node, frame: &[u8], now: u32) -> Vec<Forward> {
+            let mut fwd = Vec::new();
+            match frame.first().copied() {
+                Some(F_DATA) if frame.len() >= 11 => {
+                    let mut ob = [0u8; 8];
+                    ob.copy_from_slice(&frame[1..9]);
+                    let offset = u64::from_be_bytes(ob);
+                    let len = u16::from_be_bytes([frame[9], frame[10]]) as usize;
+                    if frame.len() >= 11 + len {
+                        if offset == self.recv_next {
+                            self.inbox.extend_from_slice(&frame[11..11 + len]);
+                            self.recv_next += len as u64;
+                        }
+                        // Cumulative ACK of the next offset we still need.
+                        fwd.append(&mut node.dg_send(&mut self.s, &ack_frame(self.recv_next), now));
+                    }
+                }
+                Some(F_ACK) if frame.len() >= 9 => {
+                    let mut ab = [0u8; 8];
+                    ab.copy_from_slice(&frame[1..9]);
+                    let ackn = u64::from_be_bytes(ab);
+                    if ackn > self.send_base {
+                        let adv = ((ackn - self.send_base) as usize).min(self.out.len());
+                        self.out.drain(0..adv);
+                        self.send_base = ackn;
+                        self.last_progress = now;
+                        fwd.append(&mut self.flush(node, now)); // window reopened
+                    }
+                }
+                _ => {}
+            }
+            fwd
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1229,5 +1523,106 @@ mod tests {
             }
         }
         assert_eq!(b.store_len(), 1, "B should now hold A's message");
+    }
+
+    fn fwd_bytes(f: &Forward) -> Vec<u8> {
+        match f {
+            Forward::Flood { bytes, .. } => bytes.clone(),
+            Forward::Directed { bytes, .. } => bytes.clone(),
+        }
+    }
+
+    /// Wire two fresh nodes together: exchange ANNOUNCEs so each learns the
+    /// other's prekey and a path back.
+    fn meet(a: &mut Node, b: &mut Node, now: u32) {
+        for f in a.build_announce(now) {
+            b.on_rx(&fwd_bytes(&f), 0, Some(a.addr), now);
+        }
+        for f in b.build_announce(now) {
+            a.on_rx(&fwd_bytes(&f), 0, Some(b.addr), now);
+        }
+    }
+
+    #[test]
+    fn datagram_session_roundtrip_and_replay() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        let mut sa = a.dial(b.addr, 22).expect("a knows b's prekey");
+        let mut sb = b.dial(a.addr, 22).expect("b knows a's prekey");
+
+        let fwds = a.dg_send(&mut sa, b"ping", now);
+        let (e, _) = Envelope::decode(&fwd_bytes(&fwds[0])).unwrap();
+
+        assert_eq!(b.dg_recv(&mut sb, &e).as_deref(), Some(&b"ping"[..]), "peer decrypts datagram");
+        assert!(b.dg_recv(&mut sb, &e).is_none(), "a replayed datagram is rejected");
+
+        // A different node cannot open it (sealed to B's prekey).
+        let mut m = Node::new("m", &[]);
+        meet(&mut a, &mut m, now);
+        let mut sm = m.dial(a.addr, 22).unwrap();
+        assert!(m.dg_recv(&mut sm, &e).is_none(), "wrong recipient can't read it");
+    }
+
+    #[test]
+    fn reliable_stream_recovers_over_30pct_loss() {
+        let t0 = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, t0);
+
+        let mut ra = a.reliable(a.dial(b.addr, 22).unwrap());
+        let mut rb = b.reliable(b.dial(a.addr, 22).unwrap());
+
+        let payload: Vec<u8> = (0..4000u32).map(|i| (i.wrapping_mul(7)) as u8).collect();
+
+        let mut to_b: Vec<Vec<u8>> = Vec::new();
+        let mut to_a: Vec<Vec<u8>> = Vec::new();
+        let mut now = t0;
+        for f in ra.write(&mut a, &payload, now) {
+            to_b.push(fwd_bytes(&f));
+        }
+
+        let mut rng: u64 = 0xDEAD_BEEF;
+        let mut drop30 = |rng: &mut u64| {
+            *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (*rng >> 33) % 100 < 30
+        };
+
+        let mut got = Vec::new();
+        for _ in 0..5000 {
+            now += 1;
+            for w in std::mem::take(&mut to_b) {
+                if drop30(&mut rng) {
+                    continue;
+                }
+                let (e, _) = Envelope::decode(&w).unwrap();
+                for f in rb.deliver(&mut b, &e, now) {
+                    to_a.push(fwd_bytes(&f));
+                }
+            }
+            got.extend(rb.read());
+            for w in std::mem::take(&mut to_a) {
+                if drop30(&mut rng) {
+                    continue;
+                }
+                let (e, _) = Envelope::decode(&w).unwrap();
+                for f in ra.deliver(&mut a, &e, now) {
+                    to_b.push(fwd_bytes(&f));
+                }
+            }
+            for f in ra.poll(&mut a, now) {
+                to_b.push(fwd_bytes(&f));
+            }
+            for f in rb.poll(&mut b, now) {
+                to_a.push(fwd_bytes(&f));
+            }
+            if got.len() >= payload.len() && to_a.is_empty() && to_b.is_empty() {
+                break;
+            }
+        }
+        assert_eq!(got, payload, "reliable stream reassembles in order despite 30% loss");
     }
 }

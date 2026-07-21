@@ -165,6 +165,27 @@ fn sim() {
 
     // 5) Fountain over a 40%-loss ONE-WAY link (no feedback): S -> R.
     fountain_demo();
+
+    // 6) A UDP-like datagram session, routed multi-hop A -> D and decrypted
+    //    only by D. This is the primitive SSH-over-SPORE (Mosh-style) builds on.
+    w.floods = 0;
+    w.directed = 0;
+    let a_addr = w.nodes[a].addr;
+    let mut sad = w.nodes[a].dial(d_addr, 22).expect("A knows D's prekey");
+    let dgf = w.nodes[a].dg_send(&mut sad, b"interactive hello over a udp-like link", NOW);
+    let del = w.run(dgf.into_iter().map(|f| (a, f)).collect());
+    let opened = del
+        .iter()
+        .find(|(n, e)| *n == d && e.payload.first() == Some(&session::TAG_DGRAM))
+        .and_then(|(_, e)| {
+            let mut sda = w.nodes[d].dial(a_addr, 22)?;
+            w.nodes[d].dg_recv(&mut sda, e)
+        });
+    println!(
+        "[6] DATAGRAM session A->D over {} directed hops: D decrypts {:?}",
+        w.directed,
+        opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned())
+    );
 }
 
 fn fountain_demo() {
