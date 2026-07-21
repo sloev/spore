@@ -563,6 +563,7 @@ pub struct Node {
     seq: u64,
     frags: HashMap<Id, Fountain>,
     pub mtu: usize,
+    manifests: HashMap<Id, file::Manifest>,
 }
 
 impl Node {
@@ -595,6 +596,7 @@ impl Node {
             seq: 0,
             frags: HashMap::new(),
             mtu: DEFAULT_MTU,
+            manifests: HashMap::new(),
         }
     }
 
@@ -809,6 +811,11 @@ impl Node {
             rx.delivered.push(e.clone());
         }
 
+        // Auto-learn manifests addressed to us (endpoint demux on the app tag).
+        if deliverable && e.typ == ty::DATA && e.payload.first() == Some(&file::MANIFEST_TAG) {
+            self.absorb_manifest(e);
+        }
+
         // Reassemble only objects bound for us; a pure relay just forwards the
         // fragments (each is an ordinary envelope) without hoarding chunks.
         if deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
@@ -978,6 +985,118 @@ impl Node {
     pub fn reliable(&self, s: session::Session) -> session::Reliable {
         let max_frame = self.mtu.saturating_sub(200).max(1);
         session::Reliable::new(s, max_frame)
+    }
+
+    // ---- files: content-addressed objects (§ application layer) ----------
+
+    /// Publish `bytes` as a content-addressed file. Splits it into chunk
+    /// envelopes (each addressed by its own content ID), stores them, and builds
+    /// a signed manifest that lists those IDs. Returns the manifest ID — the
+    /// **magnet** — and the `Forward`s to flood the small manifest. The data
+    /// itself is pulled on demand (§6 custody / swarm), BitTorrent-style.
+    pub fn publish_file(&mut self, name: &str, bytes: &[u8], dest: Addr, now: u32) -> (Id, Vec<Forward>) {
+        let chunk_size = self.mtu.saturating_sub(64).max(1);
+        let count = ((bytes.len() + chunk_size - 1) / chunk_size).max(1);
+        let expiry = now + 7 * 86400;
+        let mut file_id = [0u8; 16];
+        OsRng.fill_bytes(&mut file_id);
+        // Chunks ride a per-file topic so only interested nodes carry them.
+        let mut ft = [0u8; 8];
+        ft.copy_from_slice(&Sha256::digest(file_id)[..8]);
+
+        let mut chunk_ids = Vec::with_capacity(count);
+        for i in 0..count {
+            let start = i * chunk_size;
+            let end = ((i + 1) * chunk_size).min(bytes.len());
+            let mut payload = Vec::with_capacity(21 + (end - start));
+            payload.push(file::CHUNK_TAG);
+            payload.extend_from_slice(&file_id);
+            payload.extend_from_slice(&(i as u32).to_be_bytes());
+            payload.extend_from_slice(&bytes[start..end]);
+            let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
+            ce.flags |= fl::FLOOD;
+            chunk_ids.push(ce.id());
+            self.mark_seen(&ce);
+            self.store_put(&ce);
+        }
+
+        let manifest = file::Manifest {
+            file_id,
+            chunk_size: chunk_size as u32,
+            count: count as u32,
+            total_len: bytes.len() as u64,
+            name: name.to_string(),
+            chunk_ids,
+        };
+        let mut me = Envelope::new(ty::DATA, dest, expiry, manifest.encode());
+        if dest == ZERO_DEST || self.topics.contains(&dest) {
+            me.flags |= fl::FLOOD;
+        }
+        me.sign(&self.sk);
+        let magnet = me.id();
+        self.manifests.insert(magnet, manifest);
+        self.mark_seen(&me);
+        self.store_put(&me);
+        let forwards = self.forward_intents(&me, NO_IFACE, now);
+        (magnet, forwards)
+    }
+
+    /// Register a manifest we received. Called automatically on delivery; also
+    /// usable directly. Verifies the signature before trusting the chunk list.
+    pub fn absorb_manifest(&mut self, e: &Envelope) -> Option<Id> {
+        if !e.verify() {
+            return None;
+        }
+        let m = file::Manifest::decode(&e.payload)?;
+        let magnet = e.id();
+        self.manifests.entry(magnet).or_insert(m);
+        Some(magnet)
+    }
+
+    /// Ask neighbours for the chunks of `magnet` we don't hold yet. Reuses the
+    /// WANT machinery: a chunk is an ordinary stored envelope, named by content,
+    /// so any peer that has it answers from its store.
+    pub fn fetch(&mut self, magnet: &Id) -> Vec<Forward> {
+        let Some(m) = self.manifests.get(magnet) else {
+            return Vec::new();
+        };
+        let mut want = Vec::new();
+        for cid in &m.chunk_ids {
+            if !self.store.contains_key(cid) {
+                want.extend_from_slice(cid);
+            }
+        }
+        if want.is_empty() {
+            return Vec::new();
+        }
+        let bytes = Envelope::new(ty::WANT, ZERO_DEST, 0, want).wire();
+        vec![Forward::Flood { except: NO_IFACE, bytes }]
+    }
+
+    /// True once every chunk named by the manifest is in our store.
+    pub fn has_file(&self, magnet: &Id) -> bool {
+        match self.manifests.get(magnet) {
+            Some(m) => m.chunk_ids.iter().all(|c| self.store.contains_key(c)),
+            None => false,
+        }
+    }
+
+    /// Reassemble the file, or `None` if a chunk is still missing. Every chunk
+    /// is content-verified for free: we only count it as present if the store
+    /// holds an envelope whose ID equals the one the signed manifest named.
+    pub fn file_bytes(&self, magnet: &Id) -> Option<Vec<u8>> {
+        let m = self.manifests.get(magnet)?;
+        let mut out = Vec::with_capacity(m.total_len as usize);
+        for cid in &m.chunk_ids {
+            let s = self.store.get(cid)?;
+            let (ce, _) = Envelope::decode(&s.wire).ok()?;
+            if ce.payload.len() < 21 {
+                return None; // not a well-formed chunk
+            }
+            out.extend_from_slice(&ce.payload[21..]);
+        }
+        out.truncate(m.total_len as usize);
+        Some(out)
     }
 }
 
@@ -1202,6 +1321,108 @@ pub mod session {
                 _ => {}
             }
             fwd
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Files — content-addressed objects. A signed manifest indexes a set of
+// ordinary chunk envelopes by their content IDs. Integrity is free (an
+// envelope's ID *is* the hash of its bytes), and swarming is just WANT: any
+// peer that holds a chunk can answer for it, since the chunk is named by
+// content, not by who made it.
+// ---------------------------------------------------------------------------
+
+pub mod file {
+    use super::*;
+
+    /// First payload byte of a manifest.
+    pub const MANIFEST_TAG: u8 = 0x01;
+    /// First payload byte of a chunk: `[CHUNK_TAG][file_id:16][index:4][bytes]`.
+    pub const CHUNK_TAG: u8 = 0x07;
+
+    /// A published file: metadata plus the content IDs of its chunk envelopes in
+    /// index order. Signed on the wire, so the chunk IDs are authentic; because a
+    /// chunk envelope's ID is the hash of its bytes, holding a matching-ID
+    /// envelope is itself the integrity proof.
+    #[derive(Clone)]
+    pub struct Manifest {
+        pub file_id: [u8; 16],
+        pub chunk_size: u32,
+        pub count: u32,
+        pub total_len: u64,
+        pub name: String,
+        pub chunk_ids: Vec<Id>,
+    }
+
+    impl Manifest {
+        pub fn encode(&self) -> Vec<u8> {
+            let name = self.name.as_bytes();
+            let mut p = Vec::with_capacity(35 + name.len() + 16 * self.chunk_ids.len());
+            p.push(MANIFEST_TAG);
+            p.extend_from_slice(&self.file_id);
+            p.extend_from_slice(&self.chunk_size.to_be_bytes());
+            p.extend_from_slice(&self.count.to_be_bytes());
+            p.extend_from_slice(&self.total_len.to_be_bytes());
+            p.extend_from_slice(&(name.len() as u16).to_be_bytes());
+            p.extend_from_slice(name);
+            for c in &self.chunk_ids {
+                p.extend_from_slice(c);
+            }
+            p
+        }
+
+        pub fn decode(p: &[u8]) -> Option<Manifest> {
+            if p.first() != Some(&MANIFEST_TAG) {
+                return None;
+            }
+            let end = p.len();
+            let mut o = 1usize;
+            if o + 16 > end {
+                return None;
+            }
+            let mut file_id = [0u8; 16];
+            file_id.copy_from_slice(&p[o..o + 16]);
+            o += 16;
+            if o + 4 > end {
+                return None;
+            }
+            let chunk_size = u32::from_be_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+            o += 4;
+            if o + 4 > end {
+                return None;
+            }
+            let count = u32::from_be_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+            o += 4;
+            if o + 8 > end {
+                return None;
+            }
+            let mut tb = [0u8; 8];
+            tb.copy_from_slice(&p[o..o + 8]);
+            let total_len = u64::from_be_bytes(tb);
+            o += 8;
+            if o + 2 > end {
+                return None;
+            }
+            let name_len = u16::from_be_bytes([p[o], p[o + 1]]) as usize;
+            o += 2;
+            if o + name_len > end {
+                return None;
+            }
+            let name = String::from_utf8_lossy(&p[o..o + name_len]).into_owned();
+            o += name_len;
+            // Reject an implausible count before allocating for it.
+            if count as usize > (end - o) / 16 {
+                return None;
+            }
+            let mut chunk_ids = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let mut c = [0u8; 16];
+                c.copy_from_slice(&p[o..o + 16]);
+                o += 16;
+                chunk_ids.push(c);
+            }
+            Some(Manifest { file_id, chunk_size, count, total_len, name, chunk_ids })
         }
     }
 }
@@ -1586,7 +1807,7 @@ mod tests {
         }
 
         let mut rng: u64 = 0xDEAD_BEEF;
-        let mut drop30 = |rng: &mut u64| {
+        let drop30 = |rng: &mut u64| {
             *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
             (*rng >> 33) % 100 < 30
         };
@@ -1624,5 +1845,40 @@ mod tests {
             }
         }
         assert_eq!(got, payload, "reliable stream reassembles in order despite 30% loss");
+    }
+
+    #[test]
+    fn publish_fetch_and_verify_file() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        let data: Vec<u8> = (0..9000u32).map(|i| (i.wrapping_mul(31)) as u8).collect();
+        let (magnet, mf) = a.publish_file("field-notes.txt", &data, ZERO_DEST, now);
+
+        // The small manifest floods; B absorbs it but holds no data yet.
+        for f in &mf {
+            b.on_rx(&fwd_bytes(f), 0, Some(a.addr), now);
+        }
+        assert!(!b.has_file(&magnet), "B knows the manifest but not the chunks");
+        assert!(b.file_bytes(&magnet).is_none());
+
+        // B pulls the chunks it lacks; A answers from its store by content ID.
+        let want = b.fetch(&magnet);
+        assert_eq!(want.len(), 1, "one WANT covering the missing chunks");
+        for f in &want {
+            let rx = a.on_rx(&fwd_bytes(f), 0, Some(b.addr), now);
+            for cf in rx.forwards {
+                b.on_rx(&fwd_bytes(&cf), 0, Some(a.addr), now);
+            }
+        }
+
+        assert!(b.has_file(&magnet), "B now holds every chunk");
+        assert_eq!(
+            b.file_bytes(&magnet).as_deref(),
+            Some(&data[..]),
+            "file reassembles and is content-verified against the signed manifest"
+        );
     }
 }

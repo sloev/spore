@@ -186,6 +186,24 @@ fn sim() {
         w.directed,
         opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned())
     );
+
+    // 7) FILE: A publishes a content-addressed file; its magnet is the manifest
+    //    ID. The small manifest floods to everyone; B then pulls the data chunks
+    //    from a neighbour and verifies each one against the signed manifest.
+    let file: Vec<u8> = (0..9000u32).map(|i| (i.wrapping_mul(31)) as u8).collect();
+    let (magnet, mf) = w.nodes[a].publish_file("field-notes.txt", &file, ZERO_DEST, NOW);
+    w.run(mf.into_iter().map(|f| (a, f)).collect()); // all nodes absorb the manifest
+    let bx = w.idx("B");
+    let want = w.nodes[bx].fetch(&magnet);
+    w.run(want.into_iter().map(|f| (bx, f)).collect()); // chunks pulled to B
+    let ok = w.nodes[bx].file_bytes(&magnet).as_deref() == Some(&file[..]);
+    let mp: String = magnet[..6].iter().map(|b| format!("{b:02x}")).collect();
+    println!(
+        "[7] FILE 'field-notes.txt' ({} B) published as magnet {}…; B pulled + verified: {}",
+        file.len(),
+        mp,
+        ok
+    );
 }
 
 fn fountain_demo() {
