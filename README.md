@@ -9,19 +9,30 @@ seen, hands copies to anyone it meets who wants them, and drops duplicates and
 expired mail. That alone is a working planetary network — no servers, no global
 namespace, no always-on internet.
 
-This crate is one portable core with pure-Rust crypto (no libsodium/C), so it
-compiles unchanged to native targets and to `wasm32-unknown-unknown`. Transports
-are plugins: they hand raw bytes to `Node::on_rx` and execute the `Forward`s it
-returns. The router itself never changes across media — UDP, BLE, LoRa, serial,
-paper, or a human reading armor aloud.
+The same message travels over anything that can carry bytes — the internet, a
+walkie-talkie, a Bluetooth link, a long-range radio, a USB stick, a QR code, even a
+person reading it aloud. The delivery rules stay exactly the same no matter which
+one you use.
+
+<details>
+<summary>Deep dive: how it stays this portable</summary>
+
+It's one small Rust library with pure-Rust cryptography (no C dependencies), so the
+identical code runs on servers, phones, tiny radios, and in the browser. Each medium
+is a thin **bridge** that just hands raw bytes to the router (`Node::on_rx`) and
+carries out the sends it returns (`Forward`s). The router never changes from one
+medium to the next — that's what makes "runs on everything" actually true.
+</details>
 
 ## What's implemented
 
-Essentially all of the SPORE v1 spec (§1–§10) plus the Page-2 bindings is
-implemented and tested — objects, files, sessions, RPC, feeds, forward-secret
-sessions, mix mode, receipts, congestion control, and a family of bridges that all
-share one address resolver. What's left is medium-specific radio runners that need
-real hardware. The application layers are laid out in [docs/DESIGN.md](docs/DESIGN.md).
+Pretty much the entire SPORE v1 spec is built and tested. In plain terms, you can:
+send a message of **any size**, share **files** (like a private BitTorrent), hold a
+live **back-and-forth** (like chat or a remote terminal), **broadcast** to followers
+(like a news feed), keep messages **private** and hard to trace, and get a **delivery
+confirmation** — all over any medium, with no servers. What's left is drivers for
+specific radios, which need real hardware to test. The full list is below; the
+design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 
 <details>
 <summary>Deep dive: the full feature list</summary>
@@ -188,8 +199,13 @@ neighbour X," the bridge resolves X to its underlay address and unicasts; if it
 hasn't learned one yet, it simply broadcasts, which always works. Write the resolver
 once, reuse it on every transport.
 
+<details>
+<summary>Deep dive: the shared loop, and what <code>U</code> is per medium</summary>
+
+The whole per-bridge loop is identical on every medium — only `U` and the two send
+primitives change:
+
 ```rust
-// the entire per-bridge loop, identical on every medium (U differs, logic doesn't)
 let nbr = neighbors.snoop(&frame, underlay_src, now);   // learn: signed => bind U
 let rx  = node.on_rx(&frame, iface, nbr, now);
 for f in rx.forwards {
@@ -202,9 +218,6 @@ for f in rx.forwards {
     }
 }
 ```
-
-<details>
-<summary>Deep dive: what <code>U</code> is per medium, and stateful vs. stateless</summary>
 
 The router speaks only SPORE addresses; the bridge owns the `SPORE ↔ U` mapping, so
 `U` can be anything a medium uses to name a peer:
@@ -243,8 +256,8 @@ wired into the UDP bridge (`U = SocketAddr`) in `src/main.rs`.
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `src/lib.rs`    | the portable core: envelope, fountain, `send`, files, sessions, ratchet, mix, router, crypto, bridges |
-| `src/main.rs`   | reference node + demo + UDP / HTTP-bag / folder bridge runners |
+| `src/lib.rs`    | the whole portable core: envelope, routing, files, sessions, feeds, RPC, crypto, bridges |
+| `src/main.rs`   | reference node + the 12-step demo + UDP / HTTP / folder / TCP bridge runners |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 
