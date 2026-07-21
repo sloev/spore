@@ -82,14 +82,85 @@ SPORE demo — line topology  A — B — C — D
 [8] MIX onion A~>D via 2 mixes (B,C): D opens Some("burn the ledgers")
 ```
 
+## Routing across other networks
+
+SPORE treats a whole underlay network — a Meshtastic mesh, a Reticulum network, an
+IP subnet — as a **single link**, however many hops it uses inside. To go from node
+A to node B on the same mesh, A hands the envelope to that mesh (usually one
+broadcast) and the mesh's *own* routing carries it to B; SPORE's hop counter drops
+by just one for the entire crossing. If A and B are on *different* networks, a
+gateway node that sits on both passes the envelope from one to the other — and that
+is where a real SPORE hop happens. The envelope's cryptographic address says *who*
+it's for (end-to-end, unchanging); each network's native addressing says *how* to
+move the bytes across that one medium. So SPORE routes **between** networks and each
+network routes **within** itself — not much stranger than IP over Ethernet.
+
+<details>
+<summary>Deep dive: two address spaces, gateways, and the ARP analogy</summary>
+
+**Two independent address spaces.**
+- *Who* — the SPORE address (`SHA-256(pubkey)[..8]`) or a topic. End-to-end,
+  cryptographic, identical on every medium. Like an overlay/host identity.
+- *How* — the underlay's native addressing: a Meshtastic node number, a Reticulum
+  destination hash, an IP:port. Local to one link, meaningful only there. Like a
+  MAC address.
+
+A **bridge** owns exactly one interface (`Iface`) and translates between the two: it
+turns a `Forward` from the router into an underlay send, and turns received underlay
+frames into `node.on_rx(bytes, iface, nbr, now)`. The router never learns underlay
+addresses — that's the bridge's job, the way an OS's ARP/neighbour table maps
+IP→MAC.
+
+**An underlay with its own routing = one SPORE interface.** Meshtastic, Reticulum,
+Yggdrasil, BATMAN, Tor, plain IP — each already delivers bytes across many physical
+hops. SPORE hands it *one* frame and lets it do that; the underlay's internal hops
+are invisible and free. SPORE decrements `hops` exactly **once** for the whole
+crossing (a point-to-point backbone link may even *restore* the hop so long hauls
+don't burn the 16-hop budget).
+
+**Same network (A and B on one mesh).** A's bridge injects the envelope as an
+underlay broadcast (Meshtastic: portnum 256, dst `0xFFFFFFFF`; Reticulum: a PLAIN
+`spore`/`v1` destination; UDP: multicast/broadcast). The underlay floods it to every
+node; the ones running SPORE call `on_rx`, and B delivers because the `dest` matches
+it (or a topic it follows, or public). One SPORE hop, N invisible mesh hops.
+
+**Different networks (A on Meshtastic, B on Reticulum).** A **gateway** node C runs
+both bridges. C receives on its Meshtastic interface and the router emits
+`Forward::Flood { except: meshtastic_iface }` — send out *all other* interfaces — so
+C re-injects onto Reticulum, which carries it to B. SPORE hops count the **gateways
+between networks**, not the hops inside them. This is exactly IP routing: routers
+between subnets, switching within them.
+
+**Directed vs. flooded.** With no routing state (T0/T1), SPORE just floods on each
+interface; dedup and expiry keep it sane, and B is reached because it's on a
+reachable underlay. With paths (T2, §4 "first copy wins"), when B's signed envelope
+or ANNOUNCE arrives via a given interface A records "B is reachable via *that*
+interface" and sends future unicast there — the bridge may resolve it to a specific
+underlay address from its own learned `SPORE-addr ↔ underlay-addr` table, or just
+broadcast (dedup makes the extra reach harmless).
+
+**The IP analogy, lined up:**
+
+| SPORE | IP world |
+|---|---|
+| SPORE address (who) | IP address / hostname |
+| underlay address (how) | MAC address |
+| bridge (per interface) | NIC driver + ARP |
+| underlay-with-routing (Meshtastic / Reticulum / IP) | one L2 segment / switched LAN / tunnel |
+| gateway node (2+ interfaces) | IP router |
+| SPORE hop | IP hop (router-to-router) |
+| flood + dedup | broadcast + drop-duplicates |
+
+</details>
+
 ## Layout
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `src/lib.rs`    | the portable core: envelope, fountain, `send`, files, sessions, router, crypto, bridges |
+| `src/lib.rs`    | the portable core: envelope, fountain, `send`, files, sessions, ratchet, mix, router, crypto, bridges |
 | `src/main.rs`   | reference node + demo + UDP / HTTP-bag / folder bridge runners |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
-| `docs/DESIGN.md`| the application layers above transport: files, HTTP-over-SPORE, feeds |
+| `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 
 ## License
 
