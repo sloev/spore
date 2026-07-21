@@ -249,6 +249,17 @@ fn sim() {
     let rid = Envelope::decode(&first_bytes(&rf)).unwrap().0.id();
     w.run(rf.into_iter().map(|f| (a, f)).collect());
     println!("[9] RECEIPT: A's ACKREQ message to D acknowledged: {}", w.nodes[a].acked(&rid));
+
+    // 10) ENCRYPTED TOPIC (§7): A floods a message on topic "news" sealed under a
+    //     pre-shared key. Every node carries it; only key-holders can read it.
+    let psk = [0x42u8; 32];
+    let tf = w.nodes[a].originate(topic_of("news"), topic_seal(b"safehouse moved", &psk), NOW);
+    let tid = Envelope::decode(&first_bytes(&tf)).unwrap().0.id();
+    let del = w.run(tf.into_iter().map(|f| (a, f)).collect());
+    let payload = del.iter().find(|(_, e)| e.id() == tid).map(|(_, e)| e.payload.clone()).unwrap();
+    let holder = topic_open(&payload, &psk).map(|b| String::from_utf8_lossy(&b).into_owned());
+    let outsider = topic_open(&payload, &[0u8; 32]).is_some();
+    println!("[10] ENCRYPTED TOPIC: key-holder reads {:?}; outsider can read: {}", holder, outsider);
 }
 
 fn fountain_demo() {

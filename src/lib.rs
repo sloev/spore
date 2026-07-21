@@ -543,6 +543,35 @@ pub fn seal(msg: &[u8], recip_prekey: &[u8; 32]) -> Vec<u8> {
     out
 }
 
+/// Encrypted topic (§7): seal `msg` under a 32-byte pre-shared key with
+/// XChaCha20-Poly1305. Output = 24-byte random nonce ‖ ciphertext. Everyone on
+/// the topic shares the key; rotate it by flooding a `KEYROT` signed by the old.
+pub fn topic_seal(msg: &[u8], psk: &[u8; 32]) -> Vec<u8> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    let mut nonce = [0u8; 24];
+    OsRng.fill_bytes(&mut nonce);
+    let ct = XChaCha20Poly1305::new(Key::from_slice(psk))
+        .encrypt(XNonce::from_slice(&nonce), msg)
+        .expect("topic seal");
+    let mut out = Vec::with_capacity(24 + ct.len());
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ct);
+    out
+}
+
+/// Open an encrypted-topic payload; `None` if the key is wrong or it's corrupt.
+pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    if ct.len() < 24 {
+        return None;
+    }
+    XChaCha20Poly1305::new(Key::from_slice(psk))
+        .decrypt(XNonce::from_slice(&ct[..24]), &ct[24..])
+        .ok()
+}
+
 // ---------------------------------------------------------------------------
 // The node: §5 router + §6 sync, glued together. Transports call `on_rx`.
 // ---------------------------------------------------------------------------
@@ -561,6 +590,7 @@ pub struct Node {
     store: HashMap<Id, Stored>,
     paths: Paths,
     peer_prekeys: HashMap<Addr, [u8; 32]>,
+    peer_busy: HashMap<Addr, u8>,
 
     max_store_bytes: usize,
     seq: u64,
@@ -602,6 +632,7 @@ impl Node {
             store: HashMap::new(),
             paths: Paths::default(),
             peer_prekeys: HashMap::new(),
+            peer_busy: HashMap::new(),
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
@@ -781,10 +812,22 @@ impl Node {
         out
     }
 
-    /// Build+sign this node's ANNOUNCE (prekey + topics), ready to flood (§4).
+    /// Our current backpressure `busy` byte (§5.4c): store fill scaled to 0–255.
+    /// Neighbours use it to throttle relays toward a swamped peer.
+    pub fn busy(&self) -> u8 {
+        let used: usize = self.store.values().map(|s| s.wire.len()).sum();
+        (used.saturating_mul(255) / self.max_store_bytes.max(1)).min(255) as u8
+    }
+    /// The `busy` byte a peer last advertised in its ANNOUNCE, if heard.
+    pub fn peer_busy(&self, a: &Addr) -> Option<u8> {
+        self.peer_busy.get(a).copied()
+    }
+
+    /// Build+sign this node's ANNOUNCE (prekey + busy + topics), ready to flood (§4).
     pub fn build_announce(&mut self, now: u32) -> Vec<Forward> {
         let mut p = Vec::new();
         p.extend_from_slice(&self.prekey_pub);
+        p.push(self.busy()); // §5.4c backpressure
         p.push(self.topics.len() as u8);
         for t in &self.topics {
             p.extend_from_slice(t);
@@ -811,6 +854,7 @@ impl Node {
         let mut prekey = [0u8; 32];
         prekey.copy_from_slice(&e.payload[..32]);
         self.peer_prekeys.insert(src_addr, prekey);
+        self.peer_busy.insert(src_addr, e.payload[32]); // §5.4c busy byte
         // (topics/petname parsed here in a fuller build; omitted for brevity)
     }
 
@@ -1175,6 +1219,40 @@ impl Node {
         }
         let bytes = Envelope::new(ty::WANT, ZERO_DEST, 0, want).wire();
         vec![Forward::Flood { except: NO_IFACE, bytes }]
+    }
+
+    /// Request the chunks of every manifest we know but don't yet hold — the
+    /// subscriber half of folder sync.
+    pub fn fetch_all(&mut self) -> Vec<Forward> {
+        let magnets: Vec<Id> = self.manifests.keys().copied().collect();
+        let mut out = Vec::new();
+        for m in magnets {
+            out.append(&mut self.fetch(&m));
+        }
+        out
+    }
+
+    /// Every complete file we hold, as `(name, bytes)`, newest manifest per name
+    /// winning (by envelope expiry). Drives materialising a synced folder.
+    pub fn complete_files(&self) -> Vec<(String, Vec<u8>)> {
+        let mut best: HashMap<String, (Id, u32)> = HashMap::new();
+        for (magnet, m) in &self.manifests {
+            if !self.has_file(magnet) {
+                continue;
+            }
+            let exp = self.store.get(magnet).map(|s| s.expiry).unwrap_or(0);
+            best.entry(m.name.clone())
+                .and_modify(|(id, e)| {
+                    if exp > *e {
+                        *id = *magnet;
+                        *e = exp;
+                    }
+                })
+                .or_insert((*magnet, exp));
+        }
+        best.into_iter()
+            .filter_map(|(name, (magnet, _))| self.file_bytes(&magnet).map(|b| (name, b)))
+            .collect()
     }
 
     /// True once every chunk named by the manifest is in our store.
@@ -1715,6 +1793,49 @@ pub mod mix {
         }
         outer
     }
+
+    /// A mix's release queue (§9 timing): hold peeled inner envelopes, then let
+    /// them out only once a minimum batch has gathered *and* each item's random
+    /// delay has elapsed — breaking the timing link between arrival and re-send.
+    /// (Poisson delays and decoy onions are the runner's policy; this is the
+    /// batching core.)
+    pub struct Batch {
+        items: Vec<(Vec<u8>, u32)>, // (inner wire, release_at)
+        min_batch: usize,
+    }
+    impl Batch {
+        pub fn new(min_batch: usize) -> Self {
+            Batch { items: Vec::new(), min_batch }
+        }
+        /// Queue a peeled inner envelope with a random `delay` before release.
+        pub fn add(&mut self, inner: Vec<u8>, now: u32, delay: u32) {
+            self.items.push((inner, now + delay));
+        }
+        /// Release due envelopes, but only while at least `min_batch` are held —
+        /// so a lone message can't be traced straight through.
+        pub fn ready(&mut self, now: u32) -> Vec<Vec<u8>> {
+            if self.items.len() < self.min_batch {
+                return Vec::new();
+            }
+            let mut out = Vec::new();
+            let mut keep = Vec::new();
+            for (w, at) in std::mem::take(&mut self.items) {
+                if at <= now {
+                    out.push(w);
+                } else {
+                    keep.push((w, at));
+                }
+            }
+            self.items = keep;
+            out
+        }
+        pub fn len(&self) -> usize {
+            self.items.len()
+        }
+        pub fn is_empty(&self) -> bool {
+            self.items.is_empty()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2213,6 +2334,75 @@ pub mod bridge {
         }
     }
 
+    // -- Shape 4: shared buses (walkie-talkie, CB, ham FM) — KISS + CSMA. --
+
+    /// Shared buses have no native CRC (spec shape 4): append `SHA-256(frame)[0:4]`
+    /// so a garbled frame is dropped instead of parsed.
+    pub fn crc_append(frame: &[u8]) -> Vec<u8> {
+        let d = Sha256::digest(frame);
+        let mut out = frame.to_vec();
+        out.extend_from_slice(&d[..4]);
+        out
+    }
+    /// Verify and strip a CRC tail; `None` if it doesn't match.
+    pub fn crc_check(framed: &[u8]) -> Option<&[u8]> {
+        if framed.len() < 4 {
+            return None;
+        }
+        let (body, tail) = framed.split_at(framed.len() - 4);
+        if Sha256::digest(body)[..4] == *tail {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
+    /// Damped flooding / CSMA for shared media (§5.5): before transmitting a
+    /// flood, wait a random 1–5× airtime; if the same envelope ID is overheard
+    /// enough times meanwhile (≥ 2 for a flood, ≥ 1 for a directed send) cancel —
+    /// a neighbour already carried it, so your copy is redundant. Listen-before-
+    /// talk collapses a broadcast storm to roughly one transmission per frame.
+    #[derive(Default)]
+    pub struct Csma {
+        pending: HashMap<Id, (u32, u16, u16)>, // id -> (fire_at, heard, cancel_at)
+    }
+    impl Csma {
+        pub fn new() -> Self {
+            Csma { pending: HashMap::new() }
+        }
+        /// Queue a transmission to fire after `delay`; cancel if overheard enough.
+        pub fn schedule(&mut self, id: Id, now: u32, delay: u32, directed: bool) {
+            let cancel_at = if directed { 1 } else { 2 };
+            self.pending.entry(id).or_insert((now + delay, 0, cancel_at));
+        }
+        /// We heard this ID on the air (someone else transmitted it).
+        pub fn overheard(&mut self, id: &Id) {
+            if let Some(p) = self.pending.get_mut(id) {
+                p.1 = p.1.saturating_add(1);
+            }
+        }
+        /// IDs whose timer fired and weren't cancelled — transmit these now.
+        pub fn ready(&mut self, now: u32) -> Vec<Id> {
+            let fired: Vec<Id> = self
+                .pending
+                .iter()
+                .filter(|(_, (at, _, _))| *at <= now)
+                .map(|(id, _)| *id)
+                .collect();
+            let mut send = Vec::new();
+            for id in fired {
+                let (_, heard, cancel_at) = self.pending.remove(&id).unwrap();
+                if heard < cancel_at {
+                    send.push(id); // not overheard enough -> transmit
+                }
+            }
+            send
+        }
+        pub fn pending(&self) -> usize {
+            self.pending.len()
+        }
+    }
+
     // -- Shape 5: shared stores over any bag transport (HTTP, folder, …). --
 
     /// The three transport-agnostic operations of a "bag" — a container that
@@ -2326,6 +2516,51 @@ pub mod bridge {
                 rx.forwards.append(&mut r.forwards);
             }
             Ok(rx)
+        }
+    }
+
+    /// Folder sync (Syncthing shape, §6 + files): publish a directory as
+    /// content-addressed manifests on a shared topic, and materialise the files
+    /// a subscriber has fully fetched. A newer signed manifest for the same name
+    /// supersedes the old.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub mod foldersync {
+        use super::super::*;
+        use std::path::Path;
+        use std::{fs, io};
+
+        /// Publish every file in `dir` as a manifest on `topic`. Returns the
+        /// manifest-flood forwards; the data itself is pulled on demand.
+        pub fn publish_dir(node: &mut Node, dir: &Path, topic: Addr, now: u32) -> io::Result<Vec<Forward>> {
+            let mut out = Vec::new();
+            for entry in fs::read_dir(dir)? {
+                let path = entry?.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let name =
+                    path.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string();
+                let bytes = fs::read(&path)?;
+                let (_magnet, f) = node.publish_file(&name, &bytes, topic, now);
+                out.extend(f);
+            }
+            Ok(out)
+        }
+
+        /// Write every complete file the node holds into `out_dir` (newest
+        /// manifest per name). Returns how many files were written.
+        pub fn materialize(node: &Node, out_dir: &Path) -> io::Result<usize> {
+            fs::create_dir_all(out_dir)?;
+            let mut n = 0;
+            for (name, bytes) in node.complete_files() {
+                // Guard against path traversal in a name from the wire.
+                let safe = Path::new(&name).file_name().map(|s| s.to_owned());
+                if let Some(fname) = safe {
+                    fs::write(out_dir.join(fname), bytes)?;
+                    n += 1;
+                }
+            }
+            Ok(n)
         }
     }
 }
@@ -2859,5 +3094,95 @@ mod tests {
         assert!(admit(0, 0, 200));
         assert!(!admit(255, 0, 100));
         assert!(admit(255, 3, 100), "stamped mail is always admitted");
+    }
+
+    #[test]
+    fn encrypted_topic_roundtrip() {
+        let psk = [7u8; 32];
+        let ct = topic_seal(b"members only", &psk);
+        assert_ne!(&ct[24..], b"members only", "ciphertext is not plaintext");
+        assert_eq!(topic_open(&ct, &psk).as_deref(), Some(&b"members only"[..]));
+        assert!(topic_open(&ct, &[9u8; 32]).is_none(), "wrong key can't open it");
+    }
+
+    #[test]
+    fn announce_carries_busy_byte() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+        let mut b = Node::new("b", &[]);
+        for f in a.build_announce(now) {
+            b.on_rx(&fwd_bytes(&f), 0, Some(a.addr), now);
+        }
+        assert_eq!(b.peer_busy(&a.addr), Some(a.busy()), "B learned A's busy byte");
+    }
+
+    #[test]
+    fn mix_batch_holds_then_releases() {
+        let mut q = mix::Batch::new(3);
+        q.add(b"a".to_vec(), 0, 5);
+        q.add(b"b".to_vec(), 0, 5);
+        assert!(q.ready(100).is_empty(), "fewer than the batch minimum: hold");
+        q.add(b"c".to_vec(), 0, 5);
+        assert_eq!(q.ready(3).len(), 0, "batch full but not due yet");
+        assert_eq!(q.ready(10).len(), 3, "batch full and due: release all");
+    }
+
+    #[test]
+    fn csma_damps_a_flood() {
+        let now = 1000;
+        let mut csma = bridge::Csma::new();
+        let id1 = [1u8; 16];
+        let id2 = [2u8; 16];
+        csma.schedule(id1, now, 5, false); // flood
+        csma.schedule(id2, now, 5, false);
+        // id1 is overheard twice while we wait -> we cancel our copy.
+        csma.overheard(&id1);
+        csma.overheard(&id1);
+        let send = csma.ready(now + 5);
+        assert_eq!(send, vec![id2], "only the un-overheard flood is transmitted");
+    }
+
+    #[test]
+    fn crc_tail_detects_corruption() {
+        let framed = bridge::crc_append(b"envelope bytes");
+        assert_eq!(bridge::crc_check(&framed), Some(&b"envelope bytes"[..]));
+        let mut bad = framed.clone();
+        bad[0] ^= 0xff;
+        assert!(bridge::crc_check(&bad).is_none(), "a flipped bit is caught");
+    }
+
+    #[test]
+    fn folder_sync_publishes_and_materialises() {
+        let now = 1_700_000_000;
+        let base = std::env::temp_dir().join(format!("spore-sync-{}", std::process::id()));
+        let src = base.join("src");
+        let out = base.join("out");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("a.txt"), b"first file body").unwrap();
+        std::fs::write(src.join("b.bin"), vec![0x42u8; 5000]).unwrap();
+
+        let topic = topic_of("myfolder");
+        let mut a = Node::new("a", &["myfolder"]);
+        let mut b = Node::new("b", &["myfolder"]);
+
+        // A publishes the directory; the manifests flood to B, which absorbs them.
+        let mf = bridge::foldersync::publish_dir(&mut a, &src, topic, now).unwrap();
+        for f in &mf {
+            b.on_rx(&fwd_bytes(f), 0, Some(a.addr), now);
+        }
+        // B pulls the chunks it lacks; A serves them from its store.
+        for w in b.fetch_all() {
+            let arx = a.on_rx(&fwd_bytes(&w), 0, Some(b.addr), now);
+            for cf in arx.forwards {
+                b.on_rx(&fwd_bytes(&cf), 0, Some(a.addr), now);
+            }
+        }
+        let wrote = bridge::foldersync::materialize(&b, &out).unwrap();
+        assert_eq!(wrote, 2, "both files materialised");
+        assert_eq!(std::fs::read(out.join("a.txt")).unwrap(), b"first file body");
+        assert_eq!(std::fs::read(out.join("b.bin")).unwrap(), vec![0x42u8; 5000]);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
