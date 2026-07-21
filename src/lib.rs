@@ -922,6 +922,23 @@ impl Node {
         self.store.contains_key(id)
     }
 
+    /// All stored envelope IDs, concatenated (16 B each) — a bag INV.
+    pub fn stored_ids(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(self.store.len() * 16);
+        for id in self.store.keys() {
+            v.extend_from_slice(id);
+        }
+        v
+    }
+    /// The wire bytes of a stored envelope, if held.
+    pub fn get_wire(&self, id: &Id) -> Option<Vec<u8>> {
+        self.store.get(id).map(|s| s.wire.clone())
+    }
+    /// Every stored envelope as `(id, wire)` — the whole bag.
+    pub fn store_wires(&self) -> Vec<(Id, Vec<u8>)> {
+        self.store.iter().map(|(id, s)| (*id, s.wire.clone())).collect()
+    }
+
     // ---- datagram sessions (§ application layer, tag 0x04) ---------------
 
     /// Open a UDP-like session to `peer` on `port`. Returns `None` until we've
@@ -1555,6 +1572,197 @@ pub mod armor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Bridges — SPORE rides everything. Each medium has one of five shapes (spec
+// Page 2); bind by shape and the router never changes. A bridge only moves
+// envelope bytes in and out of `Node`; it is not part of the protocol. HTTP,
+// a folder, a serial line — all just bridges, none more special than another.
+// ---------------------------------------------------------------------------
+
+pub mod bridge {
+    use super::*;
+
+    // -- Shape 2: byte streams (TCP, serial, RFCOMM, TNCs) — KISS framing. --
+
+    /// Streaming KISS de-framer. Feed byte slices as they arrive off a stream;
+    /// get back complete frames. (Unlike `kiss::decode`, this keeps state across
+    /// reads, so a frame split over two `read()`s still reassembles.)
+    #[derive(Default)]
+    pub struct KissStream {
+        cur: Vec<u8>,
+        in_frame: bool,
+        got_cmd: bool,
+        esc: bool,
+    }
+    impl KissStream {
+        pub fn new() -> Self {
+            Self::default()
+        }
+        /// Frame `payload` for transmission on a byte stream.
+        pub fn frame(payload: &[u8]) -> Vec<u8> {
+            kiss::encode(payload)
+        }
+        /// Feed raw bytes; return any complete frames they finished.
+        pub fn push(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
+            const FEND: u8 = 0xC0;
+            const FESC: u8 = 0xDB;
+            const TFEND: u8 = 0xDC;
+            const TFESC: u8 = 0xDD;
+            let mut out = Vec::new();
+            for &b in bytes {
+                if b == FEND {
+                    if self.in_frame && !self.cur.is_empty() {
+                        out.push(std::mem::take(&mut self.cur));
+                    }
+                    self.in_frame = true;
+                    self.got_cmd = false;
+                    self.esc = false;
+                    self.cur.clear();
+                    continue;
+                }
+                if !self.in_frame {
+                    continue;
+                }
+                if !self.got_cmd {
+                    self.got_cmd = true; // skip KISS command byte
+                    continue;
+                }
+                if self.esc {
+                    self.cur.push(if b == TFEND {
+                        FEND
+                    } else if b == TFESC {
+                        FESC
+                    } else {
+                        b
+                    });
+                    self.esc = false;
+                } else if b == FESC {
+                    self.esc = true;
+                } else {
+                    self.cur.push(b);
+                }
+            }
+            out
+        }
+    }
+
+    // -- Shape 5: shared stores over any bag transport (HTTP, folder, …). --
+
+    /// The three transport-agnostic operations of a "bag" — a container that
+    /// carries envelopes between two nodes (spec Page 2's HTTP bag API, but the
+    /// same three ops serve a folder, a pastebin, or a BBS).
+    pub enum Bag {
+        /// Incoming envelopes (one or more concatenated wire forms).
+        Push(Vec<u8>),
+        /// Advertise what we hold: return our stored IDs (16 B each).
+        Inv,
+        /// Fetch by ID: body is concatenated 16-B IDs; return their envelopes.
+        Want(Vec<u8>),
+    }
+
+    /// Apply a bag operation. Returns `(forwards, response_body)` — forwards are
+    /// any relays the push triggered (run them on your other interfaces), and
+    /// the body is what to send back to the bag peer (empty for `Push`).
+    pub fn bag(node: &mut Node, op: Bag, iface: Iface, now: u32) -> (Vec<Forward>, Vec<u8>) {
+        match op {
+            Bag::Push(body) => {
+                let mut fwd = Vec::new();
+                let mut off = 0;
+                while off < body.len() {
+                    match Envelope::decode(&body[off..]) {
+                        Ok((_, n)) => {
+                            let mut rx = node.on_rx(&body[off..off + n], iface, None, now);
+                            fwd.append(&mut rx.forwards);
+                            off += n;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                (fwd, Vec::new())
+            }
+            Bag::Inv => (Vec::new(), node.stored_ids()),
+            Bag::Want(ids) => {
+                let mut body = Vec::new();
+                for chunk in ids.chunks(16) {
+                    if chunk.len() == 16 {
+                        let mut id = [0u8; 16];
+                        id.copy_from_slice(chunk);
+                        if let Some(w) = node.get_wire(&id) {
+                            body.extend_from_slice(&w);
+                        }
+                    }
+                }
+                (Vec::new(), body)
+            }
+        }
+    }
+
+    /// A shared-store folder: envelopes are files named `<hexid>.spore`. The
+    /// folder *is* a persistent INV — reading it is receiving, writing to it is
+    /// sending. Backs USB sneakernet, Syncthing, NFS, Dropbox.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub mod store {
+        use super::super::*;
+        use std::path::Path;
+        use std::{fs, io};
+
+        pub fn filename(id: &Id) -> String {
+            let mut s = String::with_capacity(38);
+            for b in id {
+                s.push_str(&format!("{b:02x}"));
+            }
+            s.push_str(".spore");
+            s
+        }
+
+        /// Write one envelope into `dir` if not already present. Returns whether
+        /// it was newly written.
+        pub fn export(dir: &Path, e: &Envelope) -> io::Result<bool> {
+            fs::create_dir_all(dir)?;
+            let path = dir.join(filename(&e.id()));
+            if path.exists() {
+                return Ok(false);
+            }
+            fs::write(path, e.wire())?;
+            Ok(true)
+        }
+
+        /// Write the node's whole store into `dir`. Returns how many were new.
+        pub fn export_all(dir: &Path, node: &Node) -> io::Result<usize> {
+            fs::create_dir_all(dir)?;
+            let mut n = 0;
+            for (id, wire) in node.store_wires() {
+                let path = dir.join(filename(&id));
+                if !path.exists() {
+                    fs::write(path, wire)?;
+                    n += 1;
+                }
+            }
+            Ok(n)
+        }
+
+        /// Feed every `*.spore` file in `dir` to the node (reading = receiving).
+        /// Returns the aggregate `Rx` (delivered + forwards).
+        pub fn import(dir: &Path, node: &mut Node, iface: Iface, now: u32) -> io::Result<Rx> {
+            let mut rx = Rx::default();
+            if !dir.exists() {
+                return Ok(rx);
+            }
+            for entry in fs::read_dir(dir)? {
+                let path = entry?.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("spore") {
+                    continue;
+                }
+                let bytes = fs::read(&path)?;
+                let mut r = node.on_rx(&bytes, iface, None, now);
+                rx.delivered.append(&mut r.delivered);
+                rx.forwards.append(&mut r.forwards);
+            }
+            Ok(rx)
+        }
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -1880,5 +2088,61 @@ mod tests {
             Some(&data[..]),
             "file reassembles and is content-verified against the signed manifest"
         );
+    }
+
+    #[test]
+    fn kiss_stream_reassembles_across_reads() {
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"streamed".to_vec());
+        e.sign(&sk);
+        let f1 = bridge::KissStream::frame(&e.wire());
+        let f2 = bridge::KissStream::frame(&e.wire());
+        let mut wire = f1.clone();
+        wire.extend_from_slice(&f2);
+
+        // Split the byte stream at an awkward point and feed it in two reads.
+        let mut ks = bridge::KissStream::new();
+        let mut frames = ks.push(&wire[..f1.len() - 3]);
+        frames.extend(ks.push(&wire[f1.len() - 3..]));
+        assert_eq!(frames.len(), 2, "both frames recovered across the split");
+        assert_eq!(frames[0], e.wire());
+        assert_eq!(frames[1], e.wire());
+    }
+
+    #[test]
+    fn bag_inv_want_push_moves_an_envelope() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+        a.originate(topic_of("news"), b"bag me".to_vec(), now);
+
+        // A advertises what it holds.
+        let (_f, ids) = bridge::bag(&mut a, bridge::Bag::Inv, 0, now);
+        assert_eq!(ids.len(), 16, "one stored envelope");
+
+        // A serves those IDs; B pushes the result into its own store.
+        let (_f, envs) = bridge::bag(&mut a, bridge::Bag::Want(ids), 0, now);
+        let mut b = Node::new("b", &["news"]);
+        let (_f, resp) = bridge::bag(&mut b, bridge::Bag::Push(envs), 0, now);
+        assert!(resp.is_empty());
+        assert_eq!(b.store_len(), 1, "the envelope crossed the bag bridge");
+    }
+
+    #[test]
+    fn folder_store_round_trip() {
+        let now = 1_700_000_000;
+        let dir = std::env::temp_dir().join(format!("spore-folder-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut a = Node::new("a", &["news"]);
+        a.originate(topic_of("news"), b"note in a folder".to_vec(), now);
+        let wrote = bridge::store::export_all(&dir, &a).unwrap();
+        assert!(wrote >= 1, "wrote the envelope as <hexid>.spore");
+
+        let mut b = Node::new("b", &["news"]);
+        let rx = bridge::store::import(&dir, &mut b, 0, now).unwrap();
+        assert_eq!(b.store_len(), wrote, "reading the folder = receiving");
+        assert!(rx.delivered.iter().any(|e| e.payload == b"note in a folder"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

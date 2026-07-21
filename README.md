@@ -44,16 +44,20 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
 - **Crypto** (§7) — anonymous sealed boxes to a recipient prekey; forward
   secrecy by rotating and deleting prekeys.
-- **Bindings** (Page 2) — KISS framing for byte streams; `~S1.…~` Base32 armor
-  for text channels, SMS, paper, and voice.
+- **Bridges** (Page 2) — a bridge only moves envelope bytes in and out of a node;
+  the router never changes. Implemented: UDP, an HTTP `/spore/{push,inv,want}` bag,
+  a `<hexid>.spore` folder store, a streaming KISS framer, and `~S1.…~` armor for
+  text/SMS/paper/voice. HTTP is just one bridge, no more special than a folder.
 </details>
 
 ## Build & run
 
 ```sh
-cargo test          # 14 tests: envelope, fountain, send, files/magnet, sessions, reliable stream, seal, KISS, armor, sync
-cargo run           # in-memory mesh demo (A — B — C — D), deterministic
-cargo run -- udp    # a real node on UDP :7373 with LAN broadcast
+cargo test               # 17 tests: envelope, fountain, send, files, sessions, reliable, bridges, seal, KISS, armor, sync
+cargo run                # in-memory mesh demo (A — B — C — D)
+cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
+cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
+cargo run -- folder DIR  # a shared-store bridge over a folder of <hexid>.spore files
 ```
 
 The demo drives the exact `Node::on_rx` router used in production; only the
@@ -76,8 +80,8 @@ SPORE demo — line topology  A — B — C — D
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `src/lib.rs`    | the portable core: envelope, fountain, `send`, files, sessions, router, crypto, KISS, armor |
-| `src/main.rs`   | reference node + in-memory demo + UDP transport    |
+| `src/lib.rs`    | the portable core: envelope, fountain, `send`, files, sessions, router, crypto, bridges |
+| `src/main.rs`   | reference node + demo + UDP / HTTP-bag / folder bridge runners |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/DESIGN.md`| the application layers above transport: files, HTTP-over-SPORE, feeds |
 

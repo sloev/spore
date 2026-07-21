@@ -213,45 +213,36 @@ roundtrip/replay/wrong-recipient and a reliable stream reassembling across 30%
 loss.
 </details>
 
-## Layer 4 — services: HTTP over SPORE  (designed)
+## Layer 4 — request/response: RPC as a convention  (designed)
 
-This is the "nobody learns anything new" layer. A service is just a request/
-response endpoint that speaks HTTP — the same `method`, `path`, `headers`, `body`,
-and status codes every web developer already uses. You write an ordinary handler;
-a thin adapter carries it over SPORE. And because responses are stored by every
-relay that carries them, popular results end up cached across the whole network for
-free.
+Sometimes you want to ask a question and get an answer — a lookup, a form
+submission, an API call. That's just two messages with a convention: a request
+envelope carrying `method`/`path`/`body`, and a response envelope carried back
+along the path the request came in on. It resembles HTTP because request/response
+*is* that shape — but HTTP itself is only a bridge (below), never part of this. The
+pattern is transport-agnostic: the same request works over LoRa, a folder, or a QR
+code.
 
 <details>
-<summary>Deep dive: request/response, bridging the web, and the free CDN</summary>
+<summary>Deep dive: the request/response convention and its free CDN</summary>
 
 - A **service** is a topic or address a node serves.
-- A **request** (`tag 0x02`) carries `method`, `path`, `headers`, `body` — sealed to
-  the service's prekey, optionally signed or anonymous, with a request-id nonce to
-  correlate the reply.
-- A **response** (`tag 0x03`) goes back to the requester's address; the reverse path
-  was learned automatically when the request arrived. Bodies of any size ride
-  Layer 1.
-
-Why this shape wins:
-
-1. **Build for SPORE without learning SPORE.** Write a normal `(req) -> res`
-   handler; an adapter maps a SPORE request envelope to your existing Express/
-   Flask/axum handler and back. The client call is `fetch`-shaped:
-   `spore.fetch("spore://<addr>/path", { method, body }) -> Response`.
-2. **Bridge the existing web for free.** A gateway proxies SPORE requests to
-   `http://localhost:PORT` and back, so any IP-reachable service becomes reachable
-   over LoRa/paper/sneakernet with zero rewrite — and vice versa.
-3. **Free CDN.** Responses are content-addressed envelopes every relay already
-   stores. Mark a `GET` cacheable and any node that carried it can answer a later
-   identical request — the store is the cache, INV/WANT is the cache-fill.
-   Store-and-forward request/response is a CDN by construction.
-
-Proposed API:
+- A **request** (`tag 0x02`) carries `method`, `path`, `body`, sealed to the
+  service's prekey with a request-id nonce; a **response** (`tag 0x03`) goes back to
+  the requester's address along the reverse path SPORE learned when the request
+  arrived (§5, "first copy wins"). Large bodies ride Layer 1.
+- **Build it like a normal handler.** A service is a `(request) -> response`
+  function; the SPORE side is a thin adapter, so nobody learns a new programming
+  model. To reach the *existing* web, run an HTTP bridge that proxies a SPORE
+  request to a local `http://…` service and the reply back — the bridge moves
+  bytes, the web app is untouched.
+- **Free CDN.** Responses are content-addressed envelopes every relay stores. Mark
+  a read-only response cacheable and any node that carried it can answer a later
+  identical request — the store is the cache, INV/WANT is the cache-fill.
 
 ```rust
 node.serve(topic("weather"), handler);          // handler: Request -> Response
-let res = node.request(addr, Request { .. }).await;
+let res = node.request(addr, Request { .. });    // reply routed back to us
 ```
 </details>
 
@@ -272,6 +263,39 @@ already does. An ergonomic wrapper (subscribe callbacks, watermark cursors) is t
 only thing left to add.
 </details>
 
+## Bridges & bindings — SPORE rides everything
+
+A bridge is *not part of the protocol*. It only moves envelope bytes in and out of
+a node. Every medium on Earth has one of five shapes (spec Page 2), and you bind by
+shape — the router never changes. HTTP, a serial cable, a folder on a USB stick are
+all bridges, none more special than another.
+
+<details>
+<summary>Deep dive: the five shapes and what's implemented</summary>
+
+| Shape | Examples | Binding | Status |
+|---|---|---|---|
+| 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message | ✅ UDP (`run_udp`) |
+| 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::KissStream`) | ✅ framer; TCP runner next |
+| 3. Text channel | SMS, email, Usenet, paper, voice | `~S1.…~` armor (`armor::wrap`) | ✅ codec |
+| 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA (listen-before-talk) | ◑ framer reused; CSMA next |
+| 5. Shared store | folder/USB/Syncthing, HTTP bag, BBS | `bridge::store`, `bridge::bag` | ✅ folder + HTTP bag |
+
+- **HTTP bag** (`bridge::bag`, `cargo run -- http`): `POST /spore/push`,
+  `GET /spore/inv`, `POST /spore/want`, MIME `application/x-spore`. HTTP is one bag
+  transport; a folder or a pastebin serves the same three ops.
+- **Folder** (`bridge::store`, `cargo run -- folder DIR`): envelopes are files named
+  `<hexid>.spore`; the folder *is* a persistent INV. Drop it in Syncthing or on a
+  USB stick and two folders become one link.
+- **KISS stream** (`bridge::KissStream`): a stateful de-framer for byte streams, so
+  a frame split across reads still reassembles — ready for a TCP/serial runner.
+- **Armor** (`armor::wrap` / `unwrap`): Base32 text you can paste, print, or read
+  aloud.
+
+Underlays with their own routing (an IP network, Reticulum, a VPN) count as *one*
+interface: decrement hops once and let them handle their own delivery.
+</details>
+
 ## Status at a glance
 
 The transport and the first pieces of the application layer exist and are tested;
@@ -286,8 +310,9 @@ the rest is designed and slots into the same tag/endpoint model.
 | L1 objects — `send()` auto-fragment + reassembly | ✅ implemented |
 | L2 files — manifest, magnet, swarm-by-WANT | ✅ implemented (folder-sync designed) |
 | L3 sessions — datagram link + reliable stream | ✅ implemented |
-| L4 services — SPORE-HTTP request/response + gateway | ▢ designed |
+| L4 request/response — RPC convention | ▢ designed |
 | L5 feeds — pub/sub over topics | ◑ works via topics; ergonomic API pending |
+| Bridges — UDP, HTTP bag, folder, KISS framer, armor | ✅ implemented (TCP/CSMA runners next) |
 
 Every layer is additive and endpoint-only. The transport underneath never learns
 they exist — which is exactly why a 200-byte LoRa link, a QR code, or a human
