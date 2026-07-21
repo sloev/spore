@@ -147,10 +147,12 @@ let forwards = node.fetch(&magnet);   // pull missing chunks; verify on arrival
 let file = node.file_bytes(&magnet);  // Some(bytes) once complete
 ```
 
-**Folder sync (Syncthing), still designed:** each file becomes a manifest; manifests
-flood on a folder-topic; followers `fetch` them; a newer signed manifest for the
-same `name` supersedes the old. An **encrypted folder** is sealed manifests behind
-a pre-shared-key topic (§7).
+**Folder sync (Syncthing) ✅ implemented:** `bridge::foldersync::publish_dir` turns
+each file in a directory into a manifest on a folder-topic; a subscriber `fetch_all`s
+the chunks and `materialize`s the completed files back to disk (newest manifest per
+name wins, path-traversal guarded). An **encrypted folder** is sealed manifests
+behind a pre-shared-key topic (§7). Tested end-to-end: publish → flood → pull →
+materialise.
 
 **Known caveat.** Chunks live in the ordinary store, which evicts under pressure
 (lowest-stamp → largest → oldest). Pinning/custody for in-progress downloads is
@@ -315,10 +317,28 @@ re-inject the inner envelope as its own traffic.
 
 Honest limits (from the spec): this beats local observers and any subset of mixes,
 but a *global* passive observer is only defeated while cover traffic flows. The
-timing side — Poisson delay, batching ≥ 3, decoy onions — is the mix *runner's* job
-(a policy layer), like CSMA on a shared bus; the crypto transform is what's
-implemented here. Tested end-to-end through two mixes: each peels one layer, the wire
-carries no plaintext, and only the recipient opens the payload.
+batching core is implemented — `mix::Batch` holds peeled inner envelopes and
+releases them only once a minimum batch has gathered *and* each item's delay has
+elapsed, breaking the arrival/re-send timing link. The remaining timing policy
+(Poisson delays, decoy onions) is the mix *runner's* job. Tested: the onion peels
+cleanly through two mixes, and the batch queue holds until full-and-due.
+</details>
+
+## Encrypted topics (§7)  ✅ implemented
+
+A public topic is readable by anyone who follows it. An *encrypted* topic adds a
+shared password: members seal every message under a pre-shared key, so the mesh
+still carries and stores the traffic but only key-holders can read it.
+
+<details>
+<summary>Deep dive: topic seal/open and key rotation</summary>
+
+`topic_seal(msg, psk)` / `topic_open(ct, psk)` use XChaCha20-Poly1305 with a 32-byte
+pre-shared key and a random 24-byte nonce prefixed to the ciphertext (spec §7). The
+envelope rides a normal topic with `ENCRYPTED` set; relays are oblivious, endpoints
+with the key decrypt. **Key rotation** stays a documented convention: flood a
+`KEYROT` carrying the new key, signed by the old one, so members roll forward while
+outsiders can't. Tested: a key-holder round-trips, a wrong key fails.
 </details>
 
 ## Delivery receipts (§8)  ✅ implemented
@@ -362,15 +382,15 @@ All four live in `congestion` as plain primitives:
 - **(b) Trickle** (`Trickle`) — the HELLO/ANNOUNCE interval doubles from 5→80 min
   while nothing new is heard and snaps back to the minimum on novelty, so a quiet
   mesh goes quiet. The TCP bridge paces its beacon with one.
-- **(c) Backpressure** (`admit`) — a peer advertises a `busy` byte (queue fill);
-  neighbours admit sends with probability (255−busy)/255 and always let stamped
-  (proof-of-work) mail through.
+- **(c) Backpressure** (`admit`) — a peer advertises a `busy` byte (store fill) in
+  its ANNOUNCE; neighbours admit sends with probability (255−busy)/255 and always
+  let stamped (proof-of-work) mail through. `Node::busy` produces it, `peer_busy`
+  reads a neighbour's.
 - **(d) Exponential backoff** (`Backoff`) — FLOOD retries at 30 s, doubling, capped
   at 1 h, at most 5 attempts; powers receipt resend above.
 
-Tested as primitives; (a) and (b) are wired live into the TCP bridge, (d) into
-receipts. Backpressure's `busy` byte is produced/consumed by policy — the remaining
-integration is advertising it in HELLO.
+Tested as primitives; (a) and (b) are wired live into the TCP bridge, (c) into the
+ANNOUNCE busy byte, (d) into receipts.
 </details>
 
 ## Bridges & bindings — SPORE rides everything
@@ -388,7 +408,7 @@ all bridges, none more special than another.
 | 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message | ✅ UDP (`run_udp`) |
 | 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::KissStream`) | ✅ framer + TCP runner |
 | 3. Text channel | SMS, email, Usenet, paper, voice | `~S1.…~` armor (`armor::wrap`) | ✅ codec |
-| 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA (listen-before-talk) | ◑ framer reused; CSMA next |
+| 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA + CRC tail | ✅ `Csma` damping + `crc_*` (AFSK runner needs a sound card) |
 | 5. Shared store | folder/USB/Syncthing, HTTP bag, BBS | `bridge::store`, `bridge::bag` | ✅ folder + HTTP bag |
 
 - **HTTP bag** (`bridge::bag`, `cargo run -- http`): `POST /spore/push`,
@@ -408,6 +428,11 @@ all bridges, none more special than another.
   Meshtastic `u32`, connection handle, or `()`). Learned by snooping signed frames;
   `resolve` turns a directed send into an underlay unicast, else the bridge
   broadcasts. Wired into the UDP bridge; the README has the full per-medium table.
+- **`Csma` + `crc_append`/`crc_check`** (`bridge`): shared-bus damped flooding
+  (listen-before-talk, cancel on overhearing) and the SHA-256[0:4] CRC tail buses
+  need. Drop-in for a walkie-talkie/AFSK runner.
+- **`foldersync`** (`bridge::foldersync`): publish a directory as manifests and
+  materialise fetched files — Syncthing over SPORE.
 
 Underlays with their own routing (an IP network, Reticulum, a VPN) count as *one*
 interface: decrement hops once and let them handle their own delivery.
@@ -425,15 +450,15 @@ the rest is designed and slots into the same tag/endpoint model.
 |---|---|
 | Transport (envelope, router, sync, seal, KISS, armor) | ✅ in `src/lib.rs` |
 | L1 objects — `send()` auto-fragment + reassembly | ✅ implemented |
-| L2 files — manifest, magnet, swarm-by-WANT | ✅ implemented (folder-sync designed) |
+| L2 files — manifest, magnet, swarm-by-WANT, folder sync | ✅ implemented |
 | L3 sessions — datagram link + reliable stream | ✅ implemented |
 | L4 request/response — RPC convention | ▢ designed |
 | L5 feeds — pub/sub over topics | ◑ works via topics; ergonomic API pending |
-| §7 crypto — Double Ratchet forward secrecy | ✅ implemented |
+| §7 crypto — Double Ratchet + encrypted topics | ✅ implemented (KEYROT convention) |
 | §8 receipts — ACKREQ + signed receipt + backoff resend | ✅ implemented |
-| §9 anonymity — mix-mode onion | ✅ implemented |
-| §5.4 congestion — backoff, Trickle, token bucket, backpressure | ✅ implemented |
-| Bridges — UDP, TCP/KISS, HTTP bag, folder, armor, `Neighbors` | ✅ implemented (CSMA + radio runners next) |
+| §9 anonymity — mix-mode onion + batch timing | ✅ implemented (Poisson/decoys = runner policy) |
+| §5.4 congestion — backoff, Trickle, token bucket, busy-byte | ✅ implemented |
+| Bridges — UDP, TCP/KISS, HTTP bag, folder+sync, CSMA/CRC, `Neighbors` | ✅ implemented (radio runners need hardware) |
 
 Every layer is additive and endpoint-only. The transport underneath never learns
 they exist — which is exactly why a 200-byte LoRa link, a QR code, or a human

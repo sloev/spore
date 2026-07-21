@@ -47,7 +47,14 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 - **Receipts** (§8) — set the ACKREQ flag and the recipient floods back a signed
   receipt; `acked(id)` reports delivery, `resend_unacked` retries on backoff.
 - **Congestion control** (§5.4) — reusable primitives: token bucket (≤10% airtime),
-  Trickle beacon timer, exponential backoff, and busy-byte backpressure.
+  Trickle beacon timer, exponential backoff, and a busy-byte in ANNOUNCE for
+  backpressure.
+- **Encrypted topics** (§7) — `topic_seal`/`topic_open` (XChaCha20-Poly1305, PSK):
+  the mesh carries the traffic, only key-holders read it.
+- **CSMA + CRC** (§5.5) — `Csma` damped flooding (listen-before-talk, cancel on
+  overhearing) and a SHA-256[0:4] tail for buses with no native CRC.
+- **Folder sync** — `foldersync::publish_dir` / `materialize`: Syncthing over SPORE,
+  built on content-addressed files.
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
   directed unicast, dedup, store with eviction, the full `on_rx` router.
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
@@ -62,7 +69,7 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test               # 22 tests: envelope, fountain, send, files, sessions, reliable, ratchet, onion, receipts, congestion, bridges, …
+cargo test               # 28 tests: envelope, fountain, send, files, sessions, ratchet, onion, receipts, congestion, topics, csma, folder-sync, …
 cargo run                # in-memory mesh demo (A — B — C — D)
 cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
 cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
@@ -86,6 +93,7 @@ SPORE demo — line topology  A — B — C — D
 [7] FILE 'field-notes.txt' (9000 B) published as magnet 8ac320df4f09…; B pulled + verified: true
 [8] MIX onion A~>D via 2 mixes (B,C): D opens Some("burn the ledgers")
 [9] RECEIPT: A's ACKREQ message to D acknowledged: true
+[10] ENCRYPTED TOPIC: key-holder reads Some("safehouse moved"); outsider can read: false
 ```
 
 ## Routing across other networks
