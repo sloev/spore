@@ -260,6 +260,39 @@ fn sim() {
     let holder = topic_open(&payload, &psk).map(|b| String::from_utf8_lossy(&b).into_owned());
     let outsider = topic_open(&payload, &[0u8; 32]).is_some();
     println!("[10] ENCRYPTED TOPIC: key-holder reads {:?}; outsider can read: {}", holder, outsider);
+
+    // 11) RPC (L4): A calls a service at D and gets a reply routed back.
+    let (rid2, qf) = w.nodes[a].request(
+        d_addr,
+        rpc::Request { method: "GET".into(), path: "/status".into(), body: vec![] },
+        NOW,
+    );
+    w.run(qf.into_iter().map(|f| (a, f)).collect()); // request reaches D, auto-queued
+    let dd = w.idx("D");
+    let mut resp_forwards = Vec::new();
+    for (from, id, req) in w.nodes[dd].poll_requests() {
+        let body = format!("serving {} {}", req.method, req.path).into_bytes();
+        let rr = w.nodes[dd].respond(from, id, rpc::Response { status: 200, body }, NOW);
+        resp_forwards.extend(rr.into_iter().map(|f| (dd, f)));
+    }
+    w.run(resp_forwards); // reply routes back to A
+    let got = w.nodes[a].take_response(rid2);
+    println!(
+        "[11] RPC A->D GET /status -> {:?}",
+        got.map(|r| (r.status, String::from_utf8_lossy(&r.body).into_owned()))
+    );
+
+    // 12) FEED (L5): everyone subscribes to "alerts"; A publishes one event.
+    for i in 0..w.nodes.len() {
+        w.nodes[i].subscribe("alerts");
+    }
+    let pf = w.nodes[a].publish("alerts", b"the tide is turning".to_vec(), NOW);
+    w.run(pf.into_iter().map(|f| (a, f)).collect());
+    let readers: Vec<&str> = (0..w.nodes.len())
+        .filter(|&i| !w.nodes[i].poll_feed().is_empty())
+        .map(|i| w.names[i].as_str())
+        .collect();
+    println!("[12] FEED 'alerts' published by A; received by: {:?}", readers);
 }
 
 fn fountain_demo() {

@@ -599,6 +599,10 @@ pub struct Node {
     manifests: HashMap<Id, file::Manifest>,
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
     acked: HashSet<Id>,            // orig ids we've received receipts for
+    rpc_pending: HashSet<u64>,     // request ids awaiting a response (L4)
+    rpc_responses: HashMap<u64, rpc::Response>,
+    rpc_inbox: Vec<(Addr, u64, rpc::Request)>, // requests delivered to a service
+    feed_inbox: Vec<feed::Event>,  // feed events on subscribed topics (L5)
 }
 
 struct Pending {
@@ -640,6 +644,10 @@ impl Node {
             manifests: HashMap::new(),
             pending: HashMap::new(),
             acked: HashSet::new(),
+            rpc_pending: HashSet::new(),
+            rpc_responses: HashMap::new(),
+            rpc_inbox: Vec::new(),
+            feed_inbox: Vec::new(),
         }
     }
 
@@ -812,6 +820,80 @@ impl Node {
         out
     }
 
+    // ---- L4 request/response (RPC) --------------------------------------
+
+    /// Call a service (an address or a served topic). Returns the request id
+    /// (to match the reply) and the `Forward`s to send. The reply arrives via
+    /// `take_response`.
+    pub fn request(&mut self, service: Addr, req: rpc::Request, now: u32) -> (u64, Vec<Forward>) {
+        let mut idb = [0u8; 8];
+        OsRng.fill_bytes(&mut idb);
+        let id = u64::from_be_bytes(idb);
+        let payload = rpc::encode_request(id, &req);
+        let mut e = Envelope::new(ty::DATA, service, now + 7 * 86400, payload);
+        if service == ZERO_DEST || self.topics.contains(&service) {
+            e.flags |= fl::FLOOD;
+        }
+        e.sign(&self.sk);
+        if e.flags & fl::FLOOD == 0 && self.paths.fresh(&service, now).is_none() {
+            e.flags |= fl::FLOOD;
+            e.sign(&self.sk);
+        }
+        self.rpc_pending.insert(id);
+        self.mark_seen(&e);
+        self.store_put(&e);
+        (id, self.forward_intents(&e, NO_IFACE, now))
+    }
+
+    /// Drain requests delivered to us as a service: `(requester, req_id, request)`.
+    pub fn poll_requests(&mut self) -> Vec<(Addr, u64, rpc::Request)> {
+        std::mem::take(&mut self.rpc_inbox)
+    }
+
+    /// Reply to a request, routed back toward the requester.
+    pub fn respond(&mut self, to: Addr, req_id: u64, resp: rpc::Response, now: u32) -> Vec<Forward> {
+        let payload = rpc::encode_response(req_id, &resp);
+        let mut e = Envelope::new(ty::DATA, to, now + 7 * 86400, payload);
+        e.sign(&self.sk);
+        if self.paths.fresh(&to, now).is_none() {
+            e.flags |= fl::FLOOD; // reverse path unknown -> flood to find it
+            e.sign(&self.sk);
+        }
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.forward_intents(&e, NO_IFACE, now)
+    }
+
+    /// Take the response to `id` if it has arrived.
+    pub fn take_response(&mut self, id: u64) -> Option<rpc::Response> {
+        self.rpc_responses.remove(&id)
+    }
+
+    // ---- L5 feeds (pub/sub) ---------------------------------------------
+
+    /// Follow a feed topic so its events are delivered to us.
+    pub fn subscribe(&mut self, topic: &str) {
+        self.topics.insert(topic_of(topic));
+    }
+
+    /// Publish an event to a feed topic (floods to all subscribers).
+    pub fn publish(&mut self, topic: &str, event: Vec<u8>, now: u32) -> Vec<Forward> {
+        let mut payload = Vec::with_capacity(1 + event.len());
+        payload.push(feed::FEED_TAG);
+        payload.extend_from_slice(&event);
+        let mut e = Envelope::new(ty::DATA, topic_of(topic), now + 7 * 86400, payload);
+        e.flags |= fl::FLOOD;
+        e.sign(&self.sk);
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.forward_intents(&e, NO_IFACE, now)
+    }
+
+    /// Drain feed events received on subscribed topics.
+    pub fn poll_feed(&mut self) -> Vec<feed::Event> {
+        std::mem::take(&mut self.feed_inbox)
+    }
+
     /// Our current backpressure `busy` byte (§5.4c): store fill scaled to 0–255.
     /// Neighbours use it to throttle relays toward a swamped peer.
     pub fn busy(&self) -> u8 {
@@ -916,6 +998,38 @@ impl Node {
         // Auto-learn manifests addressed to us (endpoint demux on the app tag).
         if deliverable && e.typ == ty::DATA && e.payload.first() == Some(&file::MANIFEST_TAG) {
             self.absorb_manifest(e);
+        }
+
+        // L4/L5 endpoint demux: queue requests/feed events, match responses.
+        if deliverable && e.typ == ty::DATA && e.flags & fl::FRAGMENT == 0 {
+            match e.payload.first().copied() {
+                Some(rpc::REQUEST_TAG) => {
+                    if let Src::Full(pk) = &e.src {
+                        if let Some((id, req)) = rpc::decode_request(&e.payload) {
+                            self.rpc_inbox.push((addr_of(pk), id, req));
+                        }
+                    }
+                }
+                Some(rpc::RESPONSE_TAG) => {
+                    if let Some((id, resp)) = rpc::decode_response(&e.payload) {
+                        if self.rpc_pending.remove(&id) {
+                            self.rpc_responses.insert(id, resp);
+                        }
+                    }
+                }
+                Some(feed::FEED_TAG) => {
+                    let from = match &e.src {
+                        Src::Full(pk) => Some(addr_of(pk)),
+                        _ => None,
+                    };
+                    self.feed_inbox.push(feed::Event {
+                        topic: e.dest,
+                        from,
+                        data: e.payload[1..].to_vec(),
+                    });
+                }
+                _ => {}
+            }
         }
 
         // Receipts (§8), only for mail addressed specifically to one of our
@@ -2179,6 +2293,105 @@ pub mod armor {
 }
 
 // ---------------------------------------------------------------------------
+// L4 Request/response — RPC as a convention (tags 0x02 request, 0x03 response).
+// A request is a signed DATA to a service (address or topic); the reply is a
+// signed DATA back to the requester, correlated by a nonce and routed along the
+// reverse path the request taught. HTTP-shaped, but medium-independent.
+// ---------------------------------------------------------------------------
+
+pub mod rpc {
+    pub const REQUEST_TAG: u8 = 0x02;
+    pub const RESPONSE_TAG: u8 = 0x03;
+
+    #[derive(Clone, Debug)]
+    pub struct Request {
+        pub method: String,
+        pub path: String,
+        pub body: Vec<u8>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct Response {
+        pub status: u16,
+        pub body: Vec<u8>,
+    }
+
+    // [0x02][req_id:8][mlen:1][method][plen:2][path][body]
+    pub(crate) fn encode_request(id: u64, r: &Request) -> Vec<u8> {
+        let m = r.method.as_bytes();
+        let m = &m[..m.len().min(255)];
+        let pa = r.path.as_bytes();
+        let mut v = Vec::with_capacity(12 + m.len() + pa.len() + r.body.len());
+        v.push(REQUEST_TAG);
+        v.extend_from_slice(&id.to_be_bytes());
+        v.push(m.len() as u8);
+        v.extend_from_slice(m);
+        v.extend_from_slice(&(pa.len() as u16).to_be_bytes());
+        v.extend_from_slice(pa);
+        v.extend_from_slice(&r.body);
+        v
+    }
+    pub(crate) fn decode_request(p: &[u8]) -> Option<(u64, Request)> {
+        if p.first() != Some(&REQUEST_TAG) || p.len() < 12 {
+            return None;
+        }
+        let id = u64::from_be_bytes(p[1..9].try_into().ok()?);
+        let mut o = 9;
+        let mlen = p[o] as usize;
+        o += 1;
+        if o + mlen + 2 > p.len() {
+            return None;
+        }
+        let method = String::from_utf8_lossy(&p[o..o + mlen]).into_owned();
+        o += mlen;
+        let plen = u16::from_be_bytes([p[o], p[o + 1]]) as usize;
+        o += 2;
+        if o + plen > p.len() {
+            return None;
+        }
+        let path = String::from_utf8_lossy(&p[o..o + plen]).into_owned();
+        o += plen;
+        Some((id, Request { method, path, body: p[o..].to_vec() }))
+    }
+
+    // [0x03][req_id:8][status:2][body]
+    pub(crate) fn encode_response(id: u64, r: &Response) -> Vec<u8> {
+        let mut v = Vec::with_capacity(11 + r.body.len());
+        v.push(RESPONSE_TAG);
+        v.extend_from_slice(&id.to_be_bytes());
+        v.extend_from_slice(&r.status.to_be_bytes());
+        v.extend_from_slice(&r.body);
+        v
+    }
+    pub(crate) fn decode_response(p: &[u8]) -> Option<(u64, Response)> {
+        if p.first() != Some(&RESPONSE_TAG) || p.len() < 11 {
+            return None;
+        }
+        let id = u64::from_be_bytes(p[1..9].try_into().ok()?);
+        let status = u16::from_be_bytes([p[9], p[10]]);
+        Some((id, Response { status, body: p[11..].to_vec() }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// L5 Feeds — pub/sub over topics (tag 0x05). Publish to a topic, subscribers
+// following it receive every event; late joiners backfill from any peer's store
+// via INV/WANT. Signed gossip minus JSON, relays, and always-on internet.
+// ---------------------------------------------------------------------------
+
+pub mod feed {
+    use super::*;
+
+    pub const FEED_TAG: u8 = 0x05;
+
+    #[derive(Clone, Debug)]
+    pub struct Event {
+        pub topic: Addr,
+        pub from: Option<Addr>,
+        pub data: Vec<u8>,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Bridges — SPORE rides everything. Each medium has one of five shapes (spec
 // Page 2); bind by shape and the router never changes. A bridge only moves
 // envelope bytes in and out of `Node`; it is not part of the protocol. HTTP,
@@ -3184,5 +3397,51 @@ mod tests {
         assert_eq!(std::fs::read(out.join("b.bin")).unwrap(), vec![0x42u8; 5000]);
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rpc_request_gets_a_response() {
+        let now = 1_700_000_000;
+        let mut client = Node::new("c", &[]);
+        let mut server = Node::new("s", &[]);
+        meet(&mut client, &mut server, now); // learn prekeys + paths both ways
+
+        let (id, fwds) = client.request(
+            server.addr,
+            rpc::Request { method: "GET".into(), path: "/temp".into(), body: vec![] },
+            now,
+        );
+        // Server receives the request and queues it.
+        server.on_rx(&fwd_bytes(&fwds[0]), 0, Some(client.addr), now);
+        let reqs = server.poll_requests();
+        assert_eq!(reqs.len(), 1);
+        let (from, rid, req) = reqs.into_iter().next().unwrap();
+        assert_eq!((req.method.as_str(), req.path.as_str()), ("GET", "/temp"));
+        assert_eq!(rid, id);
+
+        // Server answers; the reply routes back to the client.
+        let rf = server.respond(from, rid, rpc::Response { status: 200, body: b"21C".to_vec() }, now);
+        client.on_rx(&fwd_bytes(&rf[0]), 0, Some(server.addr), now);
+
+        let resp = client.take_response(id).expect("response arrived");
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.body, b"21C");
+    }
+
+    #[test]
+    fn feed_publish_reaches_subscribers() {
+        let now = 1_700_000_000;
+        let mut publisher = Node::new("p", &[]);
+        let mut sub = Node::new("s", &[]);
+        sub.subscribe("alerts");
+
+        let fwds = publisher.publish("alerts", b"the tide is turning".to_vec(), now);
+        sub.on_rx(&fwd_bytes(&fwds[0]), 0, Some(publisher.addr), now);
+
+        let events = sub.poll_feed();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].topic, topic_of("alerts"));
+        assert_eq!(events[0].data, b"the tide is turning");
+        assert!(sub.poll_feed().is_empty(), "poll drains the inbox");
     }
 }
