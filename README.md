@@ -19,6 +19,9 @@ paper, or a human reading armor aloud.
 
 - **Envelope** (§2) — the only object: encode/decode, Ed25519 sign/verify,
   content-addressed `Id`, proof-of-work priority `stamp`.
+- **`send(dest, data)` of any size** — one call that fragments arbitrarily large
+  payloads and reassembles + verifies them on the far side; callers never think
+  about MTUs. See [docs/DESIGN.md](docs/DESIGN.md) for the layers above transport.
 - **Fragmentation** (§3) — a rateless GF(2) fountain code. Decodes from any
   lossy, out-of-order, one-way subset once `count` independent chunks arrive.
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
@@ -32,7 +35,7 @@ paper, or a human reading armor aloud.
 ## Build & run
 
 ```sh
-cargo test          # 8 tests: envelope, signatures, fountain, seal, KISS, armor, sync
+cargo test          # 11 tests: envelope, signatures, fountain, send/reassembly, seal, KISS, armor, sync
 cargo run           # in-memory mesh demo (A — B — C — D), deterministic
 cargo run -- udp    # a real node on UDP :7373 with LAN broadcast
 ```
@@ -47,16 +50,18 @@ SPORE demo — line topology  A — B — C — D
 [2] PUBLIC flood from A delivered to: ["B", "C", "D"]  (4 flood sends)
 [3] SEALED unicast A->D delivered to: ["D"]  (3 directed hops, 0 floods)
     D decrypts payload: Some("meet at the north pier, midnight")
-[4] FOUNTAIN over 40% loss, one-way: 21 data chunks needed; 23 survived of 51 sent; reassembled + signature-verified: true
+[4] SEND 6000 B object -> 7 fragments; reassembled + verified by: ["B", "C", "D"]
+[5] FOUNTAIN over 40% loss, one-way: 21 data chunks needed; 25 survived of 53 sent; reassembled + signature-verified: true
 ```
 
 ## Layout
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `src/lib.rs`    | the portable core: envelope, fountain, router, crypto, KISS, armor |
+| `src/lib.rs`    | the portable core: envelope, fountain, `send`, router, crypto, KISS, armor |
 | `src/main.rs`   | reference node + in-memory demo + UDP transport    |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
+| `docs/DESIGN.md`| the application layers above transport: files, HTTP-over-SPORE, feeds |
 
 ## License
 

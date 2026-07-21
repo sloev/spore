@@ -146,7 +146,24 @@ fn sim() {
         println!("    D decrypts payload: {:?}", opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned()));
     }
 
-    // 4) Fountain over a 40%-loss ONE-WAY link (no feedback): S -> R.
+    // 4) High-level send(): one call moves a 6 KB object the caller never had
+    //    to fragment. It auto-splits into fountain chunks; every node on the
+    //    line reassembles and signature-verifies the original.
+    w.floods = 0;
+    let big = vec![0xABu8; 6000];
+    let sf = w.nodes[a].send(topic_of("news"), big.clone(), NOW);
+    let chunks = sf.len();
+    let del = w.run(sf.into_iter().map(|f| (a, f)).collect());
+    let got: Vec<&str> =
+        del.iter().filter(|(_, e)| e.payload == big).map(|(n, _)| w.names[*n].as_str()).collect();
+    println!(
+        "[4] SEND {} B object -> {} fragments; reassembled + verified by: {:?}",
+        big.len(),
+        chunks,
+        got
+    );
+
+    // 5) Fountain over a 40%-loss ONE-WAY link (no feedback): S -> R.
     fountain_demo();
 }
 
@@ -182,7 +199,7 @@ fn fountain_demo() {
     let w = recovered.expect("reassembled");
     let ok = w == wire && Envelope::decode(&w).unwrap().0.verify();
     println!(
-        "[4] FOUNTAIN over 40% loss, one-way: {} data chunks needed; {} survived of {} sent; \
+        "[5] FOUNTAIN over 40% loss, one-way: {} data chunks needed; {} survived of {} sent; \
          reassembled + signature-verified: {}",
         count, fed, sent, ok
     );

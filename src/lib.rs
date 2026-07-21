@@ -31,6 +31,14 @@ pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
 pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
 pub const PATH_FRESH_SECS: u32 = 3 * 3600;
 
+/// Default per-envelope wire budget used by `Node::send` to decide when to
+/// fragment. Transports over tighter media (LoRa ~200 B, ESP-NOW 250 B) lower
+/// `Node::mtu`; the router itself is MTU-agnostic.
+pub const DEFAULT_MTU: usize = 1400;
+/// Bytes a fragment envelope adds around its chunk: 16 header + 2 plen +
+/// 16 orig_id + 1 index + 1 count. `chunk = mtu - FRAG_OVERHEAD`.
+const FRAG_OVERHEAD: usize = 36;
+
 /// address = SHA-256(pubkey)[..8]
 pub fn addr_of(pubkey: &[u8; 32]) -> Addr {
     let d = Sha256::digest(pubkey);
@@ -550,6 +558,7 @@ pub struct Node {
     max_store_bytes: usize,
     seq: u64,
     frags: HashMap<Id, Fountain>,
+    pub mtu: usize,
 }
 
 impl Node {
@@ -581,6 +590,7 @@ impl Node {
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
+            mtu: DEFAULT_MTU,
         }
     }
 
@@ -656,6 +666,57 @@ impl Node {
         self.forward_intents(&e, NO_IFACE, now)
     }
 
+    /// High-level send: deliver `data` of *any* size to an address or topic.
+    ///
+    /// Small payloads ride a single signed envelope (identical to `originate`).
+    /// Anything larger than `self.mtu` is fountain-fragmented (§3) into equal
+    /// chunks plus a margin of repair chunks, so it survives lossy, reordered,
+    /// even one-way delivery; the receiver reassembles and verifies the original
+    /// signature before the app ever sees it. Callers never think about MTUs.
+    ///
+    /// One fountain set caps at ~`mtu`×255 (≈ 50 KB at defaults); larger objects
+    /// belong to the manifest+swarm layer (files), not a single `send`.
+    pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Vec<Forward> {
+        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, data);
+        if dest == ZERO_DEST || self.topics.contains(&dest) {
+            e.flags |= fl::FLOOD;
+        }
+        e.sign(&self.sk);
+        // Unicast with no known path: flood to discover it (§5.6).
+        if e.flags & fl::FLOOD == 0 && self.paths.fresh(&dest, now).is_none() {
+            e.flags |= fl::FLOOD;
+            e.sign(&self.sk);
+        }
+
+        let wire = e.wire();
+        if wire.len() <= self.mtu {
+            self.mark_seen(&e);
+            self.store_put(&e);
+            return self.forward_intents(&e, NO_IFACE, now);
+        }
+
+        // Too big for one envelope: fountain-fragment the signed wire form.
+        let chunk = self.mtu.saturating_sub(FRAG_OVERHEAD).max(1);
+        let count = (wire.len() + chunk - 1) / chunk;
+        assert!(
+            count <= 255,
+            "object too large for one fountain set (~mtu×255); use the file/manifest layer"
+        );
+        let orig_id = e.id();
+        // Data chunks 0..count, then a few repair chunks for loss resilience.
+        let repair = (count / 8 + 2).min(255 - count);
+        let indices: Vec<u8> = (0..(count + repair)).map(|i| i as u8).collect();
+        let frags = fragment(&wire, chunk, e.hops, e.expiry, dest, orig_id, &indices);
+
+        let mut forwards = Vec::new();
+        for fr in &frags {
+            self.mark_seen(fr);
+            self.store_put(fr);
+            forwards.append(&mut self.forward_intents(fr, NO_IFACE, now));
+        }
+        forwards
+    }
+
     /// Build+sign this node's ANNOUNCE (prekey + topics), ready to flood (§4).
     pub fn build_announce(&mut self, now: u32) -> Vec<Forward> {
         let mut p = Vec::new();
@@ -708,7 +769,13 @@ impl Node {
             ty::WANT => return self.on_want(&e, iface, nbr),
             _ => {}
         }
+        self.ingest(&e, iface, nbr, now, true)
+    }
 
+    /// The router core (§5). `allow_forward` is true for envelopes off the wire
+    /// and false for an original recombined from fragments — its chunks already
+    /// propagate on their own, so the giant reassembled copy must not re-flood.
+    fn ingest(&mut self, e: &Envelope, iface: Iface, nbr: Option<Addr>, now: u32, allow_forward: bool) -> Rx {
         let id = e.id();
         if self.seen.contains_key(&id) || e.expiry < now {
             return Rx::default(); // duplicate or expired -> drop
@@ -726,34 +793,41 @@ impl Node {
         let mut rx = Rx::default();
 
         if e.typ == ty::ANNOUNCE {
-            self.absorb_announce(&e);
+            self.absorb_announce(e);
         }
 
-        // Deliver if addressed to us / a followed topic / public.
-        if self.addrs.contains(&e.dest) || self.topics.contains(&e.dest) || e.dest == ZERO_DEST {
+        let deliverable =
+            self.addrs.contains(&e.dest) || self.topics.contains(&e.dest) || e.dest == ZERO_DEST;
+
+        // Deliver to the app — but a raw FRAGMENT is transport plumbing, never
+        // app data; delivery of a fragmented object happens on reassembly below.
+        if deliverable && e.flags & fl::FRAGMENT == 0 {
             rx.delivered.push(e.clone());
         }
 
-        // Fragment: try to reassemble the original, and if it completes, feed
-        // it back through the router as a fresh arrival.
-        if e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
+        // Reassemble only objects bound for us; a pure relay just forwards the
+        // fragments (each is an ordinary envelope) without hoarding chunks.
+        if deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
             let mut oid = [0u8; 16];
             oid.copy_from_slice(&e.payload[..16]);
             let idx = e.payload[16];
             let count = e.payload[17];
             let chunk = e.payload[18..].to_vec();
             if let Some(orig) = self.frags.entry(oid).or_default().add(&oid, idx, count, chunk) {
-                let mut inner = self.on_rx(&orig, iface, nbr, now);
-                rx.delivered.append(&mut inner.delivered);
-                rx.forwards.append(&mut inner.forwards);
+                if let Ok((oe, _)) = Envelope::decode(&orig) {
+                    // Deliver the recombined original; do not re-forward it.
+                    let mut inner = self.ingest(&oe, iface, nbr, now, false);
+                    rx.delivered.append(&mut inner.delivered);
+                    rx.forwards.append(&mut inner.forwards);
+                }
             }
         }
 
         // Store for later opportunistic sync.
-        self.store_put(&e);
+        self.store_put(e);
 
         // Relay.
-        if e.hops > 0 {
+        if allow_forward && e.hops > 0 {
             let mut f = e.clone();
             f.hops -= 1;
             rx.forwards.append(&mut self.forward_intents(&f, iface, now));
@@ -1081,6 +1155,59 @@ mod tests {
         let wire = e.wire();
         let text = format!("noise before {} noise after", armor::wrap(&wire));
         assert_eq!(armor::unwrap(&text).unwrap(), wire);
+    }
+
+    #[test]
+    fn send_small_is_a_single_envelope() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+        let f = a.send(topic_of("news"), b"hi".to_vec(), now);
+        assert_eq!(f.len(), 1, "a small payload must not fragment");
+    }
+
+    #[test]
+    fn send_large_object_fragments_and_reassembles() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+        let mut b = Node::new("b", &["news"]);
+
+        let payload = vec![0x5Au8; 5000]; // well over one MTU
+        let forwards = a.send(topic_of("news"), payload.clone(), now);
+        assert!(forwards.len() > 1, "a large payload must fragment into many sends");
+
+        // Flood every fragment across the A—B link.
+        let mut delivered = Vec::new();
+        for f in &forwards {
+            if let Forward::Flood { bytes, .. } = f {
+                let rx = b.on_rx(bytes, 0, Some(a.addr), now);
+                delivered.extend(rx.delivered);
+            }
+        }
+
+        // The app sees exactly one reassembled object — never a raw fragment.
+        assert_eq!(delivered.len(), 1, "one delivery, no raw fragments leaked to the app");
+        assert_eq!(delivered[0].payload, payload, "reassembled payload matches");
+        assert!(delivered[0].verify(), "reassembled signature verifies");
+    }
+
+    #[test]
+    fn relays_forward_fragments_without_reassembling() {
+        // C follows no relevant topic and is not the dest, so it must relay the
+        // fragments onward but never buffer/reassemble the object itself.
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+        let mut c = Node::new("c", &[]); // relay: no matching topic
+        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now);
+
+        let mut relayed = 0;
+        for f in &forwards {
+            if let Forward::Flood { bytes, .. } = f {
+                let rx = c.on_rx(bytes, 0, Some(a.addr), now);
+                assert!(rx.delivered.is_empty(), "a relay delivers nothing to its app");
+                relayed += rx.forwards.len();
+            }
+        }
+        assert!(relayed > 1, "a relay must forward the fragments onward");
     }
 
     #[test]
