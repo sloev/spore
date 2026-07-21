@@ -43,6 +43,9 @@ const FRAG_OVERHEAD: usize = 36;
 /// out of anyone's long-term store.
 pub const SESSION_EXPIRY_SECS: u32 = 300;
 
+/// First payload byte of a delivery receipt: `[0x06][orig_id:16]` (§8).
+pub const RECEIPT_TAG: u8 = 0x06;
+
 /// address = SHA-256(pubkey)[..8]
 pub fn addr_of(pubkey: &[u8; 32]) -> Addr {
     let d = Sha256::digest(pubkey);
@@ -564,6 +567,13 @@ pub struct Node {
     frags: HashMap<Id, Fountain>,
     pub mtu: usize,
     manifests: HashMap<Id, file::Manifest>,
+    pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
+    acked: HashSet<Id>,            // orig ids we've received receipts for
+}
+
+struct Pending {
+    wire: Vec<u8>,
+    backoff: congestion::Backoff,
 }
 
 impl Node {
@@ -597,6 +607,8 @@ impl Node {
             frags: HashMap::new(),
             mtu: DEFAULT_MTU,
             manifests: HashMap::new(),
+            pending: HashMap::new(),
+            acked: HashSet::new(),
         }
     }
 
@@ -723,6 +735,52 @@ impl Node {
         forwards
     }
 
+    /// Originate a unicast message that asks the recipient for a delivery
+    /// receipt (§8). Tracks it for backoff resend until a receipt arrives.
+    pub fn originate_ackreq(&mut self, dest: Addr, payload: Vec<u8>, now: u32) -> Vec<Forward> {
+        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        e.flags |= fl::ACKREQ;
+        if dest == ZERO_DEST || self.topics.contains(&dest) {
+            e.flags |= fl::FLOOD;
+        }
+        e.sign(&self.sk);
+        if e.flags & fl::FLOOD == 0 && self.paths.fresh(&dest, now).is_none() {
+            e.flags |= fl::FLOOD;
+            e.sign(&self.sk);
+        }
+        let id = e.id();
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
+        self.forward_intents(&e, NO_IFACE, now)
+    }
+
+    /// Has a receipt for `id` come back?
+    pub fn acked(&self, id: &Id) -> bool {
+        self.acked.contains(id)
+    }
+
+    /// Resend any ACKREQ messages whose backoff has elapsed without a receipt
+    /// (§5.6: flooding is route discovery). Drops exhausted or acked ones.
+    pub fn resend_unacked(&mut self, now: u32) -> Vec<Forward> {
+        let mut out = Vec::new();
+        let mut done = Vec::new();
+        for (id, p) in self.pending.iter_mut() {
+            if self.acked.contains(id) || p.backoff.exhausted() {
+                done.push(*id);
+                continue;
+            }
+            if p.backoff.due(now) {
+                p.backoff.fired(now);
+                out.push(Forward::Flood { except: NO_IFACE, bytes: p.wire.clone() });
+            }
+        }
+        for id in done {
+            self.pending.remove(&id);
+        }
+        out
+    }
+
     /// Build+sign this node's ANNOUNCE (prekey + topics), ready to flood (§4).
     pub fn build_announce(&mut self, now: u32) -> Vec<Forward> {
         let mut p = Vec::new();
@@ -814,6 +872,35 @@ impl Node {
         // Auto-learn manifests addressed to us (endpoint demux on the app tag).
         if deliverable && e.typ == ty::DATA && e.payload.first() == Some(&file::MANIFEST_TAG) {
             self.absorb_manifest(e);
+        }
+
+        // Receipts (§8), only for mail addressed specifically to one of our
+        // addresses (never for topic/public floods).
+        if e.typ == ty::DATA && self.addrs.contains(&e.dest) {
+            // A receipt for something we sent -> record the delivery.
+            if e.flags & fl::ACKREQ == 0
+                && e.payload.first() == Some(&RECEIPT_TAG)
+                && e.payload.len() >= 17
+            {
+                let mut oid = [0u8; 16];
+                oid.copy_from_slice(&e.payload[1..17]);
+                self.acked.insert(oid);
+                self.pending.remove(&oid);
+            }
+            // A message that asked for a receipt -> flood one back to its src.
+            if e.flags & fl::ACKREQ != 0 && e.flags & fl::FRAGMENT == 0 {
+                if let Src::Full(pk) = &e.src {
+                    let mut p = Vec::with_capacity(17);
+                    p.push(RECEIPT_TAG);
+                    p.extend_from_slice(&e.id());
+                    let mut ack = Envelope::new(ty::DATA, addr_of(pk), e.expiry, p);
+                    ack.flags |= fl::FLOOD; // receipts flood and teach reverse paths
+                    ack.sign(&self.sk);
+                    self.mark_seen(&ack);
+                    self.store_put(&ack);
+                    rx.forwards.append(&mut self.forward_intents(&ack, iface, now));
+                }
+            }
         }
 
         // Reassemble only objects bound for us; a pure relay just forwards the
@@ -1627,6 +1714,116 @@ pub mod mix {
             outer = Some(layer);
         }
         outer
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §5.4 Congestion control — four independent knobs. The router stays simple;
+// these are primitives the originator and the bridges apply. (a) token bucket
+// caps relayed airtime, (b) Trickle paces beacons, (c) backpressure scales
+// sends by a peer's busy byte, (d) exponential backoff retries un-acked floods.
+// ---------------------------------------------------------------------------
+
+pub mod congestion {
+    /// (d) Exponential backoff for FLOOD retransmits: 30 s, doubling each try,
+    /// capped at 1 h, at most `MAX` attempts (§5.4d, §5.6).
+    pub struct Backoff {
+        next_at: u32,
+        tries: u8,
+    }
+    impl Backoff {
+        pub const BASE: u32 = 30;
+        pub const CAP: u32 = 3600;
+        pub const MAX: u8 = 5;
+        pub fn new(now: u32) -> Self {
+            Backoff { next_at: now + Self::BASE, tries: 0 }
+        }
+        /// A retry is due (and we still have attempts left).
+        pub fn due(&self, now: u32) -> bool {
+            self.tries < Self::MAX && now >= self.next_at
+        }
+        /// Record a fired retry and schedule the next (doubling, capped).
+        pub fn fired(&mut self, now: u32) {
+            self.tries += 1;
+            let delay = (Self::BASE << (self.tries - 1).min(20)).min(Self::CAP);
+            self.next_at = now + delay;
+        }
+        pub fn exhausted(&self) -> bool {
+            self.tries >= Self::MAX
+        }
+        pub fn tries(&self) -> u8 {
+            self.tries
+        }
+    }
+
+    /// (b) Trickle timer for HELLO/ANNOUNCE: the interval doubles from `min` to
+    /// `max` while nothing new is heard, and snaps back to `min` on any novelty.
+    pub struct Trickle {
+        min: u32,
+        max: u32,
+        cur: u32,
+        fire_at: u32,
+    }
+    impl Trickle {
+        pub fn new(now: u32, min: u32, max: u32) -> Self {
+            Trickle { min, max, cur: min, fire_at: now + min }
+        }
+        pub fn due(&self, now: u32) -> bool {
+            now >= self.fire_at
+        }
+        pub fn fired(&mut self, now: u32) {
+            self.cur = (self.cur * 2).min(self.max);
+            self.fire_at = now + self.cur;
+        }
+        /// Something new was heard — reset to the fast interval.
+        pub fn reset(&mut self, now: u32) {
+            self.cur = self.min;
+            self.fire_at = now + self.min;
+        }
+        pub fn interval(&self) -> u32 {
+            self.cur
+        }
+    }
+
+    /// (a) Token bucket capping relayed bytes to a sustained rate (law on ISM
+    /// bands: ≤ 10 % airtime). Time is in seconds; `allow` refills then spends.
+    pub struct TokenBucket {
+        rate: u32, // bytes/sec sustained
+        burst: u32,
+        tokens: u32,
+        last: u32,
+    }
+    impl TokenBucket {
+        pub fn new(rate: u32) -> Self {
+            let burst = rate.max(2048); // hold at least one full frame
+            TokenBucket { rate, burst, tokens: rate, last: 0 }
+        }
+        /// Size the bucket at 10 % of a link's raw capacity (bytes/sec).
+        pub fn ten_percent(link_bytes_per_sec: u32) -> Self {
+            Self::new((link_bytes_per_sec / 10).max(1))
+        }
+        /// May we spend `bytes` of relay budget now? Refills by elapsed time.
+        pub fn allow(&mut self, bytes: u32, now: u32) -> bool {
+            let refill = now.saturating_sub(self.last).saturating_mul(self.rate);
+            self.tokens = self.tokens.saturating_add(refill).min(self.burst);
+            self.last = now;
+            if self.tokens >= bytes {
+                self.tokens -= bytes;
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    /// (c) Backpressure: a peer advertises a `busy` byte (queue fill 0–255);
+    /// neighbours admit a send with probability (255−busy)/255 and let stamped
+    /// (proof-of-work priority) mail through regardless. `roll` is a random byte.
+    pub fn admit(busy: u8, stamp: u8, roll: u8) -> bool {
+        if busy == 0 || stamp > 0 {
+            return true;
+        }
+        (roll as u16) < (255 - busy as u16)
     }
 }
 
@@ -2597,5 +2794,70 @@ mod tests {
         // Stale bindings expire.
         nbrs.expire(now + 4000);
         assert_eq!(nbrs.resolve(&a.addr, now + 4000), None, "binding aged out");
+    }
+
+    #[test]
+    fn ackreq_gets_a_receipt_back() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now); // learn prekeys + a path each way
+
+        // A -> B with ACKREQ. A has a path to B, so it's directed.
+        let fwds = a.originate_ackreq(b.addr, b"confirm receipt".to_vec(), now);
+        let id = Envelope::decode(&fwd_bytes(&fwds[0])).unwrap().0.id();
+        assert!(!a.acked(&id));
+
+        // B receives it, delivers, and floods a signed receipt back.
+        let brx = b.on_rx(&fwd_bytes(&fwds[0]), 0, Some(a.addr), now);
+        assert!(brx.delivered.iter().any(|e| e.payload == b"confirm receipt"));
+        let receipt = brx.forwards.iter().find_map(|f| match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => Some(bytes.clone()),
+        });
+        let receipt = receipt.expect("B emitted a receipt");
+
+        // A receives the receipt and marks the message delivered.
+        a.on_rx(&receipt, 0, Some(b.addr), now);
+        assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn congestion_primitives() {
+        use congestion::*;
+
+        // (d) Backoff: fires with growing gaps, then exhausts after MAX.
+        let mut bo = Backoff::new(0);
+        assert!(!bo.due(0));
+        assert!(bo.due(30));
+        bo.fired(30);
+        assert!(!bo.due(31));
+        assert!(bo.due(60), "next retry ~30 s later");
+        for t in 0..10 {
+            if bo.due(t * 100000) {
+                bo.fired(t * 100000);
+            }
+        }
+        assert!(bo.exhausted(), "gives up after MAX tries");
+
+        // (b) Trickle: doubles while quiet, resets on novelty.
+        let mut tr = Trickle::new(0, 5, 80);
+        assert!(tr.due(5));
+        tr.fired(5);
+        assert_eq!(tr.interval(), 10);
+        tr.fired(15);
+        assert_eq!(tr.interval(), 20);
+        tr.reset(100);
+        assert_eq!(tr.interval(), 5, "novelty snaps back to the fast interval");
+
+        // (a) Token bucket: caps sustained throughput, refills over time.
+        let mut tb = TokenBucket::new(100);
+        assert!(tb.allow(80, 0));
+        assert!(!tb.allow(80, 0), "same second: out of budget");
+        assert!(tb.allow(80, 5), "refilled after 5 s");
+
+        // (c) Backpressure: idle admits all; busy drops unstamped; stamped rides.
+        assert!(admit(0, 0, 200));
+        assert!(!admit(255, 0, 100));
+        assert!(admit(255, 3, 100), "stamped mail is always admitted");
     }
 }

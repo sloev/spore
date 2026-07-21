@@ -4,6 +4,7 @@
 //!   cargo run -- udp          # a real node on UDP :7373 with LAN broadcast
 //!   cargo run -- http         # an HTTP "bag" bridge on :7373 (push/inv/want)
 //!   cargo run -- folder DIR   # a shared-store bridge over a folder of *.spore
+//!   cargo run -- tcp [HOST]   # a KISS-over-TCP stream bridge (listen, or connect)
 //!
 //! The simulation drives the exact `Node::on_rx` router used in production; each
 //! `-- <mode>` swaps in a different bridge. The router never changes — a bridge
@@ -241,6 +242,13 @@ fn sim() {
         hops.len(),
         opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned())
     );
+
+    // 9) RECEIPT (§8): A sends an ACKREQ unicast to D; D auto-replies a signed
+    //    receipt that floods back, so A learns the message was delivered.
+    let rf = w.nodes[a].originate_ackreq(d_addr, b"confirm you got this".to_vec(), NOW);
+    let rid = Envelope::decode(&first_bytes(&rf)).unwrap().0.id();
+    w.run(rf.into_iter().map(|f| (a, f)).collect());
+    println!("[9] RECEIPT: A's ACKREQ message to D acknowledged: {}", w.nodes[a].acked(&rid));
 }
 
 fn fountain_demo() {
@@ -470,6 +478,90 @@ fn run_folder(dir: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Bridge: KISS over a TCP byte stream (shape 2). Point-to-point: `tcp` listens
+// for one peer, `tcp HOST:PORT` connects. Shows congestion control live —
+// Trickle paces the HELLO beacon, a token bucket caps relayed bytes (§5.4a/b).
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_tcp(target: Option<&str>) -> std::io::Result<()> {
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
+    let mut stream = match target {
+        Some(addr) => {
+            println!("connecting to {addr} …");
+            TcpStream::connect(addr)?
+        }
+        None => {
+            let l = TcpListener::bind(("0.0.0.0", 7373))?;
+            println!("listening on tcp/7373 for one peer …");
+            l.accept()?.0
+        }
+    };
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+
+    let mut node = Node::new("tcp-node", &["news"]);
+    let mut ks = bridge::KissStream::new();
+    // Congestion control, made visible: pace beacons, cap relays.
+    let mut trickle = congestion::Trickle::new(now(), 5, 80); // seconds here (spec: minutes)
+    let mut relay = congestion::TokenBucket::ten_percent(1200); // ~1.2 kB/s link
+    println!("SPORE tcp bridge up (addr {}). Ctrl-C to stop.", hexad(&node.addr));
+
+    let beacon = |node: &mut Node, s: &mut TcpStream, t: u32| -> std::io::Result<()> {
+        for f in node.build_announce(t) {
+            if let Forward::Flood { bytes, .. } = f {
+                s.write_all(&bridge::KissStream::frame(&bytes))?;
+            }
+        }
+        Ok(())
+    };
+    beacon(&mut node, &mut stream, now())?;
+
+    let mut buf = [0u8; 2048];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                println!("peer closed");
+                break;
+            }
+            Ok(n) => {
+                for frame in ks.push(&buf[..n]) {
+                    let t = now();
+                    let rx = node.on_rx(&frame, 0, None, t);
+                    for e in &rx.delivered {
+                        println!("  delivered {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
+                    }
+                    for f in rx.forwards {
+                        let bytes = match f {
+                            Forward::Flood { bytes, .. } => bytes,
+                            Forward::Directed { bytes, .. } => bytes,
+                        };
+                        // §5.4a token bucket: skip the relay if over budget.
+                        if relay.allow(bytes.len() as u32, t) {
+                            stream.write_all(&bridge::KissStream::frame(&bytes))?;
+                        }
+                    }
+                }
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+        // §5.4b Trickle: re-beacon on the doubling interval.
+        let t = now();
+        if trickle.due(t) {
+            trickle.fired(t);
+            beacon(&mut node, &mut stream, t)?;
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
@@ -477,6 +569,12 @@ fn main() {
         Some("udp") => {
             if let Err(e) = run_udp() {
                 eprintln!("udp error: {e}");
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("tcp") => {
+            if let Err(e) = run_tcp(args.get(2).map(|s| s.as_str())) {
+                eprintln!("tcp error: {e}");
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
