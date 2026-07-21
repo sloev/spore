@@ -5,6 +5,7 @@
 //!   cargo run -- http         # an HTTP "bag" bridge on :7373 (push/inv/want)
 //!   cargo run -- folder DIR   # a shared-store bridge over a folder of *.spore
 //!   cargo run -- tcp [HOST]   # a KISS-over-TCP stream bridge (listen, or connect)
+//!   cargo run -- meshtastic   # bridge to a Meshtastic WiFi-UDP broadcast node
 //!
 //! The simulation drives the exact `Node::on_rx` router used in production; each
 //! `-- <mode>` swaps in a different bridge. The router never changes — a bridge
@@ -606,6 +607,85 @@ fn run_tcp(target: Option<&str>) -> std::io::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Bridge: Meshtastic over WiFi-UDP broadcast. Meshtastic nodes with the UDP
+// feature enabled multicast their mesh packets on the LAN; this bridge speaks
+// that: it wraps each SPORE envelope as a MeshPacket on portnum 256 (PRIVATE_APP,
+// dst broadcast) and reads envelopes back out of packets on that portnum. The
+// Meshtastic mesh then carries them over LoRa to every node — SPORE sees the
+// whole mesh as one interface. Envelopes auto-fragment to fit the ~230 B budget.
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_meshtastic() -> std::io::Result<()> {
+    use spore::bridge::meshtastic as mt;
+    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let group = Ipv4Addr::from(mt::UDP_GROUP);
+    let dst = SocketAddrV4::new(group, mt::UDP_PORT);
+    let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, mt::UDP_PORT))?;
+    sock.join_multicast_v4(&group, &Ipv4Addr::UNSPECIFIED)?;
+
+    let mut node = Node::new("mesh-node", &["news"]);
+    node.mtu = 200; // fit Meshtastic's payload budget -> SPORE auto-fragments
+    // A virtual Meshtastic node number for our bridge, derived from our address.
+    let my_node = u32::from_be_bytes([node.addr[0], node.addr[1], node.addr[2], node.addr[3]]);
+    let mut neighbors: bridge::Neighbors<u32> = bridge::Neighbors::new(2 * 3600);
+    let mut rng: u32 = my_node ^ 0x9e37_79b9;
+    let mut pkt_id = || {
+        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        rng
+    };
+    let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
+
+    let send = |sock: &UdpSocket, id: &mut dyn FnMut() -> u32, bytes: &[u8], to: u32| {
+        let frame = mt::encode(bytes, my_node, to, id());
+        let _ = sock.send_to(&frame, dst);
+    };
+
+    for f in node.build_announce(now()) {
+        if let Forward::Flood { bytes, .. } = f {
+            send(&sock, &mut pkt_id, &bytes, mt::BROADCAST);
+        }
+    }
+    println!(
+        "SPORE Meshtastic-UDP bridge on {}:{} (node !{:08x}). Ctrl-C to stop.",
+        group,
+        mt::UDP_PORT,
+        my_node
+    );
+
+    let mut buf = [0u8; 1024];
+    loop {
+        let (n, _peer) = sock.recv_from(&mut buf)?;
+        let Some((from_node, portnum, payload)) = mt::decode(&buf[..n]) else {
+            continue;
+        };
+        if portnum != mt::PORT_PRIVATE_APP {
+            continue; // some other Meshtastic app, not us
+        }
+        let t = now();
+        // Snoop: bind the signed SPORE sender to the Meshtastic node it came from.
+        let nbr = neighbors.snoop(&payload, from_node, t);
+        let rx = node.on_rx(&payload, 0, nbr, t);
+        for e in &rx.delivered {
+            println!("  delivered {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
+        }
+        for f in rx.forwards {
+            match f {
+                Forward::Flood { bytes, .. } => send(&sock, &mut pkt_id, &bytes, mt::BROADCAST),
+                Forward::Directed { nbr, bytes, .. } => {
+                    // Resolve the SPORE next-hop to a Meshtastic node and unicast;
+                    // fall back to a mesh broadcast if we haven't learned it.
+                    let to = nbr.and_then(|a| neighbors.resolve(&a, t)).unwrap_or(mt::BROADCAST);
+                    send(&sock, &mut pkt_id, &bytes, to);
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(|s| s.as_str()) {
@@ -613,6 +693,12 @@ fn main() {
         Some("udp") => {
             if let Err(e) = run_udp() {
                 eprintln!("udp error: {e}");
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some("meshtastic") | Some("mesh") => {
+            if let Err(e) = run_meshtastic() {
+                eprintln!("meshtastic error: {e}");
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
