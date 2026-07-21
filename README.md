@@ -17,10 +17,10 @@ paper, or a human reading armor aloud.
 
 ## What's implemented
 
-The transport core is complete, plus the first two application layers on top of
-it: `send()` for objects of any size, and UDP-like sessions with an optional
-reliable stream. The layers above transport (files, HTTP, feeds) are designed in
-[docs/DESIGN.md](docs/DESIGN.md).
+The transport core is complete, plus three application layers on top of it:
+`send()` for objects of any size, content-addressed files (magnet links + swarm),
+and UDP-like sessions with an optional reliable stream. The remaining layers (HTTP,
+feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 
 <details>
 <summary>Deep dive: the full feature list</summary>
@@ -32,6 +32,10 @@ reliable stream. The layers above transport (files, HTTP, feeds) are designed in
   about MTUs.
 - **Fragmentation** (§3) — a rateless GF(2) fountain code. Decodes from any
   lossy, out-of-order, one-way subset once `count` independent chunks arrive.
+- **Files** — `publish_file` mints a **magnet** (a signed manifest indexing chunk
+  envelopes by content ID); peers `fetch` missing chunks via WANT and verify each
+  for free, because a chunk's ID is the hash of its bytes. BitTorrent from the
+  envelope primitive.
 - **Sessions** — a UDP-like datagram link keyed on a cryptographic address (so it
   survives roaming), plus a simple QUIC-style Go-Back-N reliable stream for
   SSH/git-shaped needs. Reliability is endpoint state, never a network property.
@@ -47,7 +51,7 @@ reliable stream. The layers above transport (files, HTTP, feeds) are designed in
 ## Build & run
 
 ```sh
-cargo test          # 13 tests: envelope, fountain, send/reassembly, sessions, reliable stream, seal, KISS, armor, sync
+cargo test          # 14 tests: envelope, fountain, send, files/magnet, sessions, reliable stream, seal, KISS, armor, sync
 cargo run           # in-memory mesh demo (A — B — C — D), deterministic
 cargo run -- udp    # a real node on UDP :7373 with LAN broadcast
 ```
@@ -65,13 +69,14 @@ SPORE demo — line topology  A — B — C — D
 [4] SEND 6000 B object -> 7 fragments; reassembled + verified by: ["B", "C", "D"]
 [5] FOUNTAIN over 40% loss, one-way: 21 data chunks needed; 25 survived of 53 sent; reassembled + signature-verified: true
 [6] DATAGRAM session A->D over 3 directed hops: D decrypts Some("interactive hello over a udp-like link")
+[7] FILE 'field-notes.txt' (9000 B) published as magnet 8ac320df4f09…; B pulled + verified: true
 ```
 
 ## Layout
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `src/lib.rs`    | the portable core: envelope, fountain, `send`, sessions, router, crypto, KISS, armor |
+| `src/lib.rs`    | the portable core: envelope, fountain, `send`, files, sessions, router, crypto, KISS, armor |
 | `src/main.rs`   | reference node + in-memory demo + UDP transport    |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/DESIGN.md`| the application layers above transport: files, HTTP-over-SPORE, feeds |

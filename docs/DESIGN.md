@@ -35,7 +35,7 @@ convention. If you've built web apps, you already know all four.
 
 | Shape | Web analogue | SPORE mechanism | State |
 |---|---|---|---|
-| **Objects** | files / magnet links | content-addressed blobs, fountain + swarm | L1 done, L2 designed |
+| **Objects** | files / magnet links | content-addressed blobs, fountain + swarm | ✅ implemented |
 | **Sessions** | UDP / QUIC / Mosh | datagram links + reliable stream | ✅ implemented |
 | **Request/response** | HTTP | `Request`/`Response` envelopes, reverse-path routed | designed |
 | **Feeds** | pub/sub, SSE | topics | works via topics |
@@ -60,12 +60,13 @@ that the message is addressed to.
 
 | Tag | Meaning | Status |
 |---|---|---|
-| `0x01` | object manifest | planned |
+| `0x01` | file manifest | ✅ implemented |
 | `0x02` | request (SPORE-HTTP) | planned |
 | `0x03` | response (SPORE-HTTP) | planned |
-| `0x04` | **datagram (session)** | ✅ implemented |
+| `0x04` | datagram (session) | ✅ implemented |
 | `0x05` | feed/event | planned |
 | `0x06` | receipt/ACK (spec §8) | planned |
+| `0x07` | file chunk | ✅ implemented |
 | `'O'` (0x4F) | mix onion (spec §9) | planned |
 
 Fragments are the one exception: they're recognised by the `FRAGMENT` header flag,
@@ -102,48 +103,58 @@ path) and covered by tests for single-envelope sends, large-object
 fragment/reassembly, and relay-forwards-without-reassembling.
 </details>
 
-## Layer 2 — files: magnet links, torrents, and folder sync  (designed)
+## Layer 2 — files: magnet links, torrents, and folder sync  ✅ implemented
 
 To share a file you publish a tiny **manifest** — a signed note that says "this
 file is called X, it's this big, and here are the fingerprints of its pieces." The
 manifest's ID is a shareable link (think magnet link or QR code). Anyone who has
-that link can then collect the pieces from *whoever happens to have them*, checking
-each piece as it arrives. Point the same machinery at a folder and you have
-Syncthing; aim it at a popular file and you have BitTorrent.
+that link can then collect the pieces from *whoever happens to have them*, and each
+piece verifies itself as it arrives. Point the same machinery at a folder and you
+have Syncthing; aim it at a popular file and you have BitTorrent.
 
 <details>
-<summary>Deep dive: manifests, swarming, and encrypted folders</summary>
+<summary>Deep dive: content-addressed chunks, swarming, and folders</summary>
+
+A file is split into chunks; each chunk is an ordinary envelope
+`[0x07][file_id:16][index:4][bytes]`, so it has its own content ID (the hash of its
+bytes). The **manifest** is a signed envelope listing those chunk IDs in order:
 
 ```
-manifest = SIGNED {
-    tag       = 0x01
-    name, mime
-    total_len, chunk_size, count
-    merkle_root        // hash tree over the chunks
-}
+manifest = SIGNED [0x01][file_id:16][chunk_size:4][count:4][total_len:8][name][chunk_id:16 × count]
 ```
 
-The manifest's 16-byte ID is the magnet handle — shareable as `spore:<hexid>`, as
-`~S1.…~` armor, or as a QR. Holding a manifest lets a node:
+The manifest's own 16-byte ID is the **magnet** — shareable as `spore:<hexid>`, as
+`~S1.…~` armor, or as a QR.
 
-- **verify** each chunk against `merkle_root` before committing it — integrity on
-  an actively hostile link;
-- **swarm** it — pull only the chunks it lacks, from any peer that has them,
-  turning INV/WANT into object-scoped reconciliation ("I hold indices {…} of object
-  O" / "send me {…}"). Resumable, multi-source, out-of-order — BitTorrent from the
-  fragment primitive.
+- **Integrity is free.** The manifest is signed, so its chunk-ID list is authentic;
+  and a chunk envelope's ID *is* the hash of its bytes. A node counts a chunk as
+  present only when its store holds an envelope whose ID matches a manifest-listed
+  ID — so a forged or corrupt chunk simply never matches. No separate hash list or
+  merkle proof needed.
+- **Swarming is just WANT.** Only the small manifest floods; the data is pulled.
+  `fetch(magnet)` emits a WANT for the chunk IDs it lacks, and any peer holding them
+  answers from its store (the existing §6 machinery, untouched). Multi-source and
+  resumable, because chunks are named by content, not by origin.
 
-**Folder sync (Syncthing):** each file becomes a manifest; manifests flood on a
-folder-topic; followers swarm them; a newer signed manifest for the same `name`
-supersedes the old. An **encrypted folder** is just sealed manifests behind a
-pre-shared-key topic (§7). One mechanism yields both torrent and sync.
-
-Proposed API:
+Implemented in `src/lib.rs` as `publish_file` / `absorb_manifest` (auto-called on
+delivery) / `fetch` / `has_file` / `file_bytes`, covered by a
+publish → flood → pull → verify test.
 
 ```rust
-let magnet = node.publish_file("photo.jpg", bytes);  // -> manifest id
-node.fetch_file(magnet).await;                        // swarm, verify, return
+let (magnet, forwards) = node.publish_file("photo.jpg", bytes, dest, now);
+// … peer learns the manifest, then:
+let forwards = node.fetch(&magnet);   // pull missing chunks; verify on arrival
+let file = node.file_bytes(&magnet);  // Some(bytes) once complete
 ```
+
+**Folder sync (Syncthing), still designed:** each file becomes a manifest; manifests
+flood on a folder-topic; followers `fetch` them; a newer signed manifest for the
+same `name` supersedes the old. An **encrypted folder** is sealed manifests behind
+a pre-shared-key topic (§7).
+
+**Known caveat.** Chunks live in the ordinary store, which evicts under pressure
+(lowest-stamp → largest → oldest). Pinning/custody for in-progress downloads is
+future work.
 </details>
 
 ## Layer 3 — sessions: a UDP-like link, and SSH over it  ✅ implemented
@@ -273,8 +284,8 @@ the rest is designed and slots into the same tag/endpoint model.
 |---|---|
 | Transport (envelope, router, sync, seal, KISS, armor) | ✅ in `src/lib.rs` |
 | L1 objects — `send()` auto-fragment + reassembly | ✅ implemented |
+| L2 files — manifest, magnet, swarm-by-WANT | ✅ implemented (folder-sync designed) |
 | L3 sessions — datagram link + reliable stream | ✅ implemented |
-| L2 files — manifest, magnet, swarm, folder-sync | ▢ designed |
 | L4 services — SPORE-HTTP request/response + gateway | ▢ designed |
 | L5 feeds — pub/sub over topics | ◑ works via topics; ergonomic API pending |
 
