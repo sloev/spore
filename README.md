@@ -44,6 +44,10 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
   out-of-order arrival, replay rejection. X25519 + ChaCha20-Poly1305.
 - **Mix mode** (§9) — onion routing as nested sealed envelopes through 2–3 mixes,
   padded to size classes; sender + recipient anonymity, each mix peels one layer.
+- **Receipts** (§8) — set the ACKREQ flag and the recipient floods back a signed
+  receipt; `acked(id)` reports delivery, `resend_unacked` retries on backoff.
+- **Congestion control** (§5.4) — reusable primitives: token bucket (≤10% airtime),
+  Trickle beacon timer, exponential backoff, and busy-byte backpressure.
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
   directed unicast, dedup, store with eviction, the full `on_rx` router.
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
@@ -58,11 +62,12 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test               # 20 tests: envelope, fountain, send, files, sessions, reliable, ratchet, onion, bridges, neighbors, seal, KISS, armor
+cargo test               # 22 tests: envelope, fountain, send, files, sessions, reliable, ratchet, onion, receipts, congestion, bridges, …
 cargo run                # in-memory mesh demo (A — B — C — D)
 cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
 cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
 cargo run -- folder DIR  # a shared-store bridge over a folder of <hexid>.spore files
+cargo run -- tcp [HOST]  # a KISS-over-TCP stream bridge (listen, or connect to HOST:PORT)
 ```
 
 The demo drives the exact `Node::on_rx` router used in production; only the
@@ -80,6 +85,7 @@ SPORE demo — line topology  A — B — C — D
 [6] DATAGRAM session A->D over 3 directed hops: D decrypts Some("interactive hello over a udp-like link")
 [7] FILE 'field-notes.txt' (9000 B) published as magnet 8ac320df4f09…; B pulled + verified: true
 [8] MIX onion A~>D via 2 mixes (B,C): D opens Some("burn the ledgers")
+[9] RECEIPT: A's ACKREQ message to D acknowledged: true
 ```
 
 ## Routing across other networks

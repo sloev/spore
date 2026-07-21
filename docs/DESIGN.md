@@ -65,7 +65,7 @@ that the message is addressed to.
 | `0x03` | response (SPORE-HTTP) | planned |
 | `0x04` | datagram (session) | ✅ implemented |
 | `0x05` | feed/event | planned |
-| `0x06` | receipt/ACK (spec §8) | planned |
+| `0x06` | receipt/ACK (spec §8) | ✅ implemented |
 | `0x07` | file chunk | ✅ implemented |
 | `'O'` (0x4F) | mix onion (spec §9) | ✅ implemented |
 
@@ -321,6 +321,58 @@ implemented here. Tested end-to-end through two mixes: each peels one layer, the
 carries no plaintext, and only the recipient opens the payload.
 </details>
 
+## Delivery receipts (§8)  ✅ implemented
+
+Flood-and-forget is fine for most mail, but sometimes you want to *know* it arrived.
+Set one flag and the recipient automatically floods a tiny signed receipt back to
+you; when it returns, your node marks the message delivered. If no receipt comes,
+the sender re-floods on a backoff schedule until one does or it gives up.
+
+<details>
+<summary>Deep dive: the ACKREQ round-trip and backoff resend</summary>
+
+`originate_ackreq(dest, payload)` sends a unicast DATA with the `ACKREQ` flag and
+remembers it. When such a message is delivered to one of our own addresses, the
+router floods a signed receipt — `[0x06][orig_id:16]` — back to the sender; being a
+signed envelope it also teaches reverse paths (§4). The sender absorbs the receipt,
+`acked(id)` flips true, and the pending entry clears.
+
+`resend_unacked(now)` re-floods any still-unacked message whose `Backoff` timer has
+elapsed (§5.6: flooding *is* route discovery, so a resend can find a path a
+blackhole was hiding), giving up after `Backoff::MAX`. Tested with an end-to-end
+ACKREQ → receipt round-trip. Known simplification: a *lost receipt* isn't re-
+requested — a duplicate of the original is deduped before it could re-trigger one.
+</details>
+
+## Congestion control (§5.4)  ✅ implemented
+
+The one hard feature that touches traffic, kept as four small independent knobs the
+originator and bridges apply — the router itself stays dumb. Cap how much you relay,
+slow your beacons when nothing's new, back off when a peer is swamped, and retry
+lost mail with growing gaps.
+
+<details>
+<summary>Deep dive: the four knobs</summary>
+
+All four live in `congestion` as plain primitives:
+
+- **(a) Token bucket** (`TokenBucket`, `ten_percent`) — caps relayed bytes to a
+  sustained rate; on ISM bands the law is ≤ 10 % airtime, and dedup makes a dropped
+  relay harmless. The TCP bridge gates every relay through one.
+- **(b) Trickle** (`Trickle`) — the HELLO/ANNOUNCE interval doubles from 5→80 min
+  while nothing new is heard and snaps back to the minimum on novelty, so a quiet
+  mesh goes quiet. The TCP bridge paces its beacon with one.
+- **(c) Backpressure** (`admit`) — a peer advertises a `busy` byte (queue fill);
+  neighbours admit sends with probability (255−busy)/255 and always let stamped
+  (proof-of-work) mail through.
+- **(d) Exponential backoff** (`Backoff`) — FLOOD retries at 30 s, doubling, capped
+  at 1 h, at most 5 attempts; powers receipt resend above.
+
+Tested as primitives; (a) and (b) are wired live into the TCP bridge, (d) into
+receipts. Backpressure's `busy` byte is produced/consumed by policy — the remaining
+integration is advertising it in HELLO.
+</details>
+
 ## Bridges & bindings — SPORE rides everything
 
 A bridge is *not part of the protocol*. It only moves envelope bytes in and out of
@@ -334,7 +386,7 @@ all bridges, none more special than another.
 | Shape | Examples | Binding | Status |
 |---|---|---|---|
 | 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message | ✅ UDP (`run_udp`) |
-| 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::KissStream`) | ✅ framer; TCP runner next |
+| 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::KissStream`) | ✅ framer + TCP runner |
 | 3. Text channel | SMS, email, Usenet, paper, voice | `~S1.…~` armor (`armor::wrap`) | ✅ codec |
 | 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA (listen-before-talk) | ◑ framer reused; CSMA next |
 | 5. Shared store | folder/USB/Syncthing, HTTP bag, BBS | `bridge::store`, `bridge::bag` | ✅ folder + HTTP bag |
@@ -346,7 +398,9 @@ all bridges, none more special than another.
   `<hexid>.spore`; the folder *is* a persistent INV. Drop it in Syncthing or on a
   USB stick and two folders become one link.
 - **KISS stream** (`bridge::KissStream`): a stateful de-framer for byte streams, so
-  a frame split across reads still reassembles — ready for a TCP/serial runner.
+  a frame split across reads still reassembles. The `tcp` runner frames envelopes
+  over a TCP stream and shows congestion control live — Trickle-paced beacons and
+  token-bucket-gated relays.
 - **Armor** (`armor::wrap` / `unwrap`): Base32 text you can paste, print, or read
   aloud.
 - **`Neighbors<U>`** (`bridge::Neighbors`): the shared address resolver every bridge
@@ -376,8 +430,10 @@ the rest is designed and slots into the same tag/endpoint model.
 | L4 request/response — RPC convention | ▢ designed |
 | L5 feeds — pub/sub over topics | ◑ works via topics; ergonomic API pending |
 | §7 crypto — Double Ratchet forward secrecy | ✅ implemented |
+| §8 receipts — ACKREQ + signed receipt + backoff resend | ✅ implemented |
 | §9 anonymity — mix-mode onion | ✅ implemented |
-| Bridges — UDP, HTTP bag, folder, KISS framer, armor | ✅ implemented (TCP/CSMA runners next) |
+| §5.4 congestion — backoff, Trickle, token bucket, backpressure | ✅ implemented |
+| Bridges — UDP, TCP/KISS, HTTP bag, folder, armor, `Neighbors` | ✅ implemented (CSMA + radio runners next) |
 
 Every layer is additive and endpoint-only. The transport underneath never learns
 they exist — which is exactly why a 200-byte LoRa link, a QR code, or a human
