@@ -349,6 +349,11 @@ all bridges, none more special than another.
   a frame split across reads still reassembles — ready for a TCP/serial runner.
 - **Armor** (`armor::wrap` / `unwrap`): Base32 text you can paste, print, or read
   aloud.
+- **`Neighbors<U>`** (`bridge::Neighbors`): the shared address resolver every bridge
+  uses — SPORE's ARP/NDP. `U` is the medium's own peer name (`SocketAddr`, MAC,
+  Meshtastic `u32`, connection handle, or `()`). Learned by snooping signed frames;
+  `resolve` turns a directed send into an underlay unicast, else the bridge
+  broadcasts. Wired into the UDP bridge; the README has the full per-medium table.
 
 Underlays with their own routing (an IP network, Reticulum, a VPN) count as *one*
 interface: decrement hops once and let them handle their own delivery.

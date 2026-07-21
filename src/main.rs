@@ -289,13 +289,16 @@ fn fountain_demo() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_udp() -> std::io::Result<()> {
-    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let sock = UdpSocket::bind(("0.0.0.0", 7373))?;
     sock.set_broadcast(true)?;
-    let bcast = SocketAddrV4::new(Ipv4Addr::BROADCAST, 7373);
+    let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, 7373).into();
     let mut node = Node::new("udp-node", &["news"]);
+    // The one generic resolver, instantiated for this medium: U = SocketAddr.
+    // Every other bridge uses the same table with its own U (MAC, node id, …).
+    let mut neighbors: bridge::Neighbors<SocketAddr> = bridge::Neighbors::new(2 * 3600);
     let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
 
     for f in node.build_announce(now()) {
@@ -307,17 +310,29 @@ fn run_udp() -> std::io::Result<()> {
 
     let mut buf = [0u8; 2048];
     loop {
-        let (n, _peer) = sock.recv_from(&mut buf)?;
-        let rx = node.on_rx(&buf[..n], 0, None, now());
+        let (n, peer) = sock.recv_from(&mut buf)?;
+        let t = now();
+        // ARP-style snoop: bind the signed sender's SPORE address to its socket,
+        // and reuse it as the router's neighbour hint.
+        let nbr = neighbors.snoop(&buf[..n], peer, t);
+        let rx = node.on_rx(&buf[..n], 0, nbr, t);
         for e in &rx.delivered {
             println!("  delivered {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
         }
         for f in rx.forwards {
-            let bytes = match f {
-                Forward::Flood { bytes, .. } => bytes,
-                Forward::Directed { bytes, .. } => bytes,
-            };
-            sock.send_to(&bytes, bcast)?;
+            match f {
+                Forward::Flood { bytes, .. } => {
+                    sock.send_to(&bytes, bcast)?;
+                }
+                Forward::Directed { nbr, bytes, .. } => {
+                    // Resolve the SPORE next-hop to a socket: unicast if we've
+                    // learned one, else broadcast (which still reaches it).
+                    match nbr.and_then(|a| neighbors.resolve(&a, t)) {
+                        Some(dst) => sock.send_to(&bytes, dst)?,
+                        None => sock.send_to(&bytes, bcast)?,
+                    };
+                }
+            }
         }
     }
 }

@@ -58,7 +58,7 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test               # 19 tests: envelope, fountain, send, files, sessions, reliable, ratchet, onion, bridges, seal, KISS, armor
+cargo test               # 20 tests: envelope, fountain, send, files, sessions, reliable, ratchet, onion, bridges, neighbors, seal, KISS, armor
 cargo run                # in-memory mesh demo (A — B — C — D)
 cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
 cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
@@ -151,6 +151,71 @@ broadcast (dedup makes the extra reach harmless).
 | SPORE hop | IP hop (router-to-router) |
 | flood + dedup | broadcast + drop-duplicates |
 
+</details>
+
+## One resolver for every bridge
+
+Every bridge — UDP, Meshtastic, BLE, LoRa, even a speaker playing audio — does
+address translation the **same way**, through one small generic table:
+`Neighbors<U>`. Here `U` is whatever *that* medium calls a peer: a `SocketAddr`, a
+6-byte MAC, a Meshtastic node number, a connection handle, or nothing at all. The
+bridge fills the table for free by **snooping**: every *signed* SPORE frame it hears
+proves who sent it (the address is a hash of the signing key), so the bridge records
+"that SPORE address lives at this underlay address" — no handshake, just like a
+learning switch or an ARP cache. When the router later says "send this toward
+neighbour X," the bridge resolves X to its underlay address and unicasts; if it
+hasn't learned one yet, it simply broadcasts, which always works. Write the resolver
+once, reuse it on every transport.
+
+```rust
+// the entire per-bridge loop, identical on every medium (U differs, logic doesn't)
+let nbr = neighbors.snoop(&frame, underlay_src, now);   // learn: signed => bind U
+let rx  = node.on_rx(&frame, iface, nbr, now);
+for f in rx.forwards {
+    match f {
+        Forward::Flood { bytes, .. }        => underlay_broadcast(&bytes),
+        Forward::Directed { nbr, bytes, .. } => match nbr.and_then(|a| neighbors.resolve(&a, now)) {
+            Some(u) => underlay_unicast(u, &bytes),  // learned: save airtime
+            None    => underlay_broadcast(&bytes),   // unknown: fall back, still arrives
+        },
+    }
+}
+```
+
+<details>
+<summary>Deep dive: what <code>U</code> is per medium, and stateful vs. stateless</summary>
+
+The router speaks only SPORE addresses; the bridge owns the `SPORE ↔ U` mapping, so
+`U` can be anything a medium uses to name a peer:
+
+| Medium | `U` (underlay address) | Example | Kind |
+|---|---|---|---|
+| UDP, Thread, Yggdrasil, cjdns | `SocketAddr` / `Ipv6Addr` | `192.168.1.7:7373` | stateless datagram |
+| Ethernet, Wi-Fi, ESP-NOW, BATMAN | `[u8; 6]` (MAC) | `00:1A:2B:3C:4D:5E` | stateless datagram |
+| Meshtastic, LoRaWAN, IrDA | `u32` | `!1234abcd` | mesh / net routed |
+| Zigbee | `u64` | `0x00158D0001234567` | stateful mesh |
+| BLE GATT, WebSocket, WebRTC | connection handle (`u32` / `String`) | `Conn_42` | **stateful stream** |
+| raw LoRa, ggwave (audio), QR stream | `()` — broadcast only | — | shared, no target |
+
+Only three behaviours follow from that last column, and the resolver handles all of
+them:
+
+- **Stateless** (UDP, LoRa, Ethernet): the bridge just blasts bytes at `U`. A
+  neighbour is only "gone" when its signed heartbeats (ANNOUNCE/HELLO) stop arriving
+  and its binding ages out — `Neighbors::expire` does that.
+- **Stateful** (WebSocket, BLE GATT): `U` is a live connection object. When it
+  drops, the bridge calls `Neighbors::forget` so the router stops routing into a
+  dead socket.
+- **Null address** `U = ()` (audio, raw LoRa, QR): the hardware has no target field —
+  everyone hears everything. Every SPORE address maps to `()`, `resolve` always
+  "succeeds" trivially, and the *envelope's own `dest`* filters out mail meant for
+  someone else. Broadcast is the only mode, and that's fine.
+
+Bindings are learned only from signed frames (you can't verify — or safely bind — an
+unsigned source), a few freshest are kept per address, and a nonce/timestamp in the
+beacon bounds replay. If a stale binding points at a dead unicast address, SPORE's
+flood-fallback (§5.6) routes around it. Implemented as `bridge::Neighbors<U>` and
+wired into the UDP bridge (`U = SocketAddr`) in `src/main.rs`.
 </details>
 
 ## Layout
