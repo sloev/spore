@@ -72,7 +72,19 @@ impl World {
         while let Some((dst, bytes, from)) = q.pop_front() {
             let rx = self.nodes[dst].on_rx(&bytes, 0, from, NOW);
             for e in rx.delivered {
-                delivered.push((dst, e));
+                // Mix behaviour (§9): if this is an onion layer for us, peel it
+                // and re-inject the inner envelope as our own traffic.
+                if let Some(inner) = self.nodes[dst].onion_peel(&e) {
+                    let r2 = self.nodes[dst].on_rx(&inner, 0, None, NOW);
+                    for e2 in r2.delivered {
+                        delivered.push((dst, e2));
+                    }
+                    for f in r2.forwards {
+                        self.enqueue(&mut q, dst, f);
+                    }
+                } else {
+                    delivered.push((dst, e));
+                }
             }
             for f in rx.forwards {
                 self.enqueue(&mut q, dst, f);
@@ -206,6 +218,28 @@ fn sim() {
         file.len(),
         mp,
         ok
+    );
+
+    // 8) MIX onion (§9): A sends an anonymous message to D wrapped through mixes
+    //    B and C. Each mix peels exactly one layer; the innermost is public and
+    //    sealed to D, so every node carries it but only D can open it.
+    let (bx, cx) = (w.idx("B"), w.idx("C"));
+    let b_pk = w.nodes[a].peer_prekey(&w.nodes[bx].addr).unwrap();
+    let c_pk = w.nodes[a].peer_prekey(&w.nodes[cx].addr).unwrap();
+    let d_pk = w.nodes[a].peer_prekey(&d_addr).unwrap();
+    let mut inner = Envelope::new(ty::DATA, ZERO_DEST, NOW + 3600, seal(b"burn the ledgers", &d_pk));
+    inner.flags |= fl::ENCRYPTED;
+    let hops = [(w.nodes[bx].addr, b_pk), (w.nodes[cx].addr, c_pk)];
+    let onion = mix::onion_wrap(&inner, &hops, NOW + 3600).unwrap();
+    let del = w.run(vec![(a, Forward::Flood { except: NO_IFACE, bytes: onion.wire() })]);
+    let opened = del
+        .iter()
+        .filter(|(n, _)| *n == d)
+        .find_map(|(_, e)| w.nodes[d].open(&e.payload));
+    println!(
+        "[8] MIX onion A~>D via {} mixes (B,C): D opens {:?}",
+        hops.len(),
+        opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned())
     );
 }
 

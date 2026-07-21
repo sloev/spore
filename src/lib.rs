@@ -1115,6 +1115,21 @@ impl Node {
         out.truncate(m.total_len as usize);
         Some(out)
     }
+
+    // ---- mix mode (§9) ---------------------------------------------------
+
+    /// If `e` is an onion layer sealed to us, peel it: open the payload, confirm
+    /// the `'O'` marker, and return the inner envelope's wire bytes (padding
+    /// stripped by self-delimiting decode). A mix re-injects this as its own
+    /// traffic. `None` if it isn't an onion for us.
+    pub fn onion_peel(&self, e: &Envelope) -> Option<Vec<u8>> {
+        let opened = self.open(&e.payload)?;
+        if opened.first() != Some(&mix::ONION_TAG) {
+            return None;
+        }
+        let (_, n) = Envelope::decode(&opened[1..]).ok()?;
+        Some(opened[1..1 + n].to_vec())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1339,6 +1354,279 @@ pub mod session {
             }
             fwd
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §7 Double Ratchet — state-of-the-art forward-secret sessions. Each message
+// gets a fresh key derived from a hash chain; a new DH public in the header
+// turns the ratchet, mixing in fresh entropy. Compromise of current state
+// reveals nothing older than the last ratchet turn, and out-of-order arrival
+// (normal in SPORE) is handled by caching skipped message keys.
+//
+// KDF = BLAKE2b; AEAD = ChaCha20-Poly1305; DH = X25519. Message on the wire:
+// [dh_pub:32][n:2][pn:2][ct] with ct = AEAD(mk, nonce=n, ad=header).
+// ---------------------------------------------------------------------------
+
+pub mod ratchet {
+    use super::*;
+    use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+    use x25519_dalek::{PublicKey, StaticSecret};
+
+    const HEADER: usize = 36; // dh_pub(32) + n(2) + pn(2)
+    const MAX_SKIP: u16 = 512; // cap out-of-order gap we'll pre-compute keys for
+
+    /// A fresh X25519 keypair as `(secret, public)` raw bytes.
+    pub fn keypair() -> ([u8; 32], [u8; 32]) {
+        let s = StaticSecret::random_from_rng(OsRng);
+        let p = PublicKey::from(&s);
+        (s.to_bytes(), p.to_bytes())
+    }
+
+    fn dh(sec: &[u8; 32], pubk: &[u8; 32]) -> [u8; 32] {
+        StaticSecret::from(*sec).diffie_hellman(&PublicKey::from(*pubk)).to_bytes()
+    }
+
+    // Root KDF: (new_root, chain_key) = BLAKE2b(root ‖ dh_out).
+    fn kdf_rk(rk: &[u8; 32], dh_out: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+        let mut h = Blake2bVar::new(64).unwrap();
+        h.update(rk);
+        h.update(dh_out);
+        h.update(b"spore-ratchet-rk");
+        let mut out = [0u8; 64];
+        h.finalize_variable(&mut out).unwrap();
+        let mut nrk = [0u8; 32];
+        let mut ck = [0u8; 32];
+        nrk.copy_from_slice(&out[..32]);
+        ck.copy_from_slice(&out[32..]);
+        (nrk, ck)
+    }
+    // Chain KDF: message key and next chain key from distinct constants.
+    fn kdf_ck(ck: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+        let mk = blake2_32(ck, 0x01);
+        let nck = blake2_32(ck, 0x02);
+        (nck, mk)
+    }
+    fn blake2_32(ck: &[u8; 32], tag: u8) -> [u8; 32] {
+        let mut h = Blake2bVar::new(32).unwrap();
+        h.update(ck);
+        h.update(&[tag]);
+        let mut o = [0u8; 32];
+        h.finalize_variable(&mut o).unwrap();
+        o
+    }
+    fn nonce_bytes(n: u16) -> [u8; 12] {
+        let mut nb = [0u8; 12];
+        nb[10..].copy_from_slice(&n.to_be_bytes());
+        nb
+    }
+
+    /// One party's ratchet state. Build with `init_alice` (initiator) or
+    /// `init_bob` (responder), then `encrypt` / `decrypt`.
+    pub struct Ratchet {
+        dhs_sec: [u8; 32],
+        dhs_pub: [u8; 32],
+        dhr: Option<[u8; 32]>,
+        rk: [u8; 32],
+        cks: Option<[u8; 32]>,
+        ckr: Option<[u8; 32]>,
+        ns: u16,
+        nr: u16,
+        pn: u16,
+        skipped: HashMap<([u8; 32], u16), [u8; 32]>,
+    }
+
+    impl Ratchet {
+        /// Initiator. `my_sec` is our identity/prekey X25519 secret; `peer_pub`
+        /// is the responder's prekey public. Root bootstraps from their static
+        /// DH, then an immediate ratchet gives us a sending chain.
+        pub fn init_alice(my_sec: [u8; 32], peer_pub: [u8; 32]) -> Self {
+            let sk = dh(&my_sec, &peer_pub);
+            let (dhs_sec, dhs_pub) = keypair();
+            let (rk, cks) = kdf_rk(&sk, &dh(&dhs_sec, &peer_pub));
+            Ratchet {
+                dhs_sec,
+                dhs_pub,
+                dhr: Some(peer_pub),
+                rk,
+                cks: Some(cks),
+                ckr: None,
+                ns: 0,
+                nr: 0,
+                pn: 0,
+                skipped: HashMap::new(),
+            }
+        }
+
+        /// Responder. Our ratchet key starts as our prekey `(my_sec, my_pub)`;
+        /// `peer_pub` is the initiator's prekey public. No sending chain yet — it
+        /// appears after we receive the initiator's first message.
+        pub fn init_bob(my_sec: [u8; 32], my_pub: [u8; 32], peer_pub: [u8; 32]) -> Self {
+            let sk = dh(&my_sec, &peer_pub);
+            Ratchet {
+                dhs_sec: my_sec,
+                dhs_pub: my_pub,
+                dhr: None,
+                rk: sk,
+                cks: None,
+                ckr: None,
+                ns: 0,
+                nr: 0,
+                pn: 0,
+                skipped: HashMap::new(),
+            }
+        }
+
+        /// Encrypt `plaintext` into a ratchet message. Panics only if called on a
+        /// responder before it has received the first message.
+        pub fn encrypt(&mut self, plaintext: &[u8]) -> Vec<u8> {
+            let cks = self.cks.expect("no sending chain yet (responder must receive first)");
+            let (nck, mk) = kdf_ck(&cks);
+            self.cks = Some(nck);
+            let n = self.ns;
+            self.ns += 1;
+
+            let mut header = Vec::with_capacity(HEADER);
+            header.extend_from_slice(&self.dhs_pub);
+            header.extend_from_slice(&n.to_be_bytes());
+            header.extend_from_slice(&self.pn.to_be_bytes());
+
+            let ct = ChaCha20Poly1305::new(Key::from_slice(&mk))
+                .encrypt(Nonce::from_slice(&nonce_bytes(n)), Payload { msg: plaintext, aad: &header })
+                .expect("aead encrypt");
+            let mut out = header;
+            out.extend_from_slice(&ct);
+            out
+        }
+
+        /// Decrypt a ratchet message, or `None` if it isn't decodable, is a
+        /// replay, or falls outside the skip window.
+        pub fn decrypt(&mut self, msg: &[u8]) -> Option<Vec<u8>> {
+            if msg.len() < HEADER {
+                return None;
+            }
+            let mut dh_pub = [0u8; 32];
+            dh_pub.copy_from_slice(&msg[..32]);
+            let n = u16::from_be_bytes([msg[32], msg[33]]);
+            let pn = u16::from_be_bytes([msg[34], msg[35]]);
+            let header = &msg[..HEADER];
+            let ct = &msg[HEADER..];
+
+            // A key we cached for an out-of-order message?
+            if let Some(mk) = self.skipped.remove(&(dh_pub, n)) {
+                return Self::open(&mk, n, header, ct);
+            }
+            // New ratchet public -> turn the ratchet (after banking the tail of
+            // the current receiving chain).
+            if self.dhr.as_ref() != Some(&dh_pub) {
+                self.skip(pn)?;
+                self.dh_ratchet(&dh_pub);
+            }
+            if n < self.nr {
+                return None; // already consumed / replay
+            }
+            self.skip(n)?;
+            let ckr = self.ckr?;
+            let (nck, mk) = kdf_ck(&ckr);
+            self.ckr = Some(nck);
+            self.nr += 1;
+            Self::open(&mk, n, header, ct)
+        }
+
+        fn open(mk: &[u8; 32], n: u16, header: &[u8], ct: &[u8]) -> Option<Vec<u8>> {
+            ChaCha20Poly1305::new(Key::from_slice(mk))
+                .decrypt(Nonce::from_slice(&nonce_bytes(n)), Payload { msg: ct, aad: header })
+                .ok()
+        }
+
+        // Cache message keys for positions self.nr .. until in the current
+        // receiving chain (so their out-of-order messages still open later).
+        fn skip(&mut self, until: u16) -> Option<()> {
+            if until > self.nr.saturating_add(MAX_SKIP) {
+                return None; // absurd gap: refuse
+            }
+            if let (Some(mut ckr), Some(dhr)) = (self.ckr, self.dhr) {
+                while self.nr < until {
+                    let (nck, mk) = kdf_ck(&ckr);
+                    self.skipped.insert((dhr, self.nr), mk);
+                    ckr = nck;
+                    self.nr += 1;
+                }
+                self.ckr = Some(ckr);
+            }
+            Some(())
+        }
+
+        fn dh_ratchet(&mut self, dh_pub: &[u8; 32]) {
+            self.pn = self.ns;
+            self.ns = 0;
+            self.nr = 0;
+            self.dhr = Some(*dh_pub);
+            let (rk, ckr) = kdf_rk(&self.rk, &dh(&self.dhs_sec, dh_pub));
+            self.rk = rk;
+            self.ckr = Some(ckr);
+            let (dhs_sec, dhs_pub) = keypair();
+            self.dhs_sec = dhs_sec;
+            self.dhs_pub = dhs_pub;
+            let (rk2, cks) = kdf_rk(&self.rk, &dh(&self.dhs_sec, dh_pub));
+            self.rk = rk2;
+            self.cks = Some(cks);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §9 Mix mode — anonymity by nesting. An onion is sealed envelopes inside
+// sealed envelopes: each layer is addressed to one mix, its payload sealed to
+// that mix = 'O' ‖ the next full envelope. A mix opens its layer and re-injects
+// the inner envelope as its own traffic. Payloads are padded to size classes so
+// onion depth never shows on the wire.
+// ---------------------------------------------------------------------------
+
+pub mod mix {
+    use super::*;
+
+    /// Marks a peeled payload as an onion layer (`'O'`).
+    pub const ONION_TAG: u8 = b'O';
+    /// Pad classes that hide depth (spec §9).
+    pub const SIZE_CLASSES: [usize; 3] = [256, 1024, 4096];
+
+    fn pad_to_class(v: &mut Vec<u8>) {
+        for &c in &SIZE_CLASSES {
+            if v.len() <= c {
+                v.resize(c, 0);
+                return;
+            }
+        }
+        // Larger than the top class: round up to a whole class multiple.
+        let top = SIZE_CLASSES[SIZE_CLASSES.len() - 1];
+        let target = v.len().div_ceil(top) * top;
+        v.resize(target, 0);
+    }
+
+    /// Wrap `inner` for delivery through `hops` (first hop = outermost). Each
+    /// `(addr, prekey)` is a mix that follows topic `mix`. Returns the outermost
+    /// envelope to inject; `None` if `hops` is empty.
+    pub fn onion_wrap(inner: &Envelope, hops: &[(Addr, [u8; 32])], expiry: u32) -> Option<Envelope> {
+        if hops.is_empty() {
+            return None;
+        }
+        let mut current = inner.wire();
+        let mut outer = None;
+        for (addr, prekey) in hops.iter().rev() {
+            let mut plain = Vec::with_capacity(1 + current.len());
+            plain.push(ONION_TAG);
+            plain.extend_from_slice(&current);
+            pad_to_class(&mut plain);
+            let sealed = seal(&plain, prekey);
+            let mut layer = Envelope::new(ty::DATA, *addr, expiry, sealed);
+            // Unsigned (sender anonymity) and flooded so it reaches the mix.
+            layer.flags |= fl::ENCRYPTED | fl::FLOOD;
+            current = layer.wire();
+            outer = Some(layer);
+        }
+        outer
     }
 }
 
@@ -2144,5 +2432,64 @@ mod tests {
         assert!(rx.delivered.iter().any(|e| e.payload == b"note in a folder"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn double_ratchet_bidirectional_and_out_of_order() {
+        let (a_sec, a_pub) = ratchet::keypair();
+        let (b_sec, b_pub) = ratchet::keypair();
+        let mut alice = ratchet::Ratchet::init_alice(a_sec, b_pub);
+        let mut bob = ratchet::Ratchet::init_bob(b_sec, b_pub, a_pub);
+
+        // Alice -> Bob (bootstraps Bob's receiving chain).
+        let m1 = alice.encrypt(b"hello bob");
+        assert_eq!(bob.decrypt(&m1).as_deref(), Some(&b"hello bob"[..]));
+
+        // Bob -> Alice (turns the ratchet in both directions).
+        let r1 = bob.encrypt(b"hi alice");
+        assert_eq!(alice.decrypt(&r1).as_deref(), Some(&b"hi alice"[..]));
+
+        // Alice -> Bob, delivered out of order: the later one first.
+        let m2 = alice.encrypt(b"one");
+        let m3 = alice.encrypt(b"two");
+        assert_eq!(bob.decrypt(&m3).as_deref(), Some(&b"two"[..]), "arrives first");
+        assert_eq!(bob.decrypt(&m2).as_deref(), Some(&b"one"[..]), "skipped key recovers it");
+
+        // A replay of an already-consumed message is rejected.
+        assert!(bob.decrypt(&m1).is_none(), "replay rejected");
+    }
+
+    #[test]
+    fn onion_routes_through_mixes_and_hides_the_secret() {
+        let now = 1_700_000_000;
+        let exp = now + 3600;
+        let m1 = Node::new("m1", &["mix"]);
+        let m2 = Node::new("m2", &["mix"]);
+        let r = Node::new("r", &[]);
+
+        // Innermost: public dest (recipient anonymity), payload sealed to R.
+        let secret = b"burn the ledgers at dawn";
+        let mut inner = Envelope::new(ty::DATA, ZERO_DEST, exp, seal(secret, &r.prekey_pub));
+        inner.flags |= fl::ENCRYPTED;
+
+        let hops = [(m1.addr, m1.prekey_pub), (m2.addr, m2.prekey_pub)];
+        let onion = mix::onion_wrap(&inner, &hops, exp).expect("wrap");
+
+        // Outer layer is addressed to M1 and leaks nothing.
+        assert_eq!(onion.dest, m1.addr);
+        assert!(!onion.wire().windows(secret.len()).any(|w| w == secret), "no plaintext on the wire");
+        assert!(m2.onion_peel(&onion).is_none(), "only the addressed mix can peel");
+
+        // M1 peels -> layer for M2; M2 peels -> the innermost; R opens it.
+        let l2 = m1.onion_peel(&onion).expect("m1 peels");
+        let (e2, _) = Envelope::decode(&l2).unwrap();
+        assert_eq!(e2.dest, m2.addr);
+
+        let l3 = m2.onion_peel(&e2).expect("m2 peels");
+        let (e3, _) = Envelope::decode(&l3).unwrap();
+        assert_eq!(e3.dest, ZERO_DEST, "innermost is public for recipient anonymity");
+
+        assert_eq!(r.open(&e3.payload).as_deref(), Some(&secret[..]), "only R recovers the secret");
+        assert!(m1.open(&e3.payload).is_none(), "a mix cannot read the payload");
     }
 }
