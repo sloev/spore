@@ -17,10 +17,11 @@ paper, or a human reading armor aloud.
 
 ## What's implemented
 
-The transport core is complete, plus three application layers on top of it:
-`send()` for objects of any size, content-addressed files (magnet links + swarm),
-and UDP-like sessions with an optional reliable stream. The remaining layers (HTTP,
-feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
+Essentially all of the SPORE v1 spec (§1–§10) plus the Page-2 bindings is
+implemented and tested — objects, files, sessions, RPC, feeds, forward-secret
+sessions, mix mode, receipts, congestion control, and a family of bridges that all
+share one address resolver. What's left is medium-specific radio runners that need
+real hardware. The application layers are laid out in [docs/DESIGN.md](docs/DESIGN.md).
 
 <details>
 <summary>Deep dive: the full feature list</summary>
@@ -55,6 +56,10 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
   overhearing) and a SHA-256[0:4] tail for buses with no native CRC.
 - **Folder sync** — `foldersync::publish_dir` / `materialize`: Syncthing over SPORE,
   built on content-addressed files.
+- **RPC** (L4) — `request` / `poll_requests` / `respond` / `take_response`: HTTP-shaped
+  method/path/body/status, reply routed back along the path the request taught.
+- **Feeds** (L5) — `subscribe` / `publish` / `poll_feed`: pub/sub over topics, with
+  INV/WANT backfill for late joiners.
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
   directed unicast, dedup, store with eviction, the full `on_rx` router.
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
@@ -69,7 +74,7 @@ feeds) are designed in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test               # 28 tests: envelope, fountain, send, files, sessions, ratchet, onion, receipts, congestion, topics, csma, folder-sync, …
+cargo test               # 30 tests: envelope, fountain, send, files, sessions, ratchet, onion, receipts, congestion, topics, csma, folder-sync, rpc, feeds, …
 cargo run                # in-memory mesh demo (A — B — C — D)
 cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
 cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
@@ -94,6 +99,8 @@ SPORE demo — line topology  A — B — C — D
 [8] MIX onion A~>D via 2 mixes (B,C): D opens Some("burn the ledgers")
 [9] RECEIPT: A's ACKREQ message to D acknowledged: true
 [10] ENCRYPTED TOPIC: key-holder reads Some("safehouse moved"); outsider can read: false
+[11] RPC A->D GET /status -> Some((200, "serving GET /status"))
+[12] FEED 'alerts' published by A; received by: ["B", "C", "D"]
 ```
 
 ## Routing across other networks

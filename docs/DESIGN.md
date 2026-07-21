@@ -37,8 +37,8 @@ convention. If you've built web apps, you already know all four.
 |---|---|---|---|
 | **Objects** | files / magnet links | content-addressed blobs, fountain + swarm | ✅ implemented |
 | **Sessions** | UDP / QUIC / Mosh | datagram links + reliable stream | ✅ implemented |
-| **Request/response** | HTTP | `Request`/`Response` envelopes, reverse-path routed | designed |
-| **Feeds** | pub/sub, SSE | topics | works via topics |
+| **Request/response** | HTTP | `Request`/`Response` envelopes, reverse-path routed | ✅ implemented |
+| **Feeds** | pub/sub, SSE | topics | ✅ implemented |
 
 Note what is deliberately *absent*: a raw reliable byte-stream offered *by the
 network*. The spec lists "no stream semantics" as a feature, because a stream
@@ -61,10 +61,10 @@ that the message is addressed to.
 | Tag | Meaning | Status |
 |---|---|---|
 | `0x01` | file manifest | ✅ implemented |
-| `0x02` | request (SPORE-HTTP) | planned |
-| `0x03` | response (SPORE-HTTP) | planned |
+| `0x02` | request (RPC) | ✅ implemented |
+| `0x03` | response (RPC) | ✅ implemented |
 | `0x04` | datagram (session) | ✅ implemented |
-| `0x05` | feed/event | planned |
+| `0x05` | feed/event | ✅ implemented |
 | `0x06` | receipt/ACK (spec §8) | ✅ implemented |
 | `0x07` | file chunk | ✅ implemented |
 | `'O'` (0x4F) | mix onion (spec §9) | ✅ implemented |
@@ -215,7 +215,7 @@ roundtrip/replay/wrong-recipient and a reliable stream reassembling across 30%
 loss.
 </details>
 
-## Layer 4 — request/response: RPC as a convention  (designed)
+## Layer 4 — request/response: RPC as a convention  ✅ implemented
 
 Sometimes you want to ask a question and get an answer — a lookup, a form
 submission, an API call. That's just two messages with a convention: a request
@@ -242,27 +242,44 @@ code.
   a read-only response cacheable and any node that carried it can answer a later
   identical request — the store is the cache, INV/WANT is the cache-fill.
 
+Implemented in `src/lib.rs`: the router auto-queues delivered requests and matches
+responses to their pending nonce, so the app loop stays tiny. Tested with a
+request → response round-trip.
+
 ```rust
-node.serve(topic("weather"), handler);          // handler: Request -> Response
-let res = node.request(addr, Request { .. });    // reply routed back to us
+// client
+let (id, forwards) = node.request(service, rpc::Request { method, path, body }, now);
+// … later, after the reply is delivered:
+let resp = node.take_response(id);               // Some(Response { status, body })
+
+// service
+for (from, id, req) in node.poll_requests() {
+    let forwards = node.respond(from, id, rpc::Response { status: 200, body }, now);
+}
 ```
 </details>
 
-## Layer 5 — feeds: pub/sub  (works via topics)
+## Layer 5 — feeds: pub/sub  ✅ implemented
 
 A feed is just a topic. Whoever wants to broadcast sends to the topic; whoever
 cares follows it and gets everything. It's the signed-gossip model behind Nostr,
 minus the JSON, the dedicated relays, and the always-on internet.
 
 <details>
-<summary>Deep dive: retention and backfill</summary>
+<summary>Deep dive: subscribe / publish / poll, retention and backfill</summary>
 
-Publishers `send(topic, event)`; subscribers follow the topic and receive each
-event through the normal deliver path. Retention is just message expiry, and a late
-joiner backfills history from any peer's store via INV/WANT. No special
-infrastructure — a feed is emergent from topics plus the store-and-sync the router
-already does. An ergonomic wrapper (subscribe callbacks, watermark cursors) is the
-only thing left to add.
+`subscribe(topic)` follows a feed, `publish(topic, event)` floods a tagged event
+(`0x05`), and the router auto-queues delivered events for `poll_feed` to drain as
+`(topic, from, data)`. Retention is just message expiry, and a late joiner backfills
+history from any peer's store via INV/WANT — no special infrastructure; a feed is
+emergent from topics plus the store-and-sync the router already does. Tested with a
+publish reaching a subscriber.
+
+```rust
+node.subscribe("alerts");
+let forwards = node.publish("alerts", event, now);
+for ev in node.poll_feed() { /* ev.topic, ev.from, ev.data */ }
+```
 </details>
 
 ## Forward-secret sessions — Double Ratchet  ✅ implemented
@@ -452,8 +469,8 @@ the rest is designed and slots into the same tag/endpoint model.
 | L1 objects — `send()` auto-fragment + reassembly | ✅ implemented |
 | L2 files — manifest, magnet, swarm-by-WANT, folder sync | ✅ implemented |
 | L3 sessions — datagram link + reliable stream | ✅ implemented |
-| L4 request/response — RPC convention | ▢ designed |
-| L5 feeds — pub/sub over topics | ◑ works via topics; ergonomic API pending |
+| L4 request/response — RPC convention | ✅ implemented |
+| L5 feeds — pub/sub over topics | ✅ implemented |
 | §7 crypto — Double Ratchet + encrypted topics | ✅ implemented (KEYROT convention) |
 | §8 receipts — ACKREQ + signed receipt + backoff resend | ✅ implemented |
 | §9 anonymity — mix-mode onion + batch timing | ✅ implemented (Poisson/decoys = runner policy) |
