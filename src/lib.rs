@@ -1,0 +1,1106 @@
+//! SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope.
+//!
+//! One portable core. Pure-Rust crypto (no libsodium/C), so this compiles
+//! unchanged to native targets and to `wasm32-unknown-unknown` for the browser.
+//! Transports are plugins that hand raw bytes to `Node::on_rx` and execute the
+//! `Forward`s it returns; the router itself never changes across media.
+//!
+//! Section numbers below map to the one-page spec.
+
+#![allow(clippy::needless_range_loop)]
+
+use std::collections::{HashMap, HashSet};
+
+use blake2::digest::{Update as _, VariableOutput};
+use blake2::Blake2bVar;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use rand::rngs::OsRng;
+use rand::RngCore;
+use sha2::{Digest, Sha256};
+
+// ---------------------------------------------------------------------------
+// §1 Identity & addressing
+// ---------------------------------------------------------------------------
+
+pub type Id = [u8; 16]; // first 16 bytes of SHA-256(envelope, hops zeroed)
+pub type Addr = [u8; 8]; // first 8 bytes of SHA-256(pubkey) or SHA-256(topic)
+pub type Iface = u16; // transport-assigned interface id
+pub const NO_IFACE: Iface = u16::MAX;
+pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
+
+pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
+pub const PATH_FRESH_SECS: u32 = 3 * 3600;
+
+/// address = SHA-256(pubkey)[..8]
+pub fn addr_of(pubkey: &[u8; 32]) -> Addr {
+    let d = Sha256::digest(pubkey);
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&d[..8]);
+    a
+}
+/// topic hash = SHA-256(utf8)[..8]
+pub fn topic_of(s: &str) -> Addr {
+    let d = Sha256::digest(s.as_bytes());
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&d[..8]);
+    a
+}
+
+// ---------------------------------------------------------------------------
+// §2 Envelope — the only object
+// ---------------------------------------------------------------------------
+
+pub const VER: u8 = 0x01;
+
+pub mod ty {
+    pub const DATA: u8 = 0;
+    pub const INV: u8 = 1;
+    pub const WANT: u8 = 2;
+    pub const ANNOUNCE: u8 = 3;
+}
+pub mod fl {
+    pub const ENCRYPTED: u8 = 1;
+    pub const SIGNED: u8 = 2;
+    pub const FRAGMENT: u8 = 4;
+    pub const ACKREQ: u8 = 8;
+    pub const FLOOD: u8 = 16; // multicast / topic / public / route-discovery
+    pub const SRC8: u8 = 32; // src carried as 8-byte address, not 32-byte key
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Src {
+    None,
+    Full([u8; 32]),
+    Short(Addr),
+}
+
+#[derive(Clone, Debug)]
+pub struct Envelope {
+    pub typ: u8,
+    pub flags: u8,
+    pub hops: u8,
+    pub expiry: u32,
+    pub dest: Addr,
+    pub src: Src,
+    pub payload: Vec<u8>,
+    pub sig: Option<[u8; 64]>,
+}
+
+#[derive(Debug)]
+pub enum Err {
+    Short,
+    Version,
+    Bad,
+}
+
+impl Envelope {
+    pub fn new(typ: u8, dest: Addr, expiry: u32, payload: Vec<u8>) -> Self {
+        Envelope { typ, flags: 0, hops: 16, expiry, dest, src: Src::None, payload, sig: None }
+    }
+
+    /// Header + src + plen + payload (no signature). `zero_hops` for the
+    /// signing/ID pre-image; false for the wire form.
+    fn body(&self, zero_hops: bool) -> Vec<u8> {
+        let mut b = Vec::with_capacity(64 + self.payload.len());
+        b.push(VER);
+        b.push(self.typ);
+        b.push(self.flags);
+        b.push(if zero_hops { 0 } else { self.hops });
+        b.extend_from_slice(&self.expiry.to_be_bytes());
+        b.extend_from_slice(&self.dest);
+        match &self.src {
+            Src::None => {}
+            Src::Full(pk) => b.extend_from_slice(pk),
+            Src::Short(a) => b.extend_from_slice(a),
+        }
+        b.extend_from_slice(&(self.payload.len() as u16).to_be_bytes());
+        b.extend_from_slice(&self.payload);
+        b
+    }
+
+    /// The exact bytes put on the wire.
+    pub fn wire(&self) -> Vec<u8> {
+        let mut b = self.body(false);
+        if let Some(sig) = &self.sig {
+            b.extend_from_slice(sig);
+        }
+        b
+    }
+
+    /// ID = SHA-256(full envelope with hops byte zeroed)[..16]. Ties the id to
+    /// the signature, and is stable under relays decrementing `hops`.
+    pub fn id(&self) -> Id {
+        let mut b = self.body(true);
+        if let Some(sig) = &self.sig {
+            b.extend_from_slice(sig);
+        }
+        let d = Sha256::digest(&b);
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&d[..16]);
+        id
+    }
+
+    /// Priority stamp: leading zero bits of the ID (proof-of-work, §10).
+    pub fn stamp(&self) -> u8 {
+        let id = self.id();
+        let mut n = 0u8;
+        for byte in id {
+            if byte == 0 {
+                n += 8;
+            } else {
+                n += byte.leading_zeros() as u8;
+                break;
+            }
+        }
+        n
+    }
+
+    pub fn sign(&mut self, sk: &SigningKey) {
+        self.src = Src::Full(sk.verifying_key().to_bytes());
+        self.flags |= fl::SIGNED;
+        self.flags &= !fl::SRC8;
+        let sig: Signature = sk.sign(&self.body(true));
+        self.sig = Some(sig.to_bytes());
+    }
+
+    /// Verify a full-key signed envelope. SRC8 envelopes need `verify_with`.
+    pub fn verify(&self) -> bool {
+        match &self.src {
+            Src::Full(pk) => self.verify_with(pk),
+            _ => false,
+        }
+    }
+    pub fn verify_with(&self, pubkey: &[u8; 32]) -> bool {
+        if self.flags & fl::SIGNED == 0 {
+            return false;
+        }
+        let (Some(sig), Ok(vk)) = (self.sig, VerifyingKey::from_bytes(pubkey)) else {
+            return false;
+        };
+        vk.verify(&self.body(true), &Signature::from_bytes(&sig)).is_ok()
+    }
+
+    pub fn decode(buf: &[u8]) -> Result<(Envelope, usize), Err> {
+        if buf.len() < 16 {
+            return std::result::Result::Err(Err::Short);
+        }
+        if buf[0] != VER {
+            return std::result::Result::Err(Err::Version);
+        }
+        let typ = buf[1];
+        let flags = buf[2];
+        let hops = buf[3];
+        let expiry = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+        let mut dest = [0u8; 8];
+        dest.copy_from_slice(&buf[8..16]);
+        let mut off = 16;
+        let need = |off: usize, n: usize| -> Result<(), Err> {
+            if off + n <= buf.len() { Ok(()) } else { std::result::Result::Err(Err::Short) }
+        };
+        let src = if flags & fl::SIGNED != 0 {
+            if flags & fl::SRC8 != 0 {
+                need(off, 8)?;
+                let mut a = [0u8; 8];
+                a.copy_from_slice(&buf[off..off + 8]);
+                off += 8;
+                Src::Short(a)
+            } else {
+                need(off, 32)?;
+                let mut pk = [0u8; 32];
+                pk.copy_from_slice(&buf[off..off + 32]);
+                off += 32;
+                Src::Full(pk)
+            }
+        } else {
+            Src::None
+        };
+        need(off, 2)?;
+        let plen = u16::from_be_bytes([buf[off], buf[off + 1]]) as usize;
+        off += 2;
+        need(off, plen)?;
+        let payload = buf[off..off + plen].to_vec();
+        off += plen;
+        let sig = if flags & fl::SIGNED != 0 {
+            need(off, 64)?;
+            let mut s = [0u8; 64];
+            s.copy_from_slice(&buf[off..off + 64]);
+            off += 64;
+            Some(s)
+        } else {
+            None
+        };
+        Ok((Envelope { typ, flags, hops, expiry, dest, src, payload, sig }, off))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §3 Fragmentation — rateless fountain code over GF(2)
+// ---------------------------------------------------------------------------
+
+/// Selection bitmap for repair chunk `idx`: first `count` bits (MSB-first) of
+/// SHA-256(orig_id ‖ idx). Empty selection maps to data chunk (idx mod count).
+fn selection(orig_id: &Id, idx: u8, count: usize) -> BitVec {
+    let mut h = Sha256::new();
+    Digest::update(&mut h, orig_id);
+    Digest::update(&mut h, [idx]);
+    let d = h.finalize();
+    let mut b = BitVec::zeros(count);
+    for i in 0..count {
+        if (d[i / 8] >> (7 - (i % 8))) & 1 == 1 {
+            b.set(i);
+        }
+    }
+    if b.is_zero() {
+        b.set(idx as usize % count);
+    }
+    b
+}
+
+fn xor_into(dst: &mut [u8], src: &[u8]) {
+    for (a, b) in dst.iter_mut().zip(src) {
+        *a ^= *b;
+    }
+}
+
+/// Produce fragment envelopes for the given chunk `indices`. Indices `< count`
+/// are plain data chunks; `>= count` are repair chunks. The sender can mint
+/// endless distinct repair indices, so this is rateless.
+pub fn fragment(
+    env_wire: &[u8],
+    chunk: usize,
+    hops: u8,
+    expiry: u32,
+    dest: Addr,
+    orig_id: Id,
+    indices: &[u8],
+) -> Vec<Envelope> {
+    let count = (env_wire.len() + chunk - 1) / chunk;
+    assert!(count <= 255, "envelope too large for one fragment set");
+    let mut padded = env_wire.to_vec();
+    padded.resize(count * chunk, 0);
+    let data = |i: usize| padded[i * chunk..(i + 1) * chunk].to_vec();
+
+    let mut out = Vec::with_capacity(indices.len());
+    for &idx in indices {
+        let cbytes = if (idx as usize) < count {
+            data(idx as usize)
+        } else {
+            let sel = selection(&orig_id, idx, count);
+            let mut acc = vec![0u8; chunk];
+            for i in 0..count {
+                if sel.get(i) {
+                    xor_into(&mut acc, &data(i));
+                }
+            }
+            acc
+        };
+        let mut payload = Vec::with_capacity(18 + chunk);
+        payload.extend_from_slice(&orig_id);
+        payload.push(idx);
+        payload.push(count as u8);
+        payload.extend_from_slice(&cbytes);
+        out.push(Envelope {
+            typ: ty::DATA,
+            flags: fl::FRAGMENT | fl::FLOOD,
+            hops,
+            expiry,
+            dest,
+            src: Src::None,
+            payload,
+            sig: None,
+        });
+    }
+    out
+}
+
+/// Online reassembler: feed chunks in any order, at any loss rate. Decodes once
+/// `count` linearly-independent chunks have arrived (typically count+2).
+pub struct Fountain {
+    count: usize,
+    chunk: usize,
+    rows: Vec<Row>, // kept in reduced row-echelon form
+    done: Option<Vec<u8>>,
+}
+struct Row {
+    pivot: usize,
+    coeff: BitVec,
+    data: Vec<u8>,
+}
+impl Fountain {
+    pub fn new() -> Self {
+        Fountain { count: 0, chunk: 0, rows: Vec::new(), done: None }
+    }
+    /// Feed one fragment's `(orig_id, idx, count, chunk_bytes)`.
+    /// Returns the reassembled original envelope bytes once solvable.
+    pub fn add(&mut self, orig_id: &Id, idx: u8, count: u8, chunk_bytes: Vec<u8>) -> Option<Vec<u8>> {
+        if self.done.is_some() {
+            return self.done.clone();
+        }
+        let count = count as usize;
+        if self.count == 0 {
+            self.count = count;
+            self.chunk = chunk_bytes.len();
+        }
+        if count != self.count || chunk_bytes.len() != self.chunk {
+            return None; // malformed / mismatched set
+        }
+        let coeff = if (idx as usize) < count {
+            BitVec::unit(count, idx as usize)
+        } else {
+            selection(orig_id, idx, count)
+        };
+        self.insert(coeff, chunk_bytes);
+        if self.rows.len() == self.count {
+            self.solve()
+        } else {
+            None
+        }
+    }
+    fn insert(&mut self, mut coeff: BitVec, mut data: Vec<u8>) {
+        for r in &self.rows {
+            if coeff.get(r.pivot) {
+                coeff.xor(&r.coeff);
+                xor_into(&mut data, &r.data);
+            }
+        }
+        if let Some(p) = coeff.first_set() {
+            for r in &mut self.rows {
+                if r.coeff.get(p) {
+                    r.coeff.xor(&coeff);
+                    xor_into(&mut r.data, &data);
+                }
+            }
+            self.rows.push(Row { pivot: p, coeff, data });
+        } // else: linearly dependent, discard
+    }
+    fn solve(&mut self) -> Option<Vec<u8>> {
+        let mut chunks = vec![vec![0u8; self.chunk]; self.count];
+        for r in &self.rows {
+            chunks[r.pivot] = r.data.clone();
+        }
+        let mut out = Vec::with_capacity(self.count * self.chunk);
+        for c in &chunks {
+            out.extend_from_slice(c);
+        }
+        // The reassembled envelope self-delimits: parse it to strip zero padding.
+        match Envelope::decode(&out) {
+            Ok((_, n)) => {
+                let w = out[..n].to_vec();
+                self.done = Some(w.clone());
+                Some(w)
+            }
+            _ => None,
+        }
+    }
+}
+impl Default for Fountain {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Minimal packed bit vector over GF(2).
+#[derive(Clone)]
+struct BitVec {
+    words: Vec<u64>,
+}
+impl BitVec {
+    fn zeros(len: usize) -> Self {
+        BitVec { words: vec![0u64; (len + 63) / 64] }
+    }
+    fn unit(len: usize, i: usize) -> Self {
+        let mut b = Self::zeros(len);
+        b.set(i);
+        b
+    }
+    fn set(&mut self, i: usize) {
+        self.words[i / 64] |= 1u64 << (i % 64);
+    }
+    fn get(&self, i: usize) -> bool {
+        (self.words[i / 64] >> (i % 64)) & 1 == 1
+    }
+    fn xor(&mut self, o: &BitVec) {
+        for k in 0..self.words.len() {
+            self.words[k] ^= o.words[k];
+        }
+    }
+    fn first_set(&self) -> Option<usize> {
+        for (k, w) in self.words.iter().enumerate() {
+            if *w != 0 {
+                return Some(k * 64 + w.trailing_zeros() as usize);
+            }
+        }
+        None
+    }
+    fn is_zero(&self) -> bool {
+        self.words.iter().all(|w| *w == 0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §4 Routing state
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+struct Path {
+    iface: Iface,
+    nbr: Option<Addr>,
+    age: u32,
+}
+#[derive(Default)]
+pub struct Paths {
+    map: HashMap<Addr, Vec<Path>>,
+}
+impl Paths {
+    fn learn(&mut self, a: Addr, iface: Iface, nbr: Option<Addr>, now: u32) {
+        let v = self.map.entry(a).or_default();
+        v.retain(|p| !(p.iface == iface && p.nbr == nbr));
+        v.insert(0, Path { iface, nbr, age: now });
+        v.truncate(3); // keep up to 3 candidates
+    }
+    fn fresh(&self, a: &Addr, now: u32) -> Option<Path> {
+        self.map
+            .get(a)?
+            .iter()
+            .find(|p| now.saturating_sub(p.age) < PATH_FRESH_SECS)
+            .cloned()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// §5 Forwarding — what the transport must execute
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub enum Forward {
+    /// Send on all interfaces except `except` (on shared media the transport
+    /// applies CSMA: jitter 1–5× airtime, cancel if the ID is overheard).
+    Flood { except: Iface, bytes: Vec<u8> },
+    /// Send only toward this neighbor/interface (learned path).
+    Directed { iface: Iface, nbr: Option<Addr>, bytes: Vec<u8> },
+}
+
+#[derive(Default)]
+pub struct Rx {
+    pub delivered: Vec<Envelope>, // to the local app
+    pub forwards: Vec<Forward>,   // to the transport
+}
+
+struct Stored {
+    wire: Vec<u8>,
+    expiry: u32,
+    stamp: u8,
+    seq: u64,
+    dest: Addr,
+}
+
+// ---------------------------------------------------------------------------
+// §7 Crypto — seal to a recipient prekey (libsodium crypto_box_seal shape).
+// Forward secrecy comes from rotating prekeys daily and deleting the private
+// half after 7 days: a seized device cannot read week-old mail.
+// ---------------------------------------------------------------------------
+
+fn seal_nonce(eph_pub: &[u8; 32], recip_pub: &[u8; 32]) -> [u8; 24] {
+    let mut h = Blake2bVar::new(24).unwrap();
+    h.update(eph_pub);
+    h.update(recip_pub);
+    let mut n = [0u8; 24];
+    h.finalize_variable(&mut n).unwrap();
+    n
+}
+
+/// Anonymous sealed box: output = ephemeral_pubkey(32) ‖ ciphertext.
+pub fn seal(msg: &[u8], recip_prekey: &[u8; 32]) -> Vec<u8> {
+    use crypto_box::aead::{generic_array::GenericArray, Aead};
+    use crypto_box::{PublicKey, SalsaBox, SecretKey};
+    let mut sb = [0u8; 32];
+    OsRng.fill_bytes(&mut sb);
+    let eph = SecretKey::from(sb);
+    let eph_pub = eph.public_key();
+    let their = PublicKey::from(*recip_prekey);
+    let nonce = seal_nonce(eph_pub.as_bytes(), their.as_bytes());
+    let ct = SalsaBox::new(&their, &eph)
+        .encrypt(GenericArray::from_slice(&nonce), msg)
+        .expect("seal");
+    let mut out = Vec::with_capacity(32 + ct.len());
+    out.extend_from_slice(eph_pub.as_bytes());
+    out.extend_from_slice(&ct);
+    out
+}
+
+// ---------------------------------------------------------------------------
+// The node: §5 router + §6 sync, glued together. Transports call `on_rx`.
+// ---------------------------------------------------------------------------
+
+pub struct Node {
+    pub sk: SigningKey,
+    pub addr: Addr,
+    prekey_sec: crypto_box::SecretKey,
+    pub prekey_pub: [u8; 32],
+    pub petname: String,
+
+    pub topics: HashSet<Addr>,
+    addrs: HashSet<Addr>,
+
+    seen: HashMap<Id, u32>, // id -> retain-until
+    store: HashMap<Id, Stored>,
+    paths: Paths,
+    peer_prekeys: HashMap<Addr, [u8; 32]>,
+
+    max_store_bytes: usize,
+    seq: u64,
+    frags: HashMap<Id, Fountain>,
+}
+
+impl Node {
+    pub fn new(petname: &str, topics: &[&str]) -> Self {
+        let mut seed = [0u8; 32];
+        OsRng.fill_bytes(&mut seed);
+        let sk = SigningKey::from_bytes(&seed);
+        let addr = addr_of(&sk.verifying_key().to_bytes());
+
+        let mut pb = [0u8; 32];
+        OsRng.fill_bytes(&mut pb);
+        let prekey_sec = crypto_box::SecretKey::from(pb);
+        let prekey_pub = *prekey_sec.public_key().as_bytes();
+
+        let mut addrs = HashSet::new();
+        addrs.insert(addr);
+        Node {
+            sk,
+            addr,
+            prekey_sec,
+            prekey_pub,
+            petname: petname.to_string(),
+            topics: topics.iter().map(|t| topic_of(t)).collect(),
+            addrs,
+            seen: HashMap::new(),
+            store: HashMap::new(),
+            paths: Paths::default(),
+            peer_prekeys: HashMap::new(),
+            max_store_bytes: 10 * 1024 * 1024,
+            seq: 0,
+            frags: HashMap::new(),
+        }
+    }
+
+    pub fn peer_prekey(&self, a: &Addr) -> Option<[u8; 32]> {
+        self.peer_prekeys.get(a).copied()
+    }
+    pub fn open(&self, sealed: &[u8]) -> Option<Vec<u8>> {
+        use crypto_box::aead::{generic_array::GenericArray, Aead};
+        use crypto_box::{PublicKey, SalsaBox};
+        if sealed.len() < 32 {
+            return None;
+        }
+        let mut ep = [0u8; 32];
+        ep.copy_from_slice(&sealed[..32]);
+        let eph_pub = PublicKey::from(ep);
+        let nonce = seal_nonce(&ep, &self.prekey_pub);
+        SalsaBox::new(&eph_pub, &self.prekey_sec)
+            .decrypt(GenericArray::from_slice(&nonce), &sealed[32..])
+            .ok()
+    }
+
+    // ---- origination -----------------------------------------------------
+
+    fn store_put(&mut self, e: &Envelope) {
+        let id = e.id();
+        self.store.insert(
+            id,
+            Stored { wire: e.wire(), expiry: e.expiry, stamp: e.stamp(), seq: self.seq, dest: e.dest },
+        );
+        self.seq += 1;
+        self.enforce_budget();
+    }
+    fn enforce_budget(&mut self) {
+        let mut total: usize = self.store.values().map(|s| s.wire.len()).sum();
+        // evict order: lowest stamp -> largest -> oldest (smallest seq)
+        while total > self.max_store_bytes {
+            let victim = self
+                .store
+                .iter()
+                .min_by(|a, b| {
+                    a.1.stamp
+                        .cmp(&b.1.stamp)
+                        .then(b.1.wire.len().cmp(&a.1.wire.len()))
+                        .then(a.1.seq.cmp(&b.1.seq))
+                })
+                .map(|(k, _)| *k);
+            match victim {
+                Some(k) => {
+                    total -= self.store[&k].wire.len();
+                    self.store.remove(&k);
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Originate a signed public (flooded) message on topic/broadcast `dest`.
+    pub fn originate(&mut self, dest: Addr, payload: Vec<u8>, now: u32) -> Vec<Forward> {
+        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        // Topics and public floods carry FLOOD; the relay uses this flag (not
+        // structure) to tell multicast from unicast (§5).
+        if dest == ZERO_DEST || self.topics.contains(&dest) {
+            e.flags |= fl::FLOOD;
+        }
+        e.sign(&self.sk);
+        // Unicast with no known path: flood to discover it (§5.6).
+        if e.flags & fl::FLOOD == 0 && self.paths.fresh(&dest, now).is_none() {
+            e.flags |= fl::FLOOD;
+            e.sign(&self.sk);
+        }
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.forward_intents(&e, NO_IFACE, now)
+    }
+
+    /// Build+sign this node's ANNOUNCE (prekey + topics), ready to flood (§4).
+    pub fn build_announce(&mut self, now: u32) -> Vec<Forward> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&self.prekey_pub);
+        p.push(self.topics.len() as u8);
+        for t in &self.topics {
+            p.extend_from_slice(t);
+        }
+        p.push(0); // np: we advertise no distant paths in this reference build
+        p.extend_from_slice(self.petname.as_bytes());
+        let mut e = Envelope::new(ty::ANNOUNCE, ZERO_DEST, now + 3600, p);
+        e.flags |= fl::FLOOD;
+        e.sign(&self.sk);
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.forward_intents(&e, NO_IFACE, now)
+    }
+
+    fn absorb_announce(&mut self, e: &Envelope) {
+        if !e.verify() {
+            return;
+        }
+        let Src::Full(pk) = &e.src else { return };
+        if e.payload.len() < 33 {
+            return;
+        }
+        let src_addr = addr_of(pk);
+        let mut prekey = [0u8; 32];
+        prekey.copy_from_slice(&e.payload[..32]);
+        self.peer_prekeys.insert(src_addr, prekey);
+        // (topics/petname parsed here in a fuller build; omitted for brevity)
+    }
+
+    // ---- receive (the entire router, §5) --------------------------------
+
+    fn mark_seen(&mut self, e: &Envelope) {
+        let retain = e.expiry.max(0u32.wrapping_add(SEEN_MIN_SECS)); // >= expiry
+        self.seen.insert(e.id(), retain);
+    }
+
+    pub fn on_rx(&mut self, raw: &[u8], iface: Iface, nbr: Option<Addr>, now: u32) -> Rx {
+        let Ok((e, _)) = Envelope::decode(raw) else {
+            return Rx::default();
+        };
+
+        // INV/WANT are per-link, hops=0, consumed on receipt — never stored,
+        // never deduped, never relayed (§6).
+        match e.typ {
+            ty::INV => return self.on_inv(&e, iface, nbr),
+            ty::WANT => return self.on_want(&e, iface, nbr),
+            _ => {}
+        }
+
+        let id = e.id();
+        if self.seen.contains_key(&id) || e.expiry < now {
+            return Rx::default(); // duplicate or expired -> drop
+        }
+        self.seen.insert(id, e.expiry.max(now + SEEN_MIN_SECS));
+
+        // Path learning: the first copy of a signed envelope raced every route
+        // and won, so its src is reachable via the interface that delivered it.
+        if e.flags & fl::SIGNED != 0 {
+            if let Src::Full(pk) = &e.src {
+                self.paths.learn(addr_of(pk), iface, nbr, now);
+            }
+        }
+
+        let mut rx = Rx::default();
+
+        if e.typ == ty::ANNOUNCE {
+            self.absorb_announce(&e);
+        }
+
+        // Deliver if addressed to us / a followed topic / public.
+        if self.addrs.contains(&e.dest) || self.topics.contains(&e.dest) || e.dest == ZERO_DEST {
+            rx.delivered.push(e.clone());
+        }
+
+        // Fragment: try to reassemble the original, and if it completes, feed
+        // it back through the router as a fresh arrival.
+        if e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
+            let mut oid = [0u8; 16];
+            oid.copy_from_slice(&e.payload[..16]);
+            let idx = e.payload[16];
+            let count = e.payload[17];
+            let chunk = e.payload[18..].to_vec();
+            if let Some(orig) = self.frags.entry(oid).or_default().add(&oid, idx, count, chunk) {
+                let mut inner = self.on_rx(&orig, iface, nbr, now);
+                rx.delivered.append(&mut inner.delivered);
+                rx.forwards.append(&mut inner.forwards);
+            }
+        }
+
+        // Store for later opportunistic sync.
+        self.store_put(&e);
+
+        // Relay.
+        if e.hops > 0 {
+            let mut f = e.clone();
+            f.hops -= 1;
+            rx.forwards.append(&mut self.forward_intents(&f, iface, now));
+        }
+        rx
+    }
+
+    fn forward_intents(&self, e: &Envelope, except: Iface, now: u32) -> Vec<Forward> {
+        let bytes = e.wire();
+        // FLOOD flag or public dest -> epidemic flood. Otherwise unicast: use a
+        // fresh path if we have one, else stay silent (discovery is the
+        // originator's job, §5.6).
+        if e.flags & fl::FLOOD != 0 || e.dest == ZERO_DEST {
+            vec![Forward::Flood { except, bytes }]
+        } else if let Some(p) = self.paths.fresh(&e.dest, now) {
+            vec![Forward::Directed { iface: p.iface, nbr: p.nbr, bytes }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    // ---- sync (§6) -------------------------------------------------------
+
+    /// INV = concatenated 16-byte IDs of stored envelopes relevant to a peer
+    /// that follows `peer_topics` (public + those topics + unicast for custody).
+    pub fn build_inv(&self, peer_topics: &HashSet<Addr>) -> Vec<u8> {
+        let mut ids: Vec<(&Id, &Stored)> = self.store.iter().collect();
+        ids.sort_by(|a, b| b.1.expiry.cmp(&a.1.expiry)); // newest first
+        let mut p = Vec::new();
+        for (id, s) in ids {
+            let relevant = s.dest == ZERO_DEST
+                || peer_topics.contains(&s.dest)
+                || !self.topics.contains(&s.dest); // unicast -> carry (custody)
+            if relevant {
+                p.extend_from_slice(id);
+            }
+        }
+        Envelope::new(ty::INV, ZERO_DEST, 0, p).wire()
+    }
+
+    fn on_inv(&self, e: &Envelope, iface: Iface, nbr: Option<Addr>) -> Rx {
+        let mut want = Vec::new();
+        for chunk in e.payload.chunks(16) {
+            if chunk.len() == 16 {
+                let mut id = [0u8; 16];
+                id.copy_from_slice(chunk);
+                if !self.store.contains_key(&id) {
+                    want.extend_from_slice(&id); // request what we lack
+                }
+            }
+        }
+        let mut rx = Rx::default();
+        if !want.is_empty() {
+            rx.forwards.push(Forward::Directed {
+                iface,
+                nbr,
+                bytes: Envelope::new(ty::WANT, ZERO_DEST, 0, want).wire(),
+            });
+        }
+        rx
+    }
+
+    fn on_want(&self, e: &Envelope, iface: Iface, nbr: Option<Addr>) -> Rx {
+        let mut rx = Rx::default();
+        for chunk in e.payload.chunks(16) {
+            if chunk.len() == 16 {
+                let mut id = [0u8; 16];
+                id.copy_from_slice(chunk);
+                if let Some(s) = self.store.get(&id) {
+                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: s.wire.clone() });
+                }
+            }
+        }
+        rx
+    }
+
+    pub fn store_len(&self) -> usize {
+        self.store.len()
+    }
+    pub fn has(&self, id: &Id) -> bool {
+        self.store.contains_key(id)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Page 2, rule 2 — KISS framing for byte streams (TCP, serial, RFCOMM, TNCs).
+// ---------------------------------------------------------------------------
+
+pub mod kiss {
+    const FEND: u8 = 0xC0;
+    const FESC: u8 = 0xDB;
+    const TFEND: u8 = 0xDC;
+    const TFESC: u8 = 0xDD;
+
+    pub fn encode(frame: &[u8]) -> Vec<u8> {
+        let mut o = vec![FEND, 0x00]; // FEND + command byte
+        for &b in frame {
+            match b {
+                FEND => o.extend_from_slice(&[FESC, TFEND]),
+                FESC => o.extend_from_slice(&[FESC, TFESC]),
+                _ => o.push(b),
+            }
+        }
+        o.push(FEND);
+        o
+    }
+
+    /// Extract complete frames from a stream buffer (command byte stripped).
+    pub fn decode(stream: &[u8]) -> Vec<Vec<u8>> {
+        let mut frames = Vec::new();
+        let mut cur = Vec::new();
+        let mut in_frame = false;
+        let mut got_cmd = false;
+        let mut esc = false;
+        for &b in stream {
+            if b == FEND {
+                if in_frame && !cur.is_empty() {
+                    frames.push(std::mem::take(&mut cur));
+                }
+                in_frame = true;
+                got_cmd = false;
+                esc = false;
+                cur.clear();
+                continue;
+            }
+            if !in_frame {
+                continue;
+            }
+            if !got_cmd {
+                got_cmd = true; // skip the command byte
+                continue;
+            }
+            if esc {
+                cur.push(if b == TFEND { FEND } else if b == TFESC { FESC } else { b });
+                esc = false;
+            } else if b == FESC {
+                esc = true;
+            } else {
+                cur.push(b);
+            }
+        }
+        frames
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Page 2, rule 3 — text-channel armor (SMS, email, Usenet, paper, voice).
+// ~S1.<base32(env)>.<base32(sha256(env)[..4])>~
+// ---------------------------------------------------------------------------
+
+pub mod armor {
+    use super::*;
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+    fn b32enc(data: &[u8]) -> String {
+        let mut out = String::new();
+        let mut buf = 0u32;
+        let mut bits = 0u32;
+        for &b in data {
+            buf = (buf << 8) | b as u32;
+            bits += 8;
+            while bits >= 5 {
+                bits -= 5;
+                out.push(A[((buf >> bits) & 31) as usize] as char);
+            }
+        }
+        if bits > 0 {
+            out.push(A[((buf << (5 - bits)) & 31) as usize] as char);
+        }
+        out
+    }
+    fn b32dec(s: &str) -> Option<Vec<u8>> {
+        let mut buf = 0u32;
+        let mut bits = 0u32;
+        let mut out = Vec::new();
+        for c in s.chars() {
+            if c.is_whitespace() {
+                continue;
+            }
+            let u = c.to_ascii_uppercase();
+            let v = A.iter().position(|&x| x as char == u)? as u32;
+            buf = (buf << 5) | v;
+            bits += 5;
+            if bits >= 8 {
+                bits -= 8;
+                out.push(((buf >> bits) & 0xff) as u8);
+            }
+        }
+        Some(out)
+    }
+
+    pub fn wrap(env_wire: &[u8]) -> String {
+        let d = Sha256::digest(env_wire);
+        format!("~S1.{}.{}~", b32enc(env_wire), b32enc(&d[..4]))
+    }
+    /// Recover envelope bytes from armor found anywhere in `text`.
+    pub fn unwrap(text: &str) -> Option<Vec<u8>> {
+        let start = text.find("~S1.")? + 4;
+        let end = text[start..].find('~')? + start;
+        let body = &text[start..end];
+        let (b32, ck) = body.rsplit_once('.')?;
+        let env = b32dec(b32)?;
+        let want = b32dec(ck)?;
+        let got = Sha256::digest(&env);
+        if got[..4] == want[..] {
+            Some(env)
+        } else {
+            None
+        }
+    }
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keypair() -> SigningKey {
+        let mut s = [0u8; 32];
+        OsRng.fill_bytes(&mut s);
+        SigningKey::from_bytes(&s)
+    }
+
+    #[test]
+    fn envelope_roundtrip_and_sig() {
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, topic_of("test"), 1_700_000_000, b"hello".to_vec());
+        e.sign(&sk);
+        let wire = e.wire();
+        let (d, n) = Envelope::decode(&wire).unwrap();
+        assert_eq!(n, wire.len());
+        assert_eq!(d.payload, b"hello");
+        assert!(d.verify());
+    }
+
+    #[test]
+    fn id_is_stable_under_hop_decrement() {
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"x".to_vec());
+        e.sign(&sk);
+        let id1 = e.id();
+        e.hops -= 1; // relays do this
+        assert_eq!(id1, e.id(), "id must not change when hops decrements");
+    }
+
+    #[test]
+    fn tampering_breaks_signature() {
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"pay".to_vec());
+        e.sign(&sk);
+        let mut wire = e.wire();
+        let plen_pos = 16 + 32; // header + full src
+        wire[plen_pos + 2] ^= 0xff; // flip a payload byte
+        let (d, _) = Envelope::decode(&wire).unwrap();
+        assert!(!d.verify());
+    }
+
+    #[test]
+    fn fountain_decodes_from_a_lossy_subset() {
+        // Build a signed envelope big enough to need many chunks.
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, vec![0xABu8; 4000]);
+        e.sign(&sk);
+        let wire = e.wire();
+        let id = e.id();
+        let cs = 200usize;
+        let count = (wire.len() + cs - 1) / cs;
+
+        // Emit data + plenty of repair, drop ~40% with a deterministic LCG.
+        let indices: Vec<u8> = (0..(count as u8).saturating_add(60)).collect();
+        let frags = fragment(&wire, cs, 16, e.expiry, ZERO_DEST, id, &indices);
+
+        let mut f = Fountain::new();
+        let mut rng: u64 = 0x1234_5678;
+        let mut fed = 0;
+        let mut recovered = None;
+        for fr in &frags {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            if (rng >> 33) % 100 < 40 {
+                continue; // 40% loss
+            }
+            fed += 1;
+            let idx = fr.payload[16];
+            let cnt = fr.payload[17];
+            let chunk = fr.payload[18..].to_vec();
+            if let Some(w) = f.add(&id, idx, cnt, chunk) {
+                recovered = Some(w);
+                break;
+            }
+        }
+        let w = recovered.expect("should reassemble");
+        assert_eq!(w, wire, "reassembled bytes must equal original");
+        let (d, _) = Envelope::decode(&w).unwrap();
+        assert!(d.verify(), "reassembled signature must verify");
+        assert!(fed >= count, "need at least `count` independent chunks");
+        assert!(fed <= count + 10, "fountain overhead should be small");
+    }
+
+    #[test]
+    fn seal_open_roundtrip() {
+        let bob = Node::new("bob", &[]);
+        let msg = b"for bob only";
+        let sealed = seal(msg, &bob.prekey_pub);
+        assert_eq!(bob.open(&sealed).as_deref(), Some(&msg[..]));
+        let mallory = Node::new("m", &[]);
+        assert!(mallory.open(&sealed).is_none());
+    }
+
+    #[test]
+    fn kiss_roundtrip_with_escapes() {
+        let frame = vec![0x01, 0xC0, 0x02, 0xDB, 0x03];
+        let stream = kiss::encode(&frame);
+        let out = kiss::decode(&stream);
+        assert_eq!(out, vec![frame]);
+    }
+
+    #[test]
+    fn armor_roundtrip() {
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"armor me".to_vec());
+        e.sign(&sk);
+        let wire = e.wire();
+        let text = format!("noise before {} noise after", armor::wrap(&wire));
+        assert_eq!(armor::unwrap(&text).unwrap(), wire);
+    }
+
+    #[test]
+    fn two_nodes_sync_over_a_link() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+        let mut b = Node::new("b", &["news"]);
+        a.originate(topic_of("news"), b"headline".to_vec(), now);
+        // B pulls: A sends INV -> B replies WANT -> A sends the envelope.
+        let inv = a.build_inv(&b.topics);
+        let want_rx = b.on_rx(&inv, 0, Some(a.addr), now);
+        assert_eq!(want_rx.forwards.len(), 1);
+        if let Forward::Directed { bytes, .. } = &want_rx.forwards[0] {
+            let get_rx = a.on_rx(bytes, 0, Some(b.addr), now); // A answers WANT
+            for f in get_rx.forwards {
+                if let Forward::Directed { bytes, .. } = f {
+                    b.on_rx(&bytes, 0, Some(a.addr), now);
+                }
+            }
+        }
+        assert_eq!(b.store_len(), 1, "B should now hold A's message");
+    }
+}
