@@ -6,6 +6,55 @@ use crate::*;
 use std::path::Path;
 use std::{fs, io};
 
+/// Folder bridge runner: periodically import new `*.spore` files (receiving) and
+/// write outbound forwards into the folder (sending). Drop it in Syncthing or on
+/// a USB stick and the folder becomes a link between two machines.
+pub fn run(
+    hub: super::hub::Shared,
+    iface: Iface,
+    rx: std::sync::mpsc::Receiver<Forward>,
+    dir: std::path::PathBuf,
+) -> io::Result<()> {
+    use std::collections::HashSet;
+    let mut known: HashSet<String> = HashSet::new();
+    println!("  [folder] iface {iface} syncing {}", dir.display());
+    loop {
+        // Import new files (reading = receiving).
+        if dir.exists() {
+            for entry in fs::read_dir(&dir)? {
+                let path = entry?.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("spore") {
+                    continue;
+                }
+                let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                if !known.insert(name) {
+                    continue; // already imported / we wrote it
+                }
+                if let Ok(bytes) = fs::read(&path) {
+                    hub.on_rx(iface, &bytes, None);
+                }
+            }
+        }
+        // Write outbound forwards into the folder (writing = sending).
+        while let Ok(f) = rx.try_recv() {
+            let bytes = match f {
+                Forward::Flood { bytes, .. } => bytes,
+                Forward::Directed { bytes, .. } => bytes,
+            };
+            if let Ok((e, _)) = Envelope::decode(&bytes) {
+                let name = filename(&e.id());
+                known.insert(name.clone());
+                fs::create_dir_all(&dir)?;
+                let path = dir.join(&name);
+                if !path.exists() {
+                    fs::write(path, &bytes)?;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 pub fn filename(id: &Id) -> String {
     let mut s = String::with_capacity(38);
     for b in id {

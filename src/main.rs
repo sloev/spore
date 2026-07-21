@@ -335,391 +335,163 @@ fn fountain_demo() {
 }
 
 // ---------------------------------------------------------------------------
-// A real transport: UDP :7373 with LAN broadcast. This is ONE interface; add
-// BLE/LoRa/serial the same way and the router is unchanged. Congestion control
-// (10% airtime token bucket + CSMA jitter) belongs here, not in the router.
+// Multi-bridge runner. One shared Node behind a Hub; every bridge named on the
+// command line runs in its own thread and relays to the others — so one process
+// can bridge a LAN, a folder on a USB stick, a TCP link, and a Meshtastic mesh
+// at once:
+//
+//   cargo run -- udp folder ./bag tcp 10.0.0.5:7373 meshtastic
+//
+// The runners live in `spore::bridge::{udp,tcp,store,meshtastic,bag}`; this is
+// only the CLI that wires them onto one node.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_arch = "wasm32"))]
-fn run_udp() -> std::io::Result<()> {
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let sock = UdpSocket::bind(("0.0.0.0", 7373))?;
-    sock.set_broadcast(true)?;
-    let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, 7373).into();
-    let mut node = Node::new("udp-node", &["news"]);
-    // The one generic resolver, instantiated for this medium: U = SocketAddr.
-    // Every other bridge uses the same table with its own U (MAC, node id, …).
-    let mut neighbors: bridge::Neighbors<SocketAddr> = bridge::Neighbors::new(2 * 3600);
-    let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-
-    for f in node.build_announce(now()) {
-        if let Forward::Flood { bytes, .. } = f {
-            sock.send_to(&bytes, bcast)?;
-        }
-    }
-    println!("SPORE node on udp/7373 (addr {}). Ctrl-C to stop.", hexad(&node.addr));
-
-    let mut buf = [0u8; 2048];
-    loop {
-        let (n, peer) = sock.recv_from(&mut buf)?;
-        let t = now();
-        // ARP-style snoop: bind the signed sender's SPORE address to its socket,
-        // and reuse it as the router's neighbour hint.
-        let nbr = neighbors.snoop(&buf[..n], peer, t);
-        let rx = node.on_rx(&buf[..n], 0, nbr, t);
-        for e in &rx.delivered {
-            println!("  delivered {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
-        }
-        for f in rx.forwards {
-            match f {
-                Forward::Flood { bytes, .. } => {
-                    sock.send_to(&bytes, bcast)?;
-                }
-                Forward::Directed { nbr, bytes, .. } => {
-                    // Resolve the SPORE next-hop to a socket: unicast if we've
-                    // learned one, else broadcast (which still reaches it).
-                    match nbr.and_then(|a| neighbors.resolve(&a, t)) {
-                        Some(dst) => sock.send_to(&bytes, dst)?,
-                        None => sock.send_to(&bytes, bcast)?,
-                    };
-                }
-            }
-        }
-    }
+enum Spec {
+    Udp,
+    Tcp(Option<String>),
+    Folder(std::path::PathBuf),
+    Meshtastic,
+    Http(u16),
 }
 
-fn hexad(a: &Addr) -> String {
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_specs(args: &[String]) -> Result<Vec<Spec>, String> {
+    let mut specs = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let tok = args[i].as_str();
+        i += 1;
+        let spec = match tok {
+            "udp" => Spec::Udp,
+            "meshtastic" | "mesh" => Spec::Meshtastic,
+            "folder" => {
+                let dir = args.get(i).ok_or("`folder` needs a directory")?.clone();
+                i += 1;
+                Spec::Folder(dir.into())
+            }
+            "tcp" => match args.get(i) {
+                // an optional HOST:PORT to connect to; otherwise listen
+                Some(a) if a.contains(':') => {
+                    i += 1;
+                    Spec::Tcp(Some(a.clone()))
+                }
+                _ => Spec::Tcp(None),
+            },
+            "http" => {
+                let port = match args.get(i).and_then(|p| p.parse::<u16>().ok()) {
+                    Some(p) => {
+                        i += 1;
+                        p
+                    }
+                    None => 7373,
+                };
+                Spec::Http(port)
+            }
+            other => return Err(format!("unknown bridge `{other}`")),
+        };
+        specs.push(spec);
+    }
+    Ok(specs)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn hex8(a: &Addr) -> String {
     a.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-// ---------------------------------------------------------------------------
-// Bridge: HTTP "bag" API (spec Page 2). HTTP is just a transport for envelopes,
-// no more special than UDP or a folder. Three endpoints move a bag of mail:
-//   POST /spore/push   body = envelope wire(s)     -> stores + relays them
-//   GET  /spore/inv    -> our stored IDs (16 B ea)
-//   POST /spore/want   body = IDs (16 B ea)         -> their envelopes
-// ---------------------------------------------------------------------------
-
 #[cfg(not(target_arch = "wasm32"))]
-fn run_http() -> std::io::Result<()> {
-    use std::net::TcpListener;
-    use std::time::{SystemTime, UNIX_EPOCH};
+fn run_bridges(specs: Vec<Spec>) {
+    use spore::bridge::hub::{now, Hub};
+    use spore::congestion::Trickle;
+    use std::thread;
 
-    let mut node = Node::new("http-node", &["news"]);
-    let listener = TcpListener::bind(("0.0.0.0", 7373))?;
-    println!(
-        "SPORE HTTP bag bridge on http://0.0.0.0:7373  (addr {})\n  POST /spore/push · GET /spore/inv · POST /spore/want",
-        hexad(&node.addr)
-    );
-    for stream in listener.incoming() {
-        let mut s = match stream {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-        if let Err(e) = serve_http(&mut node, &mut s, now) {
-            eprintln!("http: {e}");
-        }
-    }
-    Ok(())
-}
+    let node = Node::new("spore", &["news"]);
+    let hub = Hub::new(node);
+    println!("SPORE node {} — {} bridge(s). Ctrl-C to stop.", hex8(&hub.addr()), specs.len());
 
-#[cfg(not(target_arch = "wasm32"))]
-fn serve_http(node: &mut Node, s: &mut std::net::TcpStream, now: u32) -> std::io::Result<()> {
-    use std::io::{Read, Write};
-
-    // Read the request head, then the Content-Length body.
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 4096];
-    let head_end = loop {
-        if let Some(p) = find_sub(&buf, b"\r\n\r\n") {
-            break p;
-        }
-        let n = s.read(&mut tmp)?;
-        if n == 0 {
-            return Ok(());
-        }
-        buf.extend_from_slice(&tmp[..n]);
-    };
-    let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
-    let mut lines = head.lines();
-    let reqline = lines.next().unwrap_or("");
-    let mut parts = reqline.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
-    let path = parts.next().unwrap_or("").to_string();
-    let mut content_len = 0usize;
-    for l in lines {
-        if let Some(v) = l.to_ascii_lowercase().strip_prefix("content-length:") {
-            content_len = v.trim().parse().unwrap_or(0);
-        }
-    }
-    let mut body = buf[head_end + 4..].to_vec();
-    while body.len() < content_len {
-        let n = s.read(&mut tmp)?;
-        if n == 0 {
-            break;
-        }
-        body.extend_from_slice(&tmp[..n]);
-    }
-    body.truncate(content_len);
-
-    let route = path.split('?').next().unwrap_or(&path);
-    let op = match (method.as_str(), route) {
-        ("POST", "/spore/push") => Some(bridge::Bag::Push(body)),
-        ("GET", "/spore/inv") => Some(bridge::Bag::Inv),
-        ("POST", "/spore/want") => Some(bridge::Bag::Want(body)),
-        _ => None,
-    };
-    let (status, resp) = match op {
-        Some(op) => {
-            let (_forwards, resp) = bridge::bag(node, op, 0, now);
-            ("200 OK", resp)
-        }
-        None => ("404 Not Found", Vec::new()),
-    };
-    let header = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: application/x-spore\r\nContent-Length: {}\r\n\
-         Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
-        resp.len()
-    );
-    s.write_all(header.as_bytes())?;
-    s.write_all(&resp)?;
-    Ok(())
-}
-
-fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    hay.windows(needle.len()).position(|w| w == needle)
-}
-
-// ---------------------------------------------------------------------------
-// Bridge: shared-store folder. The folder of `<hexid>.spore` files *is* the
-// network — read it to receive, write to it to send. A USB stick, Syncthing,
-// or Dropbox turns two folders on two machines into one SPORE link.
-// ---------------------------------------------------------------------------
-
-#[cfg(not(target_arch = "wasm32"))]
-fn run_folder(dir: &str) -> std::io::Result<()> {
-    use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-    let mut node = Node::new("folder-node", &["news"]);
-    let p = Path::new(dir);
-
-    // Read the folder (receive), seed one message, then write our store back.
-    let rx = bridge::store::import(p, &mut node, 0, now)?;
-    for e in &rx.delivered {
-        println!("  imported {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
-    }
-    node.originate(topic_of("news"), b"hello from a folder bridge".to_vec(), now);
-    let wrote = bridge::store::export_all(p, &node)?;
-    println!(
-        "folder bridge '{dir}': imported {} envelope(s), exported {} new file(s)",
-        rx.delivered.len(),
-        wrote
-    );
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Bridge: KISS over a TCP byte stream (shape 2). Point-to-point: `tcp` listens
-// for one peer, `tcp HOST:PORT` connects. Shows congestion control live —
-// Trickle paces the HELLO beacon, a token bucket caps relayed bytes (§5.4a/b).
-// ---------------------------------------------------------------------------
-
-#[cfg(not(target_arch = "wasm32"))]
-fn run_tcp(target: Option<&str>) -> std::io::Result<()> {
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-    let mut stream = match target {
-        Some(addr) => {
-            println!("connecting to {addr} …");
-            TcpStream::connect(addr)?
-        }
-        None => {
-            let l = TcpListener::bind(("0.0.0.0", 7373))?;
-            println!("listening on tcp/7373 for one peer …");
-            l.accept()?.0
-        }
-    };
-    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
-
-    let mut node = Node::new("tcp-node", &["news"]);
-    let mut ks = bridge::KissStream::new();
-    // Congestion control, made visible: pace beacons, cap relays.
-    let mut trickle = congestion::Trickle::new(now(), 5, 80); // seconds here (spec: minutes)
-    let mut relay = congestion::TokenBucket::ten_percent(1200); // ~1.2 kB/s link
-    println!("SPORE tcp bridge up (addr {}). Ctrl-C to stop.", hexad(&node.addr));
-
-    let beacon = |node: &mut Node, s: &mut TcpStream, t: u32| -> std::io::Result<()> {
-        for f in node.build_announce(t) {
-            if let Forward::Flood { bytes, .. } = f {
-                s.write_all(&bridge::KissStream::frame(&bytes))?;
-            }
-        }
-        Ok(())
-    };
-    beacon(&mut node, &mut stream, now())?;
-
-    let mut buf = [0u8; 2048];
-    loop {
-        match stream.read(&mut buf) {
-            Ok(0) => {
-                println!("peer closed");
-                break;
-            }
-            Ok(n) => {
-                for frame in ks.push(&buf[..n]) {
-                    let t = now();
-                    let rx = node.on_rx(&frame, 0, None, t);
-                    for e in &rx.delivered {
-                        println!("  delivered {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
+    let mut handles = Vec::new();
+    for spec in specs {
+        let h = hub.clone();
+        let handle = match spec {
+            Spec::Udp => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::udp::run(h, iface, rx) {
+                        eprintln!("  [udp] {e}");
                     }
-                    for f in rx.forwards {
-                        let bytes = match f {
-                            Forward::Flood { bytes, .. } => bytes,
-                            Forward::Directed { bytes, .. } => bytes,
-                        };
-                        // §5.4a token bucket: skip the relay if over budget.
-                        if relay.allow(bytes.len() as u32, t) {
-                            stream.write_all(&bridge::KissStream::frame(&bytes))?;
-                        }
+                })
+            }
+            Spec::Tcp(target) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::tcp::run(h, iface, rx, target) {
+                        eprintln!("  [tcp] {e}");
                     }
-                }
+                })
             }
-            Err(ref e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(e) => return Err(e),
-        }
-        // §5.4b Trickle: re-beacon on the doubling interval.
-        let t = now();
-        if trickle.due(t) {
-            trickle.fired(t);
-            beacon(&mut node, &mut stream, t)?;
-        }
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Bridge: Meshtastic over WiFi-UDP broadcast. Meshtastic nodes with the UDP
-// feature enabled multicast their mesh packets on the LAN; this bridge speaks
-// that: it wraps each SPORE envelope as a MeshPacket on portnum 256 (PRIVATE_APP,
-// dst broadcast) and reads envelopes back out of packets on that portnum. The
-// Meshtastic mesh then carries them over LoRa to every node — SPORE sees the
-// whole mesh as one interface. Envelopes auto-fragment to fit the ~230 B budget.
-// ---------------------------------------------------------------------------
-
-#[cfg(not(target_arch = "wasm32"))]
-fn run_meshtastic() -> std::io::Result<()> {
-    use spore::bridge::meshtastic as mt;
-    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let group = Ipv4Addr::from(mt::UDP_GROUP);
-    let dst = SocketAddrV4::new(group, mt::UDP_PORT);
-    let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, mt::UDP_PORT))?;
-    sock.join_multicast_v4(&group, &Ipv4Addr::UNSPECIFIED)?;
-
-    let mut node = Node::new("mesh-node", &["news"]);
-    node.mtu = 200; // fit Meshtastic's payload budget -> SPORE auto-fragments
-    // A virtual Meshtastic node number for our bridge, derived from our address.
-    let my_node = u32::from_be_bytes([node.addr[0], node.addr[1], node.addr[2], node.addr[3]]);
-    let mut neighbors: bridge::Neighbors<u32> = bridge::Neighbors::new(2 * 3600);
-    let mut rng: u32 = my_node ^ 0x9e37_79b9;
-    let mut pkt_id = || {
-        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        rng
-    };
-    let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-
-    let send = |sock: &UdpSocket, id: &mut dyn FnMut() -> u32, bytes: &[u8], to: u32| {
-        let frame = mt::encode(bytes, my_node, to, id());
-        let _ = sock.send_to(&frame, dst);
-    };
-
-    for f in node.build_announce(now()) {
-        if let Forward::Flood { bytes, .. } = f {
-            send(&sock, &mut pkt_id, &bytes, mt::BROADCAST);
-        }
-    }
-    println!(
-        "SPORE Meshtastic-UDP bridge on {}:{} (node !{:08x}). Ctrl-C to stop.",
-        group,
-        mt::UDP_PORT,
-        my_node
-    );
-
-    let mut buf = [0u8; 1024];
-    loop {
-        let (n, _peer) = sock.recv_from(&mut buf)?;
-        let Some((from_node, portnum, payload)) = mt::decode(&buf[..n]) else {
-            continue;
+            Spec::Folder(dir) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::store::run(h, iface, rx, dir) {
+                        eprintln!("  [folder] {e}");
+                    }
+                })
+            }
+            Spec::Meshtastic => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::meshtastic::run(h, iface, rx) {
+                        eprintln!("  [meshtastic] {e}");
+                    }
+                })
+            }
+            Spec::Http(port) => {
+                let iface = hub.register_pull();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::bag::run_http(h, iface, port) {
+                        eprintln!("  [http] {e}");
+                    }
+                })
+            }
         };
-        if portnum != mt::PORT_PRIVATE_APP {
-            continue; // some other Meshtastic app, not us
-        }
-        let t = now();
-        // Snoop: bind the signed SPORE sender to the Meshtastic node it came from.
-        let nbr = neighbors.snoop(&payload, from_node, t);
-        let rx = node.on_rx(&payload, 0, nbr, t);
-        for e in &rx.delivered {
-            println!("  delivered {} bytes (dest {})", e.payload.len(), hexad(&e.dest));
-        }
-        for f in rx.forwards {
-            match f {
-                Forward::Flood { bytes, .. } => send(&sock, &mut pkt_id, &bytes, mt::BROADCAST),
-                Forward::Directed { nbr, bytes, .. } => {
-                    // Resolve the SPORE next-hop to a Meshtastic node and unicast;
-                    // fall back to a mesh broadcast if we haven't learned it.
-                    let to = nbr.and_then(|a| neighbors.resolve(&a, t)).unwrap_or(mt::BROADCAST);
-                    send(&sock, &mut pkt_id, &bytes, to);
+        handles.push(handle);
+    }
+
+    // One beacon loop floods this node's ANNOUNCE on every interface, Trickle-paced.
+    {
+        let h = hub.clone();
+        thread::spawn(move || {
+            let mut trickle = Trickle::new(now(), 5, 80);
+            loop {
+                let t = now();
+                if trickle.due(t) {
+                    trickle.fired(t);
+                    h.beacon();
                 }
+                thread::sleep(std::time::Duration::from_millis(500));
             }
-        }
+        });
+    }
+
+    for handle in handles {
+        let _ = handle.join();
     }
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    match args.get(1).map(|s| s.as_str()) {
-        #[cfg(not(target_arch = "wasm32"))]
-        Some("udp") => {
-            if let Err(e) = run_udp() {
-                eprintln!("udp error: {e}");
-            }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() {
+        sim();
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    match parse_specs(&args) {
+        Ok(specs) => run_bridges(specs),
+        Err(e) => {
+            eprintln!("error: {e}");
+            eprintln!("usage: spore [udp] [tcp [HOST:PORT]] [folder DIR] [meshtastic] [http [PORT]]");
+            eprintln!("       spore            # run the in-memory demo");
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        Some("meshtastic") | Some("mesh") => {
-            if let Err(e) = run_meshtastic() {
-                eprintln!("meshtastic error: {e}");
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        Some("tcp") => {
-            if let Err(e) = run_tcp(args.get(2).map(|s| s.as_str())) {
-                eprintln!("tcp error: {e}");
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        Some("http") => {
-            if let Err(e) = run_http() {
-                eprintln!("http error: {e}");
-            }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        Some("folder") => {
-            let dir = args.get(2).map(|s| s.as_str()).unwrap_or("spore");
-            if let Err(e) = run_folder(dir) {
-                eprintln!("folder error: {e}");
-            }
-        }
-        _ => sim(),
     }
 }

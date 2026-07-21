@@ -8,7 +8,7 @@
 //! Each concern lives in its own file; the shared pieces are re-exported here so
 //! call sites stay `bridge::Neighbors`, `bridge::Csma`, `bridge::bag`, …
 
-mod bag;
+pub mod bag;
 mod csma;
 mod kiss_stream;
 mod neighbors;
@@ -24,3 +24,11 @@ pub mod meshtastic;
 pub mod store;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod foldersync;
+
+// Runner glue — one shared node, threads per bridge (native only).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hub;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tcp;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod udp;

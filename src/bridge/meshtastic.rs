@@ -157,3 +157,66 @@ pub fn decode(frame: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     }
     Some((from, portnum, payload))
 }
+
+/// Meshtastic WiFi-UDP broadcast bridge runner: join the LAN multicast group,
+/// wrap floods as `MeshPacket`s on portnum 256, and unicast directed sends to a
+/// node number resolved from snooping. Clamps the shared node's MTU to fit
+/// Meshtastic's ~230 B budget so SPORE auto-fragments.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run(
+    hub: crate::bridge::hub::Shared,
+    iface: crate::Iface,
+    rx: std::sync::mpsc::Receiver<crate::Forward>,
+) -> std::io::Result<()> {
+    use crate::bridge::hub::now;
+    use crate::bridge::Neighbors;
+    use crate::Forward;
+    use std::io::ErrorKind;
+    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    use std::time::Duration;
+
+    hub.with_node(|n| n.mtu = n.mtu.min(200)); // fit the LoRa payload budget
+    let group = Ipv4Addr::from(UDP_GROUP);
+    let dst = SocketAddrV4::new(group, UDP_PORT);
+    let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, UDP_PORT))?;
+    sock.join_multicast_v4(&group, &Ipv4Addr::UNSPECIFIED)?;
+    sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+
+    let my_node = {
+        let a = hub.addr();
+        u32::from_be_bytes([a[0], a[1], a[2], a[3]])
+    };
+    let mut nbrs: Neighbors<u32> = Neighbors::new(2 * 3600);
+    let mut rng: u32 = my_node ^ 0x9e37_79b9;
+    let mut next_id = || {
+        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        rng
+    };
+    println!("  [meshtastic] iface {iface} on {group}:{UDP_PORT} (node !{my_node:08x})");
+
+    let mut buf = [0u8; 1024];
+    loop {
+        match sock.recv_from(&mut buf) {
+            Ok((n, _peer)) => {
+                if let Some((from_node, portnum, payload)) = decode(&buf[..n]) {
+                    if portnum == PORT_PRIVATE_APP {
+                        let nbr = nbrs.snoop(&payload, from_node, now());
+                        hub.on_rx(iface, &payload, nbr);
+                    }
+                }
+            }
+            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+        while let Ok(f) = rx.try_recv() {
+            let (bytes, to) = match f {
+                Forward::Flood { bytes, .. } => (bytes, BROADCAST),
+                Forward::Directed { nbr, bytes, .. } => {
+                    (bytes.clone(), nbr.and_then(|a| nbrs.resolve(&a, now())).unwrap_or(BROADCAST))
+                }
+            };
+            let frame = encode(&bytes, my_node, to, next_id());
+            sock.send_to(&frame, dst)?;
+        }
+    }
+}
