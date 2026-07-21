@@ -422,7 +422,7 @@ all bridges, none more special than another.
 
 | Shape | Examples | Binding | Status |
 |---|---|---|---|
-| 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message | ✅ UDP (`run_udp`) |
+| 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message | ✅ UDP + Meshtastic WiFi-UDP |
 | 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::KissStream`) | ✅ framer + TCP runner |
 | 3. Text channel | SMS, email, Usenet, paper, voice | `~S1.…~` armor (`armor::wrap`) | ✅ codec |
 | 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA + CRC tail | ✅ `Csma` damping + `crc_*` (AFSK runner needs a sound card) |
@@ -450,6 +450,10 @@ all bridges, none more special than another.
   need. Drop-in for a walkie-talkie/AFSK runner.
 - **`foldersync`** (`bridge::foldersync`): publish a directory as manifests and
   materialise fetched files — Syncthing over SPORE.
+- **`meshtastic`** (`bridge::meshtastic` + the `meshtastic` runner): wrap envelopes
+  as Meshtastic packets (portnum 256) over the WiFi-UDP broadcast group so a LoRa
+  mesh carries SPORE. Portable hand-rolled protobuf codec; a template pending
+  hardware validation (field numbers, multicast values, and channel encryption).
 
 Underlays with their own routing (an IP network, Reticulum, a VPN) count as *one*
 interface: decrement hops once and let them handle their own delivery.

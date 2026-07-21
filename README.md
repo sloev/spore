@@ -91,6 +91,7 @@ cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
 cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
 cargo run -- folder DIR  # a shared-store bridge over a folder of <hexid>.spore files
 cargo run -- tcp [HOST]  # a KISS-over-TCP stream bridge (listen, or connect to HOST:PORT)
+cargo run -- meshtastic  # bridge to a Meshtastic node broadcasting over WiFi-UDP
 ```
 
 The demo drives the exact `Node::on_rx` router used in production; only the
@@ -250,6 +251,34 @@ unsigned source), a few freshest are kept per address, and a nonce/timestamp in 
 beacon bounds replay. If a stale binding points at a dead unicast address, SPORE's
 flood-fallback (§5.6) routes around it. Implemented as `bridge::Neighbors<U>` and
 wired into the UDP bridge (`U = SocketAddr`) in `src/main.rs`.
+</details>
+
+## Riding a Meshtastic mesh
+
+Meshtastic is a popular long-range radio mesh. If a Meshtastic node is on your WiFi
+with its UDP feature on, it shouts every mesh message onto the local network. The
+`meshtastic` bridge listens for those, pulls out SPORE messages, and shouts SPORE's
+own replies back — so the radio mesh carries your traffic for miles, and SPORE just
+sees "one more link." Messages are automatically chopped to fit the radio's small
+packet size.
+
+<details>
+<summary>Deep dive: how the bridge works, and what to check before trusting it</summary>
+
+A SPORE envelope is wrapped as a Meshtastic packet on **portnum 256** (`PRIVATE_APP`,
+broadcast) and sent to the WiFi-UDP multicast group `224.0.0.69:4403`; incoming
+packets on that portnum are unwrapped back into `node.on_rx`. Node numbers are the
+bridge's `U` in `Neighbors<u32>` — learned by snooping each packet's `from` — so a
+directed send can unicast to one node instead of flooding the whole mesh. `mtu` is
+set to 200 so SPORE's fragmentation keeps every piece inside Meshtastic's ~230-byte
+budget, and the entire LoRa mesh counts as a single SPORE hop.
+
+It's a **template** — the frame codec is unit-tested and the runner binds, joins the
+group, and beacons, but there's no Meshtastic hardware here to close the loop. Before
+production, confirm three things against your firmware: the protobuf field numbers
+(all centralised in `bridge::meshtastic`), the multicast group/port, and encryption —
+only Meshtastic's *unencrypted* payload variant is handled, so use an unencrypted
+channel or add the channel key.
 </details>
 
 ## Layout
