@@ -85,17 +85,23 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test               # 30 tests: envelope, fountain, send, files, sessions, ratchet, onion, receipts, congestion, topics, csma, folder-sync, rpc, feeds, …
-cargo run                # in-memory mesh demo (A — B — C — D)
-cargo run -- udp         # a real node on UDP :7373 with LAN broadcast
-cargo run -- http        # an HTTP "bag" bridge on :7373 (POST /spore/push, GET /spore/inv, POST /spore/want)
-cargo run -- folder DIR  # a shared-store bridge over a folder of <hexid>.spore files
-cargo run -- tcp [HOST]  # a KISS-over-TCP stream bridge (listen, or connect to HOST:PORT)
-cargo run -- meshtastic  # bridge to a Meshtastic node broadcasting over WiFi-UDP
+cargo test    # 31 tests: envelope, fountain, send, files, sessions, ratchet, onion, receipts, congestion, csma, folder-sync, rpc, feeds, meshtastic, …
+cargo run     # in-memory mesh demo (A — B — C — D)
+
+# Run a real node with one or more bridges — name as many as you like on one
+# line and they share a single node, relaying to each other:
+cargo run -- udp                                   # a LAN over UDP :7373
+cargo run -- folder ./bag                          # a shared folder (USB / Syncthing)
+cargo run -- tcp 10.0.0.5:7373                     # connect a TCP link (omit host to listen)
+cargo run -- meshtastic                            # a Meshtastic WiFi-UDP mesh
+cargo run -- http 8088                             # an HTTP bag: push / inv / want
+cargo run -- udp folder ./bag meshtastic http 8088 # …or all at once, one gateway node
 ```
 
-The demo drives the exact `Node::on_rx` router used in production; only the
-transport is swapped for an in-memory "ether".
+Each bridge runs in its own thread and hands frames to a shared node; a message
+arriving on any medium is relayed onto all the others — that's a gateway node
+bridging, say, a LAN, a USB stick, and a radio mesh at the same time. The demo
+(no args) drives the exact same `Node::on_rx` router with an in-memory "ether".
 
 ```
 SPORE demo — line topology  A — B — C — D
@@ -285,8 +291,9 @@ channel or add the channel key.
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `src/lib.rs`    | the whole portable core: envelope, routing, files, sessions, feeds, RPC, crypto, bridges |
-| `src/main.rs`   | reference node + the 12-step demo + UDP / HTTP / folder / TCP bridge runners |
+| `src/lib.rs`    | the portable core: envelope, routing, files, sessions, feeds, RPC, crypto |
+| `src/bridge/`   | one file per bridge (udp, tcp, store, meshtastic, bag, …) + the `hub` that shares a node across them |
+| `src/main.rs`   | the 12-step demo + a CLI that runs any mix of bridges on one node |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 
