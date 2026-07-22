@@ -22,10 +22,11 @@ const pages = [
   ['docs/BRIDGES.md', 'bridges.html', 'Bridges'],
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
-  ['docs/AUDIT.md', 'audit.html', 'Audit'],
-  ['bindings/README.md', 'bindings.html', 'Bindings'],
-  ['reference/README.md', 'reference.html', 'Reference nodes'],
-  ['web/README.md', 'webguide.html', 'Web guide'],
+  // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
+  ['bindings/README.md', 'bindings.html', null],
+  ['reference/README.md', 'reference.html', null],
+  ['web/README.md', 'webguide.html', null],
+  ['CONTRIBUTING.md', 'contributing.html', null],
 ];
 
 // Map a source .md path (as written in links) to its output page.

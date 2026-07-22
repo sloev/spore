@@ -123,8 +123,6 @@ loopback), with a [live demo](web/demo.html) and guide under [`web/`](web/README
 — and to `esp-idf` for the ESP32. Adding a medium is a thin `recv`/`send` shim
 (`bridge::driver::DatagramTransport`); all the routing, address resolution, and
 fragmentation stay in the shared lib. See the full [bridge matrix](docs/BRIDGES.md).
-See [docs/BRIDGES.md](docs/BRIDGES.md) for the full medium matrix and
-[docs/AUDIT.md](docs/AUDIT.md) for per-platform status.
 
 ```
 SPORE demo — line topology  A — B — C — D
@@ -326,7 +324,7 @@ channel or add the channel key.
 | `reference/`    | dependency-free Tier-0 decoders (pure-Python parse + verify) + cross-language test vectors |
 | `docs/BRIDGES.md` | every medium SPORE can ride (grouped matrix) and how each maps to the model |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
-| `docs/AUDIT.md` | full audit / review + the per-platform daemon status |
+| `CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 
 ## License

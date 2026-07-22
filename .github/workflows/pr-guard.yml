@@ -1,0 +1,45 @@
+name: PR guard (API freeze)
+
+# Refuse pull requests that change the frozen 1.0 contract or the test suite that
+# guarantees it. Combined with branch protection (this check + CI required, no
+# direct pushes), this is what keeps `master` from ever silently breaking the API.
+#
+# The frozen set: the golden contract test, the generated test vectors and the C
+# header they pin, the example that produces the vectors, and the CI/guard
+# workflows themselves (so the guard can't be weakened in the same PR).
+#
+# To change a frozen file on purpose — a deliberate, major-version decision — add
+# the `allow-frozen-change` label to the PR.
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  frozen-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Refuse edits to frozen contract / test files
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if echo ",$LABELS," | grep -q ',allow-frozen-change,'; then
+            echo "Label 'allow-frozen-change' present — freeze guard intentionally bypassed."
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE" "$HEAD")"
+          echo "Files changed in this PR:"; echo "$changed"
+          frozen='^(tests/|reference/vectors\.json|reference/test_t0\.py|bindings/spore\.h|examples/(gen_vectors|worked)\.rs|site/seed/.*\.test\.mjs|web/(test|ws-test)\.mjs|\.github/workflows/(ci|pr-guard)\.yml)'
+          hits="$(echo "$changed" | grep -E "$frozen" || true)"
+          if [ -n "$hits" ]; then
+            echo "::error::This PR modifies frozen 1.0 contract / test files:"
+            echo "$hits"
+            echo "These files are frozen to guarantee the API and wire format. Changing them is a"
+            echo "backwards-incompatible (major-version) act — add the 'allow-frozen-change' label to proceed."
+            exit 1
+          fi
+          echo "OK — no frozen files touched."

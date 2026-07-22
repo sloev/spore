@@ -1,0 +1,12 @@
+# Every change is reviewed by the maintainer. The frozen 1.0 contract files are
+# called out so a review is always required to touch them (pair this with branch
+# protection: "require review from Code Owners" on master).
+
+*                         @sloev
+
+# Frozen 1.0 contract — the API + wire format. See CONTRIBUTING.md.
+/tests/api_freeze.rs      @sloev
+/reference/vectors.json   @sloev
+/bindings/spore.h         @sloev
+/examples/gen_vectors.rs  @sloev
+/.github/workflows/       @sloev

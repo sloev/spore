@@ -40,6 +40,9 @@ jobs:
           git diff --exit-code reference/vectors.json \
             || (echo "reference/vectors.json is stale — run: cargo run --example gen_vectors > reference/vectors.json"; exit 1)
           python3 reference/test_t0.py
+      - name: Docs/code in sync — no documented value may drift from the code
+        if: runner.os == 'Linux'
+        run: python3 scripts/check_docs_sync.py
 
   # The browser target: prove the core still compiles to wasm with its single
   # import, which the web/ node ABI and demo depend on.
