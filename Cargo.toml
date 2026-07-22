@@ -1,6 +1,6 @@
 [package]
 name = "spore"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope: a reference implementation"
 license = "Unlicense"
