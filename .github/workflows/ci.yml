@@ -33,6 +33,13 @@ jobs:
         run: cargo test --all-targets
       - name: Worked examples (reimplementation guide reference values)
         run: cargo run --example worked
+      - name: T0 reference decoder — vectors in sync + pure-Python conformance
+        if: runner.os == 'Linux'
+        run: |
+          cargo run --example gen_vectors > reference/vectors.json
+          git diff --exit-code reference/vectors.json \
+            || (echo "reference/vectors.json is stale — run: cargo run --example gen_vectors > reference/vectors.json"; exit 1)
+          python3 reference/test_t0.py
 
   # The browser target: prove the core still compiles to wasm with its single
   # import, which the web/ node ABI and demo depend on.

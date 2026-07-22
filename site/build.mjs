@@ -24,6 +24,7 @@ const pages = [
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
   ['docs/AUDIT.md', 'audit.html', 'Audit'],
   ['bindings/README.md', 'bindings.html', 'Bindings'],
+  ['reference/README.md', 'reference.html', 'Reference nodes'],
   ['web/README.md', 'webguide.html', 'Web guide'],
 ];
 

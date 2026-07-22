@@ -38,6 +38,7 @@ Concrete artifacts that already carry the node, ranked by how little they assume
 | **Seed Sheet** (`web/spore-seedsheet.html`, printed) | a camera + patience | scan any ~K of N QR codes to recover the reimplementation guide; a torn sheet still works |
 | **Repo clone** | a Rust toolchain | build the daemon + all bridges + bindings, offline |
 | **The spec** (`docs/SPEC.md`) + by-hand examples | pen, paper, patience | reimplement a compatible node in any language |
+| **Pure-Python T0 node** (`reference/spore_t0.py`) | Python 3 | receive + verify public messages, no packages, no toolchain |
 | **An armored envelope** (`~S1.…~`) | a human who can type | inject one message into a node from paper or voice |
 
 The single-file node is the flagship: `node web/build-standalone.mjs` inlines the
@@ -149,8 +150,10 @@ What exists and what's next, from the fuller design discussion.
 - [ ] **Trust roots on paper** — maintainer keys and a mnemonic-encoded release
       hash you can carry in memory; multi-signature releases so no single custodian
       is a point of failure.
-- [ ] **Tiny reference decoders** — a hand-typeable pure-C / pure-Python / shell
-      "read + verify a message" node for machines without a Rust toolchain.
+- [x] **Tiny reference decoder** ([`reference/spore_t0.py`](../reference/)) — a
+      dependency-free pure-Python T0 node (parse + address + ID + Ed25519 verify)
+      for machines without a Rust toolchain, checked against the Rust vectors in
+      CI. Pure-C and shell ports are the natural next tiers.
 
 ## Help re-seed
 
