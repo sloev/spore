@@ -97,14 +97,14 @@ and microcontrollers need a thin platform layer over the *same* core.
 | **macOS** | ✅ | ✅ (std) | build + CI on macOS; only Linux is exercised here |
 | **Windows** | ✅ | ✅ (std) | build + CI; sockets/threads are `std`, so it should just compile |
 | **Android** | ✅ | ✅ (std) | cross-compile with the NDK; wrap the daemon in a foreground service; add WiFi-Direct/BLE bridges |
-| **Web / wasm** | ✅ *(now builds)* | ▢ | the core compiles to `wasm32` (getrandom `js` feature added); the multi-thread hub is native-only, so the browser needs a single-threaded event-loop driver + JS transports (below) |
+| **Web / wasm** | ✅ | ✅ *(node + hub + transports)* | ships in `web/`: `wasm32` build with a single import (getrandom `custom` backend, no wasm-bindgen), a node ABI (`src/wasm.rs`), and a JS `Hub` that relays across transports. Loopback and a real WebSocket relay are tested end-to-end in Node; WebRTC and Nostr transports are written |
 | **ESP32** | ◑ | ▢ | build under `esp-idf` (which provides `std`); implement one `DatagramTransport` for ESP-NOW/Wi-Fi. The generic driver + `Neighbors` are reused unchanged |
 
-**Web transports** (all thin JS shims feeding the same `Node::on_rx`, resolved by
-`Neighbors<U>`): WebRTC DataChannel, WebSocket, WebTransport (QUIC), HTTP bag,
-Web Serial/USB (drive a TNC), Web Bluetooth (GATT), ultrasonic (ggwave), QR
-camera, and Nostr relays. The Rust side is ready (core builds for wasm; the FFI
-exports the primitives); these are the per-transport browser adapters to write.
+**Web transports** (all thin JS shims: a `send(bytes)`/`receive(bytes)` pair over
+the browser's own API, dispatched by the JS `Hub`). Shipped and tested: WebSocket
+(browser + Node), loopback. Shipped, browser-only: WebRTC DataChannel, Nostr relays
+(kind-30078). Still to wrap, same shape: WebTransport (QUIC), Web Serial/USB (drive
+a TNC), Web Bluetooth (GATT), ultrasonic (ggwave), QR camera. See `web/README.md`.
 
 **The key point:** the medium-independent work — router, `Neighbors<U>`,
 fragmentation, the datagram driver — is all in the portable lib. Every remaining
@@ -118,7 +118,8 @@ above describe.
    loopback once a device is available. Cheap, catches the portability claims.
 2. **Split `lib.rs`** into `router.rs` / `crypto.rs` / `app.rs` like `bridge/`.
 3. **ESP32 crate** — the highest-value new platform; the driver makes it small.
-4. **Web adapters** — WebRTC + WebSocket first (they unlock browser-to-browser).
+4. **Web adapters** — WebSocket + WebRTC + Nostr ship in `web/` (loopback and a
+   WebSocket relay tested); next are WebTransport and Web Serial/Bluetooth.
 5. **Production hardening** — §10 quotas, chunk pinning, mix timing policy, KEYROT.
 
 Nothing here blocks using the reference as-is; these are the road from *reference*

@@ -54,11 +54,11 @@ connection, drop the neighbour on disconnect via `Neighbors::forget`) / null
 | Ham AX.25 | `String` | 256 | stateless | dgram | ◑ | KISS framer present; TNC runner |
 | DMR | `u32` | var | stateless | dgram | ▢ | IP-over-DMR |
 | Reticulum | `[u8;16]` | 500 | stateless | dgram | ▢ | RNS destination |
-| WebSocket | conn | 64 K | stateful | stream | ▢ | native + Web |
+| WebSocket | conn | 64 K | stateful | stream | ◑ | JS `web/transports/websocket.mjs`, tested; native shim TODO |
 | WebTransport | conn | var | stateful | stream | ▢ | Web (QUIC) |
-| WebRTC DataChannel | `String` | 16 K | stateful | stream | ▢ | Web / native, serverless signaling |
+| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless signaling |
 | Web Serial / USB | conn | var | stateful | stream | ▢ | drive a TNC from a browser tab |
-| Nostr | relay | var | stateless | store | ▢ | one event per envelope on relays |
+| Nostr | relay | var | stateless | store | ◑ | JS `web/transports/nostr.mjs` (kind-30078) |
 | ggwave / libquiet (audio) | `()` | 140/255 | null | dgram | ▢ | acoustic, sound card |
 | JANUS (sonar) | `u8` | 32 | stateless | dgram | ▢ | underwater acoustic |
 | QR stream | `()` | ~1 K | null | dgram | ◑ | armor present; camera/screen runner |
