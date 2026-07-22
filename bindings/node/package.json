@@ -1,0 +1,1 @@
+{ "name": "spore-binding", "version": "0.1.0", "private": true, "dependencies": { "koffi": "^2.9.0" } }

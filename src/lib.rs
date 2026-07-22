@@ -572,6 +572,33 @@ pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
         .ok()
 }
 
+/// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`
+/// (X25519, the same kind a `Node` rotates in its ANNOUNCE).
+pub fn prekey_keypair() -> ([u8; 32], [u8; 32]) {
+    let mut b = [0u8; 32];
+    OsRng.fill_bytes(&mut b);
+    let sec = crypto_box::SecretKey::from(b);
+    let pubk = *sec.public_key().as_bytes();
+    (b, pubk)
+}
+
+/// Open a sealed box (`seal`) with a prekey secret. Standalone twin of
+/// `Node::open`, for callers holding the secret directly (bindings, tests).
+pub fn open_sealed(sealed: &[u8], prekey_sec: &[u8; 32]) -> Option<Vec<u8>> {
+    use crypto_box::aead::{generic_array::GenericArray, Aead};
+    use crypto_box::{PublicKey, SalsaBox, SecretKey};
+    if sealed.len() < 32 {
+        return None;
+    }
+    let sec = SecretKey::from(*prekey_sec);
+    let recip_pub = *sec.public_key().as_bytes();
+    let mut ep = [0u8; 32];
+    ep.copy_from_slice(&sealed[..32]);
+    let eph_pub = PublicKey::from(ep);
+    let nonce = seal_nonce(&ep, &recip_pub);
+    SalsaBox::new(&eph_pub, &sec).decrypt(GenericArray::from_slice(&nonce), &sealed[32..]).ok()
+}
+
 // ---------------------------------------------------------------------------
 // The node: §5 router + §6 sync, glued together. Transports call `on_rx`.
 // ---------------------------------------------------------------------------
@@ -2394,6 +2421,9 @@ pub mod feed {
 // Bridges — SPORE rides everything (spec Page 2). See `src/bridge/` for the
 // per-medium modules; each only moves envelope bytes in and out of a `Node`.
 pub mod bridge;
+
+// C ABI for the Python / Go / JS wrappers under `bindings/`.
+pub mod ffi;
 
 // ===========================================================================
 // Tests

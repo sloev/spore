@@ -5,6 +5,12 @@ edition = "2021"
 description = "SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope: a reference implementation"
 license = "Unlicense"
 
+# `cdylib` builds libspore.{so,dylib,dll} exporting the C ABI in src/ffi.rs,
+# which the Python / Go / JS wrappers under bindings/ load. `lib` (rlib) keeps
+# the crate usable as a normal Rust dependency and by the binary.
+[lib]
+crate-type = ["lib", "cdylib"]
+
 [dependencies]
 ed25519-dalek = "=2.1.1"
 crypto_box = "0.9"

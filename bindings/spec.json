@@ -1,0 +1,21 @@
+{
+  "library": "spore",
+  "doc": "SPORE v1 core primitives, exposed over a C ABI (see src/ffi.rs).",
+  "note": "Hand-maintained to mirror src/ffi.rs. Types: bytes = (ptr,len) slice; in8/in16/in32 = fixed input pointer; out8/out16/out32 = fixed output pointer; u32 = uint32. Returns: void | bytes (owned buffer) | bool.",
+  "functions": [
+    {"name": "keypair", "ret": "void", "args": [{"n": "out_sk", "t": "out32"}, {"n": "out_pk", "t": "out32"}], "doc": "Generate an Ed25519 signing keypair (secret, public)."},
+    {"name": "prekey", "ret": "void", "args": [{"n": "out_sec", "t": "out32"}, {"n": "out_pub", "t": "out32"}], "doc": "Generate an X25519 encryption prekey pair (secret, public)."},
+    {"name": "addr_of", "ret": "void", "args": [{"n": "pk", "t": "in32"}, {"n": "out", "t": "out8"}], "doc": "SPORE address = SHA-256(pubkey)[..8]."},
+    {"name": "topic_of", "ret": "void", "args": [{"n": "s", "t": "bytes"}, {"n": "out", "t": "out8"}], "doc": "Topic address = SHA-256(utf8)[..8]."},
+    {"name": "seal", "ret": "bytes", "args": [{"n": "msg", "t": "bytes"}, {"n": "recip_prekey", "t": "in32"}], "doc": "Anonymous sealed box to a recipient prekey."},
+    {"name": "open", "ret": "bytes", "args": [{"n": "sealed", "t": "bytes"}, {"n": "prekey_sec", "t": "in32"}], "doc": "Open a sealed box with a prekey secret (None on failure)."},
+    {"name": "topic_seal", "ret": "bytes", "args": [{"n": "msg", "t": "bytes"}, {"n": "psk", "t": "in32"}], "doc": "Encrypt for a topic under a 32-byte pre-shared key."},
+    {"name": "topic_open", "ret": "bytes", "args": [{"n": "ct", "t": "bytes"}, {"n": "psk", "t": "in32"}], "doc": "Decrypt a topic payload (None on failure)."},
+    {"name": "armor_wrap", "ret": "bytes", "args": [{"n": "env", "t": "bytes"}], "doc": "Armor envelope bytes into ~S1.…~ text."},
+    {"name": "armor_unwrap", "ret": "bytes", "args": [{"n": "text", "t": "bytes"}], "doc": "Recover envelope bytes from armor (None if absent)."},
+    {"name": "message_new", "ret": "bytes", "args": [{"n": "sk", "t": "in32"}, {"n": "dest", "t": "in8"}, {"n": "expiry", "t": "u32"}, {"n": "payload", "t": "bytes"}], "doc": "Build and sign a DATA envelope; returns wire bytes."},
+    {"name": "message_verify", "ret": "bool", "args": [{"n": "wire", "t": "bytes"}], "doc": "Verify a signed envelope's signature."},
+    {"name": "message_id", "ret": "bool", "args": [{"n": "wire", "t": "bytes"}, {"n": "out", "t": "out16"}], "doc": "Envelope 16-byte content ID (None if it doesn't decode)."},
+    {"name": "message_payload", "ret": "bytes", "args": [{"n": "wire", "t": "bytes"}], "doc": "Extract an envelope's payload (None if it doesn't decode)."}
+  ]
+}
