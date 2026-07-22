@@ -127,9 +127,9 @@ What exists and what's next, from the fuller design discussion.
       (`docs/BRIDGES.md`).
 - [x] **Language bindings** — Python / Go / JS from one C ABI (`bindings/`).
 - [x] **This continuity guide** with cold-start playbooks.
-- [ ] **Reimplementation guide** — the wire format with worked-by-hand examples
-      (compute an address, verify a signature) so any language can rebuild a
-      compatible node from the spec alone.
+- [x] **Reimplementation guide** ([`REBUILD.md`](REBUILD.md)) — the wire format
+      with worked-by-hand examples (address, envelope bytes, signature, armor)
+      generated from the real code, so any language can rebuild a compatible node.
 - [ ] **Printable Seed Sheet & Codex** — the reference core on one two-sided A4,
       the full source as a hash-stamped booklet, with QR carrying the actual bytes.
 - [ ] **Fountain-coded print** — the source/manual as QR fragments where *any K of

@@ -31,6 +31,8 @@ jobs:
         run: cargo clippy --all-targets
       - name: Test
         run: cargo test --all-targets
+      - name: Worked examples (reimplementation guide reference values)
+        run: cargo run --example worked
 
   # The browser target: prove the core still compiles to wasm with its single
   # import, which the web/ node ABI and demo depend on.

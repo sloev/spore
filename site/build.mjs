@@ -20,6 +20,7 @@ const pages = [
   ['docs/SPEC.md', 'spec.html', 'Spec'],
   ['docs/DESIGN.md', 'design.html', 'Design'],
   ['docs/BRIDGES.md', 'bridges.html', 'Bridges'],
+  ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
   ['docs/AUDIT.md', 'audit.html', 'Audit'],
   ['bindings/README.md', 'bindings.html', 'Bindings'],
