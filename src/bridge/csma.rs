@@ -49,12 +49,8 @@ impl Csma {
     }
     /// IDs whose timer fired and weren't cancelled — transmit these now.
     pub fn ready(&mut self, now: u32) -> Vec<Id> {
-        let fired: Vec<Id> = self
-            .pending
-            .iter()
-            .filter(|(_, (at, _, _))| *at <= now)
-            .map(|(id, _)| *id)
-            .collect();
+        let fired: Vec<Id> =
+            self.pending.iter().filter(|(_, (at, _, _))| *at <= now).map(|(id, _)| *id).collect();
         let mut send = Vec::new();
         for id in fired {
             let (_, heard, cancel_at) = self.pending.remove(&id).unwrap();

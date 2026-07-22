@@ -1,0 +1,5 @@
+# Match the reference's compact, readable house style: a wider line budget and
+# "keep it on one line if it fits" heuristics, so struct literals and short
+# signatures don't explode into multi-line blocks.
+max_width = 110
+use_small_heuristics = "Max"

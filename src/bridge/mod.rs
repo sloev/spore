@@ -25,9 +25,9 @@ pub mod audio;
 pub mod ssb;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod store;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod foldersync;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod store;
 
 // Runner glue — one shared node, threads per bridge (native only).
 #[cfg(not(target_arch = "wasm32"))]

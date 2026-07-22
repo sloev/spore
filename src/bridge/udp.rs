@@ -61,7 +61,12 @@ pub const SPORE_LAN_PORT: u16 = 7373;
 /// is the zero-config default: it targets the exact network you're on rather
 /// than the blunt `255.255.255.255`, so it reaches every host on your subnet and
 /// plays nicely with multi-homed machines.
-pub fn run_primary(hub: Shared, iface: Iface, rx: Receiver<Forward>, port: Option<u16>) -> std::io::Result<()> {
+pub fn run_primary(
+    hub: Shared,
+    iface: Iface,
+    rx: Receiver<Forward>,
+    port: Option<u16>,
+) -> std::io::Result<()> {
     let port = port.unwrap_or(SPORE_LAN_PORT);
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_broadcast(true)?;
@@ -115,7 +120,7 @@ fn netmask_for(ip: Ipv4Addr) -> Option<Ipv4Addr> {
         }
         if (ip_be & mask) == dest {
             let plen = mask.count_ones();
-            if best.map_or(true, |(_, bp)| plen > bp) {
+            if best.is_none_or(|(_, bp)| plen > bp) {
                 best = Some((mask, plen));
             }
         }

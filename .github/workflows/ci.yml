@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings # warnings fail the build — keep it clean
+
+jobs:
+  # Build + test the library and daemon on every desktop OS. The core is plain
+  # std, so this proves the single-binary portability claim.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets
+      - name: Test
+        run: cargo test --all-targets
+
+  # The browser target: prove the core still compiles to wasm with its single
+  # import, which the web/ node ABI and demo depend on.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build wasm node
+        run: cargo build --release --lib --target wasm32-unknown-unknown
+      - name: Check the wasm has exactly one import
+        run: |
+          node -e '
+            const fs = require("fs");
+            const b = fs.readFileSync("target/wasm32-unknown-unknown/release/spore.wasm");
+            const imports = WebAssembly.Module.imports(new WebAssembly.Module(b));
+            console.log(JSON.stringify(imports));
+            if (imports.length !== 1 || imports[0].name !== "spore_fill_random") {
+              throw new Error("expected exactly one import env.spore_fill_random");
+            }
+          '
+      - name: Web loopback end-to-end test
+        run: node web/test.mjs

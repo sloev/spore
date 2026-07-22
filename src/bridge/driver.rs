@@ -16,6 +16,10 @@ use super::Neighbors;
 use crate::{Forward, Iface};
 use std::sync::mpsc::Receiver;
 
+/// One received frame: the envelope bytes and the underlay address it came from
+/// (`None` if the medium can't tell). `Ok(None)` means nothing was available.
+pub type Received<A> = std::io::Result<Option<(Vec<u8>, Option<A>)>>;
+
 /// A thin, platform-specific datagram medium. `Addr` (`U`) is however the medium
 /// names a peer: a `SocketAddr`, a 6-byte MAC, a Meshtastic `u32`, `()` for
 /// broadcast-only media, and so on.
@@ -27,7 +31,7 @@ pub trait DatagramTransport {
     /// (`None` if the medium can't tell — e.g. broadcast-only audio). Return
     /// `Ok(None)` on timeout / nothing available. Any medium-specific framing or
     /// decoding (protobuf, KISS, …) happens here.
-    fn recv(&mut self) -> std::io::Result<Option<(Vec<u8>, Option<Self::Addr>)>>;
+    fn recv(&mut self) -> Received<Self::Addr>;
 
     /// Transmit an envelope. `to == None` means broadcast to the whole medium;
     /// `Some(u)` means unicast to that underlay address. Medium-specific framing

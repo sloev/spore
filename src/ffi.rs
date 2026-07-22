@@ -135,7 +135,11 @@ pub unsafe extern "C" fn spore_seal(msg: *const u8, msg_len: usize, recip_prekey
 /// # Safety
 /// `sealed`/`sealed_len` describe the box; `prekey_sec` points to 32 bytes.
 #[no_mangle]
-pub unsafe extern "C" fn spore_open(sealed: *const u8, sealed_len: usize, prekey_sec: *const u8) -> SporeBytes {
+pub unsafe extern "C" fn spore_open(
+    sealed: *const u8,
+    sealed_len: usize,
+    prekey_sec: *const u8,
+) -> SporeBytes {
     SporeBytes::or_null(open_sealed(slice(sealed, sealed_len), &arr32(prekey_sec)))
 }
 
@@ -257,7 +261,8 @@ mod tests {
 
             // Build + verify a signed message.
             let payload = b"ffi hello";
-            let msg = spore_message_new(sk.as_ptr(), addr.as_ptr(), 1_700_000_000, payload.as_ptr(), payload.len());
+            let msg =
+                spore_message_new(sk.as_ptr(), addr.as_ptr(), 1_700_000_000, payload.as_ptr(), payload.len());
             let wire = std::slice::from_raw_parts(msg.data, msg.len);
             assert_eq!(spore_message_verify(wire.as_ptr(), wire.len()), 1);
             let got = spore_message_payload(wire.as_ptr(), wire.len());

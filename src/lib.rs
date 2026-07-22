@@ -210,7 +210,11 @@ impl Envelope {
         dest.copy_from_slice(&buf[8..16]);
         let mut off = 16;
         let need = |off: usize, n: usize| -> Result<(), Err> {
-            if off + n <= buf.len() { Ok(()) } else { std::result::Result::Err(Err::Short) }
+            if off + n <= buf.len() {
+                Ok(())
+            } else {
+                std::result::Result::Err(Err::Short)
+            }
         };
         let src = if flags & fl::SIGNED != 0 {
             if flags & fl::SRC8 != 0 {
@@ -289,7 +293,7 @@ pub fn fragment(
     orig_id: Id,
     indices: &[u8],
 ) -> Vec<Envelope> {
-    let count = (env_wire.len() + chunk - 1) / chunk;
+    let count = env_wire.len().div_ceil(chunk);
     assert!(count <= 255, "envelope too large for one fragment set");
     let mut padded = env_wire.to_vec();
     padded.resize(count * chunk, 0);
@@ -421,7 +425,7 @@ struct BitVec {
 }
 impl BitVec {
     fn zeros(len: usize) -> Self {
-        BitVec { words: vec![0u64; (len + 63) / 64] }
+        BitVec { words: vec![0u64; len.div_ceil(64)] }
     }
     fn unit(len: usize, i: usize) -> Self {
         let mut b = Self::zeros(len);
@@ -474,11 +478,7 @@ impl Paths {
         v.truncate(3); // keep up to 3 candidates
     }
     fn fresh(&self, a: &Addr, now: u32) -> Option<Path> {
-        self.map
-            .get(a)?
-            .iter()
-            .find(|p| now.saturating_sub(p.age) < PATH_FRESH_SECS)
-            .cloned()
+        self.map.get(a)?.iter().find(|p| now.saturating_sub(p.age) < PATH_FRESH_SECS).cloned()
     }
 }
 
@@ -534,9 +534,7 @@ pub fn seal(msg: &[u8], recip_prekey: &[u8; 32]) -> Vec<u8> {
     let eph_pub = eph.public_key();
     let their = PublicKey::from(*recip_prekey);
     let nonce = seal_nonce(eph_pub.as_bytes(), their.as_bytes());
-    let ct = SalsaBox::new(&their, &eph)
-        .encrypt(GenericArray::from_slice(&nonce), msg)
-        .expect("seal");
+    let ct = SalsaBox::new(&their, &eph).encrypt(GenericArray::from_slice(&nonce), msg).expect("seal");
     let mut out = Vec::with_capacity(32 + ct.len());
     out.extend_from_slice(eph_pub.as_bytes());
     out.extend_from_slice(&ct);
@@ -567,9 +565,7 @@ pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
     if ct.len() < 24 {
         return None;
     }
-    XChaCha20Poly1305::new(Key::from_slice(psk))
-        .decrypt(XNonce::from_slice(&ct[..24]), &ct[24..])
-        .ok()
+    XChaCha20Poly1305::new(Key::from_slice(psk)).decrypt(XNonce::from_slice(&ct[..24]), &ct[24..]).ok()
 }
 
 /// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`
@@ -629,7 +625,7 @@ pub struct Node {
     rpc_pending: HashSet<u64>,     // request ids awaiting a response (L4)
     rpc_responses: HashMap<u64, rpc::Response>,
     rpc_inbox: Vec<(Addr, u64, rpc::Request)>, // requests delivered to a service
-    feed_inbox: Vec<feed::Event>,  // feed events on subscribed topics (L5)
+    feed_inbox: Vec<feed::Event>,              // feed events on subscribed topics (L5)
 }
 
 struct Pending {
@@ -781,7 +777,7 @@ impl Node {
 
         // Too big for one envelope: fountain-fragment the signed wire form.
         let chunk = self.mtu.saturating_sub(FRAG_OVERHEAD).max(1);
-        let count = (wire.len() + chunk - 1) / chunk;
+        let count = wire.len().div_ceil(chunk);
         assert!(
             count <= 255,
             "object too large for one fountain set (~mtu×255); use the file/manifest layer"
@@ -964,7 +960,7 @@ impl Node {
         prekey.copy_from_slice(&e.payload[..32]);
         self.peer_prekeys.insert(src_addr, prekey);
         self.peer_busy.insert(src_addr, e.payload[32]); // §5.4c busy byte
-        // (topics/petname parsed here in a fuller build; omitted for brevity)
+                                                        // (topics/petname parsed here in a fuller build; omitted for brevity)
     }
 
     // ---- receive (the entire router, §5) --------------------------------
@@ -1049,11 +1045,7 @@ impl Node {
                         Src::Full(pk) => Some(addr_of(pk)),
                         _ => None,
                     };
-                    self.feed_inbox.push(feed::Event {
-                        topic: e.dest,
-                        from,
-                        data: e.payload[1..].to_vec(),
-                    });
+                    self.feed_inbox.push(feed::Event { topic: e.dest, from, data: e.payload[1..].to_vec() });
                 }
                 _ => {}
             }
@@ -1063,10 +1055,7 @@ impl Node {
         // addresses (never for topic/public floods).
         if e.typ == ty::DATA && self.addrs.contains(&e.dest) {
             // A receipt for something we sent -> record the delivery.
-            if e.flags & fl::ACKREQ == 0
-                && e.payload.first() == Some(&RECEIPT_TAG)
-                && e.payload.len() >= 17
-            {
+            if e.flags & fl::ACKREQ == 0 && e.payload.first() == Some(&RECEIPT_TAG) && e.payload.len() >= 17 {
                 let mut oid = [0u8; 16];
                 oid.copy_from_slice(&e.payload[1..17]);
                 self.acked.insert(oid);
@@ -1141,9 +1130,8 @@ impl Node {
         ids.sort_by(|a, b| b.1.expiry.cmp(&a.1.expiry)); // newest first
         let mut p = Vec::new();
         for (id, s) in ids {
-            let relevant = s.dest == ZERO_DEST
-                || peer_topics.contains(&s.dest)
-                || !self.topics.contains(&s.dest); // unicast -> carry (custody)
+            let relevant =
+                s.dest == ZERO_DEST || peer_topics.contains(&s.dest) || !self.topics.contains(&s.dest); // unicast -> carry (custody)
             if relevant {
                 p.extend_from_slice(id);
             }
@@ -1285,7 +1273,7 @@ impl Node {
     /// itself is pulled on demand (§6 custody / swarm), BitTorrent-style.
     pub fn publish_file(&mut self, name: &str, bytes: &[u8], dest: Addr, now: u32) -> (Id, Vec<Forward>) {
         let chunk_size = self.mtu.saturating_sub(64).max(1);
-        let count = ((bytes.len() + chunk_size - 1) / chunk_size).max(1);
+        let count = bytes.len().div_ceil(chunk_size).max(1);
         let expiry = now + 7 * 86400;
         let mut file_id = [0u8; 16];
         OsRng.fill_bytes(&mut file_id);
@@ -2240,7 +2228,13 @@ pub mod kiss {
                 continue;
             }
             if esc {
-                cur.push(if b == TFEND { FEND } else if b == TFESC { FESC } else { b });
+                cur.push(if b == TFEND {
+                    FEND
+                } else if b == TFESC {
+                    FESC
+                } else {
+                    b
+                });
                 esc = false;
             } else if b == FESC {
                 esc = true;
@@ -2486,7 +2480,7 @@ mod tests {
         let wire = e.wire();
         let id = e.id();
         let cs = 200usize;
-        let count = (wire.len() + cs - 1) / cs;
+        let count = wire.len().div_ceil(cs);
 
         // Emit data + plenty of repair, drop ~40% with a deterministic LCG.
         let indices: Vec<u8> = (0..(count as u8).saturating_add(60)).collect();
@@ -2910,8 +2904,8 @@ mod tests {
         // B receives it, delivers, and floods a signed receipt back.
         let brx = b.on_rx(&fwd_bytes(&fwds[0]), 0, Some(a.addr), now);
         assert!(brx.delivered.iter().any(|e| e.payload == b"confirm receipt"));
-        let receipt = brx.forwards.iter().find_map(|f| match f {
-            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => Some(bytes.clone()),
+        let receipt = brx.forwards.first().map(|f| match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
         });
         let receipt = receipt.expect("B emitted a receipt");
 

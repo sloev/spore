@@ -106,12 +106,7 @@ fn first_bytes(forwards: &[Forward]) -> Vec<u8> {
 fn sim() {
     println!("SPORE demo — line topology  A — B — C — D\n");
 
-    let mut w = World::line(&[
-        ("A", &["news"]),
-        ("B", &["news"]),
-        ("C", &["news"]),
-        ("D", &["news"]),
-    ]);
+    let mut w = World::line(&[("A", &["news"]), ("B", &["news"]), ("C", &["news"]), ("D", &["news"])]);
     let (a, d) = (w.idx("A"), w.idx("D"));
 
     // 1) Every node floods a signed ANNOUNCE -> seeds prekeys + paths.
@@ -123,9 +118,8 @@ fn sim() {
     }
     w.run(seeds);
     let d_addr = w.nodes[d].addr;
-    let known = (0..w.nodes.len())
-        .filter(|&i| i != a && w.nodes[a].peer_prekey(&w.nodes[i].addr).is_some())
-        .count();
+    let known =
+        (0..w.nodes.len()).filter(|&i| i != a && w.nodes[a].peer_prekey(&w.nodes[i].addr).is_some()).count();
     println!(
         "[1] ANNOUNCE round done. A learned {} peer prekeys; has D's prekey: {}",
         known,
@@ -137,7 +131,8 @@ fn sim() {
     let pf = w.nodes[a].originate(ZERO_DEST, b"the dam holds".to_vec(), NOW);
     let pub_id = Envelope::decode(&first_bytes(&pf)).unwrap().0.id();
     let del = w.run(pf.into_iter().map(|f| (a, f)).collect());
-    let who: Vec<&str> = del.iter().filter(|(_, e)| e.id() == pub_id).map(|(n, _)| w.names[*n].as_str()).collect();
+    let who: Vec<&str> =
+        del.iter().filter(|(_, e)| e.id() == pub_id).map(|(n, _)| w.names[*n].as_str()).collect();
     println!("[2] PUBLIC flood from A delivered to: {:?}  ({} flood sends)", who, w.floods);
 
     // 3) A seals to D's prekey and unicasts to D's address. Every node learned
@@ -155,12 +150,18 @@ fn sim() {
         .map(|(n, e)| (w.names[*n].as_str(), e.payload.clone()))
         .collect();
     let names_only: Vec<&str> = recipients.iter().map(|(n, _)| *n).collect();
-    println!("[3] SEALED unicast A->D delivered to: {:?}  ({} directed hops, {} floods)", names_only, w.directed, w.floods);
+    println!(
+        "[3] SEALED unicast A->D delivered to: {:?}  ({} directed hops, {} floods)",
+        names_only, w.directed, w.floods
+    );
 
     // D opens the sealed payload it received; nobody else can decrypt it.
     if let Some((_, sealed_payload)) = recipients.first() {
         let opened = w.nodes[d].open(sealed_payload);
-        println!("    D decrypts payload: {:?}", opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned()));
+        println!(
+            "    D decrypts payload: {:?}",
+            opened.as_deref().map(|b| String::from_utf8_lossy(b).into_owned())
+        );
     }
 
     // 4) High-level send(): one call moves a 6 KB object the caller never had
@@ -173,12 +174,7 @@ fn sim() {
     let del = w.run(sf.into_iter().map(|f| (a, f)).collect());
     let got: Vec<&str> =
         del.iter().filter(|(_, e)| e.payload == big).map(|(n, _)| w.names[*n].as_str()).collect();
-    println!(
-        "[4] SEND {} B object -> {} fragments; reassembled + verified by: {:?}",
-        big.len(),
-        chunks,
-        got
-    );
+    println!("[4] SEND {} B object -> {} fragments; reassembled + verified by: {:?}", big.len(), chunks, got);
 
     // 5) Fountain over a 40%-loss ONE-WAY link (no feedback): S -> R.
     fountain_demo();
@@ -234,10 +230,7 @@ fn sim() {
     let hops = [(w.nodes[bx].addr, b_pk), (w.nodes[cx].addr, c_pk)];
     let onion = mix::onion_wrap(&inner, &hops, NOW + 3600).unwrap();
     let del = w.run(vec![(a, Forward::Flood { except: NO_IFACE, bytes: onion.wire() })]);
-    let opened = del
-        .iter()
-        .filter(|(n, _)| *n == d)
-        .find_map(|(_, e)| w.nodes[d].open(&e.payload));
+    let opened = del.iter().filter(|(n, _)| *n == d).find_map(|(_, e)| w.nodes[d].open(&e.payload));
     println!(
         "[8] MIX onion A~>D via {} mixes (B,C): D opens {:?}",
         hops.len(),
@@ -303,7 +296,7 @@ fn fountain_demo() {
     let id = Envelope::decode(&wire).unwrap().0.id();
 
     let cs = 200usize;
-    let count = (wire.len() + cs - 1) / cs;
+    let count = wire.len().div_ceil(cs);
     let indices: Vec<u8> = (0..(count as u8 + 60)).collect(); // data + repair chunks
     let frags = fragment(&wire, cs, 16, NOW + 7 * 86400, ZERO_DEST, id, &indices);
 
@@ -448,7 +441,9 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
         let (k, v) = (k.trim(), v.trim());
         match k {
             "udp" => Ok(Spec::Udp(v.parse().map_err(|_| format!("bad udp port `{v}`"))?)),
-            "broadcast" | "lan" => Ok(Spec::Broadcast(Some(v.parse().map_err(|_| format!("bad broadcast port `{v}`"))?))),
+            "broadcast" | "lan" => {
+                Ok(Spec::Broadcast(Some(v.parse().map_err(|_| format!("bad broadcast port `{v}`"))?)))
+            }
             "tcp" => Ok(Spec::Tcp(if v.is_empty() { None } else { Some(v.to_string()) })),
             "folder" if !v.is_empty() => Ok(Spec::Folder(v.into())),
             "folder" => Err("`folder:` needs a path".into()),
