@@ -1577,6 +1577,10 @@ pub mod rpc;
 
 pub mod feed;
 
+// §7 KEYROT — encrypted-topic key rotation (forward-secret ratchet + membership
+// rekey), built on the `topic_seal`/`seal` primitives above.
+pub mod topic;
+
 // Bridges — SPORE rides everything (spec Page 2). See `src/bridge/` for the
 // per-medium modules; each only moves envelope bytes in and out of a `Node`.
 pub mod bridge;
