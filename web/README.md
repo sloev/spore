@@ -105,3 +105,10 @@ node ws-test.mjs        # real WebSocket relay: A -> relay -> B
 Both print an `OK` line. `test.mjs` needs nothing but Node (it runs the wasm);
 `ws-test.mjs` stands up a throwaway `ws` relay on a random port and sends a signed
 message through it.
+
+## One-file node
+
+`node build-standalone.mjs` inlines the wasm and every script into a single
+`spore-standalone.html` — a complete node that runs from a `file://` path, a USB
+stick, or an email attachment, making **zero network requests**. It's the smallest
+"a whole node in one file" seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).

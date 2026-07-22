@@ -66,6 +66,11 @@ jobs:
           cp web/demo.html _site/demo/index.html
           cp target/wasm32-unknown-unknown/release/spore.wasm _site/demo/spore.wasm
 
+      - name: Build the single-file node (seed)
+        run: |
+          node web/build-standalone.mjs
+          cp web/spore-standalone.html _site/spore-standalone.html
+
       - name: Add .nojekyll
         run: touch _site/.nojekyll
 

@@ -57,3 +57,14 @@ jobs:
           '
       - name: Web loopback end-to-end test
         run: node web/test.mjs
+
+      - name: Build + verify the single-file node is self-contained
+        run: |
+          node web/build-standalone.mjs
+          # No external module imports and no remote asset references may remain.
+          if grep -nE '^\s*(import|export) ' web/spore-standalone.html; then
+            echo "standalone has live import/export statements"; exit 1
+          fi
+          if grep -nE '(src|href)="https?://' web/spore-standalone.html; then
+            echo "standalone references a remote asset"; exit 1
+          fi

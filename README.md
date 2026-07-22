@@ -323,6 +323,7 @@ channel or add the channel key.
 | `web/`          | the browser stack: wasm node, JS hub + transports, and a [live demo](web/demo.html) |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/BRIDGES.md` | every medium SPORE can ride (grouped matrix) and how each maps to the model |
+| `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
 | `docs/AUDIT.md` | full audit / review + the per-platform daemon status |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 
