@@ -23,10 +23,11 @@ rand = "0.8"
 zeroize = "=1.7.0"
 base64ct = "=1.6.0"
 
-# On the web (wasm32) getrandom needs its JS backend for OsRng to work.
-# Native targets are unaffected. This is what lets the core compile for browsers.
+# On the web (wasm32) OsRng needs a randomness source. We use getrandom's
+# `custom` backend and route it to a JS import (`spore_fill_random`) so the wasm
+# stays wasm-bindgen-free and instantiable with plain WebAssembly. See src/wasm.rs.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.2", features = ["custom"] }
 
 [profile.release]
 opt-level = 2

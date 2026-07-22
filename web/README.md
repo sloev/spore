@@ -1,0 +1,107 @@
+# SPORE in the browser
+
+The same SPORE node that runs on a laptop or an ESP32 also runs in a web page. The
+Rust core is compiled to a small WebAssembly module, and a thin JavaScript layer
+turns whatever the browser can talk over — a WebSocket, a WebRTC data channel, a
+Nostr relay — into a SPORE link. A page becomes a full peer: it signs its own
+messages, relays other people's, and needs no server of its own.
+
+```js
+import { loadSpore, Hub, ZERO_DEST } from './spore.mjs';
+import { WebSocketTransport } from './transports/websocket.mjs';
+
+const spore = await loadSpore(fetch('./spore.wasm'));
+const hub = new Hub(spore.newNode());
+hub.onDeliver = (env) => console.log('got:', new TextDecoder().decode(spore.payload(env)));
+
+hub.addTransport(new WebSocketTransport('wss://relay.example/spore'));
+hub.send(ZERO_DEST, new TextEncoder().encode('hello mesh'));
+```
+
+That's the whole surface: **load** the wasm, make a **node**, wrap it in a **hub**,
+and **attach transports**. The hub is the browser twin of the Rust daemon's bridge
+hub — a frame that arrives on one transport is fed to the router and its forwards
+are relayed onto all the others.
+
+<details>
+<summary>Deep dive — how the wasm and the hub fit together</summary>
+
+**No wasm-bindgen.** `spore.wasm` is a plain `wasm32-unknown-unknown` build with
+exactly **one import**: `env.spore_fill_random(ptr, len)`. `loadSpore` supplies it
+by calling `crypto.getRandomValues` over the module's own memory. On the Rust side
+this is wired with getrandom's `custom` backend (`register_custom_getrandom!`), so
+the whole crypto stack (ed25519, x25519, ChaCha20-Poly1305, blake2, sha2) runs
+unchanged in the browser. You can confirm the single import with
+`WebAssembly.Module.imports(new WebAssembly.Module(bytes))`.
+
+**Calling convention.** Rust hands variable-length results back as one `i64` that
+packs a pointer and length: `(ptr << 32) | len`. JS reads the two halves with
+`BigInt.asUintN(64, …)`, copies the bytes out of wasm memory, then calls
+`spore_free`. Buffers going *in* are written into memory obtained from
+`spore_alloc`. All of this is hidden inside `spore.mjs` — you only ever see
+`Uint8Array`s.
+
+**The node ABI** (`src/wasm.rs`) exposes: `spore_node_new/free`, `spore_node_addr`,
+`spore_node_subscribe`, `spore_node_send(dest, payload, now)` and
+`spore_node_recv(bytes, now)`. The two hot calls return a packed blob of two lists —
+`{ forwards, delivered }` — where *forwards* are envelopes to relay onward and
+*delivered* are envelopes addressed to (or subscribed by) this node. `spore.mjs`
+parses that blob back into arrays of `Uint8Array`.
+
+**The Hub** owns one node and N transports. On `addTransport(t)` it replaces
+`t.receive` so inbound frames route through `node.recv`; deliveries fire
+`onDeliver`, and forwards are `send()` onto every *other* transport (split-horizon).
+`hub.send(dest, payload)` originates a message from this node onto all transports.
+</details>
+
+## Transports
+
+A transport is any object with a `send(bytes)` method that calls `receive(bytes)`
+when a frame arrives. Four are included; writing your own is a dozen lines.
+
+| Transport | File | Use |
+|---|---|---|
+| **WebSocket** | `transports/websocket.mjs` | relay or direct peer; works in browser and Node 22+ |
+| **WebRTC** | `transports/webrtc.mjs` | direct browser-to-browser once signaled; no server after connect |
+| **Nostr** | `transports/nostr.mjs` | any Nostr relay becomes a SPORE bag (kind-30078, tag `spore-v1`) |
+| **Loopback** | `transports/loopback.mjs` | in-memory link between two hubs, for tests and demos |
+
+<details>
+<summary>Deep dive — writing a transport, and the ones you'd add next</summary>
+
+The base class is trivial:
+
+```js
+import { Transport } from './spore.mjs';
+export class MyTransport extends Transport {
+  send(bytes) { /* put bytes on the wire */ }
+  // call this.receive(bytes) whenever a frame comes back
+}
+```
+
+`send` may be async and should queue while the underlying channel is still opening
+(the WebSocket and WebRTC transports show the pattern). Frames are whole SPORE
+envelopes — one per message; don't split or concatenate them.
+
+Browser media not yet wrapped but that fit the same shape: **WebTransport** (QUIC
+datagrams — closest match to SPORE's datagram model), **Web Bluetooth** and
+**Web Serial** (talk to a physical LoRa/ESP32 node from the page), and
+**WebSockets to a KISS/TNC bridge** for ham radio. Each is a `send`/`receive` pair
+over its own API; the hub and node above don't change.
+</details>
+
+## Run the tests
+
+```sh
+# build the wasm the JS loads
+cargo build --release --lib --target wasm32-unknown-unknown
+
+cd web
+node test.mjs           # loopback: two hubs, one link, publish + verify
+npm install             # pulls `ws` for the next one
+node ws-test.mjs        # real WebSocket relay: A -> relay -> B
+```
+
+Both print an `OK` line. `test.mjs` needs nothing but Node (it runs the wasm);
+`ws-test.mjs` stands up a throwaway `ws` relay on a random port and sends a signed
+message through it.

@@ -2425,6 +2425,10 @@ pub mod bridge;
 // C ABI for the Python / Go / JS wrappers under `bindings/`.
 pub mod ffi;
 
+// Browser node ABI (wasm32) for the JS transports under `web/`.
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
 // ===========================================================================
 // Tests
 // ===========================================================================

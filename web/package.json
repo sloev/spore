@@ -1,0 +1,1 @@
+{ "name": "spore-web", "type": "module", "private": true, "dependencies": { "ws": "^8.18.0" } }
