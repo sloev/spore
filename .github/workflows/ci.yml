@@ -70,3 +70,11 @@ jobs:
           if grep -nE '(src|href)="https?://' web/spore-standalone.html; then
             echo "standalone references a remote asset"; exit 1
           fi
+
+      - name: Seed Sheet — fountain code + full decode round-trip
+        working-directory: site
+        run: |
+          npm install --no-audit --no-fund
+          node seed/fountain.test.mjs
+          node seed/seedsheet.test.mjs
+          node seed/build-seedsheet.mjs

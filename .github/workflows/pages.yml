@@ -71,6 +71,12 @@ jobs:
           node web/build-standalone.mjs
           cp web/spore-standalone.html _site/spore-standalone.html
 
+      - name: Build the printable Seed Sheet (fountain-coded QR)
+        working-directory: site
+        run: |
+          node seed/build-seedsheet.mjs
+          cp ../web/spore-seedsheet.html ../_site/spore-seedsheet.html
+
       - name: Add .nojekyll
         run: touch _site/.nojekyll
 

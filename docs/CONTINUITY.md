@@ -35,6 +35,7 @@ Concrete artifacts that already carry the node, ranked by how little they assume
 | Seed | Assumes | Gets you |
 |---|---|---|
 | **Single-file HTML node** (`web/spore-standalone.html`) | a browser | a full node, offline, from one file — no install, no network |
+| **Seed Sheet** (`web/spore-seedsheet.html`, printed) | a camera + patience | scan any ~K of N QR codes to recover the reimplementation guide; a torn sheet still works |
 | **Repo clone** | a Rust toolchain | build the daemon + all bridges + bindings, offline |
 | **The spec** (`docs/SPEC.md`) + by-hand examples | pen, paper, patience | reimplement a compatible node in any language |
 | **An armored envelope** (`~S1.…~`) | a human who can type | inject one message into a node from paper or voice |
@@ -52,6 +53,9 @@ re-serialize itself ("Download a copy"), so one seed makes the next.
 # Single-file browser node (needs the wasm first):
 cargo build --release --lib --target wasm32-unknown-unknown
 node web/build-standalone.mjs          # -> web/spore-standalone.html
+
+# Printable, fountain-coded Seed Sheet (any ~K of N QR codes rebuild it):
+cd site && npm install && node seed/build-seedsheet.mjs   # -> web/spore-seedsheet.html
 
 # The daemon and everything else:
 cargo build --release                  # -> target/release/spore
@@ -130,10 +134,15 @@ What exists and what's next, from the fuller design discussion.
 - [x] **Reimplementation guide** ([`REBUILD.md`](REBUILD.md)) — the wire format
       with worked-by-hand examples (address, envelope bytes, signature, armor)
       generated from the real code, so any language can rebuild a compatible node.
-- [ ] **Printable Seed Sheet & Codex** — the reference core on one two-sided A4,
-      the full source as a hash-stamped booklet, with QR carrying the actual bytes.
-- [ ] **Fountain-coded print** — the source/manual as QR fragments where *any K of
-      N* reconstruct the whole; a torn printout still rebuilds.
+- [x] **Printable Seed Sheet** (`site/seed/build-seedsheet.mjs`) — a two-sided A4:
+      the wire format by hand on one side, the full reimplementation guide as
+      fountain-coded QR on the other, with the payload's SHA-256 printed on it.
+- [x] **Fountain-coded print** — a random-linear code over GF(256)
+      (`site/seed/fountain.mjs`, the paper twin of §3) where *any ~K of N* QR codes
+      reconstruct the whole; a reference decoder (`decode-seedsheet.mjs`) and a
+      full drop-a-third round-trip test ship with it.
+- [ ] **Codex** — the complete source as a hash-stamped booklet (the Seed Sheet
+      scaled up), for machines with no toolchain to retype or rescan from.
 - [ ] **The network carries its own genome** — a well-known bootstrap-bundle magnet
       (source + binaries + this manual), signed self-update over the mesh, and
       opt-in seed-vault nodes that pin it and never evict it.
