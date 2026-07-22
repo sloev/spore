@@ -20,6 +20,10 @@ pub use neighbors::Neighbors;
 
 pub mod meshtastic;
 
+// Portable codecs (also compile to wasm for browser bridges).
+pub mod audio;
+pub mod ssb;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod store;
 #[cfg(not(target_arch = "wasm32"))]

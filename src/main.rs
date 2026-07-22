@@ -343,12 +343,15 @@ fn fountain_demo() {
 //   petname: riverside
 //   topics: [news, weather]
 //   bridges:
-//     - udp
+//     - broadcast          # zero-config: the primary subnet's own broadcast
+//     - udp                # or the plain 255.255.255.255 limited broadcast
 //     - folder: ./bag
 //     - folder: /mnt/usb/spore
 //     - tcp: 10.0.0.5:7373
 //     - meshtastic
 //     - http: 8088
+//     - audio              # data-over-sound (f32 PCM on stdin/stdout)
+//     - ssb: ./ssb-log     # Secure Scuttlebutt append-only log folder
 //
 // The runners live in `spore::bridge::{udp,tcp,store,meshtastic,bag}`; this file
 // only parses the config and wires them onto one node.
@@ -357,10 +360,13 @@ fn fountain_demo() {
 #[cfg(not(target_arch = "wasm32"))]
 enum Spec {
     Udp(u16),
+    Broadcast(Option<u16>),
     Tcp(Option<String>),
     Folder(std::path::PathBuf),
     Meshtastic,
     Http(u16),
+    Audio,
+    Ssb(std::path::PathBuf),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -442,19 +448,25 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
         let (k, v) = (k.trim(), v.trim());
         match k {
             "udp" => Ok(Spec::Udp(v.parse().map_err(|_| format!("bad udp port `{v}`"))?)),
+            "broadcast" | "lan" => Ok(Spec::Broadcast(Some(v.parse().map_err(|_| format!("bad broadcast port `{v}`"))?))),
             "tcp" => Ok(Spec::Tcp(if v.is_empty() { None } else { Some(v.to_string()) })),
             "folder" if !v.is_empty() => Ok(Spec::Folder(v.into())),
             "folder" => Err("`folder:` needs a path".into()),
             "http" => Ok(Spec::Http(v.parse().map_err(|_| format!("bad http port `{v}`"))?)),
+            "ssb" if !v.is_empty() => Ok(Spec::Ssb(v.into())),
+            "ssb" => Err("`ssb:` needs a log directory".into()),
             other => Err(format!("unknown bridge `{other}`")),
         }
     } else {
         match s {
             "udp" => Ok(Spec::Udp(7373)),
+            "broadcast" | "lan" => Ok(Spec::Broadcast(None)),
             "tcp" => Ok(Spec::Tcp(None)),
             "meshtastic" | "mesh" => Ok(Spec::Meshtastic),
             "http" => Ok(Spec::Http(7373)),
+            "audio" | "sound" => Ok(Spec::Audio),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
+            "ssb" => Err("`ssb` needs a log directory (ssb: DIR)".into()),
             other => Err(format!("unknown bridge `{other}`")),
         }
     }
@@ -503,6 +515,14 @@ fn run_config(cfg: Config) {
                     }
                 })
             }
+            Spec::Broadcast(port) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::udp::run_primary(h, iface, rx, port) {
+                        eprintln!("  [udp] {e}");
+                    }
+                })
+            }
             Spec::Tcp(target) => {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
@@ -532,6 +552,22 @@ fn run_config(cfg: Config) {
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::bag::run_http(h, iface, port) {
                         eprintln!("  [http] {e}");
+                    }
+                })
+            }
+            Spec::Audio => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::audio::run_pipe(h, iface, rx) {
+                        eprintln!("  [audio] {e}");
+                    }
+                })
+            }
+            Spec::Ssb(dir) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::ssb::run(h, iface, rx, dir) {
+                        eprintln!("  [ssb] {e}");
                     }
                 })
             }
