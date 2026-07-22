@@ -35,6 +35,11 @@ pub const PATH_FRESH_SECS: u32 = 3 * 3600;
 /// fragment. Transports over tighter media (LoRa ~200 B, ESP-NOW 250 B) lower
 /// `Node::mtu`; the router itself is MTU-agnostic.
 pub const DEFAULT_MTU: usize = 1400;
+/// Default per-source flood quota (§10): the sustained bytes/second any one
+/// originating address may have a node store and relay. Generous enough that
+/// legitimate traffic never notices; a safety valve against amplification abuse.
+/// Stamped (proof-of-work) mail bypasses it. Tune with `Node::set_source_quota`.
+pub const DEFAULT_SOURCE_QUOTA: u32 = 1024 * 1024;
 /// Bytes a fragment envelope adds around its chunk: 16 header + 2 plen +
 /// 16 orig_id + 1 index + 1 count. `chunk = mtu - FRAG_OVERHEAD`.
 const FRAG_OVERHEAD: usize = 36;
@@ -626,6 +631,7 @@ pub struct Node {
     rpc_responses: HashMap<u64, rpc::Response>,
     rpc_inbox: Vec<(Addr, u64, rpc::Request)>, // requests delivered to a service
     feed_inbox: Vec<feed::Event>,              // feed events on subscribed topics (L5)
+    quotas: congestion::Quotas,                // per-source flood quota (§10)
 }
 
 struct Pending {
@@ -671,7 +677,23 @@ impl Node {
             rpc_responses: HashMap::new(),
             rpc_inbox: Vec::new(),
             feed_inbox: Vec::new(),
+            quotas: congestion::Quotas::new(DEFAULT_SOURCE_QUOTA),
         }
+    }
+
+    /// Set the per-source flood quota (§10): the sustained bytes/second any single
+    /// originating address may have this node store and relay. Stamped mail
+    /// bypasses it. Defaults to [`DEFAULT_SOURCE_QUOTA`].
+    pub fn set_source_quota(&mut self, bytes_per_sec: u32) {
+        self.quotas = congestion::Quotas::new(bytes_per_sec);
+    }
+
+    /// Set the store's byte budget. When exceeded, low-priority envelopes are
+    /// evicted (lowest stamp → largest → oldest), but chunks of a file still being
+    /// assembled are pinned and never dropped. Defaults to 10 MiB.
+    pub fn set_store_budget(&mut self, bytes: usize) {
+        self.max_store_bytes = bytes.max(1);
+        self.enforce_budget();
     }
 
     pub fn peer_prekey(&self, a: &Addr) -> Option<[u8; 32]> {
@@ -705,11 +727,19 @@ impl Node {
     }
     fn enforce_budget(&mut self) {
         let mut total: usize = self.store.values().map(|s| s.wire.len()).sum();
+        if total <= self.max_store_bytes {
+            return;
+        }
+        // Pin the chunks (and manifest) of any file we're still assembling, so
+        // memory pressure never drops a chunk we're actively collecting and
+        // stalls the fetch forever. Completed files are unpinned and evictable.
+        let pinned = self.pinned_ids();
         // evict order: lowest stamp -> largest -> oldest (smallest seq)
         while total > self.max_store_bytes {
             let victim = self
                 .store
                 .iter()
+                .filter(|(k, _)| !pinned.contains(*k))
                 .min_by(|a, b| {
                     a.1.stamp
                         .cmp(&b.1.stamp)
@@ -722,9 +752,27 @@ impl Node {
                     total -= self.store[&k].wire.len();
                     self.store.remove(&k);
                 }
-                None => break,
+                None => break, // only in-progress file chunks remain — keep them
             }
         }
+    }
+
+    /// Content IDs that must not be evicted: the manifest and already-collected
+    /// chunks of every file we hold a manifest for but haven't completed yet.
+    fn pinned_ids(&self) -> HashSet<Id> {
+        let mut pinned = HashSet::new();
+        for (magnet, m) in &self.manifests {
+            if self.has_file(magnet) {
+                continue; // complete — its chunks may be evicted/re-fetched
+            }
+            pinned.insert(*magnet);
+            for c in &m.chunk_ids {
+                if self.store.contains_key(c) {
+                    pinned.insert(*c);
+                }
+            }
+        }
+        pinned
     }
 
     /// Originate a signed public (flooded) message on topic/broadcast `dest`.
@@ -1003,6 +1051,19 @@ impl Node {
             }
         }
 
+        // Per-source flood quota (§10): charge this envelope against its origin's
+        // byte budget. Over budget, we still deliver it locally if it's for us,
+        // but we do not amplify it — no reassembly hoarding, no store, no relay.
+        let src_addr = match &e.src {
+            Src::Full(pk) => Some(addr_of(pk)),
+            Src::Short(a) => Some(*a),
+            Src::None => None,
+        };
+        let within_quota = match src_addr {
+            Some(a) => self.quotas.admit(a, e.wire().len() as u32, e.stamp(), now),
+            None => true, // unattributable frames: dedup/expiry already bound them
+        };
+
         let mut rx = Rx::default();
 
         if e.typ == ty::ANNOUNCE {
@@ -1078,8 +1139,9 @@ impl Node {
         }
 
         // Reassemble only objects bound for us; a pure relay just forwards the
-        // fragments (each is an ordinary envelope) without hoarding chunks.
-        if deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
+        // fragments (each is an ordinary envelope) without hoarding chunks. A
+        // source over its quota can't make us hoard its chunks either.
+        if within_quota && deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
             let mut oid = [0u8; 16];
             oid.copy_from_slice(&e.payload[..16]);
             let idx = e.payload[16];
@@ -1095,14 +1157,18 @@ impl Node {
             }
         }
 
-        // Store for later opportunistic sync.
-        self.store_put(e);
+        // Store + relay only within the source's quota — this is the mesh-load
+        // that §10 caps. Local delivery above already happened regardless.
+        if within_quota {
+            // Store for later opportunistic sync.
+            self.store_put(e);
 
-        // Relay.
-        if allow_forward && e.hops > 0 {
-            let mut f = e.clone();
-            f.hops -= 1;
-            rx.forwards.append(&mut self.forward_intents(&f, iface, now));
+            // Relay.
+            if allow_forward && e.hops > 0 {
+                let mut f = e.clone();
+                f.hops -= 1;
+                rx.forwards.append(&mut self.forward_intents(&f, iface, now));
+            }
         }
         rx
     }
@@ -1975,6 +2041,8 @@ pub mod mix {
 // ---------------------------------------------------------------------------
 
 pub mod congestion {
+    use super::{Addr, HashMap};
+
     /// (d) Exponential backoff for FLOOD retransmits: 30 s, doubling each try,
     /// capped at 1 h, at most `MAX` attempts (§5.4d, §5.6).
     pub struct Backoff {
@@ -2062,6 +2130,50 @@ pub mod congestion {
                 true
             } else {
                 false
+            }
+        }
+        /// When this bucket last spent tokens — used to evict idle sources.
+        pub fn last_active(&self) -> u32 {
+            self.last
+        }
+    }
+
+    /// (d) Per-source quotas (§10): a token bucket *per originating address* so no
+    /// single node can flood the mesh beyond a sustained byte rate. A relay charges
+    /// each signed envelope against its source's bucket before storing/forwarding
+    /// it; over-budget traffic is dropped (still delivered locally if it's for us).
+    /// Stamped (proof-of-work) mail bypasses the quota, matching `admit`.
+    pub struct Quotas {
+        rate: u32,
+        max_sources: usize,
+        per_src: HashMap<Addr, TokenBucket>,
+    }
+    impl Quotas {
+        /// `rate_bytes_per_sec` is the sustained budget allowed to each source.
+        pub fn new(rate_bytes_per_sec: u32) -> Self {
+            Quotas { rate: rate_bytes_per_sec, max_sources: 4096, per_src: HashMap::new() }
+        }
+        /// Charge `bytes` from `src`'s budget; `true` if within quota. `stamp > 0`
+        /// (proof-of-work) always passes.
+        pub fn admit(&mut self, src: Addr, bytes: u32, stamp: u8, now: u32) -> bool {
+            if stamp > 0 {
+                return true;
+            }
+            if self.per_src.len() >= self.max_sources && !self.per_src.contains_key(&src) {
+                self.evict_oldest();
+            }
+            let rate = self.rate;
+            self.per_src.entry(src).or_insert_with(|| TokenBucket::new(rate)).allow(bytes, now)
+        }
+        /// Number of sources currently tracked.
+        pub fn tracked(&self) -> usize {
+            self.per_src.len()
+        }
+        // Drop the least-recently-active source so the table can't grow without
+        // bound under a spray of forged/one-off source addresses.
+        fn evict_oldest(&mut self) {
+            if let Some(k) = self.per_src.iter().min_by_key(|(_, b)| b.last_active()).map(|(k, _)| *k) {
+                self.per_src.remove(&k);
             }
         }
     }
@@ -2630,6 +2742,76 @@ mod tests {
         for f in b.build_announce(now) {
             a.on_rx(&fwd_bytes(&f), 0, Some(b.addr), now);
         }
+    }
+
+    #[test]
+    fn in_progress_file_chunks_are_pinned_under_memory_pressure() {
+        let now = 1_700_000_000;
+        let mut src = Node::new("src", &[]);
+        let file: Vec<u8> = (0..4000u32).map(|i| (i.wrapping_mul(7)) as u8).collect();
+        let (magnet, _mf) = src.publish_file("f.bin", &file, ZERO_DEST, now);
+
+        // Pull the manifest wire and the chunk wires straight out of src's store.
+        let mut manifest_wire = Vec::new();
+        let mut chunk_wires: Vec<Vec<u8>> = Vec::new();
+        for (_, w) in src.store_wires() {
+            let (e, _) = Envelope::decode(&w).unwrap();
+            match e.payload.first() {
+                Some(&file::MANIFEST_TAG) => manifest_wire = w,
+                Some(&file::CHUNK_TAG) => chunk_wires.push(w),
+                _ => {}
+            }
+        }
+        assert!(chunk_wires.len() >= 3, "multi-chunk file for the test");
+
+        let chunk0_id = Envelope::decode(&chunk_wires[0]).unwrap().0.id();
+        let in_store = |n: &Node, id: &Id| n.store_wires().iter().any(|(k, _)| k == id);
+
+        // Receiver with a tiny store budget learns the manifest and one chunk,
+        // leaving the file in-progress.
+        let mut rx = Node::new("rx", &[]);
+        rx.set_store_budget(2000);
+        rx.on_rx(&manifest_wire, 0, None, now);
+        rx.on_rx(&chunk_wires[0], 0, None, now);
+
+        // Hammer the store with junk floods from many sources to force eviction.
+        // The junk envelopes are smaller than the chunk, so a size-first eviction
+        // policy would drop the chunk first — pinning is what protects it.
+        for _ in 0..150 {
+            let mut j = Node::new("j", &[]);
+            let f = j.originate(ZERO_DEST, vec![0xEE; 240], now);
+            rx.on_rx(&fwd_bytes(&f[0]), 0, Some(j.addr), now);
+        }
+        assert!(in_store(&rx, &chunk0_id), "the in-progress chunk was pinned through the storm");
+
+        // With room to hold the whole file, delivering the rest reassembles it.
+        rx.set_store_budget(10 * 1024 * 1024);
+        for w in &chunk_wires[1..] {
+            rx.on_rx(w, 0, None, now);
+        }
+        assert_eq!(rx.file_bytes(&magnet).as_deref(), Some(&file[..]), "pinned chunks reassemble");
+    }
+
+    #[test]
+    fn source_quota_throttles_a_flooder() {
+        let now = 1_700_000_000;
+        let mut src = Node::new("S", &[]);
+        let mut relay = Node::new("R", &[]);
+        relay.set_source_quota(500); // tiny sustained budget for this source
+
+        // S sprays 40 distinct public floods at the same instant. The token
+        // bucket lets a burst through, then R stops storing and relaying S's
+        // traffic — the flooder is capped well below the 40 it sent.
+        let mut forwarded = 0;
+        for i in 0..40u32 {
+            let f = src.originate(ZERO_DEST, vec![i as u8; 200], now);
+            let rx = relay.on_rx(&fwd_bytes(&f[0]), 0, Some(src.addr), now);
+            if !rx.forwards.is_empty() {
+                forwarded += 1;
+            }
+        }
+        assert!(forwarded >= 1, "the first envelopes fit the burst");
+        assert!(forwarded < 40, "an over-quota flooder is throttled, got {forwarded}");
     }
 
     #[test]
