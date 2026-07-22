@@ -335,20 +335,28 @@ fn fountain_demo() {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-bridge runner. One shared Node behind a Hub; every bridge named on the
-// command line runs in its own thread and relays to the others — so one process
-// can bridge a LAN, a folder on a USB stick, a TCP link, and a Meshtastic mesh
-// at once:
+// Config-driven multi-bridge runner. Instead of CLI flags, a node is described
+// by a small YAML file listing the bridges to run; every bridge shares one Node
+// (via the Hub) and relays to the others. You can list several of the same kind
+// — two folders, two TCP links, UDP on different ports:
 //
-//   cargo run -- udp folder ./bag tcp 10.0.0.5:7373 meshtastic
+//   petname: riverside
+//   topics: [news, weather]
+//   bridges:
+//     - udp
+//     - folder: ./bag
+//     - folder: /mnt/usb/spore
+//     - tcp: 10.0.0.5:7373
+//     - meshtastic
+//     - http: 8088
 //
-// The runners live in `spore::bridge::{udp,tcp,store,meshtastic,bag}`; this is
-// only the CLI that wires them onto one node.
+// The runners live in `spore::bridge::{udp,tcp,store,meshtastic,bag}`; this file
+// only parses the config and wires them onto one node.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_arch = "wasm32"))]
 enum Spec {
-    Udp,
+    Udp(u16),
     Tcp(Option<String>),
     Folder(std::path::PathBuf),
     Meshtastic,
@@ -356,43 +364,110 @@ enum Spec {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_specs(args: &[String]) -> Result<Vec<Spec>, String> {
-    let mut specs = Vec::new();
-    let mut i = 0;
-    while i < args.len() {
-        let tok = args[i].as_str();
-        i += 1;
-        let spec = match tok {
-            "udp" => Spec::Udp,
-            "meshtastic" | "mesh" => Spec::Meshtastic,
-            "folder" => {
-                let dir = args.get(i).ok_or("`folder` needs a directory")?.clone();
-                i += 1;
-                Spec::Folder(dir.into())
-            }
-            "tcp" => match args.get(i) {
-                // an optional HOST:PORT to connect to; otherwise listen
-                Some(a) if a.contains(':') => {
-                    i += 1;
-                    Spec::Tcp(Some(a.clone()))
-                }
-                _ => Spec::Tcp(None),
-            },
-            "http" => {
-                let port = match args.get(i).and_then(|p| p.parse::<u16>().ok()) {
-                    Some(p) => {
-                        i += 1;
-                        p
-                    }
-                    None => 7373,
-                };
-                Spec::Http(port)
-            }
-            other => return Err(format!("unknown bridge `{other}`")),
-        };
-        specs.push(spec);
+struct Config {
+    petname: String,
+    topics: Vec<String>,
+    bridges: Vec<Spec>,
+}
+
+// A deliberately tiny YAML subset: `key: value` lines, `- item` list entries,
+// `#` comments, and inline `[a, b]` lists. No external dependency.
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_config(text: &str) -> Result<Config, String> {
+    #[derive(PartialEq)]
+    enum Sec {
+        None,
+        Topics,
+        Bridges,
     }
-    Ok(specs)
+    let mut petname = "spore".to_string();
+    let mut topics: Vec<String> = Vec::new();
+    let mut bridges: Vec<Spec> = Vec::new();
+    let mut sec = Sec::None;
+
+    for (i, raw) in text.lines().enumerate() {
+        let line = strip_comment(raw);
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let ln = i + 1;
+        if let Some(item) = trimmed.strip_prefix('-') {
+            let item = item.trim();
+            match sec {
+                Sec::Bridges => bridges.push(parse_bridge(item).map_err(|e| format!("line {ln}: {e}"))?),
+                Sec::Topics => topics.push(item.to_string()),
+                Sec::None => return Err(format!("line {ln}: list item `{item}` outside a section")),
+            }
+            continue;
+        }
+        let (k, v) = trimmed.split_once(':').ok_or(format!("line {ln}: cannot parse `{trimmed}`"))?;
+        let (k, v) = (k.trim(), v.trim());
+        match k {
+            "petname" => {
+                petname = v.to_string();
+                sec = Sec::None;
+            }
+            "topics" => {
+                if v.is_empty() {
+                    sec = Sec::Topics;
+                } else {
+                    for t in v.trim_start_matches('[').trim_end_matches(']').split(',') {
+                        let t = t.trim();
+                        if !t.is_empty() {
+                            topics.push(t.to_string());
+                        }
+                    }
+                    sec = Sec::None;
+                }
+            }
+            "bridges" => {
+                if !v.is_empty() {
+                    return Err(format!("line {ln}: `bridges:` should be a list"));
+                }
+                sec = Sec::Bridges;
+            }
+            other => return Err(format!("line {ln}: unknown key `{other}`")),
+        }
+    }
+    if bridges.is_empty() {
+        return Err("no bridges configured".to_string());
+    }
+    Ok(Config { petname, topics, bridges })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_bridge(s: &str) -> Result<Spec, String> {
+    if let Some((k, v)) = s.split_once(':') {
+        let (k, v) = (k.trim(), v.trim());
+        match k {
+            "udp" => Ok(Spec::Udp(v.parse().map_err(|_| format!("bad udp port `{v}`"))?)),
+            "tcp" => Ok(Spec::Tcp(if v.is_empty() { None } else { Some(v.to_string()) })),
+            "folder" if !v.is_empty() => Ok(Spec::Folder(v.into())),
+            "folder" => Err("`folder:` needs a path".into()),
+            "http" => Ok(Spec::Http(v.parse().map_err(|_| format!("bad http port `{v}`"))?)),
+            other => Err(format!("unknown bridge `{other}`")),
+        }
+    } else {
+        match s {
+            "udp" => Ok(Spec::Udp(7373)),
+            "tcp" => Ok(Spec::Tcp(None)),
+            "meshtastic" | "mesh" => Ok(Spec::Meshtastic),
+            "http" => Ok(Spec::Http(7373)),
+            "folder" => Err("`folder` needs a path (folder: DIR)".into()),
+            other => Err(format!("unknown bridge `{other}`")),
+        }
+    }
+}
+
+// Strip a trailing `# comment` (only when the `#` starts the line or follows
+// whitespace, so a `#` inside a value survives).
+#[cfg(not(target_arch = "wasm32"))]
+fn strip_comment(line: &str) -> &str {
+    match line.find('#') {
+        Some(p) if p == 0 || line[..p].ends_with(char::is_whitespace) => &line[..p],
+        _ => line,
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -401,23 +476,29 @@ fn hex8(a: &Addr) -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn run_bridges(specs: Vec<Spec>) {
+fn run_config(cfg: Config) {
     use spore::bridge::hub::{now, Hub};
     use spore::congestion::Trickle;
     use std::thread;
 
-    let node = Node::new("spore", &["news"]);
+    let topic_refs: Vec<&str> = cfg.topics.iter().map(|s| s.as_str()).collect();
+    let node = Node::new(&cfg.petname, &topic_refs);
     let hub = Hub::new(node);
-    println!("SPORE node {} — {} bridge(s). Ctrl-C to stop.", hex8(&hub.addr()), specs.len());
+    println!(
+        "SPORE node {} ({}) — {} bridge(s). Ctrl-C to stop.",
+        hex8(&hub.addr()),
+        cfg.petname,
+        cfg.bridges.len()
+    );
 
     let mut handles = Vec::new();
-    for spec in specs {
+    for spec in cfg.bridges {
         let h = hub.clone();
         let handle = match spec {
-            Spec::Udp => {
+            Spec::Udp(port) => {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
-                    if let Err(e) = spore::bridge::udp::run(h, iface, rx) {
+                    if let Err(e) = spore::bridge::udp::run(h, iface, rx, port) {
                         eprintln!("  [udp] {e}");
                     }
                 })
@@ -482,16 +563,23 @@ fn run_bridges(specs: Vec<Spec>) {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
-        sim();
+        sim(); // no config -> the in-memory demo
         return;
     }
     #[cfg(not(target_arch = "wasm32"))]
-    match parse_specs(&args) {
-        Ok(specs) => run_bridges(specs),
-        Err(e) => {
-            eprintln!("error: {e}");
-            eprintln!("usage: spore [udp] [tcp [HOST:PORT]] [folder DIR] [meshtastic] [http [PORT]]");
-            eprintln!("       spore            # run the in-memory demo");
+    {
+        let path = &args[0];
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("cannot read config `{path}`: {e}");
+                eprintln!("usage: spore <config.yaml>   (or `spore` for the in-memory demo)");
+                return;
+            }
+        };
+        match parse_config(&text) {
+            Ok(cfg) => run_config(cfg),
+            Err(e) => eprintln!("config error: {e}"),
         }
     }
 }

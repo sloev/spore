@@ -8,15 +8,15 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-/// Bind UDP :7373, LAN-broadcast floods, and unicast directed sends to nodes
+/// Bind UDP `port`, LAN-broadcast floods, and unicast directed sends to nodes
 /// learned by snooping. Blocks until an error or the process ends.
-pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>) -> std::io::Result<()> {
-    let sock = UdpSocket::bind(("0.0.0.0", 7373))?;
+pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, port: u16) -> std::io::Result<()> {
+    let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_broadcast(true)?;
     sock.set_read_timeout(Some(Duration::from_millis(200)))?;
-    let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, 7373).into();
+    let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, port).into();
     let mut nbrs: Neighbors<SocketAddr> = Neighbors::new(2 * 3600);
-    println!("  [udp] iface {iface} on :7373 (LAN broadcast)");
+    println!("  [udp] iface {iface} on :{port} (LAN broadcast)");
 
     let mut buf = [0u8; 2048];
     loop {
