@@ -5,7 +5,7 @@ name: GitHub Pages
 # manual dispatch.
 on:
   push:
-    branches: [main, master, "claude/**"]
+    branches: [master]
     paths:
       - "README.md"
       - "docs/**"
