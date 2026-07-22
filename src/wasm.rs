@@ -19,6 +19,9 @@ use crate::*;
 //
 // The host must supply `env.spore_fill_random(ptr, len)` (JS fills it from
 // crypto.getRandomValues). Every OsRng call in the crate flows through here.
+// The `wasm_import_module` attribute names the import module ("env") so newer
+// wasm-lld emits it as an import instead of erroring on an undefined symbol.
+#[link(wasm_import_module = "env")]
 extern "C" {
     fn spore_fill_random(ptr: *mut u8, len: usize);
 }

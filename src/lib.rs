@@ -1193,7 +1193,7 @@ impl Node {
     /// that follows `peer_topics` (public + those topics + unicast for custody).
     pub fn build_inv(&self, peer_topics: &HashSet<Addr>) -> Vec<u8> {
         let mut ids: Vec<(&Id, &Stored)> = self.store.iter().collect();
-        ids.sort_by(|a, b| b.1.expiry.cmp(&a.1.expiry)); // newest first
+        ids.sort_by_key(|(_, s)| std::cmp::Reverse(s.expiry)); // newest first
         let mut p = Vec::new();
         for (id, s) in ids {
             let relevant =
