@@ -85,23 +85,30 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test    # 31 tests: envelope, fountain, send, files, sessions, ratchet, onion, receipts, congestion, csma, folder-sync, rpc, feeds, meshtastic, …
-cargo run     # in-memory mesh demo (A — B — C — D)
-
-# Run a real node with one or more bridges — name as many as you like on one
-# line and they share a single node, relaying to each other:
-cargo run -- udp                                   # a LAN over UDP :7373
-cargo run -- folder ./bag                          # a shared folder (USB / Syncthing)
-cargo run -- tcp 10.0.0.5:7373                     # connect a TCP link (omit host to listen)
-cargo run -- meshtastic                            # a Meshtastic WiFi-UDP mesh
-cargo run -- http 8088                             # an HTTP bag: push / inv / want
-cargo run -- udp folder ./bag meshtastic http 8088 # …or all at once, one gateway node
+cargo test              # 31 tests
+cargo run               # in-memory mesh demo (A — B — C — D)
+cargo run -- node.yaml  # run a real node with the bridges named in a config file
 ```
 
-Each bridge runs in its own thread and hands frames to a shared node; a message
-arriving on any medium is relayed onto all the others — that's a gateway node
-bridging, say, a LAN, a USB stick, and a radio mesh at the same time. The demo
-(no args) drives the exact same `Node::on_rx` router with an in-memory "ether".
+A node is described by a small YAML file — a name, some topics, and a list of
+bridges. Every bridge shares one node and relays to the others, so one process is
+a gateway between, say, a LAN, a USB stick, and a radio mesh. List as many of each
+kind as you like (two folders, several TCP links, …):
+
+```yaml
+petname: riverside
+topics: [news, weather]
+bridges:
+  - udp                    # LAN broadcast on UDP :7373
+  - folder: ./bag          # a shared folder (USB / Syncthing / Dropbox)
+  - folder: /mnt/usb/spore # …as many folders as you want
+  - tcp: 10.0.0.5:7373     # connect a TCP link (omit the value to listen)
+  - meshtastic             # a Meshtastic WiFi-UDP mesh
+  - http: 8088             # an HTTP bag: push / inv / want
+```
+
+See [`spore.example.yaml`](spore.example.yaml). The demo (no argument) drives the
+exact same `Node::on_rx` router with an in-memory "ether".
 
 ```
 SPORE demo — line topology  A — B — C — D
@@ -293,7 +300,7 @@ channel or add the channel key.
 |-----------------|----------------------------------------------------|
 | `src/lib.rs`    | the portable core: envelope, routing, files, sessions, feeds, RPC, crypto |
 | `src/bridge/`   | one file per bridge (udp, tcp, store, meshtastic, bag, …) + the `hub` that shares a node across them |
-| `src/main.rs`   | the 12-step demo + a CLI that runs any mix of bridges on one node |
+| `src/main.rs`   | the 12-step demo + a YAML config loader that runs its bridges on one node |
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 
