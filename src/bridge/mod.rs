@@ -27,6 +27,8 @@ pub mod foldersync;
 
 // Runner glue — one shared node, threads per bridge (native only).
 #[cfg(not(target_arch = "wasm32"))]
+pub mod driver;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod hub;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tcp;

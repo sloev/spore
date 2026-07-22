@@ -1,43 +1,44 @@
-//! UDP/IPv4 broadcast bridge runner (message-pipe shape 1).
+//! UDP/IPv4 broadcast bridge (message-pipe shape 1). The medium-specific part is
+//! just `recv`/`send`; the shared logic lives in `driver::run_datagram`.
 
-use super::hub::{now, Shared};
-use super::Neighbors;
-use crate::*;
+use super::driver::{run_datagram, DatagramTransport};
+use super::hub::Shared;
+use crate::{Forward, Iface};
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-/// Bind UDP `port`, LAN-broadcast floods, and unicast directed sends to nodes
-/// learned by snooping. Blocks until an error or the process ends.
+struct Udp {
+    sock: UdpSocket,
+    bcast: SocketAddr,
+}
+
+impl DatagramTransport for Udp {
+    type Addr = SocketAddr;
+
+    fn recv(&mut self) -> std::io::Result<Option<(Vec<u8>, Option<SocketAddr>)>> {
+        let mut buf = [0u8; 2048];
+        match self.sock.recv_from(&mut buf) {
+            Ok((n, peer)) => Ok(Some((buf[..n].to_vec(), Some(peer)))),
+            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn send(&mut self, to: Option<&SocketAddr>, env: &[u8]) -> std::io::Result<()> {
+        self.sock.send_to(env, to.copied().unwrap_or(self.bcast))?;
+        Ok(())
+    }
+}
+
+/// Bind UDP `port` and bridge the LAN: broadcast floods, unicast directed sends
+/// to peers learned by snooping.
 pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, port: u16) -> std::io::Result<()> {
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_broadcast(true)?;
     sock.set_read_timeout(Some(Duration::from_millis(200)))?;
     let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, port).into();
-    let mut nbrs: Neighbors<SocketAddr> = Neighbors::new(2 * 3600);
     println!("  [udp] iface {iface} on :{port} (LAN broadcast)");
-
-    let mut buf = [0u8; 2048];
-    loop {
-        match sock.recv_from(&mut buf) {
-            Ok((n, peer)) => {
-                let nbr = nbrs.snoop(&buf[..n], peer, now());
-                hub.on_rx(iface, &buf[..n], nbr);
-            }
-            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
-            Err(e) => return Err(e),
-        }
-        while let Ok(f) = rx.try_recv() {
-            match f {
-                Forward::Flood { bytes, .. } => {
-                    sock.send_to(&bytes, bcast)?;
-                }
-                Forward::Directed { nbr, bytes, .. } => {
-                    let dst = nbr.and_then(|a| nbrs.resolve(&a, now())).unwrap_or(bcast);
-                    sock.send_to(&bytes, dst)?;
-                }
-            }
-        }
-    }
+    run_datagram(hub, iface, rx, Udp { sock, bcast })
 }
