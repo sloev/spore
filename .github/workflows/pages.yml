@@ -1,0 +1,86 @@
+name: GitHub Pages
+
+# Build the docs site (README + docs/*.md) and the live wasm demo, then deploy
+# to GitHub Pages. Runs on the main branches, this reference branch, and on
+# manual dispatch.
+on:
+  push:
+    branches: [main, master, "claude/**"]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "bindings/README.md"
+      - "web/**"
+      - "site/**"
+      - "src/**"
+      - "Cargo.*"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a newer run cancel an in-progress one; never interrupt a live deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build wasm node
+        run: cargo build --release --lib --target wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Render docs site
+        working-directory: site
+        run: |
+          npm install --no-audit --no-fund
+          node build.mjs
+
+      - name: Assemble the live demo
+        run: |
+          mkdir -p _site/demo/transports
+          cp web/spore.mjs _site/demo/
+          cp web/transports/*.mjs _site/demo/transports/
+          cp web/demo.html _site/demo/index.html
+          cp target/wasm32-unknown-unknown/release/spore.wasm _site/demo/spore.wasm
+
+      - name: Add .nojekyll
+        run: touch _site/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

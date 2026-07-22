@@ -1,1 +1,6 @@
 /target
+
+# Generated site + its build deps
+/_site/
+/site/node_modules/
+/site/package-lock.json

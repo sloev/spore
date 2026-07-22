@@ -1,0 +1,55 @@
+:root {
+  --bg: #0e1116; --panel: #171b22; --edge: #262c36; --ink: #e6edf3;
+  --dim: #8b98a9; --accent: #57c785; --accent2: #4aa3ff;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg:#f6f8fa; --panel:#fff; --edge:#d8dee4; --ink:#1f2328; --dim:#5b6670; }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+header.site { position: sticky; top: 0; z-index: 10; display: flex; gap: 18px;
+  align-items: center; flex-wrap: wrap; padding: 12px 22px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--edge); }
+.brand { font-weight: 800; letter-spacing: -0.02em; color: var(--accent);
+  text-decoration: none; font-size: 18px; }
+header.site nav { display: flex; gap: 4px; flex-wrap: wrap; }
+header.site nav a { color: var(--dim); text-decoration: none; font-size: 14px;
+  padding: 5px 10px; border-radius: 7px; }
+header.site nav a:hover { color: var(--ink); background: var(--panel); }
+header.site nav a.active { color: var(--ink); background: var(--panel); }
+
+main.doc { max-width: 860px; margin: 0 auto; padding: 32px 22px 80px; }
+main.doc h1 { font-size: 30px; letter-spacing: -0.02em; margin: 8px 0 16px; }
+main.doc h2 { font-size: 22px; margin: 34px 0 12px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--edge); }
+main.doc h3 { font-size: 18px; margin: 26px 0 10px; }
+main.doc p, main.doc li { color: var(--ink); }
+main.doc a { color: var(--accent2); }
+main.doc code { font-family: var(--mono); font-size: 0.88em;
+  background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 5px; padding: 1px 5px; }
+main.doc pre { background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+main.doc pre code { background: none; border: 0; padding: 0; font-size: 13.5px; }
+main.doc blockquote { margin: 16px 0; padding: 2px 16px; color: var(--dim);
+  border-left: 3px solid var(--edge); }
+
+/* Wide tables scroll inside their own box; the page never scrolls sideways. */
+.table-wrap, main.doc > table { display: block; overflow-x: auto; }
+main.doc table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+main.doc th, main.doc td { border: 1px solid var(--edge); padding: 7px 10px; text-align: left; }
+main.doc th { background: var(--panel); }
+main.doc tr:nth-child(even) td { background: color-mix(in srgb, var(--panel) 50%, transparent); }
+
+main.doc details { background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 10px; padding: 4px 16px; margin: 14px 0; }
+main.doc summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+main.doc img { max-width: 100%; }
+
+footer.site { border-top: 1px solid var(--edge); color: var(--dim);
+  font-size: 13px; text-align: center; padding: 22px; }

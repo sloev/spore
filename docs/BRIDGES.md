@@ -19,28 +19,25 @@ and all the shared logic already lives in the Rust lib (`src/bridge/`):
 So adding a medium is: pick `U`, set the MTU, write `recv`/`send`. Everything else
 is already in the lib.
 
-## The matrix
+**Legend.** `U` = underlay address · **State**: stateless (fire-and-forget) /
+stateful (keep a connection, drop the neighbour on disconnect via
+`Neighbors::forget`) / null (`U = ()`, broadcast-only, filter by the envelope's
+own `dest`). **Shape**: `dgram` (via `DatagramTransport`) · `stream` · `store`.
+**Status**: ✅ implemented · ◑ partial (codec/framer present) · ▢ planned (thin
+shim to write).
 
-`U` = underlay address · **State**: stateless (fire-and-forget) / stateful (keep a
-connection, drop the neighbour on disconnect via `Neighbors::forget`) / null
-(`U = ()`, broadcast-only, filter by the envelope's own `dest`). **Shape**:
-`dgram` (via `DatagramTransport`) · `stream` · `store`. **Status**: ✅ implemented ·
-◑ partial (codec/framer present) · ▢ planned (thin shim to write).
+## 1. Direct links & radios
+
+Physical and link-layer media — the wire, the air, sound. SPORE floods across
+whatever's in earshot.
 
 | Medium | `U` | MTU | State | Shape | Status | Notes |
 |---|---|---|---|---|---|---|
-| UDP / IPv4 | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp` |
-| Meshtastic (WiFi-UDP) | `u32` | 237 | stateless | dgram | ✅ | `bridge::meshtastic` |
-| TCP (KISS) | conn | 64 K | stateful | stream | ✅ | `bridge::tcp` |
-| Folder / USB / Syncthing | — | — | store | store | ✅ | `bridge::store` |
-| HTTP bag | conn | 64 K | stateful | store | ✅ | `bridge::bag` (pull) |
-| Text armor (SMS/paper/voice) | — | ~150 | null | store | ✅ | `armor::wrap/unwrap` |
+| UDP / IPv4 (limited bcast) | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp::run` — `255.255.255.255:port` |
+| UDP primary-subnet bcast | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp::run_primary` — auto-finds `192.168.x.255`; zero-config LAN |
 | Ethernet 802.3 | `[u8;6]` | 1500 | stateless | dgram | ▢ | raw L2 socket per OS |
 | Wi-Fi 802.11 | `[u8;6]` | 2304 | stateful | dgram | ▢ | raw/monitor mode |
 | Wi-Fi Direct | `Ipv4Addr` | 1500 | stateful | dgram | ◑ | UDP bridge over the p2p iface |
-| BATMAN-adv | `[u8;6]` | 1500 | stateless | dgram | ◑ | UDP broadcast on `bat0` |
-| Yggdrasil / cjdns | `Ipv6Addr` | 1280 | stateless | dgram | ◑ | UDP over the tun; one interface |
-| Thread | `Ipv6Addr` | 1280 | stateless | dgram | ◑ | UDP over 6LoWPAN |
 | ESP-NOW | `[u8;6]` | 250 | stateless | dgram | ▢ | ESP32 (`esp-idf`) shim |
 | BLE GATT | `[u8;6]` | ~247 | stateful | stream | ▢ | per-OS BLE / Web Bluetooth |
 | BLE Mesh | `u16` | 380 | stateless | dgram | ▢ | stack segments |
@@ -51,27 +48,95 @@ connection, drop the neighbour on disconnect via `Neighbors::forget`) / null
 | Z-Wave | `u8` | 54 | stateful | dgram | ▢ | serial controller |
 | LoRaWAN | `u32` | 51–222 | stateful | dgram | ▢ | via a network server |
 | LoRa (P2P) | `()` | 255 | null | dgram | ▢ | RNode / SX127x |
-| Ham AX.25 | `String` | 256 | stateless | dgram | ◑ | KISS framer present; TNC runner |
+| Ham AX.25 (KISS) | `String` | 256 | stateless | dgram | ◑ | `bridge::KissStream` framer; TNC runner |
+| APRS | `String` (call-ssid) | ~200 | stateless | dgram | ▢ | messages over AX.25 / APRS-IS |
 | DMR | `u32` | var | stateless | dgram | ▢ | IP-over-DMR |
-| Reticulum | `[u8;16]` | 500 | stateless | dgram | ▢ | RNS destination |
-| WebSocket | conn | 64 K | stateful | stream | ◑ | JS `web/transports/websocket.mjs`, tested; native shim TODO |
-| WebTransport | conn | var | stateful | stream | ▢ | Web (QUIC) |
-| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless signaling |
-| Web Serial / USB | conn | var | stateful | stream | ▢ | drive a TNC from a browser tab |
-| Nostr | relay | var | stateless | store | ◑ | JS `web/transports/nostr.mjs` (kind-30078) |
-| ggwave / libquiet (audio) | `()` | 140/255 | null | dgram | ▢ | acoustic, sound card |
+| goTenna | `u32` (GID) | ~200 | stateless | dgram | ▢ | consumer mesh radio |
+| **Audio (ggwave-style)** | `()` | 4 K/frame | null | dgram | ◑ | **`bridge::audio`** — 16-FSK modem, tested; sound-card via `run_pipe` |
 | JANUS (sonar) | `u8` | 32 | stateless | dgram | ▢ | underwater acoustic |
-| QR stream | `()` | ~1 K | null | dgram | ◑ | armor present; camera/screen runner |
+| QR stream | `()` | ~1 K | null | dgram | ◑ | `armor` present; camera/screen runner |
 | Iridium SBD | `u32` | 340 | stateless | dgram | ▢ | satellite gateway |
+
+### Meshtastic (LoRa mesh) — one codec, several pipes
+
+The Meshtastic `MeshPacket` protobuf codec (`bridge::meshtastic::encode`/`decode`)
+is done and tested; each row below is just a different pipe carrying the same
+frames, so `U` and MTU never change.
+
+| Transport | `U` | MTU | State | Shape | Status | Notes |
+|---|---|---|---|---|---|---|
+| Meshtastic — WiFi-UDP | `u32` | 237 | stateless | dgram | ✅ | `bridge::meshtastic::run` (multicast) |
+| Meshtastic — USB serial | `u32` | 237 | stateful | stream | ◑ | same protobuf over the Serial API; framing runner TODO |
+| Meshtastic — Web Serial | `u32` | 237 | stateful | stream | ▢ | browser tab → node over USB |
+| Meshtastic — BT/BLE | `u32` | 237 | stateful | stream | ▢ | phone/walkie-talkie BLE pairing |
+
+### Reticulum (RNS) — destination-addressed, several pipes
+
+Reticulum is itself a mesh with strong crypto; SPORE rides it as a payload,
+addressed by the 16-byte RNS destination hash.
+
+| Transport | `U` | MTU | State | Shape | Status | Notes |
+|---|---|---|---|---|---|---|
+| Reticulum — TCP/UDP iface | `[u8;16]` | 500 | stateless | dgram | ▢ | RNS destination over an IP interface |
+| Reticulum — RNode serial | `[u8;16]` | 500 | stateful | stream | ▢ | LoRa RNode over USB serial |
+| Reticulum — Web Serial | `[u8;16]` | 500 | stateful | stream | ▢ | RNode from a browser tab |
+| Reticulum — BT/BLE | `[u8;16]` | 500 | stateful | stream | ▢ | RNode / phone over BLE |
+
+## 2. Internet overlays
+
+Mesh-routing and anonymity networks that deliver packets over (or instead of) IP.
+Most already carry IP, so the existing **UDP bridge rides them unchanged** — you
+just point it at the right address on the overlay's interface.
+
+| Overlay | `U` | MTU | State | Shape | Status | Notes |
+|---|---|---|---|---|---|---|
+| BATMAN-adv | `[u8;6]` | 1500 | stateless | dgram | ◑ | UDP broadcast on `bat0` |
+| Yggdrasil / cjdns | `Ipv6Addr` | 1280 | stateless | dgram | ◑ | UDP over the tun; one interface |
+| Thread | `Ipv6Addr` | 1280 | stateless | dgram | ◑ | UDP over 6LoWPAN |
+| Tor (onion service) | `.onion` | 64 K | stateful | stream | ▢ | hidden-service rendezvous |
+| I2P | b32 dest | ~1200 | stateless | dgram | ▢ | garlic routing; SAM datagrams |
+| Veilid | node id | var | stateless | dgram | ▢ | private-routed DHT |
+| libp2p (gossipsub) | PeerId | var | stateful | stream | ▢ | pub/sub overlay; IPFS swarm |
+| WebSocket | conn | 64 K | stateful | stream | ◑ | JS `web/transports/websocket.mjs`, tested; native shim TODO |
+| WebTransport | conn | var | stateful | stream | ▢ | Web (QUIC datagrams) |
+| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless signaling |
+| Web Serial / USB | conn | var | stateful | stream | ▢ | drive a TNC/RNode from a browser tab |
+
+## 3. Store-and-forward & app carriers
+
+Systems that already store messages and pass them on — the shape SPORE *is*, so
+these compose cleanly. An envelope becomes a file, an event, a chat message, or a
+bundle; the container replicates it, and the other side unwraps it.
+
+| Carrier | `U` | MTU | State | Shape | Status | Notes |
+|---|---|---|---|---|---|---|
+| Folder / USB / Syncthing | — | — | store | store | ✅ | `bridge::store` — `*.spore` files |
+| HTTP bag | conn | 64 K | stateful | store | ✅ | `bridge::bag` (pull) |
+| Copyparty | URL | 64 K | stateful | store | ▢ | envelopes in a copyparty share (HTTP/WebDAV upload) |
+| Text armor (SMS/paper/voice) | — | ~150 | null | store | ✅ | `armor::wrap`/`unwrap` |
+| Nostr | relay | var | stateless | store | ◑ | JS `web/transports/nostr.mjs` (kind-30078) |
+| **SSB (Secure Scuttlebutt)** | feed | var | stateless | store | ◑ | **`bridge::ssb`** — `spore-v1` content; folder-log runner |
+| Matrix | room id | large | stateless | store | ▢ | envelopes as room events (base64) |
+| XMPP / Jabber | JID | large | stateful | stream | ▢ | message stanzas or PubSub |
+| DeltaChat (email) | address | large | stateless | store | ▢ | envelopes as e-mail (IMAP/SMTP, Autocrypt) |
+| Session (Oxen) | session id | var | stateless | store | ▢ | onion store-and-forward |
+| Briar | contact | var | stateful | stream | ▢ | Tor + BLE friend-to-friend |
+| Tox | ToxID | ~1200 | stateful | dgram | ▢ | P2P DHT messaging |
+| DTN / Bundle Protocol (BPv7) | EID | var | stateless | store | ▢ | RFC 9171 delay-tolerant bundles — natural fit |
+| NNCP | node id | var | stateless | store | ▢ | encrypted node-to-node copy |
+| UUCP | host | var | stateless | store | ▢ | the original store-and-forward |
+| Serval Rhizome | SID | var | stateless | store | ▢ | mesh store-and-forward |
+| Hypercore / Hyperswarm | key | var | stateful | stream | ▢ | append-log replication |
+| Earthstar / Willow | share | var | stateless | store | ▢ | offline-first sync |
 
 ## The three routing implications (all handled by `Neighbors<U>`)
 
-- **Stateful** (WebSocket, BLE GATT, Wi-Fi): `U` is a live connection object. When
-  it drops, the bridge calls `Neighbors::forget` so the router stops sending into a
-  dead handle.
-- **Stateless** (LoRa, ESP-NOW, Ethernet): no connection — blast bytes at `U`. A
-  neighbour is "gone" only when its signed heartbeats stop and its binding ages out
-  (`Neighbors::expire`).
+- **Stateful** (WebSocket, BLE GATT, serial, Wi-Fi): `U` is a live connection
+  object. When it drops, the bridge calls `Neighbors::forget` so the router stops
+  sending into a dead handle.
+- **Stateless** (LoRa, ESP-NOW, Ethernet, most store carriers): no connection —
+  hand bytes to `U`. A neighbour is "gone" only when its signed heartbeats stop
+  and its binding ages out (`Neighbors::expire`).
 - **Null address** (`U = ()`: audio, raw LoRa, QR): the hardware has no target
   field — everyone hears everything. Every SPORE address maps to `()`, `resolve`
   trivially succeeds, and the envelope's own `dest` filters mail for others.
@@ -80,12 +145,20 @@ connection, drop the neighbour on disconnect via `Neighbors::forget`) / null
 
 - **`dgram`** → implement `driver::DatagramTransport` (`recv`, `send`, optional
   `mtu`). See `bridge::udp` (~40 lines) and `bridge::meshtastic` as templates.
-- **`stream`** → a byte stream + framing (KISS). See `bridge::tcp`.
-- **`store`** → a shared container polled for new items. See `bridge::store`.
+- **`stream`** → a byte stream + framing (KISS). See `bridge::tcp` and
+  `bridge::KissStream`.
+- **`store`** → a shared container polled for new items. See `bridge::store`
+  (files), `bridge::bag` (HTTP), and `bridge::ssb` (a log folder).
 
-Several rows are marked ◑ because they're **IP underlays** — BATMAN, Yggdrasil,
-cjdns, Thread, Wi-Fi Direct all deliver IP, so the existing UDP bridge already
-rides them today; you only point it at the right broadcast/multicast address
-(§ "Routing across other networks" in the README). The rest are ▢: a thin
-`DatagramTransport`/stream shim per medium, most of which belong in a
+## Why so many rows share code
+
+Several rows are ◑ because they're **IP underlays** — BATMAN, Yggdrasil, cjdns,
+Thread, Wi-Fi Direct all deliver IP, so the existing UDP bridge already rides them
+today; you only point it at the right broadcast/multicast address (§ "Routing
+across other networks" in the README). Whole *families* also collapse to one
+codec: every Meshtastic pipe reuses `bridge::meshtastic`'s protobuf, every
+store-and-forward carrier reuses the "envelope in, envelope out" pattern of
+`bridge::store`/`bridge::ssb`, and every browser transport is a `send`/`receive`
+pair over the JS hub (`web/README.md`). The rest are ▢: a thin
+`DatagramTransport`/stream/store shim per medium, most of which belong in a
 platform-specific crate (ESP32, Android, browser) rather than the portable core.

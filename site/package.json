@@ -1,0 +1,8 @@
+{
+  "name": "spore-site",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "marked": "^12.0.0"
+  }
+}
