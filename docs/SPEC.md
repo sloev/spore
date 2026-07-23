@@ -8,7 +8,7 @@ Front: the protocol (one page). Back: how it rides everything, and why not somet
 ## 0. The whole protocol in one breath
 A SPORE message is a **signed postcard**: to, from, expiry, payload, signature. Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't seen, hands copies to anyone it meets who wants them, and drops duplicates and expired mail. That alone is a working planetary network. Everything below only makes it faster, safer, or quieter — and of the four hard features (forward secrecy, fountain fragmentation, congestion control, anonymity), only congestion control touches the router; the rest live inside payloads.
 
-**Tiers** (all interoperate): **T0 carry** ~60 lines: parse, dedup, store, deliver, damped flood · **T1 sync** +~80: ANNOUNCE/INV/WANT, watermarks · **T2 route** +~100: paths, directed unicast, custody. Endpoint extras (ratchet, fountain, mix) never change relays.
+**Tiers** (all interoperate): **T0 carry** ≈60 lines: parse, dedup, store, deliver, damped flood · **T1 sync** +≈80: ANNOUNCE/INV/WANT, watermarks · **T2 route** +≈100: paths, directed unicast, custody. Endpoint extras (ratchet, fountain, mix) never change relays.
 
 **Threat model, stated once:** every link is hostile — logged, spoofed, jammed, MITM'd. Links are trusted with *nothing*; authenticity and secrecy live only in the envelope. Attackers can drop or delay; redundancy and flood-fallback heal both.
 
@@ -125,8 +125,8 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 | ESP-NOW | 250 B, broadcast MAC, ch 6 |
 | 802.15.4 raw | ≤ 100 B payload → FRAGMENT |
 | LoRa raw | ≤ 255 B (use ≤ 200); EU 869.525 / US 915.0 MHz, SF9 BW125 CR4/5, sync 0x12, CRC on; duty/LBT per law |
-| Meshtastic | portnum **256** (PRIVATE_APP), dst 0xFFFFFFFF, ≤ ~230 B, want_ack off |
-| Reticulum | PLAIN dest, app `spore`, aspect `v1`, ≤ ~440 B; big via Link/Resource |
+| Meshtastic | portnum **256** (PRIVATE_APP), dst 0xFFFFFFFF, ≤ ≈230 B, want_ack off |
+| Reticulum | PLAIN dest, app `spore`, aspect `v1`, ≤ ≈440 B; big via Link/Resource |
 | AX.25 UI (ham packet) | dst `SPORE `, PID 0xF0, PACLEN 256, callsign = legal ID, ENCRYPTED=0 |
 | MQTT | topic `spore/1`, QoS 0, binary payload |
 | libp2p gossipsub (IPFS) | topic `spore/1`, raw envelope per message |
@@ -146,7 +146,7 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 **3 — Text channels (armor)**
 | Medium | Parameters |
 |---|---|
-| SMS | GSM-7-safe; ~150 armor chars/segment, ≤ 3 segments, else FRAGMENT; p2p → may restore hops; auto-parse Android, share-sheet iOS |
+| SMS | GSM-7-safe; ≈150 armor chars/segment, ≤ 3 segments, else FRAGMENT; p2p → may restore hops; auto-parse Android, share-sheet iOS |
 | **Email / SMTP-IMAP / DeltaChat** | armor in body or attach `<id>.spore` (`application/x-spore`); poll IMAP = receive; DeltaChat adds Autocrypt e2e, and a **webxdc app can embed a full node in the chat** |
 | **Usenet / NNTP** | one envelope per article in `alt.spore`; **Message-ID `<hexid@spore>` → servers dedup for you**; body = armor; Usenet's flooding becomes SPORE's |
 | **Signal / Telegram / WhatsApp** | paste armor or attach `<id>.spore`; automate via signal-cli; their e2e wraps ours — layers independent |
@@ -160,7 +160,7 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 |---|---|
 | **Walkie-talkies (PMR446/FRS/GMRS), CB, marine & ham FM (2 m/70 cm)** | AFSK 1200 Bd Bell 202 → KISS; couple acoustically (phone mic-to-speaker works) or 2-pin PTT cable; VOX keys TX; bursts ≤ 20 s; identify + ENCRYPTED=0 per band rules; software: Dire Wolf, `minimodem 1200` |
 | Any audio path (cassette, phone line, intercom, PA) | same AFSK; CRC tail per rule 4 |
-| Ultrasonic (ggwave) | ≤ 140 B/burst, ~8–16 B/s, 15.5–19.5 kHz; browser WASM + native; ggwave's Reed-Solomon replaces the CRC tail; doubles as WebRTC signaling |
+| Ultrasonic (ggwave) | ≤ 140 B/burst, ≈8–16 B/s, 15.5–19.5 kHz; browser WASM + native; ggwave's Reed-Solomon replaces the CRC tail; doubles as WebRTC signaling |
 | RS-485 / field wire / powerline | 9600 8N1 default; CRC tail mandatory |
 
 **5 — Shared stores**
@@ -174,7 +174,7 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 
 ## Browsers & phones: zero-rendezvous LAN peering
 1. **Template SDP**: a WebRTC session reduces to ufrag(4)+pwd(22)+DTLS fingerprint(32)+mDNS host candidate(16) ≈ **90 B**; both sides rebuild full SDP from a hardcoded template.
-2. **Ultrasonic handshake**: apps loop a ggwave HELLO = `addr(8)+descriptor(90)`; hear one → answer → `setRemoteDescription` → the browser's own mDNS resolves `<uuid>.local` → direct DataChannel. No server, no typed IP, ~15 s.
+2. **Ultrasonic handshake**: apps loop a ggwave HELLO = `addr(8)+descriptor(90)`; hear one → answer → `setRemoteDescription` → the browser's own mDNS resolves `<uuid>.local` → direct DataChannel. No server, no typed IP, ≈15 s.
 3. **Static nodes**: native nodes run **ice-lite with static ufrag/pwd/fingerprint** — a constant descriptor: print as QR on the box, beep it, bake it into the app.
 4. **QR camera** = same descriptors, instant fallback. Confirm peers by address emoji-hash (§10).
 5. **App distribution**: every native node serves the PWA at `http://localhost:7373/` (secure context: installable, offline SW) and to the LAN at its IP (same-origin ws://). HTTP bag API: `POST /spore/push`, `GET /spore/inv?since=`, `POST /spore/want`, MIME `application/x-spore`, CORS `*` + `Access-Control-Allow-Private-Network: true`. The app store is every node.
@@ -184,4 +184,4 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 ## Positioning — why not just use…
 **Reticulum**: superb routed crypto network; needs real software and bidirectional links on both ends. SPORE's floor is 60 lines, a sound card, or a human with paper — and it happily rides Reticulum. **DTN Bundle Protocol (RFC 9171)**: same ideas, IETF-complete and heavy; SPORE is BPv7's core on one page. **Meshtastic**: turnkey but one radio and its own app layer; SPORE is medium-plural and rides it. **SSB / Hypercore**: log replication couples you to whole feeds; SPORE dedups per message, so a 200-B link or a QR code is a valid peer. **Nostr**: the same signed-gossip idea minus JSON, relays and always-on internet. **Signal**: SPORE sessions use Signal's own Double Ratchet — over radios, paper and sneakernet. **Briar**: only friends relay; SPORE lets strangers carry mail, with mix mode when metadata matters. **Mixmaster / Loopix**: §9 is their core, built from one primitive. **BATMAN / OLSR / Babel / IP**: strictly better on stable dense powered networks — which is why they're underlays here. **FidoNet / UUCP / Usenet**: the ancestors; SPORE is netmail+echomail with modern crypto and self-forming routes.
 
-**Known limits, on purpose:** no stream semantics; fountain fragments to ~50 KB, bigger files ride stores/sneakernet; no permanence (expiry is a feature); mix-mode anonymity needs flowing decoys to beat a *global* observer; ratchet state is per-device — give each device its own key. Each limit buys the one-page spec. When you have fiber and stability, run IP and tunnel SPORE through it; SPORE's job begins where that ends.
+**Known limits, on purpose:** no stream semantics; fountain fragments to ≈50 KB, bigger files ride stores/sneakernet; no permanence (expiry is a feature); mix-mode anonymity needs flowing decoys to beat a *global* observer; ratchet state is per-device — give each device its own key. Each limit buys the one-page spec. When you have fiber and stability, run IP and tunnel SPORE through it; SPORE's job begins where that ends.
