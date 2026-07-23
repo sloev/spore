@@ -1634,6 +1634,33 @@ mod tests {
     }
 
     #[test]
+    fn identity_restores_from_seed() {
+        // A node's whole identity is its 32-byte seed: persist it and rebuild the
+        // same address and keys (the browser's local-storage persistence relies on
+        // exactly this round-trip).
+        let a = Node::new("persist", &["news"]);
+        let seed = a.seed();
+        let b = Node::from_seed("persist", &["news"], &seed);
+        assert_eq!(a.addr, b.addr, "same seed must reproduce the same address");
+        assert_eq!(a.sk.to_bytes(), b.sk.to_bytes(), "signing key restored");
+        assert_eq!(a.prekey_pub, b.prekey_pub, "prekey is deterministic from the seed");
+        // A signature made by the restored node verifies against the original addr.
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"hi".to_vec());
+        e.sign(&b.sk);
+        assert!(e.verify());
+    }
+
+    #[test]
+    fn distinct_seeds_give_distinct_identities() {
+        let a = Node::from_seed("x", &[], &[1u8; 32]);
+        let b = Node::from_seed("x", &[], &[2u8; 32]);
+        assert_ne!(a.addr, b.addr);
+        assert_ne!(a.prekey_pub, b.prekey_pub);
+        // `new` is just `from_seed` with a random seed → fresh nodes differ.
+        assert_ne!(Node::new("x", &[]).addr, Node::new("x", &[]).addr);
+    }
+
+    #[test]
     fn envelope_roundtrip_and_sig() {
         let sk = keypair();
         let mut e = Envelope::new(ty::DATA, topic_of("test"), 1_700_000_000, b"hello".to_vec());

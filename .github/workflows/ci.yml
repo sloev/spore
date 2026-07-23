@@ -70,6 +70,9 @@ jobs:
       - name: Web loopback end-to-end test
         run: node web/test.mjs
 
+      - name: Transport codec tests (kiss, meshtastic, audio wire formats)
+        run: node web/codec-test.mjs
+
       - name: Build + verify the single-file node is self-contained
         run: |
           node web/build-standalone.mjs

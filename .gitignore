@@ -4,3 +4,7 @@
 /_site/
 /site/node_modules/
 /site/package-lock.json
+
+# Python
+__pycache__/
+*.pyc

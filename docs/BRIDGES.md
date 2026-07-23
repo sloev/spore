@@ -127,7 +127,7 @@ See [Reticulum](#reticulum).
 
 | Pipe | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
-| [Reticulum — TCP/UDP iface ⚪](#reticulum) | dgram | `[u8;16]` | 500 | RNS destination over an IP interface |
+| [Reticulum — RNS payload 🧪](#reticulum) | dgram | `[u8;16]` | 383 | envelopes on a shared RNS destination (native, via companion) |
 | [Reticulum — RNode serial ⚪](#reticulum) | stream | `[u8;16]` | 500 | LoRa RNode over USB (native) |
 | [Reticulum — Web Serial 🧪](#reticulum) | stream | `[u8;16]` | 500 | RNode over USB from a browser tab |
 | [Reticulum — Bluetooth 🧪](#reticulum) | stream | `[u8;16]` | 500 | RNode over BLE (Nordic UART) |
@@ -963,17 +963,29 @@ over the same LoRa air Reticulum uses, but does not route RNS packets.
 | `U` | `[u8;16]` (RNS destination) or `()` (raw RNode broadcast) |
 | MTU | 500 (RNS) / ~255 (LoRa PHY) |
 | State | stateless (RNS) / stateful (serial, BLE) |
-| Status | ⚪ native RNS/RNode · 🧪 Web Serial & BLE (RNode host mode) |
-| Code | [`web/transports/reticulum.mjs`](../web/transports/reticulum.mjs) |
+| Status | 🧪 RNS payload (`bridge::reticulum` + companion) · 🧪 Web Serial & BLE (RNode host mode) |
+| Code | `bridge::reticulum` + [`tools/reticulum_companion.py`](../tools/reticulum_companion.py); [`web/transports/reticulum.mjs`](../web/transports/reticulum.mjs) |
 
 <details><summary>Deep dive</summary>
 
 **Two models.**
 
-- **RNS payload (planned).** Announce a SPORE destination on RNS and send envelopes
-  as the destination's data; RNS provides transport, path-finding, and its own
-  encryption. `U = [u8;16]` destination hash. This makes SPORE a first-class RNS
-  application and is the "right" long-term integration.
+- **RNS payload (implemented, via companion).** SPORE rides Reticulum as data on a
+  shared **PLAIN** destination `spore.mesh` — a broadcast bus every SPORE-over-RNS
+  node listens on (a PLAIN destination's hash derives only from its name+aspects, so
+  everyone computes the same one and hears every packet). RNS provides transport,
+  path-finding, and every interface it is configured with (LoRa, TCP, I2P, packet
+  radio). Because Reticulum's canonical implementation is the Python `rns` library
+  and its packet/crypto format is defined by that code, the bridge is split: the
+  **portable half** (`bridge::reticulum::run_pipe`) exchanges KISS-framed envelopes
+  on stdin/stdout exactly like the [audio modem](#audio), and a small **companion**
+  ([`tools/reticulum_companion.py`](../tools/reticulum_companion.py)) does the real
+  RNS work with the library — so nothing security-critical is re-implemented. The
+  node's MTU is clamped to a single RNS packet (383 B); larger objects fountain-
+  fragment. `U` is effectively `()` (the bus is broadcast; the envelope `dest`
+  filters). Verified off-network at the framing layer (the companion's KISS matches
+  `src/kiss.rs` byte-for-byte); the live RNS path needs a Reticulum network to
+  exercise, hence 🧪.
 - **RNode host mode (implemented).** An RNode is a LoRa modem speaking a **KISS**
   host protocol. Configure the radio, then every SPORE envelope is a KISS DATA
   frame:

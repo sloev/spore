@@ -45,7 +45,9 @@ function getVarint(buf, o) {
 
 // MeshPacket: from=1 to=2 decoded=4 encrypted=5 id=6 hop_limit=9
 // Data:       portnum=1 payload=2
-function encodeMeshPacket(envWire, fromNode, toNode, packetId) {
+// (exported for the codec tests in web/codec-test.mjs; the standalone build
+// strips `export` when it inlines this module, so this is test-only surface.)
+export function encodeMeshPacket(envWire, fromNode, toNode, packetId) {
   const data = [];
   putUint(data, 1, PORT_PRIVATE_APP);
   putBytes(data, 2, envWire);
@@ -88,7 +90,7 @@ function scanFields(buf, start, end) {
 }
 
 // Decode a bare MeshPacket -> {from, portnum, payload} or null.
-function decodeMeshPacket(buf) {
+export function decodeMeshPacket(buf) {
   const p = scanFields(buf, 0, buf.length);
   if (!p || !p.bytes[4]) return null; // no `decoded`
   const from = p.uint[1] || 0;

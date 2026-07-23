@@ -344,10 +344,11 @@ fn fountain_demo() {
 //     - meshtastic
 //     - http: 8088
 //     - audio              # data-over-sound (f32 PCM on stdin/stdout)
+//     - reticulum          # RNS payload via tools/reticulum_companion.py (KISS on stdin/stdout)
 //     - ssb: ./ssb-log     # Secure Scuttlebutt append-only log folder
 //
-// The runners live in `spore::bridge::{udp,tcp,store,meshtastic,bag}`; this file
-// only parses the config and wires them onto one node.
+// The runners live in `spore::bridge::{udp,tcp,store,meshtastic,audio,reticulum,bag}`;
+// this file only parses the config and wires them onto one node.
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -359,6 +360,7 @@ enum Spec {
     Meshtastic,
     Http(u16),
     Audio,
+    Reticulum,
     Ssb(std::path::PathBuf),
 }
 
@@ -460,6 +462,7 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "meshtastic" | "mesh" => Ok(Spec::Meshtastic),
             "http" => Ok(Spec::Http(7373)),
             "audio" | "sound" => Ok(Spec::Audio),
+            "reticulum" | "rns" => Ok(Spec::Reticulum),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
             "ssb" => Err("`ssb` needs a log directory (ssb: DIR)".into()),
             other => Err(format!("unknown bridge `{other}`")),
@@ -555,6 +558,14 @@ fn run_config(cfg: Config) {
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::audio::run_pipe(h, iface, rx) {
                         eprintln!("  [audio] {e}");
+                    }
+                })
+            }
+            Spec::Reticulum => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::reticulum::run_pipe(h, iface, rx) {
+                        eprintln!("  [reticulum] {e}");
                     }
                 })
             }
