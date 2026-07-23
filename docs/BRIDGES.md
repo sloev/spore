@@ -59,7 +59,7 @@ whatever's in earshot.
 | APRS | `String` (call-ssid) | ~200 | stateless | dgram | ▢ | messages over AX.25 / APRS-IS |
 | DMR | `u32` | var | stateless | dgram | ▢ | IP-over-DMR |
 | goTenna | `u32` (GID) | ~200 | stateless | dgram | ▢ | consumer mesh radio |
-| **Audio (ggwave-style)** | `()` | 4 K/frame | null | dgram | ◑ | **`bridge::audio`** — 16-FSK modem, tested; sound-card via `run_pipe` |
+| **Audio (ggwave-style)** | `()` | 4 K/frame | null | dgram | ◑ | **`bridge::audio`** — 16-FSK modem, tested; sound-card via `run_pipe`; bit-compatible browser twin `web/transports/audio.mjs` |
 | JANUS (sonar) | `u8` | 32 | stateless | dgram | ▢ | underwater acoustic |
 | QR stream | `()` | ~1 K | null | dgram | ◑ | `armor` present; camera/screen runner |
 | Iridium SBD | `u32` | 340 | stateless | dgram | ▢ | satellite gateway |
@@ -106,8 +106,10 @@ just point it at the right address on the overlay's interface.
 | libp2p (gossipsub) | PeerId | var | stateful | stream | ▢ | pub/sub overlay; IPFS swarm |
 | WebSocket | conn | 64 K | stateful | stream | ◑ | JS `web/transports/websocket.mjs`, tested; native shim TODO |
 | WebTransport | conn | var | stateful | stream | ▢ | Web (QUIC datagrams) |
-| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless signaling |
-| Web Serial / USB | conn | var | stateful | stream | ▢ | drive a TNC/RNode from a browser tab |
+| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless copy/paste signaling |
+| WebTorrent swarm | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webtorrent.mjs` — bittorrent-tracker rendezvous, then WebRTC P2P |
+| Web Serial / USB | conn | var | stateful | stream | ◑ | JS `web/transports/webserial.mjs` — KISS to a TNC/RNode/ESP32, interops with the serial bridge |
+| Web Bluetooth | `String` | ~247 | stateful | stream | ◑ | JS `web/transports/webbluetooth.mjs` — Nordic UART, KISS-framed |
 
 ## 3. Store-and-forward & app carriers
 

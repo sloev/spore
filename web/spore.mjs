@@ -152,6 +152,12 @@ export class Hub {
     this.transports.push(t);
     return t;
   }
+  /** Detach a transport (does not close it — the caller owns its lifecycle). */
+  removeTransport(t) {
+    this.transports = this.transports.filter((x) => x !== t);
+    t.receive = () => {};
+    return t;
+  }
   _rx(from, bytes) {
     const { forwards, delivered } = this.node.recv(bytes);
     for (const env of delivered) if (this.onDeliver) this.onDeliver(env);

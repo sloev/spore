@@ -1,7 +1,11 @@
-// Build a single self-contained HTML file that is a complete SPORE node: the
-// wasm and every JS module are inlined, so the one file runs offline from a USB
-// stick, an email attachment, or a scanned QR bundle — no server, no install, no
-// network. A copy of this file is a seed the whole node regrows from.
+// Build a single self-contained HTML file that is a complete, *functional* SPORE
+// node: the wasm router and every transport are inlined, so the one file runs
+// offline from a USB stick, an email attachment, or a scanned QR bundle — no
+// server, no install, no network. Open it and you get one live node you can wire
+// to real links at runtime — WebSocket, WebRTC, Nostr, Web Serial, Web Bluetooth,
+// an audio modem, or a WebTorrent swarm — and watch it sign, relay, and receive.
+// A copy of this file is a seed the whole node regrows from, and it is also the
+// live demo served on the site.
 //
 //   cargo build --release --lib --target wasm32-unknown-unknown
 //   node web/build-standalone.mjs
@@ -29,10 +33,19 @@ const wasmBytes = fs.readFileSync(wasmPath);
 const wasmB64 = wasmBytes.toString('base64');
 const wasmHash = crypto.createHash('sha256').update(wasmBytes).digest('hex');
 
+// Order matters only for readability; everything shares one scope. kiss before
+// the serial/BLE transports that use it.
 const modules = [
   inlineModule(read('spore.mjs')),
+  inlineModule(read('transports/kiss.mjs')),
   inlineModule(read('transports/loopback.mjs')),
   inlineModule(read('transports/websocket.mjs')),
+  inlineModule(read('transports/webrtc.mjs')),
+  inlineModule(read('transports/nostr.mjs')),
+  inlineModule(read('transports/webserial.mjs')),
+  inlineModule(read('transports/webbluetooth.mjs')),
+  inlineModule(read('transports/audio.mjs')),
+  inlineModule(read('transports/webtorrent.mjs')),
 ].join('\n\n');
 
 const html = `<!doctype html>
@@ -40,11 +53,11 @@ const html = `<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SPORE — self-contained node (one file)</title>
+<title>SPORE — a whole node in one file</title>
 <style>
   :root {
     --bg:#0e1116; --panel:#171b22; --edge:#262c36; --ink:#e6edf3;
-    --dim:#8b98a9; --accent:#57c785; --accent2:#4aa3ff; --warn:#e0a030;
+    --dim:#8b98a9; --accent:#57c785; --accent2:#4aa3ff; --warn:#e0a030; --bad:#e05a5a;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: light) {
@@ -57,93 +70,103 @@ const html = `<!doctype html>
   header { padding-top:28px; }
   h1 { margin:0 0 4px; font-size:26px; letter-spacing:-.02em; }
   h1 .s { color:var(--accent); }
-  .tag { color:var(--dim); margin:0 0 14px; }
+  .tag { color:var(--dim); margin:0 0 14px; max-width:70ch; }
   .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0 20px; }
-  .pill { font-size:12px; color:var(--dim); border:1px solid var(--edge);
-    border-radius:999px; padding:3px 10px; }
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  @media (max-width:700px){ .grid{ grid-template-columns:1fr; } }
-  .card { background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:16px; }
-  .card h2 { margin:0 0 4px; font-size:15px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
-  .addr { font-family:var(--mono); font-size:12px; color:var(--accent2); word-break:break-all; margin:0 0 12px; }
+  .pill { font-size:12px; color:var(--dim); border:1px solid var(--edge); border-radius:999px; padding:3px 10px; }
+  .pill.addr { font-family:var(--mono); color:var(--accent2); }
+  .card { background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .card h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
   .log { font-family:var(--mono); font-size:12.5px; background:var(--bg); border:1px solid var(--edge);
-    border-radius:8px; height:180px; overflow-y:auto; padding:10px; white-space:pre-wrap; }
-  .log .rx{color:var(--accent)} .log .tx{color:var(--accent2)} .log .sys{color:var(--dim)} .log .bad{color:var(--warn)}
-  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  input[type=text]{ flex:1; min-width:180px; background:var(--bg); color:var(--ink);
+    border-radius:8px; height:220px; overflow-y:auto; padding:10px; white-space:pre-wrap; }
+  .log .rx{color:var(--accent)} .log .tx{color:var(--accent2)} .log .relay{color:var(--dim)}
+  .log .sys{color:var(--dim)} .log .bad{color:var(--bad)}
+  .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+  input[type=text], select, textarea { background:var(--bg); color:var(--ink);
     border:1px solid var(--edge); border-radius:8px; padding:8px 10px; font:inherit; }
+  input[type=text]{ flex:1; min-width:160px; }
+  select{ min-width:180px; }
+  textarea{ width:100%; font-family:var(--mono); font-size:11.5px; height:70px; resize:vertical; }
   button{ background:var(--accent); color:#05130b; border:0; font-weight:600; border-radius:8px;
     padding:8px 14px; cursor:pointer; font:inherit; }
   button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--edge); }
-  .link{ text-align:center; color:var(--dim); margin:22px 0 6px; display:flex; align-items:center; gap:10px; justify-content:center; }
-  .link::before,.link::after{ content:""; height:1px; background:var(--edge); flex:1; }
-  .note{ color:var(--dim); font-size:13px; }
+  button.x{ background:transparent; color:var(--dim); border:1px solid var(--edge); padding:2px 9px; border-radius:6px; }
+  .note{ color:var(--dim); font-size:13px; margin:2px 0 0; }
   a{ color:var(--accent2); }
-  code{ font-family:var(--mono); font-size:.9em; background:var(--panel); border:1px solid var(--edge); border-radius:5px; padding:1px 5px; }
-  footer{ max-width:960px; margin:0 auto; padding:24px 20px 60px; color:var(--dim); font-size:12.5px; }
+  code{ font-family:var(--mono); font-size:.9em; background:var(--bg); border:1px solid var(--edge); border-radius:5px; padding:1px 5px; }
+  .bridge{ border:1px solid var(--edge); border-radius:10px; padding:10px 12px; margin-top:10px; }
+  .bridge .hd{ display:flex; align-items:center; gap:10px; }
+  .bridge .ttl{ font-weight:600; font-size:13.5px; flex:1; }
+  .badge{ font-size:11px; font-family:var(--mono); border:1px solid var(--edge); border-radius:999px; padding:2px 8px; color:var(--dim); }
+  .badge.open{ color:var(--accent); border-color:var(--accent); }
+  .badge.err{ color:var(--bad); border-color:var(--bad); }
+  .bridge .bd{ margin-top:8px; }
+  .cnt{ font-size:11px; color:var(--dim); font-family:var(--mono); }
+  footer{ max-width:960px; margin:0 auto; padding:12px 20px 60px; color:var(--dim); font-size:12.5px; }
 </style>
 </head>
 <body>
 <header>
   <h1><span class="s">SPORE</span> — a whole node in one file</h1>
-  <p class="tag">This page carries the router (compiled to WebAssembly) and all its
-     code inline. It needs no server, no install, and no network to run — open it
-     from a USB stick or an offline copy and two full nodes come alive below. A
-     single copy of this file is enough to rejoin, or restart, the mesh.</p>
+  <p class="tag">This page carries the router (compiled to WebAssembly) and every
+     transport inline. It needs no server and no network to start; open it from a
+     USB stick or an offline copy and one full node comes alive below. Then add
+     bridges to reach other copies — a WebSocket relay, a direct WebRTC link, a
+     Nostr relay, a USB or Bluetooth radio, sound through the speakers, or a
+     WebTorrent swarm. A single copy of this file can rejoin, or restart, the mesh.</p>
   <div class="bar">
     <span class="pill" id="status">loading…</span>
-    <span class="pill">no external requests</span>
+    <span class="pill addr" id="addr">addr —</span>
     <span class="pill">ed25519 + ChaCha20-Poly1305</span>
     <span class="pill" title="SHA-256 of the embedded wasm">wasm ${wasmHash.slice(0, 16)}…</span>
   </div>
 </header>
 <main>
-  <div class="grid">
-    <section class="card">
-      <h2>Node A</h2><p class="addr" id="addrA">—</p><div class="log" id="logA"></div>
-      <div class="row">
-        <input type="text" id="msgA" placeholder="message from A…" value="the dam holds" />
-        <button id="sendA">Send →</button>
-      </div>
-    </section>
-    <section class="card">
-      <h2>Node B</h2><p class="addr" id="addrB">—</p><div class="log" id="logB"></div>
-      <div class="row">
-        <input type="text" id="msgB" placeholder="message from B…" value="acknowledged" />
-        <button id="sendB">Send →</button>
-      </div>
-    </section>
-  </div>
-
-  <p class="link">in-memory loopback (A ⇄ B)</p>
-
   <section class="card">
-    <h2>Reach other copies</h2>
-    <p class="note">Point node A at a WebSocket relay (or another browser tab running
-      a relay) and it will exchange signed envelopes with every other copy connected
-      there — the same node, now on a real link. Leave blank to stay offline.</p>
+    <h2>This node</h2>
     <div class="row">
-      <input type="text" id="relay" placeholder="wss://relay.example/spore" />
-      <button id="connect" class="ghost">Connect A</button>
+      <select id="dest">
+        <option value="public">To: everyone (public)</option>
+        <option value="direct">To: address (hex)</option>
+      </select>
+      <input type="text" id="hex" placeholder="16 hex chars" style="display:none;max-width:220px" />
+      <input type="text" id="msg" placeholder="message…" value="the dam holds" />
+      <button id="send">Send</button>
     </div>
+    <div class="row">
+      <input type="text" id="topic" placeholder="follow a topic, e.g. spore/news" />
+      <button id="sub" class="ghost">Subscribe</button>
+    </div>
+    <div class="log" id="log" style="margin-top:12px"></div>
   </section>
 
-  <section class="card" style="margin-top:16px">
+  <section class="card">
+    <h2>Bridges</h2>
+    <p class="note">Each bridge is a real link. The node signs what you send, relays
+      what it hears, and delivers what is addressed to it — across every bridge at
+      once. Some need a permission prompt (mic, serial, Bluetooth) or a relay URL.</p>
+    <div class="row">
+      <select id="btype"></select>
+      <button id="add">Add bridge</button>
+    </div>
+    <div id="bridges"></div>
+  </section>
+
+  <section class="card">
     <h2>Reproduce this seed</h2>
-    <p class="note">Save this page and you carry the node with you. The button below
-      re-serializes the running page — wasm and all — back into a fresh copy, so one
-      seed can make the next.</p>
+    <p class="note">Save this page and you carry the whole node with you. The button
+      re-serialises the running page — wasm and all — into a fresh copy, so one seed
+      makes the next.</p>
     <div class="row"><button id="save">Download a copy</button></div>
   </section>
 </main>
 <footer>
-  Self-contained SPORE node · public domain (Unlicense). The embedded wasm is
-  SHA-256 <code>${wasmHash}</code>; verify a copy by hashing the decoded
-  <code>WASM_B64</code> constant in this file's source.
+  Self-contained SPORE node · public domain (Unlicense). Embedded wasm SHA-256
+  <code>${wasmHash}</code>; verify a copy by hashing the decoded <code>WASM_B64</code>
+  constant in this file's source.
 </footer>
 
 <script type="module">
-// ---- inlined SPORE modules (spore.mjs + transports), exports stripped --------
+// ---- inlined SPORE modules (router + every transport), exports stripped ------
 ${modules}
 
 // ---- embedded wasm (base64) --------------------------------------------------
@@ -155,69 +178,357 @@ function b64ToBytes(b64) {
   return out;
 }
 
-// ---- UI ----------------------------------------------------------------------
+// ---- tiny UI helpers ---------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const stamp = () => new Date().toLocaleTimeString();
-function log(which, cls, text) {
-  const el = $('log' + which);
+const hexOf = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+function logLine(cls, text) {
+  const el = $('log');
   const line = document.createElement('div');
-  line.className = cls; line.textContent = stamp() + '  ' + text;
-  el.appendChild(line); el.scrollTop = el.scrollHeight;
+  line.className = cls;
+  line.textContent = stamp() + '  ' + text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
 }
-const hex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
 
-try {
-  const spore = await loadSpore(b64ToBytes(WASM_B64));
-  const hubA = new Hub(spore.newNode());
-  const hubB = new Hub(spore.newNode());
-  $('addrA').textContent = 'addr ' + hex(hubA.node.addr());
-  $('addrB').textContent = 'addr ' + hex(hubB.node.addr());
+// ---- boot the one real node (called last, once every def below exists) -------
+let spore, hub;
+async function boot() {
+  try {
+    spore = await loadSpore(b64ToBytes(WASM_B64));
+    hub = new Hub(spore.newNode());
+    $('addr').textContent = 'addr ' + hexOf(hub.node.addr());
 
-  const deliver = (which) => (env) => {
-    const ok = spore.verify(env);
-    const text = new TextDecoder().decode(spore.payload(env));
-    log(which, ok ? 'rx' : 'bad', '◀ received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
+    hub.onDeliver = (env) => {
+      const ok = spore.verify(env);
+      let text;
+      try { text = new TextDecoder().decode(spore.payload(env)); }
+      catch (e) { text = '<' + spore.payload(env).length + ' bytes>'; }
+      logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
+    };
+
+    $('status').textContent = 'ready — one live node, no network yet';
+    $('status').style.color = 'var(--accent)';
+    logLine('sys', 'node ready; add a bridge to reach other copies');
+    wireCompose();
+    buildBridgeMenu();
+  } catch (e) {
+    $('status').textContent = 'error: ' + e.message;
+    $('status').style.color = 'var(--warn)';
+    console.error(e);
+  }
+}
+
+// ---- compose / subscribe -----------------------------------------------------
+function wireCompose() {
+  $('dest').onchange = () => {
+    $('hex').style.display = $('dest').value === 'direct' ? '' : 'none';
   };
-  hubA.onDeliver = deliver('A');
-  hubB.onDeliver = deliver('B');
-
-  const [ta, tb] = loopbackPair();
-  hubA.addTransport(ta); hubB.addTransport(tb);
-
-  const wire = (hub, which, id) => () => {
-    const text = $(id).value; if (!text) return;
-    hub.send(ZERO_DEST, new TextEncoder().encode(text));
-    log(which, 'tx', '▶ sent ' + JSON.stringify(text));
+  const doSend = () => {
+    const text = $('msg').value;
+    if (!text) return;
+    let dest = ZERO_DEST;
+    if ($('dest').value === 'direct') {
+      const h = $('hex').value.trim().replace(/[^0-9a-fA-F]/g, '');
+      if (h.length !== 16) { logLine('bad', 'address needs 16 hex chars'); return; }
+      dest = new Uint8Array(8);
+      for (let i = 0; i < 8; i++) dest[i] = parseInt(h.substr(i * 2, 2), 16);
+    }
+    hub.send(dest, new TextEncoder().encode(text));
+    logLine('tx', 'sent ' + JSON.stringify(text) + (dest === ZERO_DEST ? ' to everyone' : ' to ' + hexOf(dest)));
   };
-  $('sendA').onclick = wire(hubA, 'A', 'msgA');
-  $('sendB').onclick = wire(hubB, 'B', 'msgB');
-  $('msgA').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sendA').click(); });
-  $('msgB').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sendB').click(); });
+  $('send').onclick = doSend;
+  $('msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+  $('sub').onclick = () => {
+    const t = $('topic').value.trim();
+    if (!t) return;
+    hub.node.subscribe(t);
+    logLine('sys', 'now following topic ' + JSON.stringify(t));
+    $('topic').value = '';
+  };
+}
 
-  $('connect').onclick = () => {
-    const url = $('relay').value.trim(); if (!url) return;
+// ---- bridge registry ---------------------------------------------------------
+const BRIDGES = {
+  loopback: {
+    label: 'Loopback — offline self-test (spawns a 2nd node in this page)',
+    avail: () => true,
+    make: () => spawnPartner(),
+  },
+  websocket: {
+    label: 'WebSocket relay',
+    fields: [{ k: 'url', ph: 'wss://relay.example/spore' }],
+    avail: () => 'WebSocket' in window,
+    make: (f) => new WebSocketTransport(f.url),
+    watchWs: (t) => t.ws,
+  },
+  webtorrent: {
+    label: 'WebTorrent swarm — browser P2P via tracker rendezvous',
+    fields: [{ k: 'name', ph: 'swarm name', val: 'spore/public' }],
+    avail: () => 'RTCPeerConnection' in window && 'WebSocket' in window,
+    make: (f) => WebTorrentTransport.join(f.name),
+    onmeta: (t, set) => { t.onpeer = (n) => set(n + ' peer' + (n === 1 ? '' : 's')); },
+  },
+  nostr: {
+    label: 'Nostr relay (kind-30078, tag spore-v1)',
+    fields: [{ k: 'url', ph: 'wss://relay.damus.io' }],
+    avail: () => 'WebSocket' in window,
+    make: (f) => new NostrTransport(f.url, window.nostr ? (e) => window.nostr.signEvent(e) : null),
+    watchWs: (t) => t.ws,
+  },
+  webserial: {
+    label: 'Web Serial — USB LoRa/ESP32 board (KISS)',
+    avail: () => !!navigator.serial,
+    make: () => WebSerialTransport.open({ baudRate: 115200 }),
+  },
+  webbluetooth: {
+    label: 'Web Bluetooth — BLE radio (Nordic UART, KISS)',
+    avail: () => !!navigator.bluetooth,
+    make: () => WebBluetoothTransport.open(),
+  },
+  audio: {
+    label: 'Audio modem — mic + speaker, 16-FSK (interops with the Rust bridge)',
+    avail: () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+    make: () => AudioModemTransport.open(),
+  },
+  webrtc: {
+    label: 'WebRTC — direct peer, copy/paste invite (no server)',
+    avail: () => 'RTCPeerConnection' in window,
+    manual: true,
+  },
+};
+
+function buildBridgeMenu() {
+  const sel = $('btype');
+  for (const [key, b] of Object.entries(BRIDGES)) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = b.label + (b.avail() ? '' : ' — unsupported here');
+    opt.disabled = !b.avail();
+    sel.appendChild(opt);
+  }
+  $('add').onclick = () => addBridge(sel.value);
+}
+
+// A styled row for one live bridge. Returns handles the caller updates.
+function bridgeRow(title) {
+  const el = document.createElement('div');
+  el.className = 'bridge';
+  const hd = document.createElement('div');
+  hd.className = 'hd';
+  const ttl = document.createElement('span');
+  ttl.className = 'ttl';
+  ttl.textContent = title;
+  const badge = document.createElement('span');
+  badge.className = 'badge';
+  badge.textContent = 'starting';
+  const cnt = document.createElement('span');
+  cnt.className = 'cnt';
+  const rm = document.createElement('button');
+  rm.className = 'x';
+  rm.textContent = '×';
+  hd.append(ttl, cnt, badge, rm);
+  const bd = document.createElement('div');
+  bd.className = 'bd';
+  el.append(hd, bd);
+  $('bridges').prepend(el);
+  return {
+    body: bd,
+    remove: rm,
+    setState: (s, kind) => { badge.textContent = s; badge.className = 'badge' + (kind ? ' ' + kind : ''); },
+    setMeta: (s) => { cnt.textContent = s; },
+    destroy: () => el.remove(),
+  };
+}
+
+// Attach a transport to the hub, counting frames each way for the row.
+function attachCounted(t, ui) {
+  hub.addTransport(t);
+  let inN = 0, outN = 0;
+  const upd = () => ui.setMeta('↑' + outN + ' ↓' + inN);
+  const hubRx = t.receive;
+  t.receive = (b) => { inN++; upd(); return hubRx(b); };
+  const origSend = t.send.bind(t);
+  t.send = (b) => { outN++; upd(); return origSend(b); };
+  upd();
+}
+
+async function addBridge(key) {
+  const b = BRIDGES[key];
+  if (!b || !b.avail()) return;
+  if (b.manual) return addWebRTC();
+
+  const ui = bridgeRow(b.label);
+  // Render any config fields; collect their values.
+  const fields = {};
+  if (b.fields) {
+    for (const f of b.fields) {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = f.ph || f.k;
+      if (f.val) inp.value = f.val;
+      ui.body.appendChild(inp);
+      fields[f.k] = () => inp.value.trim();
+    }
+  }
+  const start = async () => {
+    const vals = {};
+    for (const k in fields) vals[k] = fields[k]();
+    if (b.fields && b.fields.some((f) => !vals[f.k])) { ui.setState('need input', 'err'); return; }
+    ui.setState('connecting');
     try {
-      hubA.addTransport(new WebSocketTransport(url));
-      log('A', 'sys', 'connecting to relay ' + url);
-    } catch (e) { log('A', 'bad', 'relay error: ' + e.message); }
+      const t = await b.make(vals);
+      attachCounted(t, ui);
+      wireState(t, b, ui);
+      logLine('sys', 'bridge up: ' + b.label);
+    } catch (e) {
+      ui.setState('error', 'err');
+      logLine('bad', 'bridge failed: ' + (e && e.message ? e.message : e));
+    }
   };
-
-  $('save').onclick = () => {
-    const blob = new Blob(['<!doctype html>\\n' + document.documentElement.outerHTML], { type: 'text/html' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'spore-standalone.html'; a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
-  $('status').textContent = 'ready — two nodes live, no network used';
-  $('status').style.color = 'var(--accent)';
-  log('A', 'sys', 'node ready; loopback linked to B');
-  log('B', 'sys', 'node ready; loopback linked to A');
-} catch (e) {
-  $('status').textContent = 'error: ' + e.message;
-  $('status').style.color = 'var(--warn)';
-  console.error(e);
+  // Until a transport exists, removing just discards the row; wireState rebinds
+  // this to also detach the live transport once it's up.
+  ui.remove.onclick = () => removeBridge(ui, () => ui._t);
+  if (b.fields && b.fields.length) {
+    const go = document.createElement('button');
+    go.textContent = 'Connect';
+    go.style.marginTop = '8px';
+    go.onclick = () => { go.disabled = true; start(); };
+    ui.body.appendChild(document.createElement('div')).appendChild(go);
+  } else {
+    start();
+  }
 }
+
+// Best-effort live state for a bridge, and remove wiring.
+function wireState(t, b, ui) {
+  ui._t = t;
+  ui.setState('open', 'open');
+  if (b.onmeta) b.onmeta(t, ui.setMeta);
+  const ws = b.watchWs && b.watchWs(t);
+  if (ws) {
+    const set = () => {
+      const s = ['connecting', 'open', 'closing', 'closed'][ws.readyState] || '?';
+      ui.setState(s, ws.readyState === 1 ? 'open' : ws.readyState >= 2 ? 'err' : '');
+    };
+    ws.addEventListener('open', set);
+    ws.addEventListener('close', set);
+    ws.addEventListener('error', set);
+    set();
+  }
+  ui.remove.onclick = () => removeBridge(ui, () => t);
+}
+
+function removeBridge(ui, getT) {
+  const t = getT && getT();
+  if (t) {
+    hub.removeTransport(t);
+    if (t.close) try { t.close(); } catch (e) { /* */ }
+  }
+  ui.destroy();
+  logLine('sys', 'bridge removed');
+}
+
+// The offline self-test: a second in-process node linked by loopback, so you can
+// watch a signed envelope leave, arrive, and verify with zero network.
+function spawnPartner() {
+  const pnode = spore.newNode();
+  const phub = new Hub(pnode);
+  phub.onDeliver = (env) => {
+    const ok = spore.verify(env);
+    let text;
+    try { text = new TextDecoder().decode(spore.payload(env)); } catch (e) { text = '?'; }
+    logLine('relay', 'partner node received ' + JSON.stringify(text) + ' (sig ' + (ok ? 'OK' : 'BAD') + ')');
+  };
+  const pair = loopbackPair();
+  phub.addTransport(pair[1]);
+  logLine('sys', 'partner node ' + hexOf(pnode.addr()) + ' linked by loopback');
+  return pair[0];
+}
+
+// WebRTC: two people swap two short blobs by any out-of-band channel.
+function addWebRTC() {
+  const ui = bridgeRow('WebRTC — direct peer (copy/paste invite)');
+  const info = document.createElement('p');
+  info.className = 'note';
+  info.textContent = 'Pick a role. Pass the blobs to the other side by any channel (chat, QR, voice).';
+  const rowBtns = document.createElement('div');
+  rowBtns.className = 'row';
+  const bCreate = document.createElement('button');
+  bCreate.className = 'ghost';
+  bCreate.textContent = 'Create invite';
+  const bAccept = document.createElement('button');
+  bAccept.className = 'ghost';
+  bAccept.textContent = 'Accept invite';
+  rowBtns.append(bCreate, bAccept);
+  ui.body.append(info, rowBtns);
+
+  const ta = (label) => {
+    const wrap = document.createElement('div');
+    const l = document.createElement('p');
+    l.className = 'note';
+    l.textContent = label;
+    const t = document.createElement('textarea');
+    wrap.append(l, t);
+    ui.body.appendChild(wrap);
+    return t;
+  };
+
+  bCreate.onclick = async () => {
+    rowBtns.remove();
+    ui.setState('gathering');
+    try {
+      const o = await manualOffer();
+      attachCounted(o.transport, ui);
+      ui.remove.onclick = () => removeBridge(ui, () => o.transport);
+      const out = ta('1. Send this invite to the other side:');
+      out.value = o.offer; out.readOnly = true; out.focus(); out.select();
+      const inp = ta('2. Paste their answer here, then Connect:');
+      const go = document.createElement('button');
+      go.textContent = 'Connect';
+      ui.body.appendChild(document.createElement('div')).appendChild(go);
+      go.onclick = async () => {
+        try { await o.accept(inp.value); ui.setState('open', 'open'); logLine('sys', 'WebRTC link established'); }
+        catch (e) { ui.setState('bad answer', 'err'); }
+      };
+    } catch (e) { ui.setState('error', 'err'); }
+  };
+
+  bAccept.onclick = async () => {
+    rowBtns.remove();
+    const inp = ta('1. Paste the invite you were given:');
+    const go = document.createElement('button');
+    go.textContent = 'Generate answer';
+    ui.body.appendChild(document.createElement('div')).appendChild(go);
+    go.onclick = async () => {
+      go.disabled = true;
+      ui.setState('gathering');
+      try {
+        const a = await manualAnswer(inp.value);
+        const out = ta('2. Send this answer back; the link opens when they Connect:');
+        out.value = a.answer; out.readOnly = true; out.focus(); out.select();
+        const t = await a.transport;
+        attachCounted(t, ui);
+        ui.remove.onclick = () => removeBridge(ui, () => t);
+        ui.setState('open', 'open');
+        logLine('sys', 'WebRTC link established');
+      } catch (e) { ui.setState('bad invite', 'err'); go.disabled = false; }
+    };
+  };
+}
+
+// ---- save a copy -------------------------------------------------------------
+$('save').onclick = () => {
+  const blob = new Blob(['<!doctype html>\\n' + document.documentElement.outerHTML], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'spore-standalone.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// Everything is defined; start the node.
+boot();
 </script>
 </body>
 </html>

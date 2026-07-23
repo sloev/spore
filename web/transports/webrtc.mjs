@@ -42,3 +42,62 @@ export function openChannel(pc, { initiator }) {
     }
   });
 }
+
+const STUN = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+// Gather ICE fully so one copy-pasteable blob carries every candidate.
+function iceComplete(pc) {
+  return new Promise((resolve) => {
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const check = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', check);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', check);
+    setTimeout(resolve, 4000);
+  });
+}
+const packSdp = (d) => btoa(JSON.stringify({ type: d.type, sdp: d.sdp }));
+const unpackSdp = (s) => JSON.parse(atob(s.trim()));
+
+/**
+ * Manual (copy-paste / QR / ultrasonic) WebRTC signaling — no server. Two people
+ * pass two short blobs by any out-of-band channel and get a direct link:
+ *
+ *   A: const { offer, transport, accept } = await manualOffer();
+ *      // send `offer` to B; when B returns their answer: await accept(answer)
+ *   B: const { answer, transport } = await manualAnswer(offer);
+ *      // send `answer` back to A
+ *
+ * Each side's `transport` resolves/attaches once the channel opens. Attach the
+ * transport to your hub immediately; it queues sends until the link is up.
+ */
+export async function manualOffer() {
+  const pc = new RTCPeerConnection({ iceServers: STUN });
+  const dc = pc.createDataChannel('spore', { ordered: false });
+  const transport = new WebRTCTransport(dc);
+  await pc.setLocalDescription(await pc.createOffer());
+  await iceComplete(pc);
+  return {
+    offer: packSdp(pc.localDescription),
+    transport,
+    accept: (answerBlob) => pc.setRemoteDescription(unpackSdp(answerBlob)),
+  };
+}
+
+export async function manualAnswer(offerBlob) {
+  const pc = new RTCPeerConnection({ iceServers: STUN });
+  let transport;
+  const ready = new Promise((res) => {
+    pc.ondatachannel = (ev) => {
+      transport = new WebRTCTransport(ev.channel);
+      res(transport);
+    };
+  });
+  await pc.setRemoteDescription(unpackSdp(offerBlob));
+  await pc.setLocalDescription(await pc.createAnswer());
+  await iceComplete(pc);
+  return { answer: packSdp(pc.localDescription), transport: ready };
+}
