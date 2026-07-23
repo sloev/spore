@@ -1,0 +1,25 @@
+name: Reference decoders
+
+# Conformance for the dependency-light Tier-0 decoders in `reference/`: the pure-C
+# and shell "read + verify a message" nodes must reproduce the Rust test vectors
+# and verify signatures. Kept as its own workflow (not the frozen `ci.yml`) so it
+# can grow without touching the frozen contract.
+on:
+  push:
+    branches: [master, develop]
+    paths:
+      - "reference/**"
+      - ".github/workflows/reference.yml"
+  pull_request:
+    paths:
+      - "reference/**"
+      - ".github/workflows/reference.yml"
+  workflow_dispatch:
+
+jobs:
+  decoders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: C + shell decoders reproduce the vectors and verify signatures
+        run: bash reference/test_decoders.sh

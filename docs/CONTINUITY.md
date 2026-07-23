@@ -153,10 +153,11 @@ What exists and what's next, from the fuller design discussion.
 - [ ] **Trust roots on paper** — maintainer keys and a mnemonic-encoded release
       hash you can carry in memory; multi-signature releases so no single custodian
       is a point of failure.
-- [x] **Tiny reference decoder** ([`reference/spore_t0.py`](../reference/)) — a
-      dependency-free pure-Python T0 node (parse + address + ID + Ed25519 verify)
-      for machines without a Rust toolchain, checked against the Rust vectors in
-      CI. Pure-C and shell ports are the natural next tiers.
+- [x] **Tiny reference decoders** ([`reference/`](../reference/)) — dependency-free
+      Tier-0 nodes (parse + address + ID + Ed25519 verify) in **Python**, **C**
+      (its own SHA-256/512 + curve arithmetic, zero deps), and **shell** (`openssl`
+      + coreutils), for machines without a Rust toolchain. All three reproduce the
+      Rust vectors and are checked in CI.
 
 ## Help re-seed
 
