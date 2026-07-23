@@ -10,7 +10,8 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use spore::bridge::hub::{Hub, Shared};
-use spore::{Envelope, Node};
+use spore::{addr_of, Envelope, Forward, Iface, Node, Src};
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
 use std::thread;
@@ -19,6 +20,10 @@ use std::thread;
 struct Runtime {
     hub: Shared,
     inbox: Mutex<Receiver<Vec<u8>>>, // delivered envelope wires (drained by nativePollDelivery)
+    // Kotlin-driven bridges (BLE, audio, Wi-Fi Direct, WebView): each registers a
+    // hub iface and pumps it by polling for outbound frames + pushing inbound —
+    // the same poll model as the delivery inbox, so no Rust→Kotlin callbacks.
+    ifaces: Mutex<HashMap<i32, Receiver<Forward>>>,
 }
 
 fn rt<'a>(ptr: jlong) -> &'a Runtime {
@@ -47,7 +52,8 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
     let hub = Hub::new(node);
     let (tx, rx) = channel();
     hub.set_delivery_sink(tx);
-    Box::into_raw(Box::new(Runtime { hub, inbox: Mutex::new(rx) })) as jlong
+    Box::into_raw(Box::new(Runtime { hub, inbox: Mutex::new(rx), ifaces: Mutex::new(HashMap::new()) }))
+        as jlong
 }
 
 /// Destroy a runtime.
@@ -133,6 +139,72 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdp(
     });
 }
 
+/// Start a TCP bridge on a background thread. `target` empty = listen; otherwise
+/// connect to `host:port`.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartTcp(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    target: JString,
+) {
+    let t: Option<String> = env.get_string(&target).ok().map(|s| s.into()).filter(|s: &String| !s.is_empty());
+    let r = rt(ptr);
+    let (iface, rx) = r.hub.register();
+    let hub = r.hub.clone();
+    thread::spawn(move || {
+        let _ = spore::bridge::tcp::run(hub, iface, rx, t);
+    });
+}
+
+/// Register a Kotlin-driven bridge interface; returns its iface id. Pump it with
+/// nativePollForward (outbound) + nativePushRx (inbound).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRegisterIface(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jint {
+    let r = rt(ptr);
+    let (iface, rx) = r.hub.register();
+    r.ifaces.lock().unwrap().insert(iface as i32, rx);
+    iface as jint
+}
+
+/// Poll one outbound frame the node wants transmitted on `iface`, or null.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePollForward(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    iface: jint,
+) -> jbyteArray {
+    let map = rt(ptr).ifaces.lock().unwrap();
+    if let Some(rx) = map.get(&iface) {
+        if let Ok(f) = rx.try_recv() {
+            let bytes = match f {
+                Forward::Flood { bytes, .. } => bytes,
+                Forward::Directed { bytes, .. } => bytes,
+            };
+            return env.byte_array_from_slice(&bytes).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut());
+        }
+    }
+    std::ptr::null_mut()
+}
+
+/// Feed an inbound frame received by a Kotlin-driven bridge into the node.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePushRx(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    iface: jint,
+    frame: JByteArray,
+) {
+    let bytes = env.convert_byte_array(&frame).unwrap_or_default();
+    rt(ptr).hub.on_rx(iface as Iface, &bytes, None);
+}
+
 /// Poll for one delivered envelope's wire bytes, or null if the inbox is empty.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativePollDelivery(
@@ -173,5 +245,28 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvVerify(
     match Envelope::decode(&w) {
         Ok((e, _)) if e.verify() => JNI_TRUE,
         _ => JNI_FALSE,
+    }
+}
+
+/// The sender's 8-byte address (for conversations / petnames), or null if the
+/// envelope is unsigned.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvSrc(
+    env: JNIEnv,
+    _class: JClass,
+    wire: JByteArray,
+) -> jbyteArray {
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    let addr = match Envelope::decode(&w) {
+        Ok((e, _)) => match e.src {
+            Src::Full(pk) => Some(addr_of(&pk)),
+            Src::Short(a) => Some(a),
+            Src::None => None,
+        },
+        Err(_) => None,
+    };
+    match addr {
+        Some(a) => env.byte_array_from_slice(&a).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
     }
 }

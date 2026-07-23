@@ -2,11 +2,13 @@
 
 A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design.
 
-> **Status: M0 skeleton.** One node in a foreground service, identity persisted,
-> the **UDP broadcast** bridge, and a minimal Compose UI (address + send/receive
-> log). The Rust JNI layer is host-`cargo check`ed in CI; the Kotlin/Gradle app is
-> a first cut proven by the `android` CI workflow. Milestones M1–M5 (more bridges,
-> petnames, feed, files, kawaii polish, signed release) are in the plan.
+> **Status: M0 + M1.** A node in a foreground service (identity persisted),
+> the **UDP broadcast** and **TCP** bridges, **petnames**, per-peer **conversations**
+> with a compose box, and a **Bridges** screen. The Rust core + JNI are
+> host-`cargo check`ed in CI; the Kotlin/Compose app is proven by the `android` CI
+> workflow (APK build). Milestones M2–M5 (audio/BLE/Wi-Fi-Direct, the WebView web
+> bridges, feed + files with fragment status, kawaii polish + signed release)
+> follow the plan.
 
 ## Layout
 

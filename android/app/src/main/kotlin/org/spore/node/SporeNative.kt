@@ -30,6 +30,18 @@ object SporeNative {
     /** Start the primary-subnet UDP broadcast bridge (port <= 0 = default). */
     external fun nativeStartUdp(ptr: Long, port: Int)
 
+    /** Start a TCP bridge (empty target = listen; else "host:port"). */
+    external fun nativeStartTcp(ptr: Long, target: String)
+
+    /** Register a Kotlin-driven bridge interface; returns its iface id. */
+    external fun nativeRegisterIface(ptr: Long): Int
+
+    /** Poll one outbound frame the node wants sent on `iface`, or null. */
+    external fun nativePollForward(ptr: Long, iface: Int): ByteArray?
+
+    /** Feed an inbound frame from a Kotlin-driven bridge into the node. */
+    external fun nativePushRx(ptr: Long, iface: Int, frame: ByteArray)
+
     /** Poll one delivered envelope's wire bytes, or null if the inbox is empty. */
     external fun nativePollDelivery(ptr: Long): ByteArray?
 
@@ -38,4 +50,7 @@ object SporeNative {
 
     /** Whether an envelope wire carries a valid signature. */
     external fun nativeEnvVerify(wire: ByteArray): Boolean
+
+    /** The sender's 8-byte address, or null if the envelope is unsigned. */
+    external fun nativeEnvSrc(wire: ByteArray): ByteArray?
 }
