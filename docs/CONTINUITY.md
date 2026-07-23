@@ -144,9 +144,12 @@ What exists and what's next, from the fuller design discussion.
       full drop-a-third round-trip test ship with it.
 - [ ] **Codex** — the complete source as a hash-stamped booklet (the Seed Sheet
       scaled up), for machines with no toolchain to retype or rescan from.
-- [ ] **The network carries its own genome** — a well-known bootstrap-bundle magnet
-      (source + binaries + this manual), signed self-update over the mesh, and
-      opt-in seed-vault nodes that pin it and never evict it.
+- [◑] **The network carries its own genome** — done: a bootstrap bundle publishes
+      on a well-known topic (`bundle::BOOTSTRAP_TOPIC`) as a signed,
+      content-addressed file any holder can serve and a newcomer verifies
+      (`Node::publish_bundle` / `bundles` / `latest_bundle`), and seed-vault nodes
+      `Node::pin` it so it's never evicted. Still open: signed self-update (a node
+      adopting a newer bundle as its own binary).
 - [ ] **Trust roots on paper** — maintainer keys and a mnemonic-encoded release
       hash you can carry in memory; multi-signature releases so no single custodian
       is a point of failure.
