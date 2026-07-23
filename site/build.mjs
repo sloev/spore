@@ -43,7 +43,7 @@ linkMap.set('readme.md', 'index.html');
 const navLinks = pages
   .filter(([, , label]) => label)
   .map(([, dst, label]) => ({ dst, label }))
-  .concat([{ dst: 'demo/', label: 'Live demo' }]);
+  .concat([{ dst: 'demo/', label: 'Web node' }]);
 
 function rewriteLinks(html, self) {
   // Rewrite href="...something.md" (with optional ../ and #anchor) to the built
