@@ -388,8 +388,10 @@ function buildBridgeMenu() {
   for (const [key, b] of Object.entries(BRIDGES)) {
     const opt = document.createElement('option');
     opt.value = key;
+    // Keep unsupported entries *selectable* (a disabled <option> makes the
+    // dropdown snap back to its previous value when clicked); we explain why on
+    // Add instead.
     opt.textContent = b.label + (b.avail() ? '' : ' — unsupported here');
-    opt.disabled = !b.avail();
     sel.appendChild(opt);
   }
   $('add').onclick = () => spinUp({ type: sel.value, fields: {} }, true);
@@ -483,6 +485,8 @@ function spinUp(entry, fresh) {
   const ui = bridgeRow(b.label);
   if (!b.avail()) {
     ui.setState('unsupported', 'err');
+    logLine('bad', b.label + ' — not available in this browser. Web Serial/Bluetooth '
+      + 'need a Chromium browser (Chrome/Edge); some APIs also need a secure page (https or file://).');
     ui.remove.onclick = () => { removeSaved(entry); ui.destroy(); };
     return;
   }
