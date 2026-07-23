@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws the real UI; this is just a valid no-action-bar host theme. -->
+    <style name="Theme.Spore" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

@@ -1,0 +1,17 @@
+[package]
+name = "spore-jni"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Own workspace root so the parent `spore` package doesn't adopt it (and vice
+# versa); this crate is built separately with cargo-ndk for Android.
+[workspace]
+
+[lib]
+name = "spore_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+spore = { path = "../.." }
+jni = "0.21"

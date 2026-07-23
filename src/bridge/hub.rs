@@ -22,11 +22,30 @@ pub fn now() -> u32 {
 pub struct Hub {
     node: Mutex<Node>,
     out: Mutex<Vec<Option<Sender<Forward>>>>, // index = iface id; None = pull-only
+    deliver: Mutex<Option<Sender<Vec<u8>>>>,  // optional app inbox: delivered envelope wires
 }
 
 impl Hub {
     pub fn new(node: Node) -> Shared {
-        Arc::new(Hub { node: Mutex::new(node), out: Mutex::new(Vec::new()) })
+        Arc::new(Hub { node: Mutex::new(node), out: Mutex::new(Vec::new()), deliver: Mutex::new(None) })
+    }
+
+    /// Install an inbox that receives the wire bytes of every envelope delivered
+    /// to this node (addressed to us, or on a topic we follow). Embedders — the
+    /// Android app, bindings — drain the paired `Receiver`. Replaces any prior sink.
+    pub fn set_delivery_sink(&self, tx: Sender<Vec<u8>>) {
+        *self.deliver.lock().unwrap() = Some(tx);
+    }
+
+    /// Originate a signed app message to `dest` (all-zero = public) and flood it
+    /// onto every interface. The convenience the daemon's `main` and the Android
+    /// app both use to *send*.
+    pub fn send(&self, dest: Addr, data: Vec<u8>) {
+        let forwards = {
+            let mut n = self.node.lock().unwrap();
+            n.send(dest, data, now())
+        };
+        self.dispatch(forwards);
     }
 
     /// Register a sending interface: returns its iface id and the queue of
@@ -56,6 +75,11 @@ impl Hub {
             n.on_rx(bytes, iface, nbr, now())
         };
         self.dispatch(rx.forwards);
+        if let Some(tx) = self.deliver.lock().unwrap().as_ref() {
+            for e in &rx.delivered {
+                let _ = tx.send(e.wire());
+            }
+        }
         rx.delivered
     }
 
