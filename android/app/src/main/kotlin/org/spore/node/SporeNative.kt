@@ -53,4 +53,31 @@ object SporeNative {
 
     /** The sender's 8-byte address, or null if the envelope is unsigned. */
     external fun nativeEnvSrc(wire: ByteArray): ByteArray?
+
+    /** The envelope's 8-byte destination (topic addr for feed posts). */
+    external fun nativeEnvDest(wire: ByteArray): ByteArray?
+
+    /** The 8-byte topic address for a topic name. */
+    external fun nativeTopicAddr(topic: String): ByteArray?
+
+    /** Send and return the number of wire fragments the payload became. */
+    external fun nativeSendCounted(ptr: Long, dest: ByteArray, payload: ByteArray): Int
+
+    /** Modulate one frame to 48 kHz mono f32 PCM (audio modem TX). */
+    external fun nativeAudioModulate(payload: ByteArray): FloatArray?
+
+    /** Feed captured mic PCM into the streaming demodulator (audio modem RX). */
+    external fun nativeAudioDemodPush(ptr: Long, samples: FloatArray)
+
+    /** Pop one frame the demodulator completed, or null. */
+    external fun nativeAudioDemodPop(ptr: Long): ByteArray?
+
+    /** Wrap an envelope as a Meshtastic MeshPacket (portnum 256, broadcast). */
+    external fun nativeMeshtasticWrap(envWire: ByteArray, fromNode: Int, packetId: Int): ByteArray?
+
+    /** Unwrap a MeshPacket; the SPORE envelope if it rides portnum 256, else null. */
+    external fun nativeMeshtasticUnwrap(frame: ByteArray): ByteArray?
+
+    /** Start the plain limited-broadcast UDP bridge (for Wi-Fi Direct groups). */
+    external fun nativeStartUdpLimited(ptr: Long, port: Int)
 }

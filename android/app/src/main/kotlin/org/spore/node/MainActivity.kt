@@ -194,29 +194,119 @@ private fun ChatDetail(peer: String) {
 
 @Composable
 private fun BridgesList() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val bridges by NodeController.bridges.collectAsState()
     var tcp by remember { mutableStateOf("") }
-    Column(Modifier.padding(16.dp).fillMaxSize()) {
-        Text("Bridges relay your signed envelopes across every medium at once.", style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = tcp, onValueChange = { tcp = it },
-                label = { Text("add TCP (host:port, blank = listen)") }, modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { NodeController.addTcp(tcp.trim()); tcp = "" }) { Text("Add") }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val askPerms = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.all { it }) pendingAction?.invoke()
+        pendingAction = null
+    }
+
+    fun withPerms(perms: List<String>, action: () -> Unit) {
+        val missing = perms.filter {
+            ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED
         }
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(bridges) { b ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("${b.kind} · ${b.status}", style = MaterialTheme.typography.titleSmall)
-                        Text(b.detail, style = MaterialTheme.typography.bodySmall)
-                    }
+        if (missing.isEmpty()) action()
+        else { pendingAction = action; askPerms.launch(missing.toTypedArray()) }
+    }
+
+    fun bonded(): List<android.bluetooth.BluetoothDevice> = try {
+        val bt = ctx.getSystemService(android.bluetooth.BluetoothManager::class.java)
+        bt?.adapter?.bondedDevices?.toList() ?: emptyList()
+    } catch (_: SecurityException) { emptyList() }
+
+    val blePerms = if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList()
+    val wifiP2pPerms =
+        if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+        else listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    var showMeshPick by remember { mutableStateOf(false) }
+    var showRnodePick by remember { mutableStateOf(false) }
+    var freq by remember { mutableStateOf("867.2") }
+    var bw by remember { mutableStateOf("125") }
+    var sf by remember { mutableStateOf("8") }
+    var cr by remember { mutableStateOf("5") }
+    var tx by remember { mutableStateOf("0") }
+
+    LazyColumn(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Text(
+                "Bridges relay your signed envelopes across every medium at once. 🍄",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        items(bridges) { b ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("${b.kind} · ${b.status}", style = MaterialTheme.typography.titleSmall)
+                    Text(b.detail, style = MaterialTheme.typography.bodySmall)
                 }
             }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = tcp, onValueChange = { tcp = it },
+                    label = { Text("TCP host:port (blank = listen)") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addTcp(tcp.trim()); tcp = "" }) { Text("Add") }
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(listOf(Manifest.permission.RECORD_AUDIO)) { NodeController.enableAudio() }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Enable audio modem (mic + speaker)") }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(blePerms) { showMeshPick = !showMeshPick }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Add Meshtastic radio (paired BLE)") }
+        }
+        if (showMeshPick) {
+            items(bonded()) { d ->
+                Card(Modifier.fillMaxWidth().clickable {
+                    NodeController.enableMeshtasticBle(ctx, d); showMeshPick = false
+                }) { Text("📻 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", Modifier.padding(12.dp)) }
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(blePerms) { showRnodePick = !showRnodePick }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Add Reticulum RNode (paired BLE)") }
+        }
+        if (showRnodePick) {
+            item {
+                Row {
+                    OutlinedTextField(freq, { freq = it }, label = { Text("MHz") }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(bw, { bw = it }, label = { Text("kHz") }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(sf, { sf = it }, label = { Text("SF") }, modifier = Modifier.weight(0.7f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(cr, { cr = it }, label = { Text("CR") }, modifier = Modifier.weight(0.7f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(tx, { tx = it }, label = { Text("dBm") }, modifier = Modifier.weight(0.7f))
+                }
+            }
+            items(bonded()) { d ->
+                Card(Modifier.fillMaxWidth().clickable {
+                    val f = ((freq.toDoubleOrNull() ?: 867.2) * 1e6).toLong()
+                    val b = ((bw.toDoubleOrNull() ?: 125.0) * 1e3).toLong()
+                    NodeController.enableRNodeBle(
+                        ctx, d, f, b, sf.toIntOrNull() ?: 8, cr.toIntOrNull() ?: 5, tx.toIntOrNull() ?: 0
+                    )
+                    showRnodePick = false
+                }) { Text("📡 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", Modifier.padding(12.dp)) }
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Enable Wi-Fi Direct group") }
         }
     }
 }

@@ -80,6 +80,62 @@ object NodeController {
         addBridgeState("TCP", if (target.isBlank()) "listening" else target, "on")
     }
 
+    private var audio: AudioBridge? = null
+    private val bleBridges = mutableListOf<BleBridge>()
+    private var wifiDirect: WifiDirectBridge? = null
+
+    /** Data-over-sound. UI must have RECORD_AUDIO granted before calling. */
+    fun enableAudio(): Boolean {
+        if (ptr == 0L || audio != null) return false
+        val iface = SporeNative.nativeRegisterIface(ptr)
+        audio = AudioBridge(ptr, iface).also { it.start() }
+        addBridgeState("Audio modem", "16-FSK · mic + speaker", "on")
+        return true
+    }
+
+    /** A paired Meshtastic node over BLE. UI gates on BLUETOOTH_CONNECT. */
+    fun enableMeshtasticBle(ctx: Context, device: android.bluetooth.BluetoothDevice) {
+        if (ptr == 0L) return
+        val iface = SporeNative.nativeRegisterIface(ptr)
+        val myNode = SporeNative.nativeAddr(ptr).let {
+            ((it[0].toInt() and 0xff) shl 24) or ((it[1].toInt() and 0xff) shl 16) or
+                ((it[2].toInt() and 0xff) shl 8) or (it[3].toInt() and 0xff)
+        }
+        val b = MeshtasticBleBridge(ptr, iface, ctx, device, myNode)
+        bleBridges.add(b)
+        addBridgeState("Meshtastic BLE", device.name ?: "device", "connecting")
+        b.onState = { s -> updateBridgeState("Meshtastic BLE", s) }
+        b.start()
+    }
+
+    /** A paired RNode over BLE (Nordic UART). UI gates on BLUETOOTH_CONNECT. */
+    fun enableRNodeBle(
+        ctx: Context, device: android.bluetooth.BluetoothDevice,
+        freqHz: Long, bwHz: Long, sf: Int, cr: Int, txDbm: Int,
+    ) {
+        if (ptr == 0L) return
+        val iface = SporeNative.nativeRegisterIface(ptr)
+        val b = RNodeBleBridge(ptr, iface, ctx, device, freqHz, bwHz, sf, cr, txDbm)
+        bleBridges.add(b)
+        addBridgeState("RNode BLE", device.name ?: "device", "connecting")
+        b.onState = { s -> updateBridgeState("RNode BLE", s) }
+        b.start()
+    }
+
+    /** Wi-Fi Direct group + limited-broadcast UDP on it. */
+    fun enableWifiDirect(ctx: Context) {
+        if (ptr == 0L || wifiDirect != null) return
+        val w = WifiDirectBridge(ctx, ptr)
+        wifiDirect = w
+        addBridgeState("Wi-Fi Direct", "P2P group + UDP flood", "starting")
+        w.onState = { s -> updateBridgeState("Wi-Fi Direct", s) }
+        w.start()
+    }
+
+    private fun updateBridgeState(kind: String, status: String) {
+        bridges.value = bridges.value.map { if (it.kind == kind) it.copy(status = status) else it }
+    }
+
     fun conversations(): List<String> =
         (messages.value.map { it.peer } + Petnames.PUBLIC).distinct()
 
