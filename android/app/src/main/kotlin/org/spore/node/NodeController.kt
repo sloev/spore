@@ -136,6 +136,34 @@ object NodeController {
         bridges.value = bridges.value.map { if (it.kind == kind) it.copy(status = status) else it }
     }
 
+    // -- web-origin bridges (headless WebView; reuses web/transports/*.mjs) ----
+    private var webHost: WebBridgeHost? = null
+
+    private fun webHost(ctx: Context): WebBridgeHost {
+        webHost?.let { return it }
+        val h = WebBridgeHost(ctx.applicationContext, ptr)
+        h.onEvent = { msg -> updateBridgeState("Web", msg) }
+        h.start()
+        webHost = h
+        addBridgeState("Web", "WebSocket / Nostr / WebTorrent host", "up")
+        return h
+    }
+
+    fun addWebSocket(ctx: Context, url: String) {
+        if (ptr == 0L || url.isBlank()) return
+        webHost(ctx).addWebSocket(url.trim())
+    }
+
+    fun addNostr(ctx: Context, url: String) {
+        if (ptr == 0L || url.isBlank()) return
+        webHost(ctx).addNostr(url.trim())
+    }
+
+    fun addWebTorrent(ctx: Context, name: String) {
+        if (ptr == 0L || name.isBlank()) return
+        webHost(ctx).addWebTorrent(name.trim())
+    }
+
     fun conversations(): List<String> =
         (messages.value.map { it.peer } + Petnames.PUBLIC).distinct()
 

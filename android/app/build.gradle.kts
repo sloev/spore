@@ -48,6 +48,16 @@ android {
     // (see .github/workflows/android.yml); Gradle packages them from there.
 }
 
+// The headless-WebView bridges reuse the repo's real JS transports verbatim —
+// copied into assets at build time so browser and phone can't drift.
+val copyWebAssets by tasks.registering(Copy::class) {
+    from(project.file("../../web/transports")) {
+        include("websocket.mjs", "nostr.mjs", "webtorrent.mjs")
+    }
+    into(project.file("src/main/assets/webtransports"))
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(copyWebAssets) }
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.02")
     implementation(composeBom)

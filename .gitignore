@@ -15,3 +15,4 @@ android/**/build/
 android/.gradle/
 android/local.properties
 android/jni/target/
+android/app/src/main/assets/webtransports/

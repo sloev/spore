@@ -308,5 +308,38 @@ private fun BridgesList() {
                 withPerms(wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
             }, modifier = Modifier.fillMaxWidth()) { Text("Enable Wi-Fi Direct group") }
         }
+        item {
+            var ws by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = ws, onValueChange = { ws = it },
+                    label = { Text("WebSocket relay wss://…") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addWebSocket(ctx, ws); ws = "" }) { Text("Add") }
+            }
+        }
+        item {
+            var nostr by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = nostr, onValueChange = { nostr = it },
+                    label = { Text("Nostr relay wss://… (rx-only)") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addNostr(ctx, nostr); nostr = "" }) { Text("Add") }
+            }
+        }
+        item {
+            var swarm by remember { mutableStateOf("spore/public") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = swarm, onValueChange = { swarm = it },
+                    label = { Text("WebTorrent swarm name") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addWebTorrent(ctx, swarm) }) { Text("Join") }
+            }
+        }
     }
 }
