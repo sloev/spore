@@ -632,6 +632,7 @@ pub struct Node {
     rpc_inbox: Vec<(Addr, u64, rpc::Request)>, // requests delivered to a service
     feed_inbox: Vec<feed::Event>,              // feed events on subscribed topics (L5)
     quotas: congestion::Quotas,                // per-source flood quota (§10)
+    pinned: HashSet<Id>,                       // magnets a seed-vault keeps forever
 }
 
 struct Pending {
@@ -678,6 +679,7 @@ impl Node {
             rpc_inbox: Vec::new(),
             feed_inbox: Vec::new(),
             quotas: congestion::Quotas::new(DEFAULT_SOURCE_QUOTA),
+            pinned: HashSet::new(),
         }
     }
 
@@ -762,8 +764,10 @@ impl Node {
     fn pinned_ids(&self) -> HashSet<Id> {
         let mut pinned = HashSet::new();
         for (magnet, m) in &self.manifests {
-            if self.has_file(magnet) {
-                continue; // complete — its chunks may be evicted/re-fetched
+            // Keep a file if it's still being assembled, or if it's explicitly
+            // pinned (a seed-vault holding the bootstrap bundle forever).
+            if self.has_file(magnet) && !self.pinned.contains(magnet) {
+                continue;
             }
             pinned.insert(*magnet);
             for c in &m.chunk_ids {
@@ -1580,6 +1584,10 @@ pub mod feed;
 // §7 KEYROT — encrypted-topic key rotation (forward-secret ratchet + membership
 // rekey), built on the `topic_seal`/`seal` primitives above.
 pub mod topic;
+
+// The network carries its own genome: publish/discover the bootstrap bundle
+// (source, manual, binaries) over the mesh, and pin it as a seed vault.
+pub mod bundle;
 
 // Bridges — SPORE rides everything (spec Page 2). See `src/bridge/` for the
 // per-medium modules; each only moves envelope bytes in and out of a `Node`.
