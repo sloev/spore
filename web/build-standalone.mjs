@@ -3,9 +3,10 @@
 // offline from a USB stick, an email attachment, or a scanned QR bundle — no
 // server, no install, no network. Open it and you get one live node you can wire
 // to real links at runtime — WebSocket, WebRTC, Nostr, Web Serial, Web Bluetooth,
-// an audio modem, or a WebTorrent swarm — and watch it sign, relay, and receive.
-// A copy of this file is a seed the whole node regrows from, and it is also the
-// live demo served on the site.
+// an audio modem, a WebTorrent swarm, or a Meshtastic / Reticulum LoRa radio —
+// and it remembers its identity and its bridges in the browser's local storage,
+// so it comes back the same node next time. A copy of this file is a seed the
+// whole node regrows from, and it is also the live demo served on the site.
 //
 //   cargo build --release --lib --target wasm32-unknown-unknown
 //   node web/build-standalone.mjs
@@ -46,6 +47,8 @@ const modules = [
   inlineModule(read('transports/webbluetooth.mjs')),
   inlineModule(read('transports/audio.mjs')),
   inlineModule(read('transports/webtorrent.mjs')),
+  inlineModule(read('transports/meshtastic.mjs')),
+  inlineModule(read('transports/reticulum.mjs')),
 ].join('\n\n');
 
 const html = `<!doctype html>
@@ -70,7 +73,7 @@ const html = `<!doctype html>
   header { padding-top:28px; }
   h1 { margin:0 0 4px; font-size:26px; letter-spacing:-.02em; }
   h1 .s { color:var(--accent); }
-  .tag { color:var(--dim); margin:0 0 14px; max-width:70ch; }
+  .tag { color:var(--dim); margin:0 0 14px; max-width:72ch; }
   .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0 20px; }
   .pill { font-size:12px; color:var(--dim); border:1px solid var(--edge); border-radius:999px; padding:3px 10px; }
   .pill.addr { font-family:var(--mono); color:var(--accent2); }
@@ -83,8 +86,8 @@ const html = `<!doctype html>
   .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
   input[type=text], select, textarea { background:var(--bg); color:var(--ink);
     border:1px solid var(--edge); border-radius:8px; padding:8px 10px; font:inherit; }
-  input[type=text]{ flex:1; min-width:160px; }
-  select{ min-width:180px; }
+  input[type=text]{ flex:1; min-width:150px; }
+  select{ min-width:200px; }
   textarea{ width:100%; font-family:var(--mono); font-size:11.5px; height:70px; resize:vertical; }
   button{ background:var(--accent); color:#05130b; border:0; font-weight:600; border-radius:8px;
     padding:8px 14px; cursor:pointer; font:inherit; }
@@ -96,10 +99,11 @@ const html = `<!doctype html>
   .bridge{ border:1px solid var(--edge); border-radius:10px; padding:10px 12px; margin-top:10px; }
   .bridge .hd{ display:flex; align-items:center; gap:10px; }
   .bridge .ttl{ font-weight:600; font-size:13.5px; flex:1; }
-  .badge{ font-size:11px; font-family:var(--mono); border:1px solid var(--edge); border-radius:999px; padding:2px 8px; color:var(--dim); }
+  .badge{ font-size:11px; font-family:var(--mono); border:1px solid var(--edge); border-radius:999px; padding:2px 8px; color:var(--dim); white-space:nowrap; }
   .badge.open{ color:var(--accent); border-color:var(--accent); }
   .badge.err{ color:var(--bad); border-color:var(--bad); }
-  .bridge .bd{ margin-top:8px; }
+  .bridge .bd{ margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+  .bridge .bd .row{ margin-top:0; }
   .cnt{ font-size:11px; color:var(--dim); font-family:var(--mono); }
   footer{ max-width:960px; margin:0 auto; padding:12px 20px 60px; color:var(--dim); font-size:12.5px; }
 </style>
@@ -111,8 +115,9 @@ const html = `<!doctype html>
      transport inline. It needs no server and no network to start; open it from a
      USB stick or an offline copy and one full node comes alive below. Then add
      bridges to reach other copies — a WebSocket relay, a direct WebRTC link, a
-     Nostr relay, a USB or Bluetooth radio, sound through the speakers, or a
-     WebTorrent swarm. A single copy of this file can rejoin, or restart, the mesh.</p>
+     Nostr relay, a USB or Bluetooth radio (incl. Meshtastic and Reticulum), sound
+     through the speakers, or a WebTorrent swarm. Its identity and bridges are
+     remembered in this browser, so it comes back the same node next time.</p>
   <div class="bar">
     <span class="pill" id="status">loading…</span>
     <span class="pill addr" id="addr">addr —</span>
@@ -135,6 +140,7 @@ const html = `<!doctype html>
     <div class="row">
       <input type="text" id="topic" placeholder="follow a topic, e.g. spore/news" />
       <button id="sub" class="ghost">Subscribe</button>
+      <span class="cnt" id="topics"></span>
     </div>
     <div class="log" id="log" style="margin-top:12px"></div>
   </section>
@@ -143,7 +149,9 @@ const html = `<!doctype html>
     <h2>Bridges</h2>
     <p class="note">Each bridge is a real link. The node signs what you send, relays
       what it hears, and delivers what is addressed to it — across every bridge at
-      once. Some need a permission prompt (mic, serial, Bluetooth) or a relay URL.</p>
+      once. Some need a permission prompt (mic, serial, Bluetooth) or a relay URL.
+      Bridges you add are remembered; network ones reconnect on load, device ones
+      wait for a click (browsers require a gesture to reopen a port).</p>
     <div class="row">
       <select id="btype"></select>
       <button id="add">Add bridge</button>
@@ -152,11 +160,14 @@ const html = `<!doctype html>
   </section>
 
   <section class="card">
-    <h2>Reproduce this seed</h2>
+    <h2>Seed &amp; memory</h2>
     <p class="note">Save this page and you carry the whole node with you. The button
       re-serialises the running page — wasm and all — into a fresh copy, so one seed
-      makes the next.</p>
-    <div class="row"><button id="save">Download a copy</button></div>
+      makes the next. Identity and bridges live in this browser's local storage.</p>
+    <div class="row">
+      <button id="save">Download a copy</button>
+      <button id="forget" class="ghost">Forget saved state</button>
+    </div>
   </section>
 </main>
 <footer>
@@ -178,10 +189,15 @@ function b64ToBytes(b64) {
   return out;
 }
 
-// ---- tiny UI helpers ---------------------------------------------------------
+// ---- tiny UI + storage helpers ----------------------------------------------
 const $ = (id) => document.getElementById(id);
 const stamp = () => new Date().toLocaleTimeString();
 const hexOf = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+function hexToBytes(h) {
+  const u = new Uint8Array(h.length / 2);
+  for (let i = 0; i < u.length; i++) u[i] = parseInt(h.substr(i * 2, 2), 16);
+  return u;
+}
 function logLine(cls, text) {
   const el = $('log');
   const line = document.createElement('div');
@@ -190,13 +206,32 @@ function logLine(cls, text) {
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
 }
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode / file:// */ } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) { /* */ } },
+};
+const K_SEED = 'spore.seed', K_BRIDGES = 'spore.bridges', K_TOPICS = 'spore.topics';
+
+let spore, hub;
+let saved = [];      // [{type, fields}] persisted bridges
+let topics = [];     // subscribed topic strings
 
 // ---- boot the one real node (called last, once every def below exists) -------
-let spore, hub;
 async function boot() {
   try {
     spore = await loadSpore(b64ToBytes(WASM_B64));
-    hub = new Hub(spore.newNode());
+
+    // Identity: restore a persisted seed, or make one and remember it.
+    let restored = false;
+    const seedHex = LS.get(K_SEED);
+    if (seedHex && /^[0-9a-fA-F]{64}$/.test(seedHex)) {
+      hub = new Hub(spore.newNode(hexToBytes(seedHex)));
+      restored = true;
+    } else {
+      hub = new Hub(spore.newNode());
+      LS.set(K_SEED, hexOf(hub.node.seed()));
+    }
     $('addr').textContent = 'addr ' + hexOf(hub.node.addr());
 
     hub.onDeliver = (env) => {
@@ -207,11 +242,20 @@ async function boot() {
       logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
     };
 
-    $('status').textContent = 'ready — one live node, no network yet';
+    // Restore followed topics.
+    try { topics = JSON.parse(LS.get(K_TOPICS) || '[]'); } catch (e) { topics = []; }
+    for (const t of topics) hub.node.subscribe(t);
+    renderTopics();
+
+    $('status').textContent = restored ? 'ready — identity restored' : 'ready — new identity';
     $('status').style.color = 'var(--accent)';
-    logLine('sys', 'node ready; add a bridge to reach other copies');
+    logLine('sys', 'node ready — ' + (restored ? 'identity restored from local storage' : 'new identity created and saved'));
     wireCompose();
     buildBridgeMenu();
+
+    // Restore saved bridges.
+    try { saved = JSON.parse(LS.get(K_BRIDGES) || '[]'); } catch (e) { saved = []; }
+    for (const entry of saved.slice()) spinUp(entry, false);
   } catch (e) {
     $('status').textContent = 'error: ' + e.message;
     $('status').style.color = 'var(--warn)';
@@ -220,6 +264,9 @@ async function boot() {
 }
 
 // ---- compose / subscribe -----------------------------------------------------
+function renderTopics() {
+  $('topics').textContent = topics.length ? 'following: ' + topics.join(', ') : '';
+}
 function wireCompose() {
   $('dest').onchange = () => {
     $('hex').style.display = $('dest').value === 'direct' ? '' : 'none';
@@ -231,8 +278,7 @@ function wireCompose() {
     if ($('dest').value === 'direct') {
       const h = $('hex').value.trim().replace(/[^0-9a-fA-F]/g, '');
       if (h.length !== 16) { logLine('bad', 'address needs 16 hex chars'); return; }
-      dest = new Uint8Array(8);
-      for (let i = 0; i < 8; i++) dest[i] = parseInt(h.substr(i * 2, 2), 16);
+      dest = hexToBytes(h);
     }
     hub.send(dest, new TextEncoder().encode(text));
     logLine('tx', 'sent ' + JSON.stringify(text) + (dest === ZERO_DEST ? ' to everyone' : ' to ' + hexOf(dest)));
@@ -241,60 +287,99 @@ function wireCompose() {
   $('msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
   $('sub').onclick = () => {
     const t = $('topic').value.trim();
-    if (!t) return;
+    if (!t || topics.includes(t)) { $('topic').value = ''; return; }
     hub.node.subscribe(t);
+    topics.push(t);
+    LS.set(K_TOPICS, JSON.stringify(topics));
+    renderTopics();
     logLine('sys', 'now following topic ' + JSON.stringify(t));
     $('topic').value = '';
   };
 }
 
 // ---- bridge registry ---------------------------------------------------------
+// flags: gesture=needs a user gesture to (re)connect; autoReconnect=safe to open
+// on load without a gesture; persist=remember across reloads (default true).
+const RADIO_FIELDS = [
+  { k: 'freq', ph: 'freq MHz', val: '867.2' },
+  { k: 'bw', ph: 'bandwidth kHz', val: '125' },
+  { k: 'sf', ph: 'spreading factor', val: '8' },
+  { k: 'cr', ph: 'coding rate', val: '5' },
+  { k: 'tx', ph: 'TX dBm', val: '0' },
+];
+const radioOpts = (f) => ({
+  freqHz: Math.round(parseFloat(f.freq) * 1e6),
+  bwHz: Math.round(parseFloat(f.bw) * 1e3),
+  sf: parseInt(f.sf, 10),
+  cr: parseInt(f.cr, 10),
+  txDbm: parseInt(f.tx, 10),
+});
+
 const BRIDGES = {
   loopback: {
     label: 'Loopback — offline self-test (spawns a 2nd node in this page)',
-    avail: () => true,
+    avail: () => true, autoReconnect: true,
     make: () => spawnPartner(),
   },
   websocket: {
     label: 'WebSocket relay',
     fields: [{ k: 'url', ph: 'wss://relay.example/spore' }],
-    avail: () => 'WebSocket' in window,
+    avail: () => 'WebSocket' in window, autoReconnect: true, watchWs: (t) => t.ws,
     make: (f) => new WebSocketTransport(f.url),
-    watchWs: (t) => t.ws,
   },
   webtorrent: {
     label: 'WebTorrent swarm — browser P2P via tracker rendezvous',
     fields: [{ k: 'name', ph: 'swarm name', val: 'spore/public' }],
-    avail: () => 'RTCPeerConnection' in window && 'WebSocket' in window,
+    avail: () => 'RTCPeerConnection' in window && 'WebSocket' in window, autoReconnect: true,
     make: (f) => WebTorrentTransport.join(f.name),
     onmeta: (t, set) => { t.onpeer = (n) => set(n + ' peer' + (n === 1 ? '' : 's')); },
   },
   nostr: {
     label: 'Nostr relay (kind-30078, tag spore-v1)',
     fields: [{ k: 'url', ph: 'wss://relay.damus.io' }],
-    avail: () => 'WebSocket' in window,
+    avail: () => 'WebSocket' in window, autoReconnect: true, watchWs: (t) => t.ws,
     make: (f) => new NostrTransport(f.url, window.nostr ? (e) => window.nostr.signEvent(e) : null),
-    watchWs: (t) => t.ws,
+  },
+  meshtastic_serial: {
+    label: 'Meshtastic — USB serial (LoRa mesh)',
+    avail: () => !!navigator.serial, gesture: true, setAddr: true,
+    make: () => MeshtasticSerialTransport.open(),
+  },
+  meshtastic_ble: {
+    label: 'Meshtastic — Bluetooth (LoRa mesh)',
+    avail: () => !!navigator.bluetooth, gesture: true, setAddr: true,
+    make: () => MeshtasticBLETransport.open(),
+  },
+  reticulum_serial: {
+    label: 'Reticulum / RNode — USB serial (LoRa)',
+    fields: RADIO_FIELDS,
+    avail: () => !!navigator.serial, gesture: true,
+    make: (f) => ReticulumSerialTransport.open(radioOpts(f)),
+  },
+  reticulum_ble: {
+    label: 'Reticulum / RNode — Bluetooth (LoRa)',
+    fields: RADIO_FIELDS,
+    avail: () => !!navigator.bluetooth, gesture: true,
+    make: (f) => ReticulumBLETransport.open(radioOpts(f)),
   },
   webserial: {
-    label: 'Web Serial — USB LoRa/ESP32 board (KISS)',
-    avail: () => !!navigator.serial,
+    label: 'Web Serial — generic KISS TNC',
+    avail: () => !!navigator.serial, gesture: true,
     make: () => WebSerialTransport.open({ baudRate: 115200 }),
   },
   webbluetooth: {
-    label: 'Web Bluetooth — BLE radio (Nordic UART, KISS)',
-    avail: () => !!navigator.bluetooth,
+    label: 'Web Bluetooth — generic Nordic UART (KISS)',
+    avail: () => !!navigator.bluetooth, gesture: true,
     make: () => WebBluetoothTransport.open(),
   },
   audio: {
     label: 'Audio modem — mic + speaker, 16-FSK (interops with the Rust bridge)',
-    avail: () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+    avail: () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia), gesture: true,
     make: () => AudioModemTransport.open(),
   },
   webrtc: {
     label: 'WebRTC — direct peer, copy/paste invite (no server)',
-    avail: () => 'RTCPeerConnection' in window,
-    manual: true,
+    avail: () => 'RTCPeerConnection' in window, manual: true, persist: false,
   },
 };
 
@@ -307,7 +392,7 @@ function buildBridgeMenu() {
     opt.disabled = !b.avail();
     sel.appendChild(opt);
   }
-  $('add').onclick = () => addBridge(sel.value);
+  $('add').onclick = () => spinUp({ type: sel.value, fields: {} }, true);
 }
 
 // A styled row for one live bridge. Returns handles the caller updates.
@@ -335,6 +420,7 @@ function bridgeRow(title) {
   return {
     body: bd,
     remove: rm,
+    _t: null,
     setState: (s, kind) => { badge.textContent = s; badge.className = 'badge' + (kind ? ' ' + kind : ''); },
     setMeta: (s) => { cnt.textContent = s; },
     destroy: () => el.remove(),
@@ -353,54 +439,7 @@ function attachCounted(t, ui) {
   upd();
 }
 
-async function addBridge(key) {
-  const b = BRIDGES[key];
-  if (!b || !b.avail()) return;
-  if (b.manual) return addWebRTC();
-
-  const ui = bridgeRow(b.label);
-  // Render any config fields; collect their values.
-  const fields = {};
-  if (b.fields) {
-    for (const f of b.fields) {
-      const inp = document.createElement('input');
-      inp.type = 'text';
-      inp.placeholder = f.ph || f.k;
-      if (f.val) inp.value = f.val;
-      ui.body.appendChild(inp);
-      fields[f.k] = () => inp.value.trim();
-    }
-  }
-  const start = async () => {
-    const vals = {};
-    for (const k in fields) vals[k] = fields[k]();
-    if (b.fields && b.fields.some((f) => !vals[f.k])) { ui.setState('need input', 'err'); return; }
-    ui.setState('connecting');
-    try {
-      const t = await b.make(vals);
-      attachCounted(t, ui);
-      wireState(t, b, ui);
-      logLine('sys', 'bridge up: ' + b.label);
-    } catch (e) {
-      ui.setState('error', 'err');
-      logLine('bad', 'bridge failed: ' + (e && e.message ? e.message : e));
-    }
-  };
-  // Until a transport exists, removing just discards the row; wireState rebinds
-  // this to also detach the live transport once it's up.
-  ui.remove.onclick = () => removeBridge(ui, () => ui._t);
-  if (b.fields && b.fields.length) {
-    const go = document.createElement('button');
-    go.textContent = 'Connect';
-    go.style.marginTop = '8px';
-    go.onclick = () => { go.disabled = true; start(); };
-    ui.body.appendChild(document.createElement('div')).appendChild(go);
-  } else {
-    start();
-  }
-}
-
-// Best-effort live state for a bridge, and remove wiring.
+// Best-effort live connection state for a bridge.
 function wireState(t, b, ui) {
   ui._t = t;
   ui.setState('open', 'open');
@@ -416,17 +455,95 @@ function wireState(t, b, ui) {
     ws.addEventListener('error', set);
     set();
   }
-  ui.remove.onclick = () => removeBridge(ui, () => t);
 }
 
-function removeBridge(ui, getT) {
-  const t = getT && getT();
-  if (t) {
-    hub.removeTransport(t);
-    if (t.close) try { t.close(); } catch (e) { /* */ }
+function persistBridges() {
+  LS.set(K_BRIDGES, JSON.stringify(saved.map((e) => ({ type: e.type, fields: e.fields || {} }))));
+}
+function removeSaved(entry) {
+  const i = saved.indexOf(entry);
+  if (i >= 0) { saved.splice(i, 1); persistBridges(); }
+}
+
+function shouldStartNow(b, fresh) {
+  const hasFields = b.fields && b.fields.length;
+  if (!hasFields && !b.gesture) return true;          // trivial (loopback)
+  if (fresh && b.gesture && !hasFields) return true;  // the Add click is the gesture
+  if (!fresh && b.autoReconnect) return true;         // restore a network bridge
+  return false;                                        // otherwise wait for a click
+}
+
+// Create, wire, and (optionally) start one bridge. entry = {type, fields};
+// fresh = added from the menu (vs. restored from storage).
+function spinUp(entry, fresh) {
+  const b = BRIDGES[entry.type];
+  if (!b) return;
+  if (b.manual) { addWebRTC(); return; }
+
+  const ui = bridgeRow(b.label);
+  if (!b.avail()) {
+    ui.setState('unsupported', 'err');
+    ui.remove.onclick = () => { removeSaved(entry); ui.destroy(); };
+    return;
   }
-  ui.destroy();
-  logLine('sys', 'bridge removed');
+
+  const getters = {};
+  if (b.fields) {
+    const form = document.createElement('div');
+    form.className = 'row';
+    for (const f of b.fields) {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = f.ph || f.k;
+      inp.value = entry.fields && entry.fields[f.k] != null ? entry.fields[f.k] : (f.val || '');
+      inp.style.minWidth = '90px';
+      form.appendChild(inp);
+      getters[f.k] = () => inp.value.trim();
+    }
+    ui.body.appendChild(form);
+  }
+
+  const start = async () => {
+    const vals = {};
+    for (const k in getters) vals[k] = getters[k]();
+    if (b.fields && b.fields.some((f) => !vals[f.k])) { ui.setState('need input', 'err'); return; }
+    ui.setState('connecting');
+    try {
+      const t = await b.make(vals);
+      if (b.setAddr && t.setAddr) t.setAddr(hub.node.addr());
+      entry.fields = vals;
+      if (b.persist !== false) {
+        if (!saved.includes(entry)) saved.push(entry);
+        persistBridges();
+      }
+      attachCounted(t, ui);
+      wireState(t, b, ui);
+      logLine('sys', 'bridge up: ' + b.label);
+    } catch (e) {
+      ui.setState('error', 'err');
+      logLine('bad', 'bridge failed: ' + (e && e.message ? e.message : e));
+    }
+  };
+
+  ui.remove.onclick = () => {
+    removeSaved(entry);
+    if (ui._t) { hub.removeTransport(ui._t); if (ui._t.close) try { ui._t.close(); } catch (e) { /* */ } }
+    ui.destroy();
+    logLine('sys', 'bridge removed');
+  };
+
+  if (shouldStartNow(b, fresh)) {
+    start();
+  } else {
+    const go = document.createElement('button');
+    go.textContent = fresh ? 'Connect' : 'Reconnect';
+    go.onclick = () => { go.disabled = true; start().finally(() => { go.disabled = false; }); };
+    const wrap = document.createElement('div');
+    wrap.className = 'row';
+    wrap.appendChild(go);
+    ui.body.appendChild(wrap);
+    if (!fresh) ui.setState('saved · reconnect');
+  }
 }
 
 // The offline self-test: a second in-process node linked by loopback, so you can
@@ -449,9 +566,13 @@ function spawnPartner() {
 // WebRTC: two people swap two short blobs by any out-of-band channel.
 function addWebRTC() {
   const ui = bridgeRow('WebRTC — direct peer (copy/paste invite)');
+  ui.remove.onclick = () => {
+    if (ui._t) { hub.removeTransport(ui._t); if (ui._t.close) try { ui._t.close(); } catch (e) { /* */ } }
+    ui.destroy();
+  };
   const info = document.createElement('p');
   info.className = 'note';
-  info.textContent = 'Pick a role. Pass the blobs to the other side by any channel (chat, QR, voice).';
+  info.textContent = 'Pick a role. Pass the blobs to the other side by any channel (chat, QR, voice). Not remembered across reloads.';
   const rowBtns = document.createElement('div');
   rowBtns.className = 'row';
   const bCreate = document.createElement('button');
@@ -464,13 +585,11 @@ function addWebRTC() {
   ui.body.append(info, rowBtns);
 
   const ta = (label) => {
-    const wrap = document.createElement('div');
     const l = document.createElement('p');
     l.className = 'note';
     l.textContent = label;
     const t = document.createElement('textarea');
-    wrap.append(l, t);
-    ui.body.appendChild(wrap);
+    ui.body.append(l, t);
     return t;
   };
 
@@ -480,13 +599,14 @@ function addWebRTC() {
     try {
       const o = await manualOffer();
       attachCounted(o.transport, ui);
-      ui.remove.onclick = () => removeBridge(ui, () => o.transport);
+      ui._t = o.transport;
       const out = ta('1. Send this invite to the other side:');
       out.value = o.offer; out.readOnly = true; out.focus(); out.select();
       const inp = ta('2. Paste their answer here, then Connect:');
       const go = document.createElement('button');
       go.textContent = 'Connect';
-      ui.body.appendChild(document.createElement('div')).appendChild(go);
+      const wrap = document.createElement('div'); wrap.className = 'row'; wrap.appendChild(go);
+      ui.body.appendChild(wrap);
       go.onclick = async () => {
         try { await o.accept(inp.value); ui.setState('open', 'open'); logLine('sys', 'WebRTC link established'); }
         catch (e) { ui.setState('bad answer', 'err'); }
@@ -499,7 +619,8 @@ function addWebRTC() {
     const inp = ta('1. Paste the invite you were given:');
     const go = document.createElement('button');
     go.textContent = 'Generate answer';
-    ui.body.appendChild(document.createElement('div')).appendChild(go);
+    const wrap = document.createElement('div'); wrap.className = 'row'; wrap.appendChild(go);
+    ui.body.appendChild(wrap);
     go.onclick = async () => {
       go.disabled = true;
       ui.setState('gathering');
@@ -509,7 +630,7 @@ function addWebRTC() {
         out.value = a.answer; out.readOnly = true; out.focus(); out.select();
         const t = await a.transport;
         attachCounted(t, ui);
-        ui.remove.onclick = () => removeBridge(ui, () => t);
+        ui._t = t;
         ui.setState('open', 'open');
         logLine('sys', 'WebRTC link established');
       } catch (e) { ui.setState('bad invite', 'err'); go.disabled = false; }
@@ -517,7 +638,7 @@ function addWebRTC() {
   };
 }
 
-// ---- save a copy -------------------------------------------------------------
+// ---- save a copy / forget --------------------------------------------------
 $('save').onclick = () => {
   const blob = new Blob(['<!doctype html>\\n' + document.documentElement.outerHTML], { type: 'text/html' });
   const a = document.createElement('a');
@@ -525,6 +646,11 @@ $('save').onclick = () => {
   a.download = 'spore-standalone.html';
   a.click();
   URL.revokeObjectURL(a.href);
+};
+$('forget').onclick = () => {
+  if (!confirm('Forget the saved identity and bridges in this browser? This node will come back as a new stranger.')) return;
+  LS.del(K_SEED); LS.del(K_BRIDGES); LS.del(K_TOPICS);
+  location.reload();
 };
 
 // Everything is defined; start the node.

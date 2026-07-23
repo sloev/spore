@@ -57,7 +57,7 @@ parses that blob back into arrays of `Uint8Array`.
 ## Transports
 
 A transport is any object with a `send(bytes)` method that calls `receive(bytes)`
-when a frame arrives. Eight are included; writing your own is a dozen lines.
+when a frame arrives. Ten are included; writing your own is a dozen lines.
 
 | Transport | File | Use |
 |---|---|---|
@@ -65,14 +65,19 @@ when a frame arrives. Eight are included; writing your own is a dozen lines.
 | **WebRTC** | `transports/webrtc.mjs` | direct browser-to-browser; manual copy/paste (`manualOffer`/`manualAnswer`) or your own signaling; no server after connect |
 | **WebTorrent** | `transports/webtorrent.mjs` | join a swarm by name; real bittorrent-tracker rendezvous, then P2P over WebRTC |
 | **Nostr** | `transports/nostr.mjs` | any Nostr relay becomes a SPORE bag (kind-30078, tag `spore-v1`) |
-| **Web Serial** | `transports/webserial.mjs` | a USB LoRa/ESP32 board straight from the page; KISS-framed, interops with the Rust serial bridge |
-| **Web Bluetooth** | `transports/webbluetooth.mjs` | a BLE radio over the Nordic UART Service; KISS-framed |
+| **Meshtastic** | `transports/meshtastic.mjs` | a Meshtastic LoRa node over USB or Bluetooth; envelope rides a `MeshPacket` (portnum 256), codec ported from the Rust `bridge::meshtastic` |
+| **Reticulum / RNode** | `transports/reticulum.mjs` | an RNode LoRa modem over USB or Bluetooth in host/KISS mode; you set the radio (freq/bw/sf/cr/tx) |
+| **Web Serial** | `transports/webserial.mjs` | a generic USB KISS TNC/board; interops with the Rust serial bridge |
+| **Web Bluetooth** | `transports/webbluetooth.mjs` | a generic BLE radio over the Nordic UART Service; KISS-framed |
 | **Audio modem** | `transports/audio.mjs` | data-over-sound; a 16-FSK modem **bit-compatible** with the Rust `bridge::audio` |
 | **Loopback** | `transports/loopback.mjs` | in-memory link between two hubs, for tests and offline demos |
 
 The KISS framing shared by the serial and Bluetooth transports lives in
 `transports/kiss.mjs` and matches Rust's `src/kiss.rs` byte-for-byte, so a browser
-tab and a physical board speak the same wire.
+tab and a physical board speak the same wire. The Meshtastic and Reticulum
+transports are honest device drivers (Meshtastic protobuf / RNode host protocol)
+but are not hardware-verified in CI — treat them as templates to confirm against
+your firmware.
 
 <details>
 <summary>Deep dive — writing a transport, and the ones you'd add next</summary>
@@ -119,10 +124,13 @@ message through it.
 `spore-standalone.html` — a complete, functional node that runs from a `file://`
 path, a USB stick, or an email attachment, making **zero network requests until you
 add a bridge**. It boots one live node, then lets you wire it at runtime to a
-WebSocket relay, a direct WebRTC peer, a Nostr relay, a USB or Bluetooth radio, the
-speakers/mic (audio modem), or a WebTorrent swarm — signing, relaying, and
-delivering across all of them at once. It's the smallest "a whole node in one file"
-seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
+WebSocket relay, a direct WebRTC peer, a Nostr relay, a Meshtastic or Reticulum
+LoRa radio (USB or Bluetooth), the speakers/mic (audio modem), or a WebTorrent
+swarm — signing, relaying, and delivering across all of them at once. Its identity
+and its bridges are remembered in the browser's local storage (the 32-byte signing
+seed via `node.seed()` / `newNode(seed)`), so it returns as the same node; network
+bridges reconnect on load, device bridges wait for a click. It's the smallest
+"a whole node in one file" seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
 
 This same file *is* the live demo: the Pages workflow builds it and serves it at
 both `/spore-standalone.html` and `/demo/`. There is no separate demo page to keep

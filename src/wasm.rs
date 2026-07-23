@@ -99,6 +99,18 @@ pub unsafe extern "C" fn spore_node_free(n: *mut Node) {
     }
 }
 
+/// Create a node from a fixed 32-byte signing seed, restoring a persisted
+/// identity (same address and keys). `seed` points to 32 readable bytes.
+///
+/// # Safety
+/// `seed` points to 32 readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_new_seeded(seed: *const u8) -> *mut Node {
+    let mut s = [0u8; 32];
+    std::ptr::copy_nonoverlapping(seed, s.as_mut_ptr(), 32);
+    Box::into_raw(Box::new(Node::from_seed("web", &[], &s)))
+}
+
 /// Write the node's 8-byte address to `out`.
 ///
 /// # Safety
@@ -106,6 +118,18 @@ pub unsafe extern "C" fn spore_node_free(n: *mut Node) {
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_addr(n: *mut Node, out: *mut u8) {
     std::ptr::copy_nonoverlapping((*n).addr.as_ptr(), out, 8);
+}
+
+/// Write the node's 32-byte signing seed (its whole identity) to `out`, so a
+/// caller can persist it and later reconstruct the node with
+/// [`spore_node_new_seeded`].
+///
+/// # Safety
+/// `n` is a valid handle; `out` points to 32 writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_seed(n: *mut Node, out: *mut u8) {
+    let s = (*n).seed();
+    std::ptr::copy_nonoverlapping(s.as_ptr(), out, 32);
 }
 
 /// Follow a feed/topic so its traffic is delivered to us.

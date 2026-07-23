@@ -74,8 +74,8 @@ frames, so `U` and MTU never change.
 |---|---|---|---|---|---|---|
 | Meshtastic — WiFi-UDP | `u32` | 237 | stateless | dgram | ✅ | `bridge::meshtastic::run` (multicast) |
 | Meshtastic — USB serial | `u32` | 237 | stateful | stream | ◑ | same protobuf over the Serial API; framing runner TODO |
-| Meshtastic — Web Serial | `u32` | 237 | stateful | stream | ▢ | browser tab → node over USB |
-| Meshtastic — BT/BLE | `u32` | 237 | stateful | stream | ▢ | phone/walkie-talkie BLE pairing |
+| Meshtastic — Web Serial | `u32` | 237 | stateful | stream | ◑ | JS `web/transports/meshtastic.mjs` (0x94c3 framing + ToRadio/FromRadio) |
+| Meshtastic — BT/BLE | `u32` | 237 | stateful | stream | ◑ | JS `web/transports/meshtastic.mjs` (BLE service, ToRadio/FromRadio) |
 
 ### Reticulum (RNS) — destination-addressed, several pipes
 
@@ -86,8 +86,8 @@ addressed by the 16-byte RNS destination hash.
 |---|---|---|---|---|---|---|
 | Reticulum — TCP/UDP iface | `[u8;16]` | 500 | stateless | dgram | ▢ | RNS destination over an IP interface |
 | Reticulum — RNode serial | `[u8;16]` | 500 | stateful | stream | ▢ | LoRa RNode over USB serial |
-| Reticulum — Web Serial | `[u8;16]` | 500 | stateful | stream | ▢ | RNode from a browser tab |
-| Reticulum — BT/BLE | `[u8;16]` | 500 | stateful | stream | ▢ | RNode / phone over BLE |
+| Reticulum — Web Serial | `[u8;16]` | 500 | stateful | stream | ◑ | JS `web/transports/reticulum.mjs` — RNode host/KISS over USB |
+| Reticulum — BT/BLE | `[u8;16]` | 500 | stateful | stream | ◑ | JS `web/transports/reticulum.mjs` — RNode host/KISS over BLE (Nordic UART) |
 
 ## 2. Internet overlays
 
