@@ -431,6 +431,26 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeMeshtasticUnwrap(
     }
 }
 
+/// Receive-side fragmentation status as "idhex:have/count" lines joined by
+/// '\n' (empty string when nothing is reassembling) — the UI's "receiving X/N".
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFragStatus(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let rows = rt(ptr).hub.with_node(|n| n.frag_progress());
+    let s = rows
+        .iter()
+        .map(|(id, have, count)| {
+            let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
+            format!("{hex}:{have}/{count}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
 /// Start the plain limited-broadcast UDP bridge (255.255.255.255) — used on a
 /// Wi-Fi Direct group where the subnet-directed broadcast isn't discoverable.
 #[no_mangle]

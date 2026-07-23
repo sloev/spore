@@ -3,8 +3,10 @@ package org.spore.node
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -34,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,9 +44,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,16 +61,27 @@ class MainActivity : ComponentActivity() {
 private sealed interface Screen
 private data object Chats : Screen
 private data class Chat(val peer: String) : Screen
+private data object Feed : Screen
 private data object BridgesScreen : Screen
+
+/** 🍄 with a brief sparkle whenever the node relays/receives (kawaii heartbeat). */
+@Composable
+private fun mascot(): String {
+    val tick by NodeController.relayTick.collectAsState()
+    var sparkle by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        if (tick != 0L) { sparkle = true; delay(1500); sparkle = false }
+    }
+    return if (sparkle) "🍄✨" else "🍄"
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
     MaterialTheme {
-        // Ask for notification permission on 33+ so the foreground node is visible.
-        val ctx = androidx.compose.ui.platform.LocalContext.current
+        val ctx = LocalContext.current
         val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-        androidx.compose.runtime.LaunchedEffect(Unit) {
+        LaunchedEffect(Unit) {
             if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             ) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -73,14 +89,16 @@ fun App() {
 
         var screen by remember { mutableStateOf<Screen>(Chats) }
         val addr by NodeController.address.collectAsState()
+        val m = mascot()
 
         Scaffold(
             topBar = {
                 TopAppBar(title = {
                     when (val s = screen) {
-                        is Chat -> Text("🍄 " + Petnames.label(s.peer))
-                        BridgesScreen -> Text("🍄 Bridges")
-                        else -> Text("🍄 SPORE")
+                        is Chat -> Text("$m ${Petnames.label(s.peer)}")
+                        Feed -> Text("$m Feed")
+                        BridgesScreen -> Text("$m Bridges")
+                        else -> Text("$m SPORE")
                     }
                 }, navigationIcon = {
                     if (screen is Chat) {
@@ -91,28 +109,41 @@ fun App() {
             bottomBar = {
                 if (screen !is Chat) {
                     NavigationBar {
-                        NavigationBarItem(
-                            selected = screen == Chats,
-                            onClick = { screen = Chats },
-                            icon = {}, label = { Text("Chats") }
-                        )
-                        NavigationBarItem(
-                            selected = screen == BridgesScreen,
-                            onClick = { screen = BridgesScreen },
-                            icon = {}, label = { Text("Bridges") }
-                        )
+                        NavigationBarItem(selected = screen == Chats, onClick = { screen = Chats }, icon = {}, label = { Text("Chats") })
+                        NavigationBarItem(selected = screen == Feed, onClick = { screen = Feed }, icon = {}, label = { Text("Feed") })
+                        NavigationBarItem(selected = screen == BridgesScreen, onClick = { screen = BridgesScreen }, icon = {}, label = { Text("Bridges") })
                     }
                 }
             }
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
+                ReceivingBar()
                 when (val s = screen) {
                     Chats -> ChatsList(addr) { screen = Chat(it) }
                     is Chat -> ChatDetail(s.peer)
+                    Feed -> FeedScreen()
                     BridgesScreen -> BridgesList()
                 }
             }
         }
+    }
+}
+
+/** Live receive-side fragmentation status ("receiving X/N"). */
+@Composable
+private fun ReceivingBar() {
+    val recv by NodeController.receiving.collectAsState()
+    if (recv.isNotBlank()) {
+        val lines = recv.lines().filter { it.isNotBlank() }
+        val label = lines.joinToString("  ·  ") { l ->
+            val p = l.substringAfter(':', "?")
+            "⇣ receiving $p"
+        }
+        Text(
+            label,
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -159,11 +190,23 @@ private fun ChatsList(addr: String, open: (String) -> Unit) {
 
 @Composable
 private fun ChatDetail(peer: String) {
+    val ctx = LocalContext.current
     val messages by NodeController.messages.collectAsState()
     val names by Petnames.map.collectAsState()
     var text by remember { mutableStateOf("") }
     var editingName by remember(peer) { mutableStateOf(names[peer] ?: "") }
     val thread = remember(messages, peer) { messages.filter { it.peer == peer } }
+
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && i >= 0) c.getString(i) else null
+            } ?: "file.bin"
+            val data = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (data != null) NodeController.sendFile(peer, name, data)
+        }
+    }
 
     Column(Modifier.padding(16.dp).fillMaxSize()) {
         if (peer != Petnames.PUBLIC) {
@@ -181,10 +224,13 @@ private fun ChatDetail(peer: String) {
             items(thread) { m ->
                 val who = if (m.mine) "you" else Petnames.label(m.peer)
                 val sig = if (!m.mine && !m.verified) "  ⚠ sig BAD" else ""
-                Text("${if (m.mine) "▶" else "◀"} $who: ${m.text}$sig", Modifier.padding(vertical = 2.dp))
+                val frag = if (m.mine && m.fragments > 1) "  ·  ⇡ ${m.fragments} fragments" else ""
+                Text("${if (m.mine) "▶" else "◀"} $who: ${m.text}$sig$frag", Modifier.padding(vertical = 2.dp))
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { pickFile.launch("*/*") }) { Text("📎") }
+            Spacer(Modifier.width(8.dp))
             OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
             Button(onClick = { NodeController.send(peer, text); text = "" }) { Text("Send") }
@@ -193,8 +239,67 @@ private fun ChatDetail(peer: String) {
 }
 
 @Composable
+private fun FeedScreen() {
+    val posts by NodeController.posts.collectAsState()
+    val topics by NodeController.topics.collectAsState()
+    var follow by remember { mutableStateOf("") }
+    var compose by remember { mutableStateOf("") }
+    var activeTopic by remember { mutableStateOf<String?>(null) }
+    val shown = remember(posts, activeTopic) {
+        if (activeTopic == null) posts else posts.filter { it.topic == activeTopic }
+    }
+
+    Column(Modifier.padding(16.dp).fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = follow, onValueChange = { follow = it },
+                label = { Text("follow a topic, e.g. spore/news") }, modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { NodeController.follow(follow); follow = "" }) { Text("Follow") }
+        }
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(Modifier.fillMaxWidth().height(40.dp)) {
+            items(listOf<String?>(null) + topics) { t ->
+                Text(
+                    if (t == null) "all" else "#$t",
+                    Modifier.padding(end = 12.dp).clickable { activeTopic = t },
+                    style = if (activeTopic == t) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        if (shown.isEmpty()) {
+            Text("nothing sprouting here yet 🌱", Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center)
+        }
+        LazyColumn(Modifier.weight(1f)) {
+            items(shown.asReversed()) { p ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("#${p.topic} · ${Petnames.label(p.author)}${if (!p.verified) " ⚠" else ""}", style = MaterialTheme.typography.bodySmall)
+                        Text(p.text)
+                    }
+                }
+            }
+        }
+        val target = activeTopic ?: topics.firstOrNull()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = compose, onValueChange = { compose = it },
+                label = { Text(if (target != null) "post to #$target" else "follow a topic first") },
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { if (target != null) { NodeController.post(target, compose); compose = "" } },
+                enabled = target != null
+            ) { Text("Post") }
+        }
+    }
+}
+
+@Composable
 private fun BridgesList() {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val ctx = LocalContext.current
     val bridges by NodeController.bridges.collectAsState()
     var tcp by remember { mutableStateOf("") }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }

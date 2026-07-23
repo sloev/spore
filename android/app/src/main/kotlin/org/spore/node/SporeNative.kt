@@ -80,4 +80,7 @@ object SporeNative {
 
     /** Start the plain limited-broadcast UDP bridge (for Wi-Fi Direct groups). */
     external fun nativeStartUdpLimited(ptr: Long, port: Int)
+
+    /** In-progress reassemblies as "idhex:have/count" lines ("" = none). */
+    external fun nativeFragStatus(ptr: Long): String
 }
