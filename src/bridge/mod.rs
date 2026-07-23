@@ -19,6 +19,7 @@ pub use kiss_stream::KissStream;
 pub use neighbors::Neighbors;
 
 pub mod meshtastic;
+pub mod reticulum;
 
 // Portable codecs (also compile to wasm for browser bridges).
 pub mod audio;

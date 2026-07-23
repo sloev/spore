@@ -115,6 +115,7 @@ bridges:
   - meshtastic             # a Meshtastic WiFi-UDP mesh
   - http: 8088             # an HTTP bag: push / inv / want
   - audio                  # data-over-sound (f32 PCM on stdin/stdout)
+  - reticulum              # RNS payload via tools/reticulum_companion.py
   - ssb: ./ssb-log         # a Secure Scuttlebutt append-only log folder
 ```
 
