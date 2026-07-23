@@ -14,15 +14,22 @@ and all the shared logic already lives in the Rust lib (`src/bridge/`):
    implements `bridge::driver::DatagramTransport` (two methods) and gets neighbour
    learning, resolution, relay, and MTU handling for free from
    `driver::run_datagram`. Stream media (TCP) and shared stores (folders) are the
-   two other shapes.
+   two other forms.
 
 So adding a medium is: pick `U`, set the MTU, write `recv`/`send`. Everything else
 is already in the lib.
 
+> **Shapes vs. forms.** The spec (Page 2) names **five medium *shapes*** — message
+> pipe, byte stream, text channel, shared bus, shared store. In this reference they
+> collapse to **three driver *forms*** — `dgram`, `stream`, `store` — because
+> message pipes and shared buses both ride the datagram driver, and text channels
+> and shared stores both ride the store pattern. The tables below list the driver
+> *form*; the *shape* is the spec category it comes from.
+
 **Legend.** `U` = underlay address · **State**: stateless (fire-and-forget) /
 stateful (keep a connection, drop the neighbour on disconnect via
 `Neighbors::forget`) / null (`U = ()`, broadcast-only, filter by the envelope's
-own `dest`). **Shape**: `dgram` (via `DatagramTransport`) · `stream` · `store`.
+own `dest`). **Form** (the driver form the medium's Page-2 shape collapses to): `dgram` (via `DatagramTransport`) · `stream` · `store`.
 **Status**: ✅ implemented · ◑ partial (codec/framer present) · ▢ planned (thin
 shim to write).
 
@@ -31,7 +38,7 @@ shim to write).
 Physical and link-layer media — the wire, the air, sound. SPORE floods across
 whatever's in earshot.
 
-| Medium | `U` | MTU | State | Shape | Status | Notes |
+| Medium | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | UDP / IPv4 (limited bcast) | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp::run` — `255.255.255.255:port` |
 | UDP primary-subnet bcast | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp::run_primary` — auto-finds `192.168.x.255`; zero-config LAN |
@@ -63,7 +70,7 @@ The Meshtastic `MeshPacket` protobuf codec (`bridge::meshtastic::encode`/`decode
 is done and tested; each row below is just a different pipe carrying the same
 frames, so `U` and MTU never change.
 
-| Transport | `U` | MTU | State | Shape | Status | Notes |
+| Transport | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | Meshtastic — WiFi-UDP | `u32` | 237 | stateless | dgram | ✅ | `bridge::meshtastic::run` (multicast) |
 | Meshtastic — USB serial | `u32` | 237 | stateful | stream | ◑ | same protobuf over the Serial API; framing runner TODO |
@@ -75,7 +82,7 @@ frames, so `U` and MTU never change.
 Reticulum is itself a mesh with strong crypto; SPORE rides it as a payload,
 addressed by the 16-byte RNS destination hash.
 
-| Transport | `U` | MTU | State | Shape | Status | Notes |
+| Transport | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | Reticulum — TCP/UDP iface | `[u8;16]` | 500 | stateless | dgram | ▢ | RNS destination over an IP interface |
 | Reticulum — RNode serial | `[u8;16]` | 500 | stateful | stream | ▢ | LoRa RNode over USB serial |
@@ -88,7 +95,7 @@ Mesh-routing and anonymity networks that deliver packets over (or instead of) IP
 Most already carry IP, so the existing **UDP bridge rides them unchanged** — you
 just point it at the right address on the overlay's interface.
 
-| Overlay | `U` | MTU | State | Shape | Status | Notes |
+| Overlay | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | BATMAN-adv | `[u8;6]` | 1500 | stateless | dgram | ◑ | UDP broadcast on `bat0` |
 | Yggdrasil / cjdns | `Ipv6Addr` | 1280 | stateless | dgram | ◑ | UDP over the tun; one interface |
@@ -108,7 +115,7 @@ Systems that already store messages and pass them on — the shape SPORE *is*, s
 these compose cleanly. An envelope becomes a file, an event, a chat message, or a
 bundle; the container replicates it, and the other side unwraps it.
 
-| Carrier | `U` | MTU | State | Shape | Status | Notes |
+| Carrier | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | Folder / USB / Syncthing | — | — | store | store | ✅ | `bridge::store` — `*.spore` files |
 | HTTP bag | conn | 64 K | stateful | store | ✅ | `bridge::bag` (pull) |
@@ -141,7 +148,7 @@ bundle; the container replicates it, and the other side unwraps it.
   field — everyone hears everything. Every SPORE address maps to `()`, `resolve`
   trivially succeeds, and the envelope's own `dest` filters mail for others.
 
-## How the shapes map to code
+## How the forms map to code
 
 - **`dgram`** → implement `driver::DatagramTransport` (`recv`, `send`, optional
   `mtu`). See `bridge::udp` (~40 lines) and `bridge::meshtastic` as templates.

@@ -24,16 +24,18 @@ design. So the entire application layer is built from two ingredients only:
 The guiding mantra for the whole layer: **URLs and `fetch()`, over sneakernet.**
 </details>
 
-## Everything is one of four shapes
+## Every service is one of four patterns
 
-Almost every service you'd want maps onto one of four familiar shapes, and each
-one corresponds to a mechanism SPORE already has or can express as a payload
-convention. If you've built web apps, you already know all four.
+Almost every service you'd want maps onto one of four familiar **patterns**, and
+each one corresponds to a mechanism SPORE already has or can express as a payload
+convention. If you've built web apps, you already know all four. (These are
+application *patterns* — distinct from the five medium *shapes* a bridge binds to,
+below.)
 
 <details>
-<summary>Deep dive: the four shapes and their web analogues</summary>
+<summary>Deep dive: the four service patterns and their web analogues</summary>
 
-| Shape | Web analogue | SPORE mechanism | State |
+| Pattern | Web analogue | SPORE mechanism | State |
 |---|---|---|---|
 | **Objects** | files / magnet links | content-addressed blobs, fountain + swarm | ✅ implemented |
 | **Sessions** | UDP / QUIC / Mosh | datagram links + reliable stream | ✅ implemented |
