@@ -77,8 +77,15 @@ class Spore {
     return { forwards, delivered };
   }
 
-  /** Create a node handle (call node.free() when done). */
-  newNode() {
+  /** Create a node handle (call node.free() when done). Pass a 32-byte `seed`
+   * (its whole identity) to restore a persisted node; omit it for a fresh one. */
+  newNode(seed = null) {
+    if (seed) {
+      const p = this._put(seed);
+      const node = new SporeNode(this, this.ex.spore_node_new_seeded(p));
+      this.ex.spore_free(p, seed.length);
+      return node;
+    }
     return new SporeNode(this, this.ex.spore_node_new());
   }
   /** The payload of a delivered envelope. */
@@ -112,6 +119,15 @@ class SporeNode {
     const a = this.s._u8(p, 8).slice();
     this.s.ex.spore_free(p, 8);
     return a;
+  }
+  /** The node's 32-byte signing seed — persist it and pass to `newNode(seed)`
+   * to keep the same identity (address) across restarts. */
+  seed() {
+    const p = this.s.ex.spore_alloc(32);
+    this.s.ex.spore_node_seed(this.ptr, p);
+    const s = this.s._u8(p, 32).slice();
+    this.s.ex.spore_free(p, 32);
+    return s;
   }
   subscribe(topic) {
     const t = new TextEncoder().encode(topic);
@@ -150,6 +166,12 @@ export class Hub {
   addTransport(t) {
     t.receive = (bytes) => this._rx(t, bytes);
     this.transports.push(t);
+    return t;
+  }
+  /** Detach a transport (does not close it — the caller owns its lifecycle). */
+  removeTransport(t) {
+    this.transports = this.transports.filter((x) => x !== t);
+    t.receive = () => {};
     return t;
   }
   _rx(from, bytes) {

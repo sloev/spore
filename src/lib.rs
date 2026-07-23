@@ -644,11 +644,30 @@ impl Node {
     pub fn new(petname: &str, topics: &[&str]) -> Self {
         let mut seed = [0u8; 32];
         OsRng.fill_bytes(&mut seed);
-        let sk = SigningKey::from_bytes(&seed);
+        Self::from_seed(petname, topics, &seed)
+    }
+
+    /// The 32-byte signing seed that is this node's whole identity. Persist it
+    /// (e.g. a browser's local storage) and [`Node::from_seed`] restores the same
+    /// address and keys on the next start — so a node keeps its identity across
+    /// restarts instead of becoming a stranger each time.
+    pub fn seed(&self) -> [u8; 32] {
+        self.sk.to_bytes()
+    }
+
+    /// Build a node with a fixed 32-byte signing seed. The encryption prekey is
+    /// derived deterministically from the same seed, so the seed alone fully
+    /// restores the identity. Pair with [`Node::seed`] to persist and reload.
+    pub fn from_seed(petname: &str, topics: &[&str], seed: &[u8; 32]) -> Self {
+        let sk = SigningKey::from_bytes(seed);
         let addr = addr_of(&sk.verifying_key().to_bytes());
 
-        let mut pb = [0u8; 32];
-        OsRng.fill_bytes(&mut pb);
+        // Prekey seed = SHA-256(seed ‖ domain) — independent of the signing key
+        // but reproducible from the same stored seed. (Built as one buffer to
+        // avoid the blake2/sha2 `update` trait ambiguity in this crate.)
+        let mut buf = seed.to_vec();
+        buf.extend_from_slice(b"spore/prekey/v1");
+        let pb: [u8; 32] = Sha256::digest(&buf).into();
         let prekey_sec = crypto_box::SecretKey::from(pb);
         let prekey_pub = *prekey_sec.public_key().as_bytes();
 

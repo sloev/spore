@@ -46,8 +46,29 @@ want("".join(rebuild.split()), ["armor"], "docs/REBUILD.md (armor)")
 # The frozen contract test hard-codes the full set (its whole point).
 want(frozen, ["pubkey", "addr", "topic_news", "unsigned_wire", "unsigned_id", "signed_wire", "signed_id"], "tests/api_freeze.rs")
 
+# Terminology consistency: "shape" means the FIVE medium bindings (spec Page 2).
+# The reference's three driver categories are "forms" (dgram/stream/store) and the
+# application taxonomy is "service patterns" — so no doc/comment may say "two/three/
+# four shapes". Only "five shapes" is allowed.
+import glob
+import re
+
+shape_re = re.compile(r"\b(two|three|four)\s+shapes?\b", re.IGNORECASE)
+scan = glob.glob(os.path.join(root, "**", "*.md"), recursive=True) + glob.glob(
+    os.path.join(root, "src", "**", "*.rs"), recursive=True
+)
+for f in scan:
+    if os.sep + "node_modules" + os.sep in f or os.sep + "_site" + os.sep in f:
+        continue
+    for i, ln in enumerate(open(f, encoding="utf-8"), 1):
+        m = shape_re.search(ln)
+        if m:
+            rel = os.path.relpath(f, root)
+            errors.append(f'{rel}:{i}: "{m.group(0)}" — say "form" (dgram/stream/store) or '
+                          f'"service pattern"; "shape" is the five Page-2 medium bindings')
+
 if errors:
-    print("DOCS-SYNC FAIL — regenerate vectors and update the consumers:")
+    print("DOCS-SYNC FAIL — regenerate vectors and/or fix terminology:")
     print("  cargo run --example gen_vectors > reference/vectors.json")
     for e in errors:
         print("  -", e)

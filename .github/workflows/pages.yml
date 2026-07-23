@@ -58,18 +58,15 @@ jobs:
           npm install --no-audit --no-fund
           node build.mjs
 
-      - name: Assemble the live demo
-        run: |
-          mkdir -p _site/demo/transports
-          cp web/spore.mjs _site/demo/
-          cp web/transports/*.mjs _site/demo/transports/
-          cp web/demo.html _site/demo/index.html
-          cp target/wasm32-unknown-unknown/release/spore.wasm _site/demo/spore.wasm
-
-      - name: Build the single-file node (seed)
+      - name: Build the single-file node (seed) — it is also the live demo
         run: |
           node web/build-standalone.mjs
           cp web/spore-standalone.html _site/spore-standalone.html
+          # The live demo IS the standalone: one self-contained file, no server,
+          # no external requests. Serve the same file at /demo/ so links there
+          # keep working.
+          mkdir -p _site/demo
+          cp web/spore-standalone.html _site/demo/index.html
 
       - name: Build the printable Seed Sheet (fountain-coded QR)
         working-directory: site

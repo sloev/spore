@@ -8,7 +8,7 @@
 //! and resolution (`Neighbors<U>`), relaying to the shared node via the hub, MTU
 //! clamping, and the broadcast fallback when a destination isn't known yet.
 //!
-//! The two non-datagram shapes (a byte *stream* like TCP, and a shared *store*
+//! The two non-datagram forms (a byte *stream* like TCP, and a shared *store*
 //! like a folder) keep their own small runners.
 
 use super::hub::{now, Shared};

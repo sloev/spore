@@ -14,15 +14,22 @@ and all the shared logic already lives in the Rust lib (`src/bridge/`):
    implements `bridge::driver::DatagramTransport` (two methods) and gets neighbour
    learning, resolution, relay, and MTU handling for free from
    `driver::run_datagram`. Stream media (TCP) and shared stores (folders) are the
-   two other shapes.
+   two other forms.
 
 So adding a medium is: pick `U`, set the MTU, write `recv`/`send`. Everything else
 is already in the lib.
 
+> **Shapes vs. forms.** The spec (Page 2) names **five medium *shapes*** — message
+> pipe, byte stream, text channel, shared bus, shared store. In this reference they
+> collapse to **three driver *forms*** — `dgram`, `stream`, `store` — because
+> message pipes and shared buses both ride the datagram driver, and text channels
+> and shared stores both ride the store pattern. The tables below list the driver
+> *form*; the *shape* is the spec category it comes from.
+
 **Legend.** `U` = underlay address · **State**: stateless (fire-and-forget) /
 stateful (keep a connection, drop the neighbour on disconnect via
 `Neighbors::forget`) / null (`U = ()`, broadcast-only, filter by the envelope's
-own `dest`). **Shape**: `dgram` (via `DatagramTransport`) · `stream` · `store`.
+own `dest`). **Form** (the driver form the medium's Page-2 shape collapses to): `dgram` (via `DatagramTransport`) · `stream` · `store`.
 **Status**: ✅ implemented · ◑ partial (codec/framer present) · ▢ planned (thin
 shim to write).
 
@@ -31,7 +38,7 @@ shim to write).
 Physical and link-layer media — the wire, the air, sound. SPORE floods across
 whatever's in earshot.
 
-| Medium | `U` | MTU | State | Shape | Status | Notes |
+| Medium | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | UDP / IPv4 (limited bcast) | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp::run` — `255.255.255.255:port` |
 | UDP primary-subnet bcast | `SocketAddr` | 1400 | stateless | dgram | ✅ | `bridge::udp::run_primary` — auto-finds `192.168.x.255`; zero-config LAN |
@@ -52,7 +59,7 @@ whatever's in earshot.
 | APRS | `String` (call-ssid) | ~200 | stateless | dgram | ▢ | messages over AX.25 / APRS-IS |
 | DMR | `u32` | var | stateless | dgram | ▢ | IP-over-DMR |
 | goTenna | `u32` (GID) | ~200 | stateless | dgram | ▢ | consumer mesh radio |
-| **Audio (ggwave-style)** | `()` | 4 K/frame | null | dgram | ◑ | **`bridge::audio`** — 16-FSK modem, tested; sound-card via `run_pipe` |
+| **Audio (ggwave-style)** | `()` | 4 K/frame | null | dgram | ◑ | **`bridge::audio`** — 16-FSK modem, tested; sound-card via `run_pipe`; bit-compatible browser twin `web/transports/audio.mjs` |
 | JANUS (sonar) | `u8` | 32 | stateless | dgram | ▢ | underwater acoustic |
 | QR stream | `()` | ~1 K | null | dgram | ◑ | `armor` present; camera/screen runner |
 | Iridium SBD | `u32` | 340 | stateless | dgram | ▢ | satellite gateway |
@@ -63,24 +70,24 @@ The Meshtastic `MeshPacket` protobuf codec (`bridge::meshtastic::encode`/`decode
 is done and tested; each row below is just a different pipe carrying the same
 frames, so `U` and MTU never change.
 
-| Transport | `U` | MTU | State | Shape | Status | Notes |
+| Transport | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | Meshtastic — WiFi-UDP | `u32` | 237 | stateless | dgram | ✅ | `bridge::meshtastic::run` (multicast) |
 | Meshtastic — USB serial | `u32` | 237 | stateful | stream | ◑ | same protobuf over the Serial API; framing runner TODO |
-| Meshtastic — Web Serial | `u32` | 237 | stateful | stream | ▢ | browser tab → node over USB |
-| Meshtastic — BT/BLE | `u32` | 237 | stateful | stream | ▢ | phone/walkie-talkie BLE pairing |
+| Meshtastic — Web Serial | `u32` | 237 | stateful | stream | ◑ | JS `web/transports/meshtastic.mjs` (0x94c3 framing + ToRadio/FromRadio) |
+| Meshtastic — BT/BLE | `u32` | 237 | stateful | stream | ◑ | JS `web/transports/meshtastic.mjs` (BLE service, ToRadio/FromRadio) |
 
 ### Reticulum (RNS) — destination-addressed, several pipes
 
 Reticulum is itself a mesh with strong crypto; SPORE rides it as a payload,
 addressed by the 16-byte RNS destination hash.
 
-| Transport | `U` | MTU | State | Shape | Status | Notes |
+| Transport | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | Reticulum — TCP/UDP iface | `[u8;16]` | 500 | stateless | dgram | ▢ | RNS destination over an IP interface |
 | Reticulum — RNode serial | `[u8;16]` | 500 | stateful | stream | ▢ | LoRa RNode over USB serial |
-| Reticulum — Web Serial | `[u8;16]` | 500 | stateful | stream | ▢ | RNode from a browser tab |
-| Reticulum — BT/BLE | `[u8;16]` | 500 | stateful | stream | ▢ | RNode / phone over BLE |
+| Reticulum — Web Serial | `[u8;16]` | 500 | stateful | stream | ◑ | JS `web/transports/reticulum.mjs` — RNode host/KISS over USB |
+| Reticulum — BT/BLE | `[u8;16]` | 500 | stateful | stream | ◑ | JS `web/transports/reticulum.mjs` — RNode host/KISS over BLE (Nordic UART) |
 
 ## 2. Internet overlays
 
@@ -88,7 +95,7 @@ Mesh-routing and anonymity networks that deliver packets over (or instead of) IP
 Most already carry IP, so the existing **UDP bridge rides them unchanged** — you
 just point it at the right address on the overlay's interface.
 
-| Overlay | `U` | MTU | State | Shape | Status | Notes |
+| Overlay | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | BATMAN-adv | `[u8;6]` | 1500 | stateless | dgram | ◑ | UDP broadcast on `bat0` |
 | Yggdrasil / cjdns | `Ipv6Addr` | 1280 | stateless | dgram | ◑ | UDP over the tun; one interface |
@@ -99,8 +106,10 @@ just point it at the right address on the overlay's interface.
 | libp2p (gossipsub) | PeerId | var | stateful | stream | ▢ | pub/sub overlay; IPFS swarm |
 | WebSocket | conn | 64 K | stateful | stream | ◑ | JS `web/transports/websocket.mjs`, tested; native shim TODO |
 | WebTransport | conn | var | stateful | stream | ▢ | Web (QUIC datagrams) |
-| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless signaling |
-| Web Serial / USB | conn | var | stateful | stream | ▢ | drive a TNC/RNode from a browser tab |
+| WebRTC DataChannel | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webrtc.mjs`, serverless copy/paste signaling |
+| WebTorrent swarm | `String` | 16 K | stateful | stream | ◑ | JS `web/transports/webtorrent.mjs` — bittorrent-tracker rendezvous, then WebRTC P2P |
+| Web Serial / USB | conn | var | stateful | stream | ◑ | JS `web/transports/webserial.mjs` — KISS to a TNC/RNode/ESP32, interops with the serial bridge |
+| Web Bluetooth | `String` | ~247 | stateful | stream | ◑ | JS `web/transports/webbluetooth.mjs` — Nordic UART, KISS-framed |
 
 ## 3. Store-and-forward & app carriers
 
@@ -108,7 +117,7 @@ Systems that already store messages and pass them on — the shape SPORE *is*, s
 these compose cleanly. An envelope becomes a file, an event, a chat message, or a
 bundle; the container replicates it, and the other side unwraps it.
 
-| Carrier | `U` | MTU | State | Shape | Status | Notes |
+| Carrier | `U` | MTU | State | Form | Status | Notes |
 |---|---|---|---|---|---|---|
 | Folder / USB / Syncthing | — | — | store | store | ✅ | `bridge::store` — `*.spore` files |
 | HTTP bag | conn | 64 K | stateful | store | ✅ | `bridge::bag` (pull) |
@@ -141,7 +150,7 @@ bundle; the container replicates it, and the other side unwraps it.
   field — everyone hears everything. Every SPORE address maps to `()`, `resolve`
   trivially succeeds, and the envelope's own `dest` filters mail for others.
 
-## How the shapes map to code
+## How the forms map to code
 
 - **`dgram`** → implement `driver::DatagramTransport` (`recv`, `send`, optional
   `mtu`). See `bridge::udp` (~40 lines) and `bridge::meshtastic` as templates.
