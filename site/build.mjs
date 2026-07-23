@@ -113,4 +113,16 @@ for (const [src, dst, label] of pages) {
 // Ship the stylesheet.
 fs.writeFileSync(path.join(out, 'style.css'), fs.readFileSync(path.join(root, 'site/style.css')));
 console.log('wrote _site/style.css');
+
+// Ship docs images. README (index.html, at the site root) references them as
+// `docs/<img>`, while docs pages (also at the root) reference them bare, so copy
+// each image to both `_site/` and `_site/docs/`.
+const docsImgs = fs.readdirSync(path.join(root, 'docs')).filter((f) => /\.(png|jpe?g|svg|gif|webp)$/i.test(f));
+fs.mkdirSync(path.join(out, 'docs'), { recursive: true });
+for (const img of docsImgs) {
+  const bytes = fs.readFileSync(path.join(root, 'docs', img));
+  fs.writeFileSync(path.join(out, img), bytes);
+  fs.writeFileSync(path.join(out, 'docs', img), bytes);
+  console.log(`copied docs/${img} -> _site/${img} and _site/docs/${img}`);
+}
 console.log('done. copy web/ + the built wasm into _site/demo/ to finish.');

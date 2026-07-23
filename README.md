@@ -3,6 +3,11 @@
 **S**tore-and-forward **P**lanetary **O**pportunistic **R**elay **E**nvelope — a
 Rust reference implementation of the [SPORE v1 spec](docs/SPEC.md).
 
+<p align="center">
+  <a href="docs/spore-v1.png"><img src="docs/spore-v1.png" alt="SPORE v1 — the whole protocol on one page: postcard model, envelope layout, routing, crypto, mix mode, and bindings" width="820" /></a>
+</p>
+<p align="center"><em>The entire protocol on one page — <a href="docs/spore-v1.png">open full size</a>.</em></p>
+
 A SPORE message is a **signed postcard**: to, from, expiry, payload, signature.
 Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't
 seen, hands copies to anyone it meets who wants them, and drops duplicates and
