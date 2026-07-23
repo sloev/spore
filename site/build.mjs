@@ -125,4 +125,4 @@ for (const img of docsImgs) {
   fs.writeFileSync(path.join(out, 'docs', img), bytes);
   console.log(`copied docs/${img} -> _site/${img} and _site/docs/${img}`);
 }
-console.log('done. copy web/ + the built wasm into _site/demo/ to finish.');
+console.log('done. build the standalone into _site/demo/index.html to finish.');

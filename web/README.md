@@ -112,3 +112,7 @@ message through it.
 `spore-standalone.html` — a complete node that runs from a `file://` path, a USB
 stick, or an email attachment, making **zero network requests**. It's the smallest
 "a whole node in one file" seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
+
+This same file *is* the live demo: the Pages workflow builds it and serves it at
+both `/spore-standalone.html` and `/demo/`. There is no separate demo page to keep
+in sync — the thing you download and the thing you try in the browser are one file.
