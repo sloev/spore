@@ -127,7 +127,8 @@ as a full node there — a wasm node plus JS transports (WebSocket, WebRTC, Nost
 loopback), with a self-contained [single-file demo](web/README.md#one-file-node) and guide under [`web/`](web/README.md)
 — and to `esp-idf` for the ESP32. Adding a medium is a thin `recv`/`send` shim
 (`bridge::driver::DatagramTransport`); all the routing, address resolution, and
-fragmentation stay in the shared lib. See the full [bridge matrix](docs/BRIDGES.md).
+fragmentation stay in the shared lib. See the full [bridge reference](docs/BRIDGES.md)
+— an index plus a per-protocol deep dive (wire format, mapping, security, specs).
 
 ```
 SPORE demo — line topology  A — B — C — D
@@ -327,7 +328,7 @@ channel or add the channel key.
 | `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
 | `docs/REBUILD.md` | reimplement SPORE in any language: the wire format with real worked examples |
 | `reference/`    | dependency-free Tier-0 decoders (pure-Python parse + verify) + cross-language test vectors |
-| `docs/BRIDGES.md` | every medium SPORE can ride (grouped matrix) and how each maps to the model |
+| `docs/BRIDGES.md` | bridge reference — status index + a deep dive per protocol (wire format, SPORE mapping, security, specs) |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
 | `CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
