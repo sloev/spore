@@ -1,6 +1,10 @@
 # SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope
 Front: the protocol (one page). Back: how it rides everything, and why not something else.
 
+<p align="center"><a href="spore-v1.png"><img src="spore-v1.png" alt="SPORE v1 one-page visual reference" width="820" /></a></p>
+
+*The whole thing at a glance ([full size](spore-v1.png)); the text below is the normative version.*
+
 ## 0. The whole protocol in one breath
 A SPORE message is a **signed postcard**: to, from, expiry, payload, signature. Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't seen, hands copies to anyone it meets who wants them, and drops duplicates and expired mail. That alone is a working planetary network. Everything below only makes it faster, safer, or quieter — and of the four hard features (forward secrecy, fountain fragmentation, congestion control, anonymity), only congestion control touches the router; the rest live inside payloads.
 
