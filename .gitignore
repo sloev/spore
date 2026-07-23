@@ -8,3 +8,10 @@
 # Python
 __pycache__/
 *.pyc
+
+# Android build outputs
+android/app/src/main/jniLibs/
+android/**/build/
+android/.gradle/
+android/local.properties
+android/jni/target/

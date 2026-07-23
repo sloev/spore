@@ -1,0 +1,86 @@
+name: android
+
+# Builds the SPORE Android APK: cross-compile the Rust JNI lib with cargo-ndk,
+# then assemble the app with Gradle. Uploads a debug APK artifact on every run,
+# and attaches it to a dated GitHub Release when a `v*` tag is pushed. A new
+# workflow file (not frozen); does not touch ci.yml / pr-guard.yml.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # attach the APK to a release on tag
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK + platform + build-tools
+        run: |
+          yes | sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: android/jni
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build the Rust JNI libraries (.so per ABI)
+        working-directory: android/jni
+        run: >
+          cargo ndk
+          -t arm64-v8a -t armeabi-v7a -t x86_64
+          -o ../app/src/main/jniLibs
+          build --release
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Assemble debug APK
+        working-directory: android
+        # Always debug-signed (installable) until a release keystore is added to
+        # repo secrets; see android/PLAN.md.
+        run: gradle :app:assembleDebug
+
+      - name: Locate the APK
+        id: apk
+        working-directory: android
+        run: echo "path=$(find app/build/outputs/apk -name '*.apk' | head -1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spore-apk
+          path: android/${{ steps.apk.outputs.path }}
+
+      - name: Attach APK to release (on tag)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SPORE ${{ github.ref_name }}
+          files: android/${{ steps.apk.outputs.path }}
+          body: >
+            SPORE Android node — build ${{ github.ref_name }}.
+            Debug-signed until a release keystore is configured in repo secrets.
