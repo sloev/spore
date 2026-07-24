@@ -59,11 +59,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Assemble debug APK
+      - name: Assemble APK (debug on PRs; release on tags)
         working-directory: android
-        # Always debug-signed (installable) until a release keystore is added to
-        # repo secrets; see android/PLAN.md.
-        run: gradle :app:assembleDebug
+        env:
+          # When the repo has a release keystore in secrets, tag builds are
+          # properly signed; otherwise the release build falls back to the debug
+          # key so it is still installable. See android/app/build.gradle.kts.
+          SPORE_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SPORE_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          SPORE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SPORE_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            gradle :app:assembleRelease
+          else
+            gradle :app:assembleDebug
+          fi
 
       - name: Locate the APK
         id: apk

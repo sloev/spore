@@ -37,9 +37,27 @@ android {
         jvmTarget = "17"
     }
 
+    // Release signing: if CI provides a keystore (repo secrets, see
+    // .github/workflows/android.yml), sign with it; otherwise fall back to the
+    // debug key so a release build is always installable.
+    val ksB64 = System.getenv("SPORE_KEYSTORE_B64")
+    if (!ksB64.isNullOrBlank()) {
+        val ksFile = layout.buildDirectory.file("spore-release.keystore").get().asFile
+        ksFile.parentFile.mkdirs()
+        ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+        signingConfigs.create("release") {
+            storeFile = ksFile
+            storePassword = System.getenv("SPORE_KEYSTORE_PASS") ?: ""
+            keyAlias = System.getenv("SPORE_KEY_ALIAS") ?: "spore"
+            keyPassword = System.getenv("SPORE_KEY_PASS") ?: (System.getenv("SPORE_KEYSTORE_PASS") ?: "")
+        }
+    }
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
+            signingConfig = if (!ksB64.isNullOrBlank()) signingConfigs.getByName("release")
+            else signingConfigs.getByName("debug")
         }
     }
 

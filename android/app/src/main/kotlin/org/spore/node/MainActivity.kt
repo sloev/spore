@@ -63,6 +63,20 @@ private data object Chats : Screen
 private data class Chat(val peer: String) : Screen
 private data object Feed : Screen
 private data object BridgesScreen : Screen
+private data object Advanced : Screen
+
+// Kawaii-but-serious: Meshtastic-adjacent greens with a soft pastel accent.
+private val SporeLightColors = androidx.compose.material3.lightColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF2E7D4F),
+    secondary = androidx.compose.ui.graphics.Color(0xFF57C785),
+    tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE8F4EC),
+)
+private val SporeDarkColors = androidx.compose.material3.darkColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF57C785),
+    secondary = androidx.compose.ui.graphics.Color(0xFF7ADBA2),
+    tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
+)
 
 /** 🍄 with a brief sparkle whenever the node relays/receives (kawaii heartbeat). */
 @Composable
@@ -78,7 +92,8 @@ private fun mascot(): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
-    MaterialTheme {
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    MaterialTheme(colorScheme = if (dark) SporeDarkColors else SporeLightColors) {
         val ctx = LocalContext.current
         val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         LaunchedEffect(Unit) {
@@ -98,16 +113,21 @@ fun App() {
                         is Chat -> Text("$m ${Petnames.label(s.peer)}")
                         Feed -> Text("$m Feed")
                         BridgesScreen -> Text("$m Bridges")
+                        Advanced -> Text("$m Advanced")
                         else -> Text("$m SPORE")
                     }
                 }, navigationIcon = {
-                    if (screen is Chat) {
+                    if (screen is Chat || screen == Advanced) {
                         IconButton(onClick = { screen = Chats }) { Text("←") }
+                    }
+                }, actions = {
+                    if (screen !is Chat && screen != Advanced) {
+                        IconButton(onClick = { screen = Advanced }) { Text("⚙") }
                     }
                 })
             },
             bottomBar = {
-                if (screen !is Chat) {
+                if (screen !is Chat && screen != Advanced) {
                     NavigationBar {
                         NavigationBarItem(selected = screen == Chats, onClick = { screen = Chats }, icon = {}, label = { Text("Chats") })
                         NavigationBarItem(selected = screen == Feed, onClick = { screen = Feed }, icon = {}, label = { Text("Feed") })
@@ -123,6 +143,7 @@ fun App() {
                     is Chat -> ChatDetail(s.peer)
                     Feed -> FeedScreen()
                     BridgesScreen -> BridgesList()
+                    Advanced -> AdvancedScreen(addr)
                 }
             }
         }
@@ -293,6 +314,59 @@ private fun FeedScreen() {
                 onClick = { if (target != null) { NodeController.post(target, compose); compose = "" } },
                 enabled = target != null
             ) { Text("Post") }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedScreen(addr: String) {
+    val ctx = LocalContext.current
+    val topics by NodeController.topics.collectAsState()
+    var showSeed by remember { mutableStateOf(false) }
+    Column(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Identity", style = MaterialTheme.typography.titleSmall)
+                Text("address: $addr", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "followed topics: ${if (topics.isEmpty()) "—" else topics.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Seed (your whole identity)", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Anyone holding these 32 bytes IS this node. Only reveal to move " +
+                        "your identity to another device.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                if (!showSeed) {
+                    OutlinedButton(onClick = { showSeed = true }) { Text("Reveal seed") }
+                } else {
+                    val seedHex = remember {
+                        ctx.getSharedPreferences("spore", android.content.Context.MODE_PRIVATE)
+                            .getString("seed", null)
+                            ?.let { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }
+                            ?.joinToString("") { b -> "%02x".format(b) } ?: "unavailable"
+                    }
+                    Text(seedHex, style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { showSeed = false }) { Text("Hide") }
+                }
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("About", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "SPORE — store-and-forward planetary opportunistic relay envelope. " +
+                        "This phone is a full node: it signs, relays, and delivers across " +
+                        "every enabled bridge. Public domain. 🍄",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }

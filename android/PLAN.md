@@ -4,9 +4,11 @@ A pocket SPORE node: a real, always-on node in your hand with all the bridges, a
 a simple messenger/feed/file UI that a Meshtastic user feels at home in. Lives in
 this monorepo under `android/`.
 
-> Status: **planning**. This document is the agreed shape; nothing under `android/`
-> is built yet. Decisions marked **[choice]** have a recommended default and named
-> alternatives — change the default here and the build follows.
+> Status: **M0–M5 built.** All milestones below are implemented; the Rust core +
+> JNI are tested in CI and the Kotlin/Compose app builds via the `android`
+> workflow. Hardware-dependent paths are honest templates — see
+> [`docs/HARDWARE.md`](../docs/HARDWARE.md). Decisions marked **[choice]** were
+> resolved to their recommended defaults (Kotlin+Compose+JNI; headless WebView).
 
 ## Goals
 
@@ -164,21 +166,22 @@ The core crate is unchanged; `android/jni` depends on it. No frozen file is touc
 (the JNI is a new crate; the release workflow is a new file). The core's frozen v1.0
 contract and all existing guards stay intact.
 
-## Milestones
+## Milestones (all done)
 
-- **M0 — skeleton.** Compose app + `android/jni` cross-compiled via cargo-ndk; node
-  runs in a foreground service; identity persisted; **UDP broadcast** working between
-  two phones; a **debug APK from CI**.
-- **M1 — messaging.** DM-by-petname UI + petname address book + bridges screen
-  (toggle/status) + **TCP** + **audio modem**.
-- **M2 — radios.** **BT-Meshtastic**, **BT-Reticulum**, **Wi-Fi Direct**; multicast
-  lock, Doze handling, battery-exemption prompt.
-- **M3 — web bridges.** Headless WebView carrying **WebSocket, Nostr, WebRTC,
-  WebTorrent**.
-- **M4 — feed + files.** Microblog feed + composer; file send/receive with the
-  **fragment status** UI. **BLE mesh** if time allows.
-- **M5 — polish + release.** Kawaii mascot + states, advanced options, signed
-  **date-versioned GitHub release** APK.
+- **M0 ✅ skeleton.** Compose app + `android/jni` cross-compiled via cargo-ndk; node
+  in a foreground service; identity persisted; **UDP broadcast**; debug APK from CI.
+- **M1 ✅ messaging.** DM-by-petname UI + petname address book + bridges screen +
+  **TCP**, plus the generic Kotlin-driven-bridge iface poll API.
+- **M2 ✅ radios.** **audio modem**, **BT-Meshtastic**, **BT-Reticulum (RNode)**,
+  **Wi-Fi Direct**; `MulticastLock`.
+- **M3 ✅ web bridges.** Headless WebView carrying **WebSocket, Nostr, WebTorrent**
+  (WebRTC data channels under WebTorrent). Manual copy/paste WebRTC stays a web-node
+  feature.
+- **M4 ✅ feed + files.** Microblog **Feed** on topics + composer; file send/receive
+  (app-layer framing) with **fragment status** both ways (`Node::frag_progress`).
+- **M5 ✅ polish + release.** Kawaii green theme + sparkle mascot, an **Advanced**
+  screen (identity/seed), and **date-versioned** release APK signing (debug key
+  fallback until a keystore is in secrets).
 
 ## Interplay with governance
 

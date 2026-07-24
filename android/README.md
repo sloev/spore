@@ -2,13 +2,19 @@
 
 A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design.
 
-> **Status: M0 + M1.** A node in a foreground service (identity persisted),
-> the **UDP broadcast** and **TCP** bridges, **petnames**, per-peer **conversations**
-> with a compose box, and a **Bridges** screen. The Rust core + JNI are
-> host-`cargo check`ed in CI; the Kotlin/Compose app is proven by the `android` CI
-> workflow (APK build). Milestones M2–M5 (audio/BLE/Wi-Fi-Direct, the WebView web
-> bridges, feed + files with fragment status, kawaii polish + signed release)
-> follow the plan.
+> **Status: M0–M5 (all milestones).** A full node in a foreground service with a
+> stable persisted identity, and every planned bridge: **UDP broadcast, TCP,
+> audio modem, BT-Meshtastic, BT-Reticulum (RNode), Wi-Fi Direct**, and the
+> web-origin bridges (**WebSocket, Nostr, WebTorrent**) via a headless WebView.
+> UI: per-peer **conversations** with **petnames** and **file sharing**, a
+> microblog **Feed**, live **fragment status** both ways, a **Bridges** screen
+> with permission-gated toggles, and an **Advanced** screen (identity / seed
+> export). Kawaii green theme + a mascot that sparkles when the mesh breathes.
+>
+> The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
+> Kotlin/Compose app is proven to build by the `android` CI workflow. The
+> hardware-dependent paths (radios, BLE, mic, live peers) are honest templates —
+> verify them with [`docs/HARDWARE.md`](../docs/HARDWARE.md).
 
 ## Layout
 
