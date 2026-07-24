@@ -1,4 +1,5 @@
 import java.text.SimpleDateFormat
+import java.util.Base64
 import java.util.Date
 
 plugins {
@@ -44,7 +45,7 @@ android {
     if (!ksB64.isNullOrBlank()) {
         val ksFile = layout.buildDirectory.file("spore-release.keystore").get().asFile
         ksFile.parentFile.mkdirs()
-        ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+        ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
         signingConfigs.create("release") {
             storeFile = ksFile
             storePassword = System.getenv("SPORE_KEYSTORE_PASS") ?: ""
