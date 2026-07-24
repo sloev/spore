@@ -224,7 +224,7 @@ object NodeController {
         w.start()
     }
 
-    // -- web-origin bridges (headless WebView; reuses web/transports/*.mjs) ----
+    // -- web-origin bridges (headless WebView; reuses the web transport modules) --
     private var webHost: WebBridgeHost? = null
 
     private fun webHost(ctx: Context): WebBridgeHost {

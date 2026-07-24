@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 /**
  * Headless WebView carrying the web-origin bridges — WebSocket, Nostr, and
  * WebTorrent (peer-to-peer WebRTC under the hood) — by running the repo's real
- * `web/transports/*.mjs` (copied into assets at build time) and piping raw
+ * web transport modules (copied into assets at build time) and piping raw
  * envelopes to the native node over one JNI iface. Loaded with an https base URL
  * so `crypto.subtle` / WebRTC get a secure context.
  */
