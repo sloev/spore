@@ -62,13 +62,14 @@ that the message is addressed to.
 
 | Tag | Meaning | Status |
 |---|---|---|
-| `0x01` | file manifest | ✅ implemented |
+| `0x01` | file manifest (leaf — names chunks) | ✅ implemented |
 | `0x02` | request (RPC) | ✅ implemented |
 | `0x03` | response (RPC) | ✅ implemented |
 | `0x04` | datagram (session) | ✅ implemented |
 | `0x05` | feed/event | ✅ implemented |
 | `0x06` | receipt/ACK (spec §8) | ✅ implemented |
 | `0x07` | file chunk | ✅ implemented |
+| `0x08` | file manifest (interior — names manifests) | ✅ implemented |
 | `'O'` (0x4F) | mix onion (spec §9) | ✅ implemented |
 
 Fragments are the one exception: they're recognised by the `FRAGMENT` header flag,
@@ -128,26 +129,64 @@ manifest = SIGNED [0x01][file_id:16][chunk_size:4][count:4][total_len:8][name][c
 The manifest's own 16-byte ID is the **magnet** — shareable as `spore:<hexid>`, as
 `~S1.…~` armor, or as a QR.
 
-- **Integrity is free.** The manifest is signed, so its chunk-ID list is authentic;
-  and a chunk envelope's ID *is* the hash of its bytes. A node counts a chunk as
-  present only when its store holds an envelope whose ID matches a manifest-listed
-  ID — so a forged or corrupt chunk simply never matches. No separate hash list or
-  merkle proof needed.
-- **Swarming is just WANT.** Only the small manifest floods; the data is pulled.
-  `fetch(magnet)` emits a WANT for the chunk IDs it lacks, and any peer holding them
-  answers from its store (the existing §6 machinery, untouched). Multi-source and
-  resumable, because chunks are named by content, not by origin.
+**Manifest trees.** A manifest is one envelope, so a single one can only name so
+many chunks — about **93 KB** of file at a 1400-byte MTU. Past that the chunk IDs
+are grouped under **interior manifests**, and those grouped again, until what
+remains fits the signed root. An interior node is the same object one level up:
+
+```
+interior = UNSIGNED [0x08][depth:1][file_id:16][chunk_size:4][count:4][total_len:8][name_len:2][id:16 × count]
+```
+
+At `depth == 0` the IDs name chunks; at `depth > 0` they name manifests of
+`depth - 1`. Capacity multiplies by the interior fan-out (~84) per level, to a
+cap of `MAX_DEPTH = 4`:
+
+| depth | capacity at MTU 1400 |
+|---|---|
+| 0 (one manifest) | 94 KB |
+| 1 | 8.1 MB |
+| 2 | 679 MB |
+| 3 | 57 GB |
+| 4 | 4.8 TB |
+
+A file that fits one manifest still encodes exactly as it did before trees
+existed — same `0x01` tag, same bytes — so nothing that already works changes.
+
+- **Integrity is free.** The root is signed, so its ID list is authentic; and every
+  ID below it — chunk or sub-manifest alike — *is* the hash of the bytes it names.
+  A node counts a part as present only when its store holds an envelope whose ID
+  matches the one its parent named, so a forged or corrupt part simply never
+  matches. **Only the root is signed**: the hash chain covers the rest, which is
+  why interior nodes need no signature and no source key, buying back ~96 bytes of
+  fan-out each. The magnet is a genuine Merkle root.
+- **Swarming is just WANT.** Only the small root floods; everything else is pulled.
+  `fetch(magnet)` emits a WANT for the IDs it lacks, and any peer holding them
+  answers from its store (the existing §6 machinery, untouched). A sub-manifest is
+  an ordinary stored envelope named by content, so it needs no new message type.
+  Multi-source and resumable, because parts are named by content, not by origin.
+- **It resolves top-down.** A WANT frame holds ~86 IDs, and the deeper levels are
+  not even *nameable* until the levels above arrive — so `fetch` returns one
+  frame's worth per call and is called until complete. Interior nodes surface
+  before the chunks beneath them, so the tree fills in as it goes.
 
 Implemented in `src/lib.rs` as `publish_file` / `absorb_manifest` (auto-called on
-delivery) / `fetch` / `has_file` / `file_bytes`, covered by a
-publish → flood → pull → verify test.
+delivery) / `fetch` / `fetch_n` / `missing` / `has_file` / `file_bytes` /
+`write_file_to`, covered by publish → flood → pull → verify tests at one level and
+at several.
 
 ```rust
 let (magnet, forwards) = node.publish_file("photo.jpg", bytes, dest, now);
-// … peer learns the manifest, then:
-let forwards = node.fetch(&magnet);   // pull missing chunks; verify on arrival
+// … peer learns the root manifest, then, until has_file:
+let forwards = node.fetch(&magnet);   // one frame of WANT; verify on arrival
 let file = node.file_bytes(&magnet);  // Some(bytes) once complete
+node.write_file_to(&magnet, &mut f)?; // …or stream it, one chunk in memory
 ```
+
+**What bounds a file now.** Not the wire format. Every chunk lives in the store, so
+the practical ceiling is `max_storable_file_bytes()` — half the store budget,
+leaving the other half to relay with — and beneath that, whatever the slowest
+bridge on the path is willing to carry.
 
 **Folder sync (Syncthing) ✅ implemented:** `bridge::foldersync::publish_dir` turns
 each file in a directory into a manifest on a folder-topic; a subscriber `fetch_all`s
@@ -156,9 +195,12 @@ name wins, path-traversal guarded). An **encrypted folder** is sealed manifests
 behind a pre-shared-key topic (§7). Tested end-to-end: publish → flood → pull →
 materialise.
 
-**Known caveat.** Chunks live in the ordinary store, which evicts under pressure
-(lowest-stamp → largest → oldest). Pinning/custody for in-progress downloads is
-future work.
+**Known caveat.** Parts live in the ordinary store, which evicts under pressure
+(lowest-stamp → largest → oldest). A file still being assembled is pinned —
+interior manifests included, since losing one would hide its whole subtree and
+strand the transfer with no way to name what went missing — but the store is
+in memory, so a node can only carry what it can hold. A disk-backed chunk store
+is what would let files run to the sizes the manifest tree now allows.
 </details>
 
 ## Layer 3 — sessions: a UDP-like link, and SSH over it  ✅ implemented

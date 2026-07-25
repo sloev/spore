@@ -790,8 +790,11 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePublishFile(
     env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
-/// The largest file this node can announce at its current MTU (the manifest is
-/// one envelope listing 16 bytes per chunk, so it bounds the file size).
+/// The largest file this node can share right now.
+///
+/// Manifests are trees, so the protocol itself no longer bounds a file at any
+/// size a phone cares about — what bounds it is the store every chunk has to
+/// live in. Clamped into a `jint`, which the protocol figure would overflow.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeMaxFileBytes(
     _env: JNIEnv,
@@ -799,7 +802,22 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeMaxFileBytes(
     ptr: jlong,
 ) -> jint {
     let Some(r) = rt(ptr) else { return 0 };
-    r.hub.with_node(|n| n.max_file_bytes()) as jint
+    r.hub.with_node(|n| n.max_storable_file_bytes().min(jint::MAX as usize)) as jint
+}
+
+/// Set how many bytes this node keeps for stored traffic (its own files
+/// included). Bounds what it can share and how much it can relay for others.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetStoreBudget(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    bytes: jint,
+) {
+    let Some(r) = rt(ptr) else { return };
+    if bytes > 0 {
+        r.hub.with_node(|n| n.set_store_budget(bytes as usize));
+    }
 }
 
 /// Files we hold a manifest for, one per line:
@@ -825,7 +843,12 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFiles(
     env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
-/// Ask the mesh for the chunks we're still missing for this file.
+/// Ask the mesh for the parts we're still missing for this file.
+///
+/// One WANT frame can only name so many ids, and a big file is a tree whose
+/// deeper levels are not even nameable until the levels above arrive — so this
+/// asks for a burst of frames per call and gets called again each housekeeping
+/// tick. It converges rather than completing in one shot.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
     mut env: JNIEnv,
@@ -833,6 +856,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
     ptr: jlong,
     magnet_hex: JString,
 ) {
+    // Frames of ids to ask for per call: ~1400 ids in flight, which is a few MB
+    // of chunks. Small enough not to bury a slow bridge in replies.
+    const BURST: usize = 16;
+
     let Some(r) = rt(ptr) else {
         return;
     };
@@ -841,7 +868,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
         Err(_) => return,
     };
     let Some(magnet) = id_from_hex(&s) else { return };
-    let forwards = r.hub.with_node(|n| n.fetch(&magnet));
+    let forwards = r.hub.with_node(|n| n.fetch_n(&magnet, BURST));
     r.hub.originate(forwards);
 }
 

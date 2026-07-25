@@ -69,8 +69,14 @@ object NodeController {
 
     // Files ride the protocol's own manifest + chunk layer: a signed manifest
     // (magnet) names fountain-coded chunks that any relay can carry and serve.
-    // First payload byte of a manifest (src/file.rs MANIFEST_TAG).
+    // First payload byte of a manifest: a leaf one names chunks, an interior one
+    // names manifests a level down (src/file.rs MANIFEST_TAG / TREE_TAG). A big
+    // file arrives as a tree of these, but it is still one magnet.
     private const val MANIFEST_TAG: Byte = 0x01
+    private const val TREE_TAG: Byte = 0x08
+
+    // What we keep for stored traffic — our own files plus what we relay.
+    private const val STORE_BUDGET_BYTES = 64 * 1024 * 1024
     private var lastFileSender: String = Petnames.PUBLIC   // thread for the next completed file
     private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
@@ -91,6 +97,10 @@ object NodeController {
             prefs.edit().putString("seed", Base64.encodeToString(fresh, Base64.NO_WRAP)).apply()
         }
         address.value = SporeNative.nativeAddr(ptr).toHex()
+        // The core defaults to a desktop-ish 10 MB. A phone can spare more, and
+        // since manifests became trees this budget — not the wire format — is
+        // what decides how big a file we can share and how much we can relay.
+        SporeNative.nativeSetStoreBudget(ptr, STORE_BUDGET_BYTES)
         // The name we announce; peers offer it as the default petname for us.
         myName.value = prefs.getString("myname", "") ?: ""
         if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
@@ -181,7 +191,7 @@ object NodeController {
         // A file manifest is not chat text: the core absorbs it automatically,
         // then the housekeeping loop fetches its chunks and saves the result.
         // Remember who sent it so the finished file lands in their conversation.
-        if (payload.isNotEmpty() && payload[0] == MANIFEST_TAG) {
+        if (payload.isNotEmpty() && (payload[0] == MANIFEST_TAG || payload[0] == TREE_TAG)) {
             if (!ok) {
                 append(Msg(thread, "⚠ ignored an unsigned file offer", mine = false, verified = false))
                 return
@@ -222,15 +232,16 @@ object NodeController {
      */
     fun sendFile(peer: String, name: String, data: ByteArray) {
         if (ptr == 0L || data.isEmpty()) return
-        // A manifest is a single envelope listing 16 bytes per chunk, so the MTU
-        // bounds how big a file can even be announced. Refuse clearly rather than
-        // publishing a manifest no link can carry. Leave room for sealing
-        // (~48 bytes) and the encrypted file name.
+        // Manifests are trees now, so a file's size is bounded by the store every
+        // chunk has to sit in — not by what one envelope can list. Refuse clearly
+        // rather than publishing chunks we would immediately evict and then be
+        // unable to serve.
         val cap = maxFileBytes()
         if (data.size > cap) {
             append(
-                Msg(peer, "⚠ $name is ${data.size / 1024} KB — this link can carry at most " +
-                    "${cap / 1024} KB per file. Send it in parts.", mine = true, verified = true)
+                Msg(peer, "⚠ $name is ${data.size / 1024 / 1024} MB — this node keeps room for " +
+                    "about ${cap / 1024 / 1024} MB per file. Send it in parts.",
+                    mine = true, verified = true)
             )
             return
         }
@@ -245,7 +256,7 @@ object NodeController {
         )
     }
 
-    /** Largest file we can share right now (MTU-bound, minus sealing overhead). */
+    /** Largest file we can share right now (store-bound, minus sealing overhead). */
     fun maxFileBytes(): Int {
         if (ptr == 0L) return 0
         return (SporeNative.nativeMaxFileBytes(ptr) - 160).coerceAtLeast(0)

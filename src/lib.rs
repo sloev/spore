@@ -796,11 +796,15 @@ impl Node {
                 continue;
             }
             pinned.insert(*magnet);
-            for c in &m.chunk_ids {
-                if self.store.contains_key(c) {
-                    pinned.insert(*c);
+            // Interior manifests are pinned alongside the chunks: evicting one
+            // mid-fetch would hide its whole subtree and stall the transfer with
+            // no way to name what went missing.
+            self.walk_tree(m, &mut |id, _, held| {
+                if held {
+                    pinned.insert(*id);
                 }
-            }
+                true
+            });
         }
         pinned
     }
@@ -1186,7 +1190,12 @@ impl Node {
         }
 
         // Auto-learn manifests addressed to us (endpoint demux on the app tag).
-        if deliverable && e.typ == ty::DATA && e.payload.first() == Some(&file::MANIFEST_TAG) {
+        // Either root tag counts; interior nodes never reach here, since they
+        // ride a per-file topic nobody subscribes to, and are unsigned besides.
+        if deliverable
+            && e.typ == ty::DATA
+            && matches!(e.payload.first(), Some(&file::MANIFEST_TAG) | Some(&file::TREE_TAG))
+        {
             self.absorb_manifest(e);
         }
 
@@ -1454,6 +1463,12 @@ impl Node {
     /// a signed manifest that lists those IDs. Returns the manifest ID — the
     /// **magnet** — and the `Forward`s to flood the small manifest. The data
     /// itself is pulled on demand (§6 custody / swarm), BitTorrent-style.
+    ///
+    /// A manifest is one envelope, so it can only name so many chunks. Past that
+    /// the chunk ids are grouped under **interior manifests** and those are
+    /// grouped again, until what remains fits the signed root — a Merkle tree of
+    /// manifests whose root is still a single 16-byte magnet. Files small enough
+    /// for one manifest produce exactly the bytes they always did.
     pub fn publish_file(&mut self, name: &str, bytes: &[u8], dest: Addr, now: u32) -> (Id, Vec<Forward>) {
         let chunk_size = self.mtu.saturating_sub(64).max(1);
         let count = bytes.len().div_ceil(chunk_size).max(1);
@@ -1464,7 +1479,8 @@ impl Node {
         let mut ft = [0u8; 8];
         ft.copy_from_slice(&Sha256::digest(file_id)[..8]);
 
-        let mut chunk_ids = Vec::with_capacity(count);
+        // (id, bytes of file covered) for the level we are currently grouping.
+        let mut level: Vec<(Id, u64)> = Vec::with_capacity(count);
         for i in 0..count {
             let start = i * chunk_size;
             let end = ((i + 1) * chunk_size).min(bytes.len());
@@ -1475,18 +1491,51 @@ impl Node {
             payload.extend_from_slice(&bytes[start..end]);
             let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
             ce.flags |= fl::FLOOD;
-            chunk_ids.push(ce.id());
+            level.push((ce.id(), (end - start) as u64));
             self.mark_seen(&ce);
             self.store_put(&ce);
+        }
+
+        // Grow interior levels until the remaining ids fit the signed root.
+        // Interior nodes are unsigned and unnamed: the parent names them by
+        // content id, which is hash enough, and dropping the signature buys back
+        // ~96 bytes of fan-out per node.
+        let fanout = file::interior_fanout(self.mtu).max(2);
+        // `depth` is the depth a manifest would have if it named the current
+        // level directly — 0 while `level` is still chunks. Each grouping pass
+        // buries the level one deeper.
+        let mut depth = 0u8;
+        while depth < file::MAX_DEPTH && level.len() > file::root_fanout(self.mtu, name.len(), depth) {
+            let mut next = Vec::with_capacity(level.len().div_ceil(fanout));
+            for group in level.chunks(fanout) {
+                let covered: u64 = group.iter().map(|(_, n)| *n).sum();
+                let node = file::Manifest {
+                    file_id,
+                    chunk_size: chunk_size as u32,
+                    count: group.len() as u32,
+                    total_len: covered,
+                    name: String::new(),
+                    chunk_ids: group.iter().map(|(id, _)| *id).collect(),
+                    depth,
+                };
+                let mut ne = Envelope::new(ty::DATA, ft, expiry, node.encode());
+                ne.flags |= fl::FLOOD;
+                next.push((ne.id(), covered));
+                self.mark_seen(&ne);
+                self.store_put(&ne);
+            }
+            level = next;
+            depth += 1;
         }
 
         let manifest = file::Manifest {
             file_id,
             chunk_size: chunk_size as u32,
-            count: count as u32,
+            count: level.len() as u32,
             total_len: bytes.len() as u64,
             name: name.to_string(),
-            chunk_ids,
+            chunk_ids: level.iter().map(|(id, _)| *id).collect(),
+            depth,
         };
         let mut me = Envelope::new(ty::DATA, dest, expiry, manifest.encode());
         if dest == ZERO_DEST || self.topics.contains(&dest) {
@@ -1513,24 +1562,105 @@ impl Node {
         Some(magnet)
     }
 
-    /// Ask neighbours for the chunks of `magnet` we don't hold yet. Reuses the
-    /// WANT machinery: a chunk is an ordinary stored envelope, named by content,
-    /// so any peer that has it answers from its store.
-    pub fn fetch(&mut self, magnet: &Id) -> Vec<Forward> {
-        let Some(m) = self.manifests.get(magnet) else {
-            return Vec::new();
-        };
-        let mut want = Vec::new();
-        for cid in &m.chunk_ids {
-            if !self.store.contains_key(cid) {
-                want.extend_from_slice(cid);
+    /// Read an interior manifest out of the store.
+    ///
+    /// Interior nodes are unsigned on purpose, so this must never be reached
+    /// from anything but a parent's id list: the store is keyed by content hash,
+    /// so an id a verified parent named can only resolve to the bytes that
+    /// parent meant. `expect` pins the child's depth — it must be exactly one
+    /// less than its parent's, or a crafted tree could recurse sideways.
+    fn tree_node(&self, id: &Id, expect: u8) -> Option<file::Manifest> {
+        let s = self.store.get(id)?;
+        let (e, _) = Envelope::decode(&s.wire).ok()?;
+        let m = file::Manifest::decode(&e.payload)?;
+        (m.depth == expect).then_some(m)
+    }
+
+    /// Depth-first walk of a manifest tree, in file order.
+    ///
+    /// Calls `f(id, depth, held)` for every id the tree names — `depth == 0` for
+    /// a data chunk, higher for an interior node — where `held` says whether we
+    /// have it. A held interior node is descended into right after its call; an
+    /// unheld one hides its whole subtree, which is exactly why the walk reports
+    /// it. Returning `false` from `f` stops the walk, so callers that only need
+    /// the next few ids never pay for the whole tree.
+    fn walk_tree<F>(&self, m: &file::Manifest, f: &mut F) -> bool
+    where
+        F: FnMut(&Id, u8, bool) -> bool,
+    {
+        for id in &m.chunk_ids {
+            if m.depth == 0 {
+                if !f(id, 0, self.store.contains_key(id)) {
+                    return false;
+                }
+                continue;
+            }
+            let child = self.tree_node(id, m.depth - 1);
+            if !f(id, m.depth, child.is_some()) {
+                return false;
+            }
+            if let Some(c) = child {
+                if !self.walk_tree(&c, f) {
+                    return false;
+                }
             }
         }
-        if want.is_empty() {
+        true
+    }
+
+    /// The next ids needed to make progress on `magnet`, at most `limit`, in
+    /// file order. Interior nodes surface before the chunks beneath them because
+    /// the walk reports a node before descending — so a tree resolves top-down
+    /// without needing a separate scheduling pass.
+    pub fn missing(&self, magnet: &Id, limit: usize) -> Vec<Id> {
+        let Some(root) = self.manifests.get(magnet) else {
             return Vec::new();
+        };
+        let mut out = Vec::new();
+        if limit == 0 {
+            return out;
         }
-        let bytes = Envelope::new(ty::WANT, ZERO_DEST, 0, want).wire();
-        vec![Forward::Flood { except: NO_IFACE, bytes }]
+        self.walk_tree(root, &mut |id, _, held| {
+            if !held {
+                out.push(*id);
+            }
+            out.len() < limit
+        });
+        out
+    }
+
+    /// How many ids fit in one WANT frame at this node's MTU.
+    fn want_window(&self) -> usize {
+        (self.mtu.saturating_sub(file::INTERIOR_ENV_OVERHEAD) / 16).max(1)
+    }
+
+    /// Ask neighbours for the parts of `magnet` we don't hold yet. Reuses the
+    /// WANT machinery: a chunk — and equally a sub-manifest — is an ordinary
+    /// stored envelope, named by content, so any peer that has it answers from
+    /// its store.
+    ///
+    /// One call asks for one frame's worth. A large file needs many, which is
+    /// the point: the request is paced by the link rather than by the file.
+    pub fn fetch(&mut self, magnet: &Id) -> Vec<Forward> {
+        self.fetch_n(magnet, 1)
+    }
+
+    /// Ask for up to `frames` frames' worth at once — successive,
+    /// non-overlapping windows, so a link with room for more than one packet in
+    /// flight can use it. A slow link should stay at `1`: every id asked for is
+    /// a reply someone else has to carry back.
+    pub fn fetch_n(&mut self, magnet: &Id, frames: usize) -> Vec<Forward> {
+        let window = self.want_window();
+        self.missing(magnet, window.saturating_mul(frames.max(1)))
+            .chunks(window)
+            .map(|w| {
+                let payload: Vec<u8> = w.iter().flatten().copied().collect();
+                Forward::Flood {
+                    except: NO_IFACE,
+                    bytes: Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire(),
+                }
+            })
+            .collect()
     }
 
     /// Request the chunks of every manifest we know but don't yet hold — the
@@ -1614,61 +1744,153 @@ impl Node {
         Some((name, inner[2 + nlen..].to_vec()))
     }
 
-    /// The largest file [`Node::publish_file`] can actually announce at this
-    /// node's MTU.
+    /// The largest file [`Node::publish_file`] can announce at this node's MTU.
     ///
-    /// A manifest is **one envelope** that lists a 16-byte id per chunk, so the
-    /// chunk count is bounded by what fits beside the envelope header, the
-    /// signature and the file name. Past that the manifest itself would not fit a
-    /// frame and the file could never be advertised — so check this before
-    /// publishing and split (or refuse) instead of emitting something unsendable.
+    /// A manifest is one envelope, so a single one can only name so many chunks
+    /// (~94 KB of file at a 1400-byte MTU). Interior manifests lift that: each
+    /// level multiplies capacity by the interior fan-out, up to
+    /// [`file::MAX_DEPTH`] levels — some terabytes, i.e. no practical protocol
+    /// limit. What actually bounds a transfer now is the store budget at each
+    /// hop and what the slowest bridge on the path is willing to carry, not the
+    /// manifest.
     ///
     /// Sealing (`publish_file_sealed`) grows the payload by ~48 bytes plus the
     /// file name, so leave a little headroom under this figure.
     pub fn max_file_bytes(&self) -> usize {
-        // Signed envelope overhead: 16 header + 32 full src + 2 plen + 64 sig.
-        const ENV_OVERHEAD: usize = 114;
-        // Manifest fixed fields (35) plus an allowance for a long file name.
-        const MANIFEST_FIXED: usize = 35 + 96;
         let chunk = self.mtu.saturating_sub(64).max(1);
-        let room = self.mtu.saturating_sub(ENV_OVERHEAD).saturating_sub(MANIFEST_FIXED);
-        (room / 16) * chunk
+        // Allow for a long file name in the signed root.
+        let mut ids = file::root_fanout(self.mtu, 96, file::MAX_DEPTH);
+        let fanout = file::interior_fanout(self.mtu);
+        for _ in 0..file::MAX_DEPTH {
+            ids = ids.saturating_mul(fanout);
+        }
+        ids.saturating_mul(chunk)
+    }
+
+    /// The largest file whose manifest fits a **single** envelope — the point
+    /// past which [`Node::publish_file`] starts building a tree. Below this a
+    /// file is announced by one manifest, exactly as it was before trees
+    /// existed, and one round trip is enough to learn every chunk id.
+    pub fn max_flat_file_bytes(&self) -> usize {
+        let chunk = self.mtu.saturating_sub(64).max(1);
+        file::root_fanout(self.mtu, 96, 0) * chunk
+    }
+
+    /// The ceiling on everything this node holds at once, files included.
+    pub fn store_budget(&self) -> usize {
+        self.max_store_bytes
+    }
+
+    /// The largest file this node can publish and still serve from its own
+    /// store — **the limit an application should actually enforce.**
+    ///
+    /// Since manifests grew into trees, the protocol stopped being what bounds a
+    /// file; the store did. Every chunk lives there as its own envelope, so a
+    /// file costs a little more than its own length, and a node that spent its
+    /// whole budget on one file would have nothing left to relay with. Hence
+    /// half the budget, not all of it. Raise it with [`Node::set_store_budget`].
+    pub fn max_storable_file_bytes(&self) -> usize {
+        let chunk = self.mtu.saturating_sub(64).max(1);
+        // A chunk envelope costs about a whole frame once its header, file id
+        // and index are counted, so charge the file a frame per chunk.
+        (self.max_store_bytes / 2 / self.mtu.max(1)) * chunk
     }
 
     /// Every file we hold a manifest for: `(magnet, advertised name, total
     /// bytes, chunks held, chunks total)` — a transfer list with progress.
+    /// Chunks held is a *lower bound* while the tree is still resolving: chunks
+    /// under an interior node we haven't got yet are not yet nameable, so they
+    /// cannot be counted. Costs one tree walk per file, so poll it at UI rates,
+    /// not per packet.
     pub fn files(&self) -> Vec<(Id, String, u64, u32, u32)> {
         self.manifests
             .iter()
             .map(|(magnet, m)| {
-                let have = m.chunk_ids.iter().filter(|c| self.store.contains_key(*c)).count() as u32;
-                (*magnet, m.name.clone(), m.total_len, have, m.count)
+                let total = if m.chunk_size == 0 {
+                    m.count
+                } else {
+                    m.total_len.div_ceil(m.chunk_size as u64) as u32
+                };
+                let mut have = 0u32;
+                self.walk_tree(m, &mut |_, depth, held| {
+                    if depth == 0 && held {
+                        have += 1;
+                    }
+                    true
+                });
+                (*magnet, m.name.clone(), m.total_len, have, total.max(1))
             })
             .collect()
     }
 
     pub fn has_file(&self, magnet: &Id) -> bool {
-        match self.manifests.get(magnet) {
-            Some(m) => m.chunk_ids.iter().all(|c| self.store.contains_key(c)),
-            None => false,
-        }
+        let Some(root) = self.manifests.get(magnet) else {
+            return false;
+        };
+        let mut complete = true;
+        self.walk_tree(root, &mut |_, _, held| {
+            complete = held;
+            held // the first gap ends the walk
+        });
+        complete
     }
 
-    /// Reassemble the file, or `None` if a chunk is still missing. Every chunk
-    /// is content-verified for free: we only count it as present if the store
-    /// holds an envelope whose ID equals the one the signed manifest named.
-    pub fn file_bytes(&self, magnet: &Id) -> Option<Vec<u8>> {
-        let m = self.manifests.get(magnet)?;
-        let mut out = Vec::with_capacity(m.total_len as usize);
-        for cid in &m.chunk_ids {
-            let s = self.store.get(cid)?;
-            let (ce, _) = Envelope::decode(&s.wire).ok()?;
-            if ce.payload.len() < 21 {
-                return None; // not a well-formed chunk
+    /// Write the file straight out to `w`, chunk by chunk, returning the bytes
+    /// written. `None` if any part is still missing.
+    ///
+    /// This is the form to prefer for anything large: only one chunk is in
+    /// memory at a time, so a file bounded by disk is not also bounded by RAM.
+    /// A file sealed to a peer still arrives as ciphertext here — [`Node::open_file`]
+    /// is what decrypts, and it does so whole.
+    pub fn write_file_to<W: std::io::Write>(&self, magnet: &Id, w: &mut W) -> Option<u64> {
+        let root = self.manifests.get(magnet)?;
+        let total = root.total_len;
+        let mut written = 0u64;
+        let mut ok = true;
+        self.walk_tree(root, &mut |id, depth, held| {
+            if !held {
+                ok = false;
+                return false;
             }
-            out.extend_from_slice(&ce.payload[21..]);
-        }
-        out.truncate(m.total_len as usize);
+            if depth != 0 {
+                return true; // an interior node carries ids, not bytes
+            }
+            let Some(s) = self.store.get(id) else {
+                ok = false;
+                return false;
+            };
+            let Ok((ce, _)) = Envelope::decode(&s.wire) else {
+                ok = false;
+                return false;
+            };
+            if ce.payload.len() < 21 {
+                ok = false; // not a well-formed chunk
+                return false;
+            }
+            let body = &ce.payload[21..];
+            let take = total.saturating_sub(written).min(body.len() as u64) as usize;
+            if w.write_all(&body[..take]).is_err() {
+                ok = false;
+                return false;
+            }
+            written += take as u64;
+            true
+        });
+        (ok && written == total).then_some(written)
+    }
+
+    /// Reassemble the file, or `None` if a part is still missing. Every chunk
+    /// is content-verified for free: we only count it as present if the store
+    /// holds an envelope whose ID equals the one its parent named, and the root
+    /// that anchors those names is signed.
+    pub fn file_bytes(&self, magnet: &Id) -> Option<Vec<u8>> {
+        let root = self.manifests.get(magnet)?;
+        // `total_len` comes off the wire, so reserve against it only up to a
+        // sane bound — a manifest claiming u64::MAX must not be able to abort us
+        // on the allocation. Beyond the hint the Vec just grows.
+        let hint = root.total_len.min(1 << 20) as usize;
+        let mut out = Vec::with_capacity(hint);
+        self.write_file_to(magnet, &mut out)?;
         Some(out)
     }
 
@@ -2382,32 +2604,140 @@ mod tests {
     }
 
     #[test]
-    fn max_file_bytes_is_the_point_where_the_manifest_stops_fitting() {
+    fn a_file_that_fits_one_manifest_keeps_the_pre_tree_encoding() {
         let now = 1_700_000_000;
         let mut n = Node::new("n", &[]);
-        let cap = n.max_file_bytes();
-        assert!(cap > 0);
+        let body = vec![3u8; n.max_flat_file_bytes()];
+        let (magnet, _) = n.publish_file("small.bin", &body, ZERO_DEST, now);
 
-        // A file at the cap: its manifest still fits one frame, so it can be
-        // announced at all.
-        let ok_file = vec![7u8; cap];
-        let (magnet, _) = n.publish_file("at-the-cap.bin", &ok_file, ZERO_DEST, now);
-        let manifest_wire = n.get_wire(&magnet).expect("manifest stored");
-        assert!(
-            manifest_wire.len() <= n.mtu,
-            "a file at the cap must still produce a sendable manifest ({} > {})",
-            manifest_wire.len(),
-            n.mtu
+        let wire = n.get_wire(&magnet).expect("manifest stored");
+        assert!(wire.len() <= n.mtu, "a flat manifest fits one frame");
+        let (e, _) = Envelope::decode(&wire).unwrap();
+        assert_eq!(
+            e.payload.first(),
+            Some(&file::MANIFEST_TAG),
+            "small files must stay byte-compatible with nodes that predate trees"
         );
+        assert_eq!(file::Manifest::decode(&e.payload).unwrap().depth, 0);
+        assert_eq!(n.file_bytes(&magnet).as_deref(), Some(&body[..]));
+    }
 
-        // Comfortably past it, the manifest outgrows a frame — which is exactly
-        // why callers must consult the cap rather than publish blindly.
-        let big = vec![7u8; cap * 4];
-        let (m2, _) = n.publish_file("too-big.bin", &big, ZERO_DEST, now);
-        assert!(
-            n.get_wire(&m2).expect("stored").len() > n.mtu,
-            "oversized files are what the cap exists to prevent"
-        );
+    #[test]
+    fn a_file_past_one_manifest_grows_a_tree_but_keeps_one_magnet() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        // A small MTU buys deep trees for the price of a small file.
+        n.mtu = 200;
+        let body: Vec<u8> = (0..30_000u32).map(|i| i.wrapping_mul(31) as u8).collect();
+        assert!(body.len() > n.max_flat_file_bytes() * 8, "big enough to need levels");
+
+        let (magnet, forwards) = n.publish_file("deep.bin", &body, ZERO_DEST, now);
+        let wire = n.get_wire(&magnet).expect("root stored");
+        assert!(wire.len() <= n.mtu, "the root is one frame however big the file is");
+        assert_eq!(forwards.len(), 1, "one magnet floods — the file itself is pulled");
+
+        let (e, _) = Envelope::decode(&wire).unwrap();
+        assert_eq!(e.payload.first(), Some(&file::TREE_TAG));
+        let root = file::Manifest::decode(&e.payload).unwrap();
+        assert!(root.depth >= 2, "30 KB at a 200-byte MTU needs levels, got {}", root.depth);
+        assert_eq!(root.total_len, body.len() as u64);
+
+        assert!(n.has_file(&magnet));
+        assert_eq!(n.file_bytes(&magnet).as_deref(), Some(&body[..]));
+    }
+
+    #[test]
+    fn a_tree_resolves_top_down_through_windowed_fetches() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        a.mtu = 200;
+        b.mtu = 200;
+        meet(&mut a, &mut b, now);
+
+        let body: Vec<u8> = (0..12_000u32).map(|i| i.wrapping_mul(17) as u8).collect();
+        let (magnet, forwards) = a.publish_file("deep.bin", &body, ZERO_DEST, now);
+
+        // Only the root reaches B. It names sub-manifests, not chunks, so B
+        // cannot yet name a single byte of the file.
+        for f in forwards {
+            b.on_rx(&fwd_bytes(&f), 0, Some(a.addr), now);
+        }
+        assert!(!b.has_file(&magnet), "B holds the map's first page only");
+
+        let mut rounds = 0;
+        while !b.has_file(&magnet) && rounds < 500 {
+            let want = b.fetch(&magnet);
+            assert!(!want.is_empty(), "B still needs parts but asked for nothing");
+            for f in &want {
+                let wire = fwd_bytes(f);
+                assert!(wire.len() <= b.mtu, "a WANT must fit the link it rides");
+                for answer in a.on_rx(&wire, 0, Some(b.addr), now).forwards {
+                    b.on_rx(&fwd_bytes(&answer), 0, Some(a.addr), now);
+                }
+            }
+            rounds += 1;
+        }
+
+        assert!(b.has_file(&magnet), "B never completed the file");
+        assert_eq!(b.file_bytes(&magnet).as_deref(), Some(&body[..]));
+        assert!(rounds > 1, "a tree this size cannot arrive in one frame");
+    }
+
+    #[test]
+    fn a_tree_node_at_an_impossible_depth_is_refused() {
+        let m = file::Manifest {
+            file_id: [1u8; 16],
+            chunk_size: 100,
+            count: 0,
+            total_len: 0,
+            name: String::new(),
+            chunk_ids: vec![],
+            depth: 1,
+        };
+        let mut enc = m.encode();
+        assert_eq!(enc[0], file::TREE_TAG);
+
+        enc[1] = 0; // leaf depth under the interior tag
+        assert!(file::Manifest::decode(&enc).is_none());
+        enc[1] = file::MAX_DEPTH + 1; // deeper than we are willing to walk
+        assert!(file::Manifest::decode(&enc).is_none());
+        enc[1] = file::MAX_DEPTH;
+        assert!(file::Manifest::decode(&enc).is_some());
+    }
+
+    #[test]
+    fn a_manifest_claiming_an_absurd_size_cannot_exhaust_memory() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        let (magnet, _) = n.publish_file("t.bin", b"tiny", ZERO_DEST, now);
+
+        // total_len arrives off the wire. Reassembly must fail on the bytes it
+        // cannot find, not on the allocator it was asked to trust.
+        n.manifests.get_mut(&magnet).unwrap().total_len = u64::MAX;
+        assert!(n.file_bytes(&magnet).is_none());
+        assert!(!n.has_file(&magnet) || n.write_file_to(&magnet, &mut Vec::new()).is_none());
+    }
+
+    #[test]
+    fn writing_a_file_out_streams_it_without_a_whole_second_copy() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        n.mtu = 200;
+        let body: Vec<u8> = (0..9_000u32).map(|i| (i % 253) as u8).collect();
+        let (magnet, _) = n.publish_file("s.bin", &body, ZERO_DEST, now);
+
+        let mut out = Vec::new();
+        assert_eq!(n.write_file_to(&magnet, &mut out), Some(body.len() as u64));
+        assert_eq!(out, body);
+
+        // A node holding the root but no chunks reports nothing, rather than
+        // handing back a short file that looks complete.
+        let mut fresh = Node::new("fresh", &[]);
+        fresh.mtu = 200;
+        let (root, _) = Envelope::decode(&n.get_wire(&magnet).unwrap()).unwrap();
+        fresh.absorb_manifest(&root).expect("the root is signed");
+        assert!(fresh.write_file_to(&magnet, &mut Vec::new()).is_none());
     }
 
     #[test]
