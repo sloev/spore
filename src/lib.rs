@@ -619,6 +619,7 @@ pub struct Node {
     paths: Paths,
     peer_prekeys: HashMap<Addr, [u8; 32]>,
     peer_busy: HashMap<Addr, u8>,
+    peer_names: HashMap<Addr, String>, // the display name a peer announces (a hint, not identity)
 
     max_store_bytes: usize,
     seq: u64,
@@ -686,6 +687,7 @@ impl Node {
             paths: Paths::default(),
             peer_prekeys: HashMap::new(),
             peer_busy: HashMap::new(),
+            peer_names: HashMap::new(),
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
@@ -924,6 +926,16 @@ impl Node {
         (id, self.forward_intents(&e, NO_IFACE, now), encrypted)
     }
 
+    /// The display name a peer announced, if any.
+    ///
+    /// This is what the peer **claims** to be called — anyone may announce any
+    /// name, so it is a display hint, never identity. Offer it as the default
+    /// when the user assigns their own local petname; that petname is the name
+    /// to trust.
+    pub fn peer_name(&self, a: &Addr) -> Option<&str> {
+        self.peer_names.get(a).map(|s| s.as_str())
+    }
+
     /// Peers we've heard from, freshest first: `(address, seconds since last
     /// heard, whether we hold their prekey)`. A peer appears once any signed
     /// traffic — usually their ANNOUNCE — has reached us; holding their prekey
@@ -1081,7 +1093,23 @@ impl Node {
         prekey.copy_from_slice(&e.payload[..32]);
         self.peer_prekeys.insert(src_addr, prekey);
         self.peer_busy.insert(src_addr, e.payload[32]); // §5.4c busy byte
-                                                        // (topics/petname parsed here in a fuller build; omitted for brevity)
+
+        // The rest is `ntopics · topics[8×n] · np · petname`. The petname is the
+        // name the peer *claims*; it is a display hint only — never identity.
+        // Anyone may announce any name, so a UI must treat it as a suggestion
+        // and let the user assign the local petname that it actually trusts.
+        let ntopics = e.payload[33] as usize;
+        let after_topics = 34 + ntopics * 8;
+        if after_topics < e.payload.len() {
+            let name_start = after_topics + 1; // skip the `np` byte
+            if name_start <= e.payload.len() {
+                let claimed = String::from_utf8_lossy(&e.payload[name_start..]);
+                let claimed: String = claimed.chars().filter(|c| !c.is_control()).take(32).collect();
+                if !claimed.is_empty() {
+                    self.peer_names.insert(src_addr, claimed);
+                }
+            }
+        }
     }
 
     // ---- receive (the entire router, §5) --------------------------------
@@ -1663,6 +1691,7 @@ pub mod feed;
 
 // §7 KEYROT — encrypted-topic key rotation (forward-secret ratchet + membership
 // rekey), built on the `topic_seal`/`seal` primitives above.
+pub mod invite;
 pub mod topic;
 
 // The network carries its own genome: publish/discover the bootstrap bundle
@@ -2266,6 +2295,30 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn announced_names_reach_peers_as_a_hint() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("Jo's phone", &[]);
+        let mut b = Node::new("basecamp", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Each side learns what the other calls itself — so a UI can suggest a
+        // petname instead of making anyone read out hex.
+        assert_eq!(a.peer_name(&b.addr), Some("basecamp"));
+        assert_eq!(b.peer_name(&a.addr), Some("Jo's phone"));
+        // We never invent a name for someone we haven't heard.
+        assert_eq!(a.peer_name(&Node::new("x", &[]).addr), None);
+
+        // A node that follows topics still announces a readable name (the name
+        // sits after the topic list on the wire).
+        let mut t = Node::new("weatherbox", &["news", "weather"]);
+        let mut c = Node::new("c", &[]);
+        for f in t.build_announce(now) {
+            c.on_rx(&fwd_bytes(&f), 0, Some(t.addr), now);
+        }
+        assert_eq!(c.peer_name(&t.addr), Some("weatherbox"));
     }
 
     #[test]

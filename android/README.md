@@ -17,9 +17,16 @@ A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design
 > + a mascot that sparkles when the mesh breathes.
 >
 > Protocol behaviour: the node **announces itself** (so peers learn its address,
-> prekey and a path back), **seals direct messages** to a peer's prekey once
-> heard (🔒), and asks for **delivery receipts** (✓ delivered). Broadcasts and
-> topic posts are signed but public by nature — the UI says so.
+> prekey, a path back, and the **name it announces**), **seals direct messages**
+> to a peer's prekey once heard (🔒), and asks for **delivery receipts**
+> (✓ delivered). Broadcasts and topic posts are signed but public by nature —
+> the UI says so.
+>
+> **Connect (👋)** shows an invite QR carrying your address, your name and the
+> relay/swarm bridges you're on; a friend scans (or pastes) it, confirms a
+> petname — prefilled with the name you announce — and can opt in to your
+> bridges. Invites are unauthenticated by nature, so the name is shown as a
+> claim and bridges are never joined without a tick.
 >
 > The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
 > Kotlin/Compose app is proven to build by the `android` CI workflow. The

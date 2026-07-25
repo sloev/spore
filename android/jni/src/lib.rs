@@ -444,8 +444,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeBeacon(
     rt(ptr).hub.beacon();
 }
 
-/// Peers we've heard from, freshest first, as "addrhex:secondsAgo:hasPrekey"
-/// lines ("" when we haven't met anyone yet).
+/// Peers we've heard from, freshest first, one per line:
+/// `addrhex:secondsAgo:hasPrekey:announcedName` (the name may be empty and is
+/// last, so a name containing ':' survives a limit-4 split).
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativePeers(
     env: JNIEnv,
@@ -453,16 +454,77 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePeers(
     ptr: jlong,
 ) -> jni::sys::jstring {
     let now = spore::bridge::hub::now();
-    let rows = rt(ptr).hub.with_node(|n| n.peers(now));
-    let s = rows
-        .iter()
-        .map(|(a, age, key)| {
-            let hex: String = a.iter().map(|b| format!("{b:02x}")).collect();
-            format!("{hex}:{age}:{}", if *key { 1 } else { 0 })
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let s = rt(ptr).hub.with_node(|n| {
+        n.peers(now)
+            .iter()
+            .map(|(a, age, key)| {
+                let hex: String = a.iter().map(|b| format!("{b:02x}")).collect();
+                let name = n.peer_name(a).unwrap_or("").replace('\n', " ");
+                format!("{hex}:{age}:{}:{name}", if *key { 1 } else { 0 })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
     env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Set the name this node announces to the mesh (a display hint others may use
+/// as the default petname for us). Takes effect on the next beacon.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetName(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    name: JString,
+) {
+    if let Ok(s) = env.get_string(&name) {
+        let s: String = s.into();
+        let s: String = s.chars().filter(|c| !c.is_control()).take(32).collect();
+        rt(ptr).hub.with_node(|n| n.petname = s);
+    }
+}
+
+/// Build a shareable invite ("here's how to reach me") for this node: address,
+/// the name we announce, and the given bridge specs (one per line).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeInviteEncode(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    bridges: JString,
+) -> jni::sys::jstring {
+    let raw: String = env.get_string(&bridges).map(|s| s.into()).unwrap_or_default();
+    let list: Vec<String> = raw.lines().filter(|l| !l.trim().is_empty()).map(|l| l.to_string()).collect();
+    let r = rt(ptr);
+    let addr = r.hub.addr();
+    let name = r.hub.with_node(|n| n.petname.clone());
+    let s = spore::invite::encode(&addr, &name, &list);
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Parse a scanned or pasted invite. Returns `addrhex\nname\nbridge…` (bridges
+/// one per line), or null if it isn't a valid invite — a mistyped or truncated
+/// string fails its checksum rather than yielding a plausible wrong address.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeInviteDecode(
+    mut env: JNIEnv,
+    _class: JClass,
+    text: JString,
+) -> jni::sys::jstring {
+    let s: String = match env.get_string(&text) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let Some(inv) = spore::invite::decode(&s) else {
+        return std::ptr::null_mut();
+    };
+    let hex: String = inv.addr.iter().map(|b| format!("{b:02x}")).collect();
+    let mut out = format!("{hex}\n{}", inv.name);
+    for b in &inv.bridges {
+        out.push('\n');
+        out.push_str(b);
+    }
+    env.new_string(out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
 /// Send a direct message: sealed to the peer's prekey when known, and flagged

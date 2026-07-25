@@ -24,8 +24,15 @@ data class Msg(
     val ts: Long = System.currentTimeMillis(),
 )
 
-/** A node we've heard from: how long ago, and whether we can encrypt to it. */
-data class Peer(val addr: String, val secondsAgo: Int, val hasKey: Boolean)
+/**
+ * A node we've heard from: how long ago, whether we can encrypt to it, and the
+ * name it *claims*. The claimed name is a hint only — anyone may announce any
+ * name — so it is offered as the default when you assign your own petname.
+ */
+data class Peer(val addr: String, val secondsAgo: Int, val hasKey: Boolean, val announced: String = "")
+
+/** A parsed invite awaiting the user's confirmation. */
+data class ScannedInvite(val addr: String, val suggestedName: String, val bridges: List<String>)
 
 /** One microblog post on a followed topic. */
 data class Post(val topic: String, val author: String, val text: String, val verified: Boolean, val ts: Long = System.currentTimeMillis())
@@ -51,6 +58,7 @@ object NodeController {
     val peers = MutableStateFlow<List<Peer>>(emptyList()) // nodes we've heard from
     val storeCount = MutableStateFlow(0) // envelopes held for the mesh
     val address = MutableStateFlow("")
+    val myName = MutableStateFlow("") // the name we announce (a hint for others)
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
     val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
 
@@ -76,6 +84,9 @@ object NodeController {
             prefs.edit().putString("seed", Base64.encodeToString(fresh, Base64.NO_WRAP)).apply()
         }
         address.value = SporeNative.nativeAddr(ptr).toHex()
+        // The name we announce; peers offer it as the default petname for us.
+        myName.value = prefs.getString("myname", "") ?: ""
+        if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
 
         // Refollow persisted topics.
         prefs.getStringSet("topics", emptySet())?.forEach { follow(it, persist = false) }
@@ -114,8 +125,11 @@ object NodeController {
                 SporeNative.nativeResendUnacked(ptr)
                 peers.value = SporeNative.nativePeers(ptr).lines().filter { it.isNotBlank() }
                     .mapNotNull { line ->
-                        val p = line.split(':')
-                        if (p.size == 3) Peer(p[0], p[1].toIntOrNull() ?: 0, p[2] == "1") else null
+                        // name is last and may contain ':' — keep it whole.
+                        val p = line.split(':', limit = 4)
+                        if (p.size >= 3) {
+                            Peer(p[0], p[1].toIntOrNull() ?: 0, p[2] == "1", p.getOrElse(3) { "" })
+                        } else null
                     }
                 storeCount.value = SporeNative.nativeStoreLen(ptr)
                 refreshDelivery()
@@ -319,6 +333,69 @@ object NodeController {
     fun addWebTorrent(ctx: Context, name: String) {
         if (ptr == 0L || name.isBlank()) return
         webHost(ctx).addWebTorrent(name.trim())
+    }
+
+    // -- your name, and invites -------------------------------------------------
+
+    /** The name we announce to the mesh (others see it as a suggested petname). */
+    fun setMyName(name: String) {
+        if (ptr == 0L) return
+        val n = name.trim().take(32)
+        myName.value = n
+        SporeNative.nativeSetName(ptr, n)
+        appCtx.getSharedPreferences("spore", Context.MODE_PRIVATE).edit().putString("myname", n).apply()
+        SporeNative.nativeBeacon(ptr) // let peers see the new name right away
+    }
+
+    /**
+     * A shareable invite: our address, our announced name, and the bridges we're
+     * reachable on — so a scanner can *join the same mesh*, not just learn a
+     * number. Only shareable bridge kinds are included: a relay URL or swarm
+     * name means something to someone else, a local USB radio does not.
+     */
+    fun inviteText(): String {
+        if (ptr == 0L) return ""
+        val specs = bridges.value.mapNotNull { b ->
+            when (b.kind) {
+                "WebSocket" -> "ws:${b.detail}"
+                "Nostr" -> "nostr:${b.detail}"
+                "WebTorrent" -> "wt:${b.detail}"
+                "TCP" -> if (b.detail.contains(':')) "tcp:${b.detail}" else null
+                else -> null // audio/BLE/Wi-Fi-Direct/UDP are local, not shareable
+            }
+        }
+        return SporeNative.nativeInviteEncode(ptr, specs.joinToString("\n")) ?: ""
+    }
+
+    /** Parse a scanned or pasted invite; null if it isn't a valid one. */
+    fun parseInvite(text: String): ScannedInvite? {
+        val out = SporeNative.nativeInviteDecode(text.trim())?.lines() ?: return null
+        if (out.isEmpty() || out[0].length != 16) return null
+        return ScannedInvite(out[0], out.getOrElse(1) { "" }, out.drop(2).filter { it.isNotBlank() })
+    }
+
+    /** Save a contact from an invite under the petname the user confirmed. */
+    fun acceptInvite(inv: ScannedInvite, petname: String) {
+        Petnames.set(inv.addr, petname.ifBlank { inv.suggestedName })
+    }
+
+    /**
+     * Join bridges offered by an invite. Called only after the user ticks them:
+     * an invite is unauthenticated, so auto-joining whatever it names would let
+     * a hostile QR steer this node onto a relay of the attacker's choosing.
+     */
+    fun applyInviteBridges(ctx: Context, specs: List<String>) {
+        for (s in specs) {
+            val (kind, value) = s.split(':', limit = 2).let {
+                if (it.size == 2) it[0] to it[1] else return@for
+            }
+            when (kind) {
+                "ws" -> addWebSocket(ctx, value)
+                "nostr" -> addNostr(ctx, value)
+                "wt" -> addWebTorrent(ctx, value)
+                "tcp" -> addTcp(value)
+            }
+        }
     }
 
     // -- helpers ----------------------------------------------------------------

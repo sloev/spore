@@ -65,6 +65,7 @@ private data class Chat(val peer: String) : Screen
 private data object Feed : Screen
 private data object BridgesScreen : Screen
 private data object Advanced : Screen
+private data object Connect : Screen
 
 // Kawaii-but-serious: Meshtastic-adjacent greens with a soft pastel accent.
 private val SporeLightColors = androidx.compose.material3.lightColorScheme(
@@ -119,20 +120,22 @@ fun App() {
                         Feed -> Text("$m Feed")
                         BridgesScreen -> Text("$m Bridges")
                         Advanced -> Text("$m Advanced")
+                        Connect -> Text("$m Connect")
                         else -> Text("$m SPORE")
                     }
                 }, navigationIcon = {
-                    if (screen is Chat || screen == Advanced) {
+                    if (screen is Chat || screen == Advanced || screen == Connect) {
                         IconButton(onClick = { screen = Chats }) { Text("←") }
                     }
                 }, actions = {
-                    if (screen !is Chat && screen != Advanced) {
+                    if (screen !is Chat && screen != Advanced && screen != Connect) {
+                        IconButton(onClick = { screen = Connect }) { Text("👋") }
                         IconButton(onClick = { screen = Advanced }) { Text("⚙") }
                     }
                 })
             },
             bottomBar = {
-                if (screen !is Chat && screen != Advanced) {
+                if (screen !is Chat && screen != Advanced && screen != Connect) {
                     NavigationBar {
                         NavigationBarItem(selected = screen == Chats, onClick = { screen = Chats }, icon = {}, label = { Text("Chats") })
                         NavigationBarItem(selected = screen == Feed, onClick = { screen = Feed }, icon = {}, label = { Text("Feed") })
@@ -149,6 +152,7 @@ fun App() {
                     Feed -> FeedScreen()
                     BridgesScreen -> BridgesList()
                     Advanced -> AdvancedScreen(addr)
+                    Connect -> ConnectScreen()
                 }
             }
         }
@@ -211,10 +215,14 @@ private fun ChatsList(addr: String, open: (String) -> Unit) {
                 }
                 items(nearby) { p ->
                     val ago = if (p.secondsAgo < 60) "${p.secondsAgo}s ago" else "${p.secondsAgo / 60}m ago"
+                    // Your petname wins; otherwise show what they call themselves,
+                    // quoted so it reads as a claim rather than a verified name.
+                    val shown = names[p.addr] ?: p.announced.takeIf { it.isNotBlank() }?.let { "“$it”" }
+                        ?: Petnames.label(p.addr)
                     Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { open(p.addr) }) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "📡 ${Petnames.label(p.addr)}",
+                                "📡 $shown",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.weight(1f)
                             )
@@ -385,12 +393,190 @@ private fun FeedScreen() {
     }
 }
 
+/**
+ * Meet someone: show them your QR, or scan/paste theirs. An invite carries your
+ * address, the name you announce, and the bridges you're reachable on — so they
+ * can join the same mesh, not merely learn a number.
+ */
+@Composable
+private fun ConnectScreen() {
+    val ctx = LocalContext.current
+    val myName by NodeController.myName.collectAsState()
+    val invite = remember(myName) { NodeController.inviteText() }
+
+    var scanning by remember { mutableStateOf(false) }
+    var pasted by remember { mutableStateOf("") }
+    var found by remember { mutableStateOf<ScannedInvite?>(null) }
+    var petname by remember { mutableStateOf("") }
+    var chosen by remember { mutableStateOf(setOf<String>()) }
+    var note by remember { mutableStateOf("") }
+
+    val camPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        scanning = ok
+        if (!ok) note = "camera denied — paste the invite text instead"
+    }
+
+    fun accept(inv: ScannedInvite) {
+        found = inv
+        petname = inv.suggestedName
+        chosen = emptySet()
+        scanning = false
+    }
+
+    LazyColumn(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val pending = found
+        if (pending == null) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Your invite", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Let a friend scan this. It shares your address, your name, and any " +
+                                "relay or swarm bridges you're on.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        if (invite.isNotBlank()) QrImage(invite)
+                        Text(invite, style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.padding(top = 8.dp)) {
+                            OutlinedButton(onClick = {
+                                val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(android.content.ClipData.newPlainText("SPORE invite", invite))
+                            }) { Text("Copy") }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(onClick = {
+                                val i = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"; putExtra(Intent.EXTRA_TEXT, invite)
+                                }
+                                ctx.startActivity(Intent.createChooser(i, "Share your SPORE invite"))
+                            }) { Text("Share") }
+                        }
+                    }
+                }
+            }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Add a friend", style = MaterialTheme.typography.titleSmall)
+                        if (scanning) {
+                            QrScanner(onResult = { text ->
+                                val inv = NodeController.parseInvite(text)
+                                if (inv != null) accept(inv) else note = "that QR isn't a SPORE invite"
+                            })
+                            OutlinedButton(onClick = { scanning = false }) { Text("Stop scanning") }
+                        } else {
+                            OutlinedButton(onClick = {
+                                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA)
+                                    == PackageManager.PERMISSION_GRANTED
+                                ) scanning = true else camPerm.launch(Manifest.permission.CAMERA)
+                            }) { Text("Scan their QR") }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = pasted, onValueChange = { pasted = it },
+                                label = { Text("…or paste an invite") }, modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(onClick = {
+                                val inv = NodeController.parseInvite(pasted)
+                                if (inv != null) { accept(inv); pasted = "" }
+                                else note = "that doesn't look like a valid invite"
+                            }) { Text("Add") }
+                        }
+                        if (note.isNotBlank()) {
+                            Text(note, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        } else {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Add ${pending.suggestedName.ifBlank { "this node" }}?", style = MaterialTheme.typography.titleSmall)
+                        Text("address ${pending.addr}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "The name in an invite is only what they claim — the petname you set " +
+                                "here is the one you'll trust.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = petname, onValueChange = { petname = it },
+                            label = { Text("petname") }, modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+            if (pending.bridges.isNotEmpty()) {
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Also join their bridges?", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Only tick these if you trust the sender: joining connects your " +
+                                    "node to servers they chose.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            pending.bridges.forEach { b ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 6.dp).clickable {
+                                        chosen = if (b in chosen) chosen - b else chosen + b
+                                    },
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(if (b in chosen) "☑" else "☐")
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(b, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                Row {
+                    Button(onClick = {
+                        NodeController.acceptInvite(pending, petname)
+                        if (chosen.isNotEmpty()) NodeController.applyInviteBridges(ctx, chosen.toList())
+                        note = "added ${petname.ifBlank { pending.suggestedName }}"
+                        found = null
+                    }) { Text("Add contact") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { found = null }) { Text("Cancel") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AdvancedScreen(addr: String) {
     val ctx = LocalContext.current
     val topics by NodeController.topics.collectAsState()
     var showSeed by remember { mutableStateOf(false) }
     Column(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val myName by NodeController.myName.collectAsState()
+        var editName by remember(myName) { mutableStateOf(myName) }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Your name", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Announced to nodes in range, and offered to them as the default petname " +
+                        "for you. A display hint, not an identity — your address is that.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = editName, onValueChange = { editName = it },
+                        label = { Text("name") }, modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { NodeController.setMyName(editName) }) { Text("Save") }
+                }
+            }
+        }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {
                 Text("Identity", style = MaterialTheme.typography.titleSmall)
