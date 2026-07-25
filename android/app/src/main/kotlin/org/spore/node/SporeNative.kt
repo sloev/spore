@@ -83,4 +83,49 @@ object SporeNative {
 
     /** In-progress reassemblies as "idhex:have/count" lines ("" = none). */
     external fun nativeFragStatus(ptr: Long): String
+
+    /** Flood our ANNOUNCE so peers learn our address, prekey and a path back. */
+    external fun nativeBeacon(ptr: Long)
+
+    /** Peers heard from, freshest first: "addrhex:secondsAgo:hasPrekey:name" lines. */
+    external fun nativePeers(ptr: Long): String
+
+    /** Set the name we announce to the mesh (a hint others may adopt). */
+    external fun nativeSetName(ptr: Long, name: String)
+
+    /** Build a shareable invite for this node (bridge specs one per line). */
+    external fun nativeInviteEncode(ptr: Long, bridges: String): String?
+
+    /** Parse an invite: "addrhex\nname\nbridge…", or null if invalid. */
+    external fun nativeInviteDecode(text: String): String?
+
+    /** Publish a file (sealed to dest when possible). "magnethex:1|0". */
+    external fun nativePublishFile(ptr: Long, name: String, bytes: ByteArray, destHex: String): String?
+
+    /** Known files: "magnet:totalBytes:chunksHeld:chunksTotal:name" lines. */
+    external fun nativeFiles(ptr: Long): String
+
+    /** Ask the mesh for the chunks still missing for this file. */
+    external fun nativeFetchFile(ptr: Long, magnetHex: String)
+
+    /** A complete file as u16 nameLen · name · bytes (decrypted), else null. */
+    external fun nativeOpenFile(ptr: Long, magnetHex: String): ByteArray?
+
+    /** Direct message: sealed when possible + receipt requested. "idhex:1|0". */
+    external fun nativeSendDirect(ptr: Long, dest: ByteArray, payload: ByteArray): String?
+
+    /** Has a delivery receipt for this envelope id (hex) arrived? */
+    external fun nativeAcked(ptr: Long, idHex: String): Boolean
+
+    /** Resend ACKREQ messages whose backoff elapsed without a receipt. */
+    external fun nativeResendUnacked(ptr: Long)
+
+    /** Readable payload: decrypted if sealed to us, else as-is; null if not ours. */
+    external fun nativeEnvPlaintext(ptr: Long, wire: ByteArray): ByteArray?
+
+    /** Was this envelope sealed? (lock indicator) */
+    external fun nativeEnvEncrypted(wire: ByteArray): Boolean
+
+    /** How many envelopes we're storing and relaying for the mesh. */
+    external fun nativeStoreLen(ptr: Long): Int
 }

@@ -431,6 +431,342 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeMeshtasticUnwrap(
     }
 }
 
+// -- peers, encrypted direct messages, delivery receipts ---------------------
+
+/// Flood this node's ANNOUNCE on every interface. Peers learn our address,
+/// prekey (so they can encrypt to us) and a path back — call it periodically.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeBeacon(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) {
+    rt(ptr).hub.beacon();
+}
+
+/// Peers we've heard from, freshest first, one per line:
+/// `addrhex:secondsAgo:hasPrekey:announcedName` (the name may be empty and is
+/// last, so a name containing ':' survives a limit-4 split).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePeers(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let now = spore::bridge::hub::now();
+    let s = rt(ptr).hub.with_node(|n| {
+        n.peers(now)
+            .iter()
+            .map(|(a, age, key)| {
+                let hex: String = a.iter().map(|b| format!("{b:02x}")).collect();
+                let name = n.peer_name(a).unwrap_or("").replace('\n', " ");
+                format!("{hex}:{age}:{}:{name}", if *key { 1 } else { 0 })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Set the name this node announces to the mesh (a display hint others may use
+/// as the default petname for us). Takes effect on the next beacon.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetName(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    name: JString,
+) {
+    if let Ok(s) = env.get_string(&name) {
+        let s: String = s.into();
+        let s: String = s.chars().filter(|c| !c.is_control()).take(32).collect();
+        rt(ptr).hub.with_node(|n| n.petname = s);
+    }
+}
+
+/// Build a shareable invite ("here's how to reach me") for this node: address,
+/// the name we announce, and the given bridge specs (one per line).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeInviteEncode(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    bridges: JString,
+) -> jni::sys::jstring {
+    let raw: String = env.get_string(&bridges).map(|s| s.into()).unwrap_or_default();
+    let list: Vec<String> = raw.lines().filter(|l| !l.trim().is_empty()).map(|l| l.to_string()).collect();
+    let r = rt(ptr);
+    let addr = r.hub.addr();
+    let name = r.hub.with_node(|n| n.petname.clone());
+    let s = spore::invite::encode(&addr, &name, &list);
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Parse a scanned or pasted invite. Returns `addrhex\nname\nbridge…` (bridges
+/// one per line), or null if it isn't a valid invite — a mistyped or truncated
+/// string fails its checksum rather than yielding a plausible wrong address.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeInviteDecode(
+    mut env: JNIEnv,
+    _class: JClass,
+    text: JString,
+) -> jni::sys::jstring {
+    let s: String = match env.get_string(&text) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let Some(inv) = spore::invite::decode(&s) else {
+        return std::ptr::null_mut();
+    };
+    let hex: String = inv.addr.iter().map(|b| format!("{b:02x}")).collect();
+    let mut out = format!("{hex}\n{}", inv.name);
+    for b in &inv.bridges {
+        out.push('\n');
+        out.push_str(b);
+    }
+    env.new_string(out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Send a direct message: sealed to the peer's prekey when known, and flagged
+/// for a delivery receipt. Returns "idhex:1" (encrypted) or "idhex:0"
+/// (cleartext — we haven't heard their ANNOUNCE yet).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendDirect(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    dest: JByteArray,
+    payload: JByteArray,
+) -> jni::sys::jstring {
+    let d = env.convert_byte_array(&dest).unwrap_or_default();
+    let p = env.convert_byte_array(&payload).unwrap_or_default();
+    if d.len() != 8 {
+        return std::ptr::null_mut();
+    }
+    let mut addr = [0u8; 8];
+    addr.copy_from_slice(&d);
+    let r = rt(ptr);
+    let (id, forwards, encrypted) = r.hub.with_node(|n| n.send_direct(addr, &p, spore::bridge::hub::now()));
+    r.hub.originate(forwards);
+    let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
+    let s = format!("{hex}:{}", if encrypted { 1 } else { 0 });
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Has a delivery receipt for this envelope id (hex) come back?
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeAcked(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    id_hex: JString,
+) -> jboolean {
+    let s: String = match env.get_string(&id_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return JNI_FALSE,
+    };
+    if s.len() != 32 {
+        return JNI_FALSE;
+    }
+    let mut id = [0u8; 16];
+    for (i, b) in id.iter_mut().enumerate() {
+        match u8::from_str_radix(&s[i * 2..i * 2 + 2], 16) {
+            Ok(v) => *b = v,
+            Err(_) => return JNI_FALSE,
+        }
+    }
+    if rt(ptr).hub.with_node(|n| n.acked(&id)) {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+/// Resend ACKREQ messages whose backoff elapsed without a receipt (§5.6).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeResendUnacked(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) {
+    let r = rt(ptr);
+    let forwards = r.hub.with_node(|n| n.resend_unacked(spore::bridge::hub::now()));
+    r.hub.originate(forwards);
+}
+
+/// The readable payload of a delivered envelope: decrypted with our prekey
+/// secret when it is ENCRYPTED, otherwise the payload as-is. Null if it is
+/// sealed to someone else (or malformed).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvPlaintext(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    wire: JByteArray,
+) -> jbyteArray {
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    let Ok((e, _)) = Envelope::decode(&w) else {
+        return std::ptr::null_mut();
+    };
+    let out = if e.flags & spore::fl::ENCRYPTED != 0 {
+        match rt(ptr).hub.with_node(|n| n.open(&e.payload)) {
+            Some(p) => p,
+            None => return std::ptr::null_mut(),
+        }
+    } else {
+        e.payload
+    };
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Whether an envelope was sealed (for the UI's lock indicator).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvEncrypted(
+    env: JNIEnv,
+    _class: JClass,
+    wire: JByteArray,
+) -> jboolean {
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    match Envelope::decode(&w) {
+        Ok((e, _)) if e.flags & spore::fl::ENCRYPTED != 0 => JNI_TRUE,
+        _ => JNI_FALSE,
+    }
+}
+
+/// How many envelopes this node is currently storing and relaying for others.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeStoreLen(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jint {
+    rt(ptr).hub.with_node(|n| n.store_len()) as jint
+}
+
+// -- files: the protocol's manifest/chunk layer, sealed when we can ----------
+
+fn id_from_hex(s: &str) -> Option<spore::Id> {
+    if s.len() != 32 {
+        return None;
+    }
+    let mut id = [0u8; 16];
+    for (i, b) in id.iter_mut().enumerate() {
+        *b = u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(id)
+}
+
+/// Publish a file through the manifest/chunk layer, **sealed to `dest`'s prekey
+/// when we have it** (contents *and* name encrypted). `dest` empty = public.
+/// Returns "magnethex:1" (sealed) or "magnethex:0" (cleartext).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePublishFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    name: JString,
+    bytes: JByteArray,
+    dest_hex: JString,
+) -> jni::sys::jstring {
+    let name: String = env.get_string(&name).map(|s| s.into()).unwrap_or_default();
+    let data = env.convert_byte_array(&bytes).unwrap_or_default();
+    let dhex: String = env.get_string(&dest_hex).map(|s| s.into()).unwrap_or_default();
+
+    let mut dest = [0u8; 8];
+    let mut unicast = false;
+    if dhex.len() == 16 {
+        for (i, b) in dest.iter_mut().enumerate() {
+            match u8::from_str_radix(&dhex[i * 2..i * 2 + 2], 16) {
+                Ok(v) => *b = v,
+                Err(_) => return std::ptr::null_mut(),
+            }
+        }
+        unicast = true;
+    }
+
+    let now = spore::bridge::hub::now();
+    let r = rt(ptr);
+    let (magnet, forwards, sealed) = r.hub.with_node(|n| {
+        if unicast {
+            if let Some((m, f)) = n.publish_file_sealed(&name, &data, dest, now) {
+                return (m, f, true);
+            }
+        }
+        let (m, f) = n.publish_file(&name, &data, dest, now);
+        (m, f, false)
+    });
+    r.hub.originate(forwards);
+    let hex: String = magnet.iter().map(|b| format!("{b:02x}")).collect();
+    let s = format!("{hex}:{}", if sealed { 1 } else { 0 });
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Files we hold a manifest for, one per line:
+/// `magnethex:totalBytes:chunksHeld:chunksTotal:advertisedName`.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFiles(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let rows = rt(ptr).hub.with_node(|n| n.files());
+    let s = rows
+        .iter()
+        .map(|(m, name, total, have, count)| {
+            let hex: String = m.iter().map(|b| format!("{b:02x}")).collect();
+            format!("{hex}:{total}:{have}:{count}:{}", name.replace('\n', " "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Ask the mesh for the chunks we're still missing for this file.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    magnet_hex: JString,
+) {
+    let s: String = match env.get_string(&magnet_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return,
+    };
+    let Some(magnet) = id_from_hex(&s) else { return };
+    let r = rt(ptr);
+    let forwards = r.hub.with_node(|n| n.fetch(&magnet));
+    r.hub.originate(forwards);
+}
+
+/// A complete file as `u16 nameLen · name · bytes`, decrypted if it was sealed
+/// to us. Null while chunks are missing, or if it was sealed to someone else.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeOpenFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    magnet_hex: JString,
+) -> jbyteArray {
+    let s: String = match env.get_string(&magnet_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let Some(magnet) = id_from_hex(&s) else {
+        return std::ptr::null_mut();
+    };
+    let Some((name, bytes)) = rt(ptr).hub.with_node(|n| n.open_file(&magnet)) else {
+        return std::ptr::null_mut();
+    };
+    let nb = name.as_bytes();
+    let nlen = nb.len().min(u16::MAX as usize);
+    let mut out = Vec::with_capacity(2 + nlen + bytes.len());
+    out.extend_from_slice(&(nlen as u16).to_be_bytes());
+    out.extend_from_slice(&nb[..nlen]);
+    out.extend_from_slice(&bytes);
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
 /// Receive-side fragmentation status as "idhex:have/count" lines joined by
 /// '\n' (empty string when nothing is reassembling) — the UI's "receiving X/N".
 #[no_mangle]

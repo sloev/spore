@@ -12,6 +12,9 @@
 
     <!-- audio modem -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- scanning a friend's invite QR (optional: invites can also be pasted) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- BLE bridges (Meshtastic / RNode); legacy pair for API <= 30 -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />

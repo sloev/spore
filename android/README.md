@@ -10,10 +10,29 @@ A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design
 > stable persisted identity, and every planned bridge: **UDP broadcast, TCP,
 > audio modem, BT-Meshtastic, BT-Reticulum (RNode), Wi-Fi Direct**, and the
 > web-origin bridges (**WebSocket, Nostr, WebTorrent**) via a headless WebView.
-> UI: per-peer **conversations** with **petnames** and **file sharing**, a
-> microblog **Feed**, live **fragment status** both ways, a **Bridges** screen
-> with permission-gated toggles, and an **Advanced** screen (identity / seed
-> export). Kawaii green theme + a mascot that sparkles when the mesh breathes.
+> UI: a **Nearby** list of nodes you've heard from, per-peer **conversations**
+> with **petnames** and **file sharing**, a microblog **Feed**, live **fragment
+> status** both ways, a **Bridges** screen with permission-gated toggles, and an
+> **Advanced** screen (identity / seed export / node health). Kawaii green theme
+> + a mascot that sparkles when the mesh breathes.
+>
+> Protocol behaviour: the node **announces itself** (so peers learn its address,
+> prekey, a path back, and the **name it announces**), **seals direct messages**
+> to a peer's prekey once heard (🔒), and asks for **delivery receipts**
+> (✓ delivered). Broadcasts and topic posts are signed but public by nature —
+> the UI says so.
+>
+> **Connect (👋)** shows an invite QR carrying your address, your name and the
+> relay/swarm bridges you're on; a friend scans (or pastes) it, confirms a
+> petname — prefilled with the name you announce — and can opt in to your
+> bridges. Invites are unauthenticated by nature, so the name is shown as a
+> claim and bridges are never joined without a tick.
+>
+> **Files** ride the protocol's own manifest + chunk layer — a signed manifest
+> (magnet) names fountain-coded chunks any relay can carry and serve, so a large
+> file survives lossy links and resumes rather than restarting. To a known peer a
+> file is **sealed**: contents *and* file name, so relays carrying the chunks
+> learn neither.
 >
 > The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
 > Kotlin/Compose app is proven to build by the `android` CI workflow. The

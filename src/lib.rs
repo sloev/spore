@@ -573,6 +573,11 @@ pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
     XChaCha20Poly1305::new(Key::from_slice(psk)).decrypt(XNonce::from_slice(&ct[..24]), &ct[24..]).ok()
 }
 
+/// The manifest name a [`Node::publish_file_sealed`] file advertises. The real
+/// name is encrypted inside the sealed content, so a relay carrying the chunks
+/// learns nothing but "some sealed file".
+pub const SEALED_FILE_NAME: &str = "sealed";
+
 /// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`
 /// (X25519, the same kind a `Node` rotates in its ANNOUNCE).
 pub fn prekey_keypair() -> ([u8; 32], [u8; 32]) {
@@ -619,6 +624,7 @@ pub struct Node {
     paths: Paths,
     peer_prekeys: HashMap<Addr, [u8; 32]>,
     peer_busy: HashMap<Addr, u8>,
+    peer_names: HashMap<Addr, String>, // the display name a peer announces (a hint, not identity)
 
     max_store_bytes: usize,
     seq: u64,
@@ -686,6 +692,7 @@ impl Node {
             paths: Paths::default(),
             peer_prekeys: HashMap::new(),
             peer_busy: HashMap::new(),
+            peer_names: HashMap::new(),
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
@@ -893,6 +900,66 @@ impl Node {
         self.acked.contains(id)
     }
 
+    /// Send a **direct message**: sealed to the peer's prekey when we know it
+    /// (§7), and flagged `ACKREQ` so the recipient returns a delivery receipt
+    /// (§8). Returns the envelope id — poll [`Node::acked`] for delivery — and
+    /// whether it actually went out encrypted.
+    ///
+    /// A peer's prekey arrives with their ANNOUNCE, so the first message to a
+    /// stranger may go as signed cleartext; once we've heard them, everything
+    /// after is sealed. This is the one call a messenger UI needs.
+    pub fn send_direct(&mut self, dest: Addr, plaintext: &[u8], now: u32) -> (Id, Vec<Forward>, bool) {
+        let (payload, encrypted) = match self.peer_prekey(&dest) {
+            Some(pk) => (seal(plaintext, &pk), true),
+            None => (plaintext.to_vec(), false),
+        };
+        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        e.flags |= fl::ACKREQ;
+        if encrypted {
+            e.flags |= fl::ENCRYPTED;
+        }
+        e.sign(&self.sk);
+        // Unicast with no known path: flood to discover it (§5.6).
+        if self.paths.fresh(&dest, now).is_none() {
+            e.flags |= fl::FLOOD;
+            e.sign(&self.sk);
+        }
+        let id = e.id();
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
+        (id, self.forward_intents(&e, NO_IFACE, now), encrypted)
+    }
+
+    /// The display name a peer announced, if any.
+    ///
+    /// This is what the peer **claims** to be called — anyone may announce any
+    /// name, so it is a display hint, never identity. Offer it as the default
+    /// when the user assigns their own local petname; that petname is the name
+    /// to trust.
+    pub fn peer_name(&self, a: &Addr) -> Option<&str> {
+        self.peer_names.get(a).map(|s| s.as_str())
+    }
+
+    /// Peers we've heard from, freshest first: `(address, seconds since last
+    /// heard, whether we hold their prekey)`. A peer appears once any signed
+    /// traffic — usually their ANNOUNCE — has reached us; holding their prekey
+    /// is what makes an encrypted message to them possible.
+    pub fn peers(&self, now: u32) -> Vec<(Addr, u32, bool)> {
+        let mut v: Vec<(Addr, u32, bool)> = self
+            .paths
+            .map
+            .iter()
+            .filter(|(a, _)| !self.addrs.contains(*a))
+            .filter_map(|(a, ps)| {
+                let newest = ps.iter().map(|p| p.age).max()?;
+                Some((*a, now.saturating_sub(newest), self.peer_prekeys.contains_key(a)))
+            })
+            .collect();
+        v.sort_by_key(|(_, age, _)| *age);
+        v
+    }
+
     /// Resend any ACKREQ messages whose backoff has elapsed without a receipt
     /// (§5.6: flooding is route discovery). Drops exhausted or acked ones.
     pub fn resend_unacked(&mut self, now: u32) -> Vec<Forward> {
@@ -1031,7 +1098,23 @@ impl Node {
         prekey.copy_from_slice(&e.payload[..32]);
         self.peer_prekeys.insert(src_addr, prekey);
         self.peer_busy.insert(src_addr, e.payload[32]); // §5.4c busy byte
-                                                        // (topics/petname parsed here in a fuller build; omitted for brevity)
+
+        // The rest is `ntopics · topics[8×n] · np · petname`. The petname is the
+        // name the peer *claims*; it is a display hint only — never identity.
+        // Anyone may announce any name, so a UI must treat it as a suggestion
+        // and let the user assign the local petname that it actually trusts.
+        let ntopics = e.payload[33] as usize;
+        let after_topics = 34 + ntopics * 8;
+        if after_topics < e.payload.len() {
+            let name_start = after_topics + 1; // skip the `np` byte
+            if name_start <= e.payload.len() {
+                let claimed = String::from_utf8_lossy(&e.payload[name_start..]);
+                let claimed: String = claimed.chars().filter(|c| !c.is_control()).take(32).collect();
+                if !claimed.is_empty() {
+                    self.peer_names.insert(src_addr, claimed);
+                }
+            }
+        }
     }
 
     // ---- receive (the entire router, §5) --------------------------------
@@ -1485,6 +1568,64 @@ impl Node {
     }
 
     /// True once every chunk named by the manifest is in our store.
+    /// Publish a file **sealed to `dest`'s prekey**: the bytes *and the file
+    /// name* are encrypted, so relays carrying the chunks learn neither. The
+    /// manifest advertises the placeholder name [`SEALED_FILE_NAME`]; the real
+    /// one travels inside the sealed blob as `u16 length · name · bytes`.
+    ///
+    /// `None` if we haven't heard `dest`'s prekey yet (it arrives with their
+    /// ANNOUNCE) — the caller can fall back to [`Node::publish_file`] and say so.
+    pub fn publish_file_sealed(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        dest: Addr,
+        now: u32,
+    ) -> Option<(Id, Vec<Forward>)> {
+        let pk = self.peer_prekey(&dest)?;
+        let nb = name.as_bytes();
+        let nlen = nb.len().min(u16::MAX as usize);
+        let mut inner = Vec::with_capacity(2 + nlen + bytes.len());
+        inner.extend_from_slice(&(nlen as u16).to_be_bytes());
+        inner.extend_from_slice(&nb[..nlen]);
+        inner.extend_from_slice(bytes);
+        let sealed = seal(&inner, &pk);
+        Some(self.publish_file(SEALED_FILE_NAME, &sealed, dest, now))
+    }
+
+    /// Recover a complete file as `(name, bytes)`, decrypting it when it was
+    /// sealed to us. `None` while chunks are still missing, or when the file was
+    /// sealed to someone else — we relay those without ever reading them.
+    pub fn open_file(&self, magnet: &Id) -> Option<(String, Vec<u8>)> {
+        let m = self.manifests.get(magnet)?;
+        let raw = self.file_bytes(magnet)?;
+        if m.name != SEALED_FILE_NAME {
+            return Some((m.name.clone(), raw));
+        }
+        let inner = self.open(&raw)?;
+        if inner.len() < 2 {
+            return None;
+        }
+        let nlen = u16::from_be_bytes([inner[0], inner[1]]) as usize;
+        if 2 + nlen > inner.len() {
+            return None;
+        }
+        let name = String::from_utf8_lossy(&inner[2..2 + nlen]).to_string();
+        Some((name, inner[2 + nlen..].to_vec()))
+    }
+
+    /// Every file we hold a manifest for: `(magnet, advertised name, total
+    /// bytes, chunks held, chunks total)` — a transfer list with progress.
+    pub fn files(&self) -> Vec<(Id, String, u64, u32, u32)> {
+        self.manifests
+            .iter()
+            .map(|(magnet, m)| {
+                let have = m.chunk_ids.iter().filter(|c| self.store.contains_key(*c)).count() as u32;
+                (*magnet, m.name.clone(), m.total_len, have, m.count)
+            })
+            .collect()
+    }
+
     pub fn has_file(&self, magnet: &Id) -> bool {
         match self.manifests.get(magnet) {
             Some(m) => m.chunk_ids.iter().all(|c| self.store.contains_key(c)),
@@ -1613,6 +1754,7 @@ pub mod feed;
 
 // §7 KEYROT — encrypted-topic key rotation (forward-secret ratchet + membership
 // rekey), built on the `topic_seal`/`seal` primitives above.
+pub mod invite;
 pub mod topic;
 
 // The network carries its own genome: publish/discover the bootstrap bundle
@@ -2216,6 +2358,105 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn sealed_files_hide_their_contents_and_their_name() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        let body: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+        let (magnet, _f) = a.publish_file_sealed("plans.pdf", &body, b.addr, now).expect("prekey known");
+
+        // Nothing on the wire reveals the name or the contents — a relay only
+        // ever sees "some sealed file".
+        for (_, w) in a.store_wires() {
+            assert!(!w.windows(9).any(|x| x == b"plans.pdf"), "the file name leaked");
+            assert!(!w.windows(16).any(|x| body.windows(16).any(|y| x == y)), "file contents leaked");
+        }
+
+        // Move everything A holds to B, as a sync or a chunk fetch would.
+        for (_, w) in a.store_wires() {
+            b.on_rx(&w, 0, Some(a.addr), now);
+        }
+        let (name, got) = b.open_file(&magnet).expect("B has every chunk and can open it");
+        assert_eq!(name, "plans.pdf", "the real name is recovered from inside the seal");
+        assert_eq!(got, body);
+
+        // A third party relays the same chunks but can never read them.
+        let mut c = Node::new("c", &[]);
+        for (_, w) in a.store_wires() {
+            c.on_rx(&w, 0, Some(a.addr), now);
+        }
+        assert!(c.open_file(&magnet).is_none(), "a relay must not be able to open it");
+
+        // Progress is reportable while a transfer is still in flight.
+        let files = b.files();
+        let row = files.iter().find(|(m, ..)| *m == magnet).expect("listed");
+        assert_eq!(row.3, row.4, "B holds every chunk");
+    }
+
+    #[test]
+    fn announced_names_reach_peers_as_a_hint() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("Jo's phone", &[]);
+        let mut b = Node::new("basecamp", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Each side learns what the other calls itself — so a UI can suggest a
+        // petname instead of making anyone read out hex.
+        assert_eq!(a.peer_name(&b.addr), Some("basecamp"));
+        assert_eq!(b.peer_name(&a.addr), Some("Jo's phone"));
+        // We never invent a name for someone we haven't heard.
+        assert_eq!(a.peer_name(&Node::new("x", &[]).addr), None);
+
+        // A node that follows topics still announces a readable name (the name
+        // sits after the topic list on the wire).
+        let mut t = Node::new("weatherbox", &["news", "weather"]);
+        let mut c = Node::new("c", &[]);
+        for f in t.build_announce(now) {
+            c.on_rx(&fwd_bytes(&f), 0, Some(t.addr), now);
+        }
+        assert_eq!(c.peer_name(&t.addr), Some("weatherbox"));
+    }
+
+    #[test]
+    fn send_direct_seals_to_the_peer_and_reports_delivery() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // The ANNOUNCE exchange makes each side a known peer, with a prekey.
+        let peers = a.peers(now);
+        assert_eq!(peers.len(), 1, "exactly one peer, and not ourselves");
+        assert_eq!(peers[0].0, b.addr);
+        assert!(peers[0].2, "prekey learned from the ANNOUNCE");
+
+        // A direct message is sealed to that prekey and asks for a receipt.
+        let (id, fwds, encrypted) = a.send_direct(b.addr, b"meet at the north pier", now);
+        assert!(encrypted, "prekey known => sealed");
+        let wire = fwd_bytes(&fwds[0]);
+        let (e, _) = Envelope::decode(&wire).unwrap();
+        assert!(e.flags & fl::ENCRYPTED != 0, "marked ENCRYPTED");
+        assert!(e.flags & fl::ACKREQ != 0, "marked ACKREQ");
+        assert!(!e.payload.windows(4).any(|w| w == b"meet"), "the plaintext must never appear on the wire");
+
+        // B opens it with its prekey secret, and answers with a receipt.
+        assert!(!a.acked(&id));
+        let brx = b.on_rx(&wire, 0, Some(a.addr), now);
+        let opened = brx.delivered.iter().find_map(|d| b.open(&d.payload));
+        assert_eq!(opened.expect("B decrypts"), b"meet at the north pier");
+        let receipt = brx.forwards.first().map(fwd_bytes).expect("B emitted a receipt");
+        a.on_rx(&receipt, 0, Some(b.addr), now);
+        assert!(a.acked(&id), "the UI can show it delivered");
+
+        // To a stranger we have no prekey for, it still sends — as cleartext.
+        let c = Node::new("c", &[]);
+        let (_, _, enc2) = a.send_direct(c.addr, b"hello stranger", now);
+        assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
     }
 
     #[test]

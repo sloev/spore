@@ -18,8 +18,24 @@ data class Msg(
     val mine: Boolean,
     val verified: Boolean,
     val fragments: Int = 1, // wire frames the payload became (send-side status)
+    val encrypted: Boolean = false, // sealed to the peer's prekey (§7)
+    val id: String? = null, // envelope id, for delivery receipts (mine only)
+    val delivered: Boolean = false, // a receipt came back (§8)
     val ts: Long = System.currentTimeMillis(),
 )
+
+/**
+ * A node we've heard from: how long ago, whether we can encrypt to it, and the
+ * name it *claims*. The claimed name is a hint only — anyone may announce any
+ * name — so it is offered as the default when you assign your own petname.
+ */
+data class Peer(val addr: String, val secondsAgo: Int, val hasKey: Boolean, val announced: String = "")
+
+/** A file transfer in flight (or complete): chunks held out of the total. */
+data class Transfer(val magnet: String, val name: String, val totalBytes: Long, val have: Int, val count: Int)
+
+/** A parsed invite awaiting the user's confirmation. */
+data class ScannedInvite(val addr: String, val suggestedName: String, val bridges: List<String>)
 
 /** One microblog post on a followed topic. */
 data class Post(val topic: String, val author: String, val text: String, val verified: Boolean, val ts: Long = System.currentTimeMillis())
@@ -29,26 +45,34 @@ data class BridgeState(val kind: String, val detail: String, val status: String)
 
 /**
  * Owns the one native node for the whole app (the Service starts it; the UI reads
- * its flows). Identity persisted; DMs grouped by peer; feed posts grouped by
- * followed topic; small app-layer file framing; live fragment status both ways.
+ * its flows). Identity persisted; DMs sealed and receipted, grouped by peer;
+ * feed posts grouped by followed topic; files carried by the protocol's manifest
+ * + chunk layer (sealed to a peer when we can); live fragment status both ways.
  */
 object NodeController {
     private var ptr: Long = 0L
     private var pollJob: Job? = null
+    private var houseJob: Job? = null
     private lateinit var appCtx: Context
 
     val messages = MutableStateFlow<List<Msg>>(emptyList())
     val posts = MutableStateFlow<List<Post>>(emptyList())
     val topics = MutableStateFlow<List<String>>(emptyList()) // followed topic names
     val bridges = MutableStateFlow<List<BridgeState>>(emptyList())
+    val peers = MutableStateFlow<List<Peer>>(emptyList()) // nodes we've heard from
+    val storeCount = MutableStateFlow(0) // envelopes held for the mesh
+    val transfers = MutableStateFlow<List<Transfer>>(emptyList()) // files in flight
     val address = MutableStateFlow("")
+    val myName = MutableStateFlow("") // the name we announce (a hint for others)
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
     val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
 
-    // File payloads carry a tiny app-layer header so the receiver can save them:
-    // "SPFILE1" ++ u16 name-length ++ name ++ bytes. SPORE itself treats the
-    // payload as opaque; fragmentation/reassembly is the core's fountain code.
-    private val FILE_MAGIC = "SPFILE1".toByteArray(Charsets.UTF_8)
+    // Files ride the protocol's own manifest + chunk layer: a signed manifest
+    // (magnet) names fountain-coded chunks that any relay can carry and serve.
+    // First payload byte of a manifest (src/file.rs MANIFEST_TAG).
+    private const val MANIFEST_TAG: Byte = 0x01
+    private var lastFileSender: String = Petnames.PUBLIC   // thread for the next completed file
+    private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
     private var topicAddrToName = mutableMapOf<String, String>() // topicAddrHex -> name
 
@@ -67,6 +91,9 @@ object NodeController {
             prefs.edit().putString("seed", Base64.encodeToString(fresh, Base64.NO_WRAP)).apply()
         }
         address.value = SporeNative.nativeAddr(ptr).toHex()
+        // The name we announce; peers offer it as the default petname for us.
+        myName.value = prefs.getString("myname", "") ?: ""
+        if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
 
         // Refollow persisted topics.
         prefs.getStringSet("topics", emptySet())?.forEach { follow(it, persist = false) }
@@ -93,6 +120,43 @@ object NodeController {
                 if (idle) delay(100)
             }
         }
+
+        // Housekeeping: announce ourselves so peers learn our address, prekey and
+        // a path back (without this nobody can encrypt to us, and we're invisible
+        // until we speak); refresh the peer list; retry unacknowledged messages;
+        // and mark delivered anything whose receipt has come back.
+        houseJob = CoroutineScope(Dispatchers.IO).launch {
+            var tick = 0
+            while (isActive) {
+                SporeNative.nativeBeacon(ptr)
+                SporeNative.nativeResendUnacked(ptr)
+                peers.value = SporeNative.nativePeers(ptr).lines().filter { it.isNotBlank() }
+                    .mapNotNull { line ->
+                        // name is last and may contain ':' — keep it whole.
+                        val p = line.split(':', limit = 4)
+                        if (p.size >= 3) {
+                            Peer(p[0], p[1].toIntOrNull() ?: 0, p[2] == "1", p.getOrElse(3) { "" })
+                        } else null
+                    }
+                storeCount.value = SporeNative.nativeStoreLen(ptr)
+                refreshDelivery()
+                pumpFiles()
+                // Beacon briskly at first so a fresh node is discovered quickly,
+                // then settle down to stay cheap on battery — but keep chasing
+                // chunks while a file is still coming in.
+                val fetching = transfers.value.any { it.have < it.count }
+                delay(if (fetching) 2_000L else if (tick++ < 6) 5_000L else 30_000L)
+            }
+        }
+    }
+
+    /** Flip any of our messages whose delivery receipt has arrived. */
+    private fun refreshDelivery() {
+        val pending = messages.value.filter { it.mine && it.id != null && !it.delivered }
+        if (pending.isEmpty()) return
+        val nowDelivered = pending.filter { SporeNative.nativeAcked(ptr, it.id!!) }.map { it.id }.toSet()
+        if (nowDelivered.isEmpty()) return
+        messages.value = messages.value.map { if (it.id in nowDelivered) it.copy(delivered = true) else it }
     }
 
     /** Classify a delivered envelope: feed post, file, or plain message. */
@@ -100,7 +164,10 @@ object NodeController {
         val ok = SporeNative.nativeEnvVerify(wire)
         val src = SporeNative.nativeEnvSrc(wire)?.toHex() ?: Petnames.PUBLIC
         val dest = SporeNative.nativeEnvDest(wire)?.toHex()
-        val payload = SporeNative.nativeEnvPayload(wire) ?: return
+        val sealed = SporeNative.nativeEnvEncrypted(wire)
+        // Sealed envelopes are opened with our prekey secret; one addressed to
+        // someone else simply won't open, and we relay it without reading it.
+        val payload = SporeNative.nativeEnvPlaintext(ptr, wire) ?: return
 
         // A broadcast (all-zero dest) belongs in the shared "everyone" thread, not
         // in a private conversation with whoever happened to send it.
@@ -111,49 +178,104 @@ object NodeController {
             posts.value = (posts.value + Post(topicName, src, payload.toString(Charsets.UTF_8), ok)).takeLast(500)
             return
         }
-        if (payload.size > FILE_MAGIC.size + 2 && payload.copyOfRange(0, FILE_MAGIC.size).contentEquals(FILE_MAGIC)) {
-            val nameLen = ((payload[FILE_MAGIC.size].toInt() and 0xff) shl 8) or (payload[FILE_MAGIC.size + 1].toInt() and 0xff)
-            val nameStart = FILE_MAGIC.size + 2
-            if (nameStart + nameLen <= payload.size) {
-                // Never write an unverified file to storage: an envelope whose
-                // signature doesn't check out could come from anyone in range.
-                if (!ok) {
-                    append(Msg(thread, "⚠ dropped an unsigned file — signature did not verify", mine = false, verified = false))
-                    return
-                }
-                // '/' is sanitised away, so a name can't escape the directory.
-                val name = payload.copyOfRange(nameStart, nameStart + nameLen).toString(Charsets.UTF_8)
-                    .replace(Regex("[^A-Za-z0-9._-]"), "_")
-                    .ifBlank { "file.bin" }
-                val data = payload.copyOfRange(nameStart + nameLen, payload.size)
-                val dir = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
-                val f = File(dir, name)
-                val saved = runCatching { f.writeBytes(data) }.isSuccess
-                val text = if (saved) "📎 received ${f.name} (${data.size / 1024} KB) → ${f.path}"
-                else "⚠ received ${f.name} but could not save it"
-                append(Msg(thread, text, mine = false, verified = ok))
+        // A file manifest is not chat text: the core absorbs it automatically,
+        // then the housekeeping loop fetches its chunks and saves the result.
+        // Remember who sent it so the finished file lands in their conversation.
+        if (payload.isNotEmpty() && payload[0] == MANIFEST_TAG) {
+            if (!ok) {
+                append(Msg(thread, "⚠ ignored an unsigned file offer", mine = false, verified = false))
                 return
             }
+            lastFileSender = thread
+            append(Msg(thread, "📎 incoming file…", mine = false, verified = true, encrypted = sealed))
+            return
         }
-        append(Msg(thread, payload.toString(Charsets.UTF_8), mine = false, verified = ok))
+        append(Msg(thread, payload.toString(Charsets.UTF_8), mine = false, verified = ok, encrypted = sealed))
     }
 
-    /** Send a text to a peer (address hex) or everyone (Petnames.PUBLIC). */
+    /**
+     * Send a text to a peer (address hex) or everyone (Petnames.PUBLIC).
+     * A direct message is sealed to the peer's prekey when we've heard their
+     * ANNOUNCE, and asks for a delivery receipt; a broadcast can be neither.
+     */
     fun send(peer: String, text: String) {
         if (ptr == 0L || text.isEmpty()) return
         val dest = destOf(peer) ?: return
-        val n = SporeNative.nativeSendCounted(ptr, dest, text.toByteArray(Charsets.UTF_8))
-        append(Msg(peer, text, mine = true, verified = true, fragments = n))
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (peer == Petnames.PUBLIC) {
+            val n = SporeNative.nativeSendCounted(ptr, dest, bytes)
+            append(Msg(peer, text, mine = true, verified = true, fragments = n))
+            return
+        }
+        val res = SporeNative.nativeSendDirect(ptr, dest, bytes)?.split(':')
+        val id = res?.getOrNull(0)
+        val enc = res?.getOrNull(1) == "1"
+        append(Msg(peer, text, mine = true, verified = true, encrypted = enc, id = id))
     }
 
-    /** Send a file (framed with the app-layer header) to a peer. */
+    /**
+     * Share a file through the protocol's manifest + chunk layer: a signed
+     * manifest names fountain-coded chunks that any relay can carry and serve,
+     * so a big file survives lossy links and doesn't have to arrive in one go.
+     * To a known peer it is **sealed** — contents *and* file name — so relays
+     * carrying the chunks learn neither.
+     */
     fun sendFile(peer: String, name: String, data: ByteArray) {
         if (ptr == 0L || data.isEmpty()) return
-        val dest = destOf(peer) ?: return
-        val nameB = name.toByteArray(Charsets.UTF_8)
-        val payload = FILE_MAGIC + byteArrayOf(((nameB.size shr 8) and 0xff).toByte(), (nameB.size and 0xff).toByte()) + nameB + data
-        val n = SporeNative.nativeSendCounted(ptr, dest, payload)
-        append(Msg(peer, "📎 sent $name (${data.size / 1024} KB)", mine = true, verified = true, fragments = n))
+        val destHex = if (peer == Petnames.PUBLIC) "" else peer
+        val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return
+        val sealed = res.getOrNull(1) == "1"
+        res.getOrNull(0)?.let { savedMagnets.add(it) } // never re-save our own file
+        val how = if (sealed) "sealed" else "signed, not encrypted"
+        append(
+            Msg(peer, "📎 shared $name (${data.size / 1024} KB · $how)",
+                mine = true, verified = true, encrypted = sealed)
+        )
+    }
+
+    /**
+     * Pull chunks for files we know a manifest for, and save each one once it is
+     * complete. A file sealed to someone else simply never opens for us — we
+     * relay its chunks without ever reading them.
+     */
+    private fun pumpFiles() {
+        val rows = SporeNative.nativeFiles(ptr).lines().filter { it.isNotBlank() }
+        val list = mutableListOf<Transfer>()
+        for (line in rows) {
+            val p = line.split(':', limit = 5)
+            if (p.size < 5) continue
+            val magnet = p[0]
+            val have = p[2].toIntOrNull() ?: 0
+            val count = p[3].toIntOrNull() ?: 0
+            list.add(Transfer(magnet, p[4], p[1].toLongOrNull() ?: 0L, have, count))
+            if (have < count) {
+                SporeNative.nativeFetchFile(ptr, magnet) // ask the mesh for the rest
+                continue
+            }
+            if (magnet in savedMagnets) continue
+            // Complete: decrypt if it was sealed to us, then write it out.
+            val blob = SporeNative.nativeOpenFile(ptr, magnet) ?: continue
+            if (blob.size < 2) continue
+            val nlen = ((blob[0].toInt() and 0xff) shl 8) or (blob[1].toInt() and 0xff)
+            if (2 + nlen > blob.size) continue
+            // '/' is sanitised away, so a name can't escape the directory.
+            val fname = blob.copyOfRange(2, 2 + nlen).toString(Charsets.UTF_8)
+                .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "file.bin" }
+            val bytes = blob.copyOfRange(2 + nlen, blob.size)
+            val dir = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
+            val f = File(dir, fname)
+            val okSave = runCatching { f.writeBytes(bytes) }.isSuccess
+            savedMagnets.add(magnet)
+            append(
+                Msg(
+                    lastFileSender,
+                    if (okSave) "📎 received ${f.name} (${bytes.size / 1024} KB) → ${f.path}"
+                    else "⚠ received ${f.name} but could not save it",
+                    mine = false, verified = true
+                )
+            )
+        }
+        transfers.value = list
     }
 
     // -- feed (microblogging on topics) ----------------------------------------
@@ -264,6 +386,70 @@ object NodeController {
     fun addWebTorrent(ctx: Context, name: String) {
         if (ptr == 0L || name.isBlank()) return
         webHost(ctx).addWebTorrent(name.trim())
+    }
+
+    // -- your name, and invites -------------------------------------------------
+
+    /** The name we announce to the mesh (others see it as a suggested petname). */
+    fun setMyName(name: String) {
+        if (ptr == 0L) return
+        val n = name.trim().take(32)
+        myName.value = n
+        SporeNative.nativeSetName(ptr, n)
+        appCtx.getSharedPreferences("spore", Context.MODE_PRIVATE).edit().putString("myname", n).apply()
+        SporeNative.nativeBeacon(ptr) // let peers see the new name right away
+    }
+
+    /**
+     * A shareable invite: our address, our announced name, and the bridges we're
+     * reachable on — so a scanner can *join the same mesh*, not just learn a
+     * number. Only shareable bridge kinds are included: a relay URL or swarm
+     * name means something to someone else, a local USB radio does not.
+     */
+    fun inviteText(): String {
+        if (ptr == 0L) return ""
+        val specs = bridges.value.mapNotNull { b ->
+            when (b.kind) {
+                "WebSocket" -> "ws:${b.detail}"
+                "Nostr" -> "nostr:${b.detail}"
+                "WebTorrent" -> "wt:${b.detail}"
+                "TCP" -> if (b.detail.contains(':')) "tcp:${b.detail}" else null
+                else -> null // audio/BLE/Wi-Fi-Direct/UDP are local, not shareable
+            }
+        }
+        return SporeNative.nativeInviteEncode(ptr, specs.joinToString("\n")) ?: ""
+    }
+
+    /** Parse a scanned or pasted invite; null if it isn't a valid one. */
+    fun parseInvite(text: String): ScannedInvite? {
+        val out = SporeNative.nativeInviteDecode(text.trim())?.lines() ?: return null
+        if (out.isEmpty() || out[0].length != 16) return null
+        return ScannedInvite(out[0], out.getOrElse(1) { "" }, out.drop(2).filter { it.isNotBlank() })
+    }
+
+    /** Save a contact from an invite under the petname the user confirmed. */
+    fun acceptInvite(inv: ScannedInvite, petname: String) {
+        Petnames.set(inv.addr, petname.ifBlank { inv.suggestedName })
+    }
+
+    /**
+     * Join bridges offered by an invite. Called only after the user ticks them:
+     * an invite is unauthenticated, so auto-joining whatever it names would let
+     * a hostile QR steer this node onto a relay of the attacker's choosing.
+     */
+    fun applyInviteBridges(ctx: Context, specs: List<String>) {
+        for (s in specs) {
+            val parts = s.split(':', limit = 2)
+            if (parts.size != 2) continue
+            val kind = parts[0]
+            val value = parts[1]
+            when (kind) {
+                "ws" -> addWebSocket(ctx, value)
+                "nostr" -> addNostr(ctx, value)
+                "wt" -> addWebTorrent(ctx, value)
+                "tcp" -> addTcp(value)
+            }
+        }
     }
 
     // -- helpers ----------------------------------------------------------------
