@@ -102,6 +102,10 @@ object NodeController {
         val dest = SporeNative.nativeEnvDest(wire)?.toHex()
         val payload = SporeNative.nativeEnvPayload(wire) ?: return
 
+        // A broadcast (all-zero dest) belongs in the shared "everyone" thread, not
+        // in a private conversation with whoever happened to send it.
+        val thread = if (dest == null || dest.all { it == '0' }) Petnames.PUBLIC else src
+
         val topicName = dest?.let { topicAddrToName[it] }
         if (topicName != null) {
             posts.value = (posts.value + Post(topicName, src, payload.toString(Charsets.UTF_8), ok)).takeLast(500)
@@ -111,17 +115,27 @@ object NodeController {
             val nameLen = ((payload[FILE_MAGIC.size].toInt() and 0xff) shl 8) or (payload[FILE_MAGIC.size + 1].toInt() and 0xff)
             val nameStart = FILE_MAGIC.size + 2
             if (nameStart + nameLen <= payload.size) {
+                // Never write an unverified file to storage: an envelope whose
+                // signature doesn't check out could come from anyone in range.
+                if (!ok) {
+                    append(Msg(thread, "⚠ dropped an unsigned file — signature did not verify", mine = false, verified = false))
+                    return
+                }
+                // '/' is sanitised away, so a name can't escape the directory.
                 val name = payload.copyOfRange(nameStart, nameStart + nameLen).toString(Charsets.UTF_8)
                     .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    .ifBlank { "file.bin" }
                 val data = payload.copyOfRange(nameStart + nameLen, payload.size)
                 val dir = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
                 val f = File(dir, name)
-                runCatching { f.writeBytes(data) }
-                append(Msg(src, "📎 received ${f.name} (${data.size / 1024} KB) → ${f.path}", mine = false, verified = ok))
+                val saved = runCatching { f.writeBytes(data) }.isSuccess
+                val text = if (saved) "📎 received ${f.name} (${data.size / 1024} KB) → ${f.path}"
+                else "⚠ received ${f.name} but could not save it"
+                append(Msg(thread, text, mine = false, verified = ok))
                 return
             }
         }
-        append(Msg(src, payload.toString(Charsets.UTF_8), mine = false, verified = ok))
+        append(Msg(thread, payload.toString(Charsets.UTF_8), mine = false, verified = ok))
     }
 
     /** Send a text to a peer (address hex) or everyone (Petnames.PUBLIC). */
