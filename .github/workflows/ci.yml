@@ -43,6 +43,18 @@ jobs:
       - name: Docs/code in sync — no documented value may drift from the code
         if: runner.os == 'Linux'
         run: python3 scripts/check_docs_sync.py
+      # android/jni is its own workspace (so the root build ignores it), which
+      # means the checks above never reach it. Lint it here on Linux; the Android
+      # cross-build in android.yml only proves it compiles for the device.
+      - name: Android JNI crate — fmt + clippy
+        if: runner.os == 'Linux'
+        run: |
+          cargo fmt --check --manifest-path android/jni/Cargo.toml
+          cargo clippy --manifest-path android/jni/Cargo.toml --all-targets
+      # The other half of the RNS bridge; nothing else exercises it.
+      - name: Reticulum companion parses
+        if: runner.os == 'Linux'
+        run: python3 -m py_compile tools/reticulum_companion.py
 
   # The browser target: prove the core still compiles to wasm with its single
   # import, which the web/ node ABI and demo depend on.
@@ -72,6 +84,12 @@ jobs:
 
       - name: Transport codec tests (kiss, meshtastic, audio wire formats)
         run: node web/codec-test.mjs
+
+      - name: Real WebSocket relay end-to-end test
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          node ws-test.mjs
 
       - name: Build + verify the single-file node is self-contained
         run: |
