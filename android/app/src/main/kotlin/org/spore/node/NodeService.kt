@@ -47,7 +47,7 @@ class NodeService : Service() {
             )
         }
         return NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("🍄 SPORE")
+            .setContentTitle("🍄 SPORE Communicator")
             .setContentText("node running")
             .setSmallIcon(R.drawable.ic_spore)
             .setOngoing(true)

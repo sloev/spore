@@ -1,6 +1,10 @@
-# SPORE for Android
+# SPORE Communicator (Android)
 
 A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design.
+
+**Downloads:** [latest rolling build](https://github.com/sloev/spore/releases/tag/rolling)
+(freshest, from `master`) · [latest stable release](https://github.com/sloev/spore/releases/latest)
+(tagged).
 
 > **Status: M0–M5 (all milestones).** A full node in a foreground service with a
 > stable persisted identity, and every planned bridge: **UDP broadcast, TCP,

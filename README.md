@@ -131,6 +131,20 @@ loopback), with a self-contained [web node](web/README.md#one-file-node) and gui
 fragmentation stay in the shared lib. See the full [bridge reference](docs/BRIDGES.md)
 — an index plus a per-protocol deep dive (wire format, mapping, security, specs).
 
+**📱 SPORE Communicator (Android).** A full node in your pocket — a real SPORE
+node running in a background service, with instant messaging (petnames), a
+microblog feed, and file sharing, over every bridge at once: UDP/Wi-Fi Direct,
+audio modem, Bluetooth Meshtastic and Reticulum radios, and WebSocket/Nostr/
+WebTorrent. Built for Meshtastic users: simple by default, advanced options a tap
+away, a little kawaii. See [`android/`](android/README.md).
+
+- **Latest rolling build** (freshest, from `master`): [releases/tag/rolling](https://github.com/sloev/spore/releases/tag/rolling)
+- **Latest stable release** (tagged): [releases/latest](https://github.com/sloev/spore/releases/latest)
+
+Grab the `.apk` from either release page and install it (you may need to allow
+installing from your browser/files app). Rolling updates on every merge; tagged
+releases are the stable points.
+
 ```
 SPORE demo — line topology  A — B — C — D
 
