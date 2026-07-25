@@ -1614,6 +1614,27 @@ impl Node {
         Some((name, inner[2 + nlen..].to_vec()))
     }
 
+    /// The largest file [`Node::publish_file`] can actually announce at this
+    /// node's MTU.
+    ///
+    /// A manifest is **one envelope** that lists a 16-byte id per chunk, so the
+    /// chunk count is bounded by what fits beside the envelope header, the
+    /// signature and the file name. Past that the manifest itself would not fit a
+    /// frame and the file could never be advertised — so check this before
+    /// publishing and split (or refuse) instead of emitting something unsendable.
+    ///
+    /// Sealing (`publish_file_sealed`) grows the payload by ~48 bytes plus the
+    /// file name, so leave a little headroom under this figure.
+    pub fn max_file_bytes(&self) -> usize {
+        // Signed envelope overhead: 16 header + 32 full src + 2 plen + 64 sig.
+        const ENV_OVERHEAD: usize = 114;
+        // Manifest fixed fields (35) plus an allowance for a long file name.
+        const MANIFEST_FIXED: usize = 35 + 96;
+        let chunk = self.mtu.saturating_sub(64).max(1);
+        let room = self.mtu.saturating_sub(ENV_OVERHEAD).saturating_sub(MANIFEST_FIXED);
+        (room / 16) * chunk
+    }
+
     /// Every file we hold a manifest for: `(magnet, advertised name, total
     /// bytes, chunks held, chunks total)` — a transfer list with progress.
     pub fn files(&self) -> Vec<(Id, String, u64, u32, u32)> {
@@ -2358,6 +2379,35 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn max_file_bytes_is_the_point_where_the_manifest_stops_fitting() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        let cap = n.max_file_bytes();
+        assert!(cap > 0);
+
+        // A file at the cap: its manifest still fits one frame, so it can be
+        // announced at all.
+        let ok_file = vec![7u8; cap];
+        let (magnet, _) = n.publish_file("at-the-cap.bin", &ok_file, ZERO_DEST, now);
+        let manifest_wire = n.get_wire(&magnet).expect("manifest stored");
+        assert!(
+            manifest_wire.len() <= n.mtu,
+            "a file at the cap must still produce a sendable manifest ({} > {})",
+            manifest_wire.len(),
+            n.mtu
+        );
+
+        // Comfortably past it, the manifest outgrows a frame — which is exactly
+        // why callers must consult the cap rather than publish blindly.
+        let big = vec![7u8; cap * 4];
+        let (m2, _) = n.publish_file("too-big.bin", &big, ZERO_DEST, now);
+        assert!(
+            n.get_wire(&m2).expect("stored").len() > n.mtu,
+            "oversized files are what the cap exists to prevent"
+        );
     }
 
     #[test]

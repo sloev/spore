@@ -31,8 +31,30 @@ struct Runtime {
     demod_out: Mutex<VecDeque<Vec<u8>>>,
 }
 
-fn rt<'a>(ptr: jlong) -> &'a Runtime {
-    unsafe { &*(ptr as *const Runtime) }
+/// Handles we've handed to Kotlin and not yet freed.
+///
+/// A raw `jlong` carries no way to tell a live runtime from a zero, a typo, or
+/// one that was already freed — dereferencing any of those is undefined
+/// behaviour. Registering every live handle turns all three into a lookup miss,
+/// so the worst case becomes "this call does nothing" instead of a crash or
+/// worse. (A handle freed by another thread *during* a call is still a race the
+/// registry can't close; the app keeps one runtime for its lifetime and never
+/// frees it, which is why that path stays theoretical.)
+fn live() -> &'static Mutex<std::collections::HashSet<jlong>> {
+    static LIVE: std::sync::OnceLock<Mutex<std::collections::HashSet<jlong>>> = std::sync::OnceLock::new();
+    LIVE.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Resolve a handle, or `None` if it is zero, unknown, or already freed.
+fn rt<'a>(ptr: jlong) -> Option<&'a Runtime> {
+    if ptr == 0 {
+        return None;
+    }
+    let known = live().lock().ok()?.contains(&ptr);
+    if !known {
+        return None;
+    }
+    Some(unsafe { &*(ptr as *const Runtime) })
 }
 
 /// Create a runtime. `seed` is null for a fresh identity, or 32 bytes to restore.
@@ -57,19 +79,26 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
     let hub = Hub::new(node);
     let (tx, rx) = channel();
     hub.set_delivery_sink(tx);
-    Box::into_raw(Box::new(Runtime {
+    let ptr = Box::into_raw(Box::new(Runtime {
         hub,
         inbox: Mutex::new(rx),
         ifaces: Mutex::new(HashMap::new()),
         demod: Mutex::new(spore::bridge::audio::Demod::new()),
         demod_out: Mutex::new(VecDeque::new()),
-    })) as jlong
+    })) as jlong;
+    if let Ok(mut set) = live().lock() {
+        set.insert(ptr);
+    }
+    ptr
 }
 
 /// Destroy a runtime.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeFree(_env: JNIEnv, _class: JClass, ptr: jlong) {
-    if ptr != 0 {
+    // Deregister first: any later call with this handle now misses the lookup
+    // instead of touching freed memory. Freeing twice is a no-op.
+    let was_live = live().lock().map(|mut s| s.remove(&ptr)).unwrap_or(false);
+    if was_live {
         unsafe {
             drop(Box::from_raw(ptr as *mut Runtime));
         }
@@ -83,7 +112,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAddr(
     _class: JClass,
     ptr: jlong,
 ) -> jbyteArray {
-    let a = rt(ptr).hub.addr();
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let a = r.hub.addr();
     env.byte_array_from_slice(&a).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
@@ -94,7 +126,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSeed(
     _class: JClass,
     ptr: jlong,
 ) -> jbyteArray {
-    let s = rt(ptr).hub.with_node(|n| n.seed());
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let s = r.hub.with_node(|n| n.seed());
     env.byte_array_from_slice(&s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
@@ -106,9 +141,12 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSubscribe(
     ptr: jlong,
     topic: JString,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     if let Ok(s) = env.get_string(&topic) {
         let s: String = s.into();
-        rt(ptr).hub.with_node(|n| n.subscribe(&s));
+        r.hub.with_node(|n| n.subscribe(&s));
     }
 }
 
@@ -121,6 +159,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSend(
     dest: JByteArray,
     payload: JByteArray,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let d = env.convert_byte_array(&dest).unwrap_or_default();
     let p = env.convert_byte_array(&payload).unwrap_or_default();
     if d.len() != 8 {
@@ -128,7 +169,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSend(
     }
     let mut addr = [0u8; 8];
     addr.copy_from_slice(&d);
-    rt(ptr).hub.send(addr, p);
+    r.hub.send(addr, p);
 }
 
 /// Start the primary-subnet UDP broadcast bridge on a background thread. `port`
@@ -140,7 +181,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdp(
     ptr: jlong,
     port: jint,
 ) {
-    let r = rt(ptr);
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let (iface, rx) = r.hub.register();
     let hub = r.hub.clone();
     let port = if port > 0 { Some(port as u16) } else { None };
@@ -158,8 +201,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartTcp(
     ptr: jlong,
     target: JString,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let t: Option<String> = env.get_string(&target).ok().map(|s| s.into()).filter(|s: &String| !s.is_empty());
-    let r = rt(ptr);
     let (iface, rx) = r.hub.register();
     let hub = r.hub.clone();
     thread::spawn(move || {
@@ -175,7 +220,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeRegisterIface(
     _class: JClass,
     ptr: jlong,
 ) -> jint {
-    let r = rt(ptr);
+    let Some(r) = rt(ptr) else {
+        return 0;
+    };
     let (iface, rx) = r.hub.register();
     r.ifaces.lock().unwrap().insert(iface as i32, rx);
     iface as jint
@@ -189,7 +236,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePollForward(
     ptr: jlong,
     iface: jint,
 ) -> jbyteArray {
-    let map = rt(ptr).ifaces.lock().unwrap();
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let map = r.ifaces.lock().unwrap();
     if let Some(rx) = map.get(&iface) {
         if let Ok(f) = rx.try_recv() {
             let bytes = match f {
@@ -211,8 +261,11 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePushRx(
     iface: jint,
     frame: JByteArray,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let bytes = env.convert_byte_array(&frame).unwrap_or_default();
-    rt(ptr).hub.on_rx(iface as Iface, &bytes, None);
+    r.hub.on_rx(iface as Iface, &bytes, None);
 }
 
 /// Poll for one delivered envelope's wire bytes, or null if the inbox is empty.
@@ -222,7 +275,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePollDelivery(
     _class: JClass,
     ptr: jlong,
 ) -> jbyteArray {
-    match rt(ptr).inbox.lock().unwrap().try_recv() {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    match r.inbox.lock().unwrap().try_recv() {
         Ok(wire) => env.byte_array_from_slice(&wire).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut()),
         Err(_) => std::ptr::null_mut(),
     }
@@ -323,6 +379,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendCounted(
     dest: JByteArray,
     payload: JByteArray,
 ) -> jint {
+    let Some(r) = rt(ptr) else {
+        return 0;
+    };
     let d = env.convert_byte_array(&dest).unwrap_or_default();
     let p = env.convert_byte_array(&payload).unwrap_or_default();
     if d.len() != 8 {
@@ -330,7 +389,6 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendCounted(
     }
     let mut addr = [0u8; 8];
     addr.copy_from_slice(&d);
-    let r = rt(ptr);
     let forwards = r.hub.with_node(|n| n.send(addr, p, spore::bridge::hub::now()));
     let count = forwards.len() as jint;
     r.hub.originate(forwards);
@@ -365,6 +423,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioDemodPush(
     ptr: jlong,
     samples: JFloatArray,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let len = env.get_array_length(&samples).unwrap_or(0) as usize;
     if len == 0 {
         return;
@@ -373,7 +434,6 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioDemodPush(
     if env.get_float_array_region(&samples, 0, &mut buf).is_err() {
         return;
     }
-    let r = rt(ptr);
     let frames = r.demod.lock().unwrap().push(&buf);
     if !frames.is_empty() {
         r.demod_out.lock().unwrap().extend(frames);
@@ -387,7 +447,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioDemodPop(
     _class: JClass,
     ptr: jlong,
 ) -> jbyteArray {
-    match rt(ptr).demod_out.lock().unwrap().pop_front() {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    match r.demod_out.lock().unwrap().pop_front() {
         Some(f) => env.byte_array_from_slice(&f).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
     }
@@ -441,7 +504,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeBeacon(
     _class: JClass,
     ptr: jlong,
 ) {
-    rt(ptr).hub.beacon();
+    let Some(r) = rt(ptr) else {
+        return;
+    };
+    r.hub.beacon();
 }
 
 /// Peers we've heard from, freshest first, one per line:
@@ -453,8 +519,11 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePeers(
     _class: JClass,
     ptr: jlong,
 ) -> jni::sys::jstring {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
     let now = spore::bridge::hub::now();
-    let s = rt(ptr).hub.with_node(|n| {
+    let s = r.hub.with_node(|n| {
         n.peers(now)
             .iter()
             .map(|(a, age, key)| {
@@ -477,10 +546,13 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetName(
     ptr: jlong,
     name: JString,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     if let Ok(s) = env.get_string(&name) {
         let s: String = s.into();
         let s: String = s.chars().filter(|c| !c.is_control()).take(32).collect();
-        rt(ptr).hub.with_node(|n| n.petname = s);
+        r.hub.with_node(|n| n.petname = s);
     }
 }
 
@@ -493,9 +565,11 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeInviteEncode(
     ptr: jlong,
     bridges: JString,
 ) -> jni::sys::jstring {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
     let raw: String = env.get_string(&bridges).map(|s| s.into()).unwrap_or_default();
     let list: Vec<String> = raw.lines().filter(|l| !l.trim().is_empty()).map(|l| l.to_string()).collect();
-    let r = rt(ptr);
     let addr = r.hub.addr();
     let name = r.hub.with_node(|n| n.petname.clone());
     let s = spore::invite::encode(&addr, &name, &list);
@@ -538,6 +612,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendDirect(
     dest: JByteArray,
     payload: JByteArray,
 ) -> jni::sys::jstring {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
     let d = env.convert_byte_array(&dest).unwrap_or_default();
     let p = env.convert_byte_array(&payload).unwrap_or_default();
     if d.len() != 8 {
@@ -545,7 +622,6 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendDirect(
     }
     let mut addr = [0u8; 8];
     addr.copy_from_slice(&d);
-    let r = rt(ptr);
     let (id, forwards, encrypted) = r.hub.with_node(|n| n.send_direct(addr, &p, spore::bridge::hub::now()));
     r.hub.originate(forwards);
     let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
@@ -561,6 +637,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAcked(
     ptr: jlong,
     id_hex: JString,
 ) -> jboolean {
+    let Some(r) = rt(ptr) else {
+        return JNI_FALSE;
+    };
     let s: String = match env.get_string(&id_hex) {
         Ok(s) => s.into(),
         Err(_) => return JNI_FALSE,
@@ -575,7 +654,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAcked(
             Err(_) => return JNI_FALSE,
         }
     }
-    if rt(ptr).hub.with_node(|n| n.acked(&id)) {
+    if r.hub.with_node(|n| n.acked(&id)) {
         JNI_TRUE
     } else {
         JNI_FALSE
@@ -589,7 +668,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeResendUnacked(
     _class: JClass,
     ptr: jlong,
 ) {
-    let r = rt(ptr);
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let forwards = r.hub.with_node(|n| n.resend_unacked(spore::bridge::hub::now()));
     r.hub.originate(forwards);
 }
@@ -604,12 +685,15 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvPlaintext(
     ptr: jlong,
     wire: JByteArray,
 ) -> jbyteArray {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
     let w = env.convert_byte_array(&wire).unwrap_or_default();
     let Ok((e, _)) = Envelope::decode(&w) else {
         return std::ptr::null_mut();
     };
     let out = if e.flags & spore::fl::ENCRYPTED != 0 {
-        match rt(ptr).hub.with_node(|n| n.open(&e.payload)) {
+        match r.hub.with_node(|n| n.open(&e.payload)) {
             Some(p) => p,
             None => return std::ptr::null_mut(),
         }
@@ -640,7 +724,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStoreLen(
     _class: JClass,
     ptr: jlong,
 ) -> jint {
-    rt(ptr).hub.with_node(|n| n.store_len()) as jint
+    let Some(r) = rt(ptr) else {
+        return 0;
+    };
+    r.hub.with_node(|n| n.store_len()) as jint
 }
 
 // -- files: the protocol's manifest/chunk layer, sealed when we can ----------
@@ -668,6 +755,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePublishFile(
     bytes: JByteArray,
     dest_hex: JString,
 ) -> jni::sys::jstring {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
     let name: String = env.get_string(&name).map(|s| s.into()).unwrap_or_default();
     let data = env.convert_byte_array(&bytes).unwrap_or_default();
     let dhex: String = env.get_string(&dest_hex).map(|s| s.into()).unwrap_or_default();
@@ -685,7 +775,6 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePublishFile(
     }
 
     let now = spore::bridge::hub::now();
-    let r = rt(ptr);
     let (magnet, forwards, sealed) = r.hub.with_node(|n| {
         if unicast {
             if let Some((m, f)) = n.publish_file_sealed(&name, &data, dest, now) {
@@ -701,6 +790,18 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativePublishFile(
     env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
+/// The largest file this node can announce at its current MTU (the manifest is
+/// one envelope listing 16 bytes per chunk, so it bounds the file size).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeMaxFileBytes(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jint {
+    let Some(r) = rt(ptr) else { return 0 };
+    r.hub.with_node(|n| n.max_file_bytes()) as jint
+}
+
 /// Files we hold a manifest for, one per line:
 /// `magnethex:totalBytes:chunksHeld:chunksTotal:advertisedName`.
 #[no_mangle]
@@ -709,7 +810,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFiles(
     _class: JClass,
     ptr: jlong,
 ) -> jni::sys::jstring {
-    let rows = rt(ptr).hub.with_node(|n| n.files());
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let rows = r.hub.with_node(|n| n.files());
     let s = rows
         .iter()
         .map(|(m, name, total, have, count)| {
@@ -729,12 +833,14 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
     ptr: jlong,
     magnet_hex: JString,
 ) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let s: String = match env.get_string(&magnet_hex) {
         Ok(s) => s.into(),
         Err(_) => return,
     };
     let Some(magnet) = id_from_hex(&s) else { return };
-    let r = rt(ptr);
     let forwards = r.hub.with_node(|n| n.fetch(&magnet));
     r.hub.originate(forwards);
 }
@@ -748,6 +854,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeOpenFile(
     ptr: jlong,
     magnet_hex: JString,
 ) -> jbyteArray {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
     let s: String = match env.get_string(&magnet_hex) {
         Ok(s) => s.into(),
         Err(_) => return std::ptr::null_mut(),
@@ -755,7 +864,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeOpenFile(
     let Some(magnet) = id_from_hex(&s) else {
         return std::ptr::null_mut();
     };
-    let Some((name, bytes)) = rt(ptr).hub.with_node(|n| n.open_file(&magnet)) else {
+    let Some((name, bytes)) = r.hub.with_node(|n| n.open_file(&magnet)) else {
         return std::ptr::null_mut();
     };
     let nb = name.as_bytes();
@@ -775,7 +884,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFragStatus(
     _class: JClass,
     ptr: jlong,
 ) -> jni::sys::jstring {
-    let rows = rt(ptr).hub.with_node(|n| n.frag_progress());
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let rows = r.hub.with_node(|n| n.frag_progress());
     let s = rows
         .iter()
         .map(|(id, have, count)| {
@@ -796,7 +908,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdpLimited(
     ptr: jlong,
     port: jint,
 ) {
-    let r = rt(ptr);
+    let Some(r) = rt(ptr) else {
+        return;
+    };
     let (iface, rx) = r.hub.register();
     let hub = r.hub.clone();
     let port = if port > 0 { port as u16 } else { 7373 };

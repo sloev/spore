@@ -102,6 +102,9 @@ object SporeNative {
     /** Publish a file (sealed to dest when possible). "magnethex:1|0". */
     external fun nativePublishFile(ptr: Long, name: String, bytes: ByteArray, destHex: String): String?
 
+    /** Largest file this node can announce at its MTU (manifest-bounded). */
+    external fun nativeMaxFileBytes(ptr: Long): Int
+
     /** Known files: "magnet:totalBytes:chunksHeld:chunksTotal:name" lines. */
     external fun nativeFiles(ptr: Long): String
 

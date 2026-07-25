@@ -222,6 +222,18 @@ object NodeController {
      */
     fun sendFile(peer: String, name: String, data: ByteArray) {
         if (ptr == 0L || data.isEmpty()) return
+        // A manifest is a single envelope listing 16 bytes per chunk, so the MTU
+        // bounds how big a file can even be announced. Refuse clearly rather than
+        // publishing a manifest no link can carry. Leave room for sealing
+        // (~48 bytes) and the encrypted file name.
+        val cap = maxFileBytes()
+        if (data.size > cap) {
+            append(
+                Msg(peer, "⚠ $name is ${data.size / 1024} KB — this link can carry at most " +
+                    "${cap / 1024} KB per file. Send it in parts.", mine = true, verified = true)
+            )
+            return
+        }
         val destHex = if (peer == Petnames.PUBLIC) "" else peer
         val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return
         val sealed = res.getOrNull(1) == "1"
@@ -231,6 +243,12 @@ object NodeController {
             Msg(peer, "📎 shared $name (${data.size / 1024} KB · $how)",
                 mine = true, verified = true, encrypted = sealed)
         )
+    }
+
+    /** Largest file we can share right now (MTU-bound, minus sealing overhead). */
+    fun maxFileBytes(): Int {
+        if (ptr == 0L) return 0
+        return (SporeNative.nativeMaxFileBytes(ptr) - 160).coerceAtLeast(0)
     }
 
     /**
