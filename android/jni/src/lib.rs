@@ -805,6 +805,36 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeMaxFileBytes(
     r.hub.with_node(|n| n.max_storable_file_bytes().min(jint::MAX as usize)) as jint
 }
 
+/// Keep the store's bytes in `dir`, holding only `memBytes` of them resident,
+/// and adopt anything left there by a previous run. Returns how many envelopes
+/// were adopted (-1 if the directory could not be used).
+///
+/// This is what makes a big transfer survive the app being killed: the chunks
+/// are already on disk, and the manifests among them are re-learned, so a fetch
+/// resumes instead of starting over.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetSpillDir(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    dir: JString,
+    mem_bytes: jint,
+    now: jint,
+) -> jint {
+    let Some(r) = rt(ptr) else { return -1 };
+    let Ok(dir) = env.get_string(&dir) else { return -1 };
+    let dir: String = dir.into();
+    r.hub.with_node(|n| {
+        if mem_bytes > 0 {
+            n.set_mem_budget(mem_bytes as usize);
+        }
+        match n.set_spill_dir(std::path::Path::new(&dir), now.max(0) as u32) {
+            Ok(k) => k as jint,
+            Err(_) => -1,
+        }
+    })
+}
+
 /// Set how many bytes this node keeps for stored traffic (its own files
 /// included). Bounds what it can share and how much it can relay for others.
 #[no_mangle]

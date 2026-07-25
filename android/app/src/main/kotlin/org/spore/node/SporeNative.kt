@@ -108,6 +108,9 @@ object SporeNative {
     /** Set how many bytes this node keeps for stored traffic (files included). */
     external fun nativeSetStoreBudget(ptr: Long, bytes: Int)
 
+    /** Back the store with `dir`, keeping `memBytes` resident. Returns envelopes adopted. */
+    external fun nativeSetSpillDir(ptr: Long, dir: String, memBytes: Int, now: Int): Int
+
     /** Known files: "magnet:totalBytes:chunksHeld:chunksTotal:name" lines. */
     external fun nativeFiles(ptr: Long): String
 

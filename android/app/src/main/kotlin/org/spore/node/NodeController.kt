@@ -61,6 +61,7 @@ object NodeController {
     val bridges = MutableStateFlow<List<BridgeState>>(emptyList())
     val peers = MutableStateFlow<List<Peer>>(emptyList()) // nodes we've heard from
     val storeCount = MutableStateFlow(0) // envelopes held for the mesh
+    val resumed = MutableStateFlow(0) // envelopes adopted from disk at startup
     val transfers = MutableStateFlow<List<Transfer>>(emptyList()) // files in flight
     val address = MutableStateFlow("")
     val myName = MutableStateFlow("") // the name we announce (a hint for others)
@@ -75,8 +76,11 @@ object NodeController {
     private const val MANIFEST_TAG: Byte = 0x01
     private const val TREE_TAG: Byte = 0x08
 
-    // What we keep for stored traffic — our own files plus what we relay.
-    private const val STORE_BUDGET_BYTES = 64 * 1024 * 1024
+    // What we keep for stored traffic — our own files plus what we relay. The
+    // bytes live on disk; only MEM_BUDGET_BYTES of them stay in RAM, so the
+    // ceiling on a transfer is storage rather than the heap of a phone app.
+    private const val STORE_BUDGET_BYTES = 256 * 1024 * 1024
+    private const val MEM_BUDGET_BYTES = 8 * 1024 * 1024
     private var lastFileSender: String = Petnames.PUBLIC   // thread for the next completed file
     private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
@@ -97,10 +101,18 @@ object NodeController {
             prefs.edit().putString("seed", Base64.encodeToString(fresh, Base64.NO_WRAP)).apply()
         }
         address.value = SporeNative.nativeAddr(ptr).toHex()
-        // The core defaults to a desktop-ish 10 MB. A phone can spare more, and
-        // since manifests became trees this budget — not the wire format — is
-        // what decides how big a file we can share and how much we can relay.
+        // The core defaults to a desktop-ish 10 MB held entirely in memory.
+        // Since manifests became trees this budget — not the wire format — is
+        // what decides how big a file we can share and how much we can relay, so
+        // back it with app-private storage and keep only a working set in RAM.
         SporeNative.nativeSetStoreBudget(ptr, STORE_BUDGET_BYTES)
+        val spill = File(appCtx.filesDir, "store").apply { mkdirs() }
+        val adopted = SporeNative.nativeSetSpillDir(
+            ptr, spill.absolutePath, MEM_BUDGET_BYTES, (System.currentTimeMillis() / 1000).toInt()
+        )
+        // Anything still on disk from last time is ours again — including
+        // half-finished transfers, which resume rather than restart.
+        resumed.value = adopted.coerceAtLeast(0)
         // The name we announce; peers offer it as the default petname for us.
         myName.value = prefs.getString("myname", "") ?: ""
         if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)

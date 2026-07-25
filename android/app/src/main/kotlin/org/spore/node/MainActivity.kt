@@ -604,6 +604,7 @@ private fun AdvancedScreen(addr: String) {
         }
         val nearby by NodeController.peers.collectAsState()
         val stored by NodeController.storeCount.collectAsState()
+        val resumed by NodeController.resumed.collectAsState()
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {
                 Text("Node", style = MaterialTheme.typography.titleSmall)
@@ -613,6 +614,13 @@ private fun AdvancedScreen(addr: String) {
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text("envelopes relayed/stored: $stored", style = MaterialTheme.typography.bodySmall)
+                if (resumed > 0) {
+                    Text(
+                        "picked up $resumed from storage on start — transfers resume " +
+                            "rather than restart 🌱",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 Text(
                     "Direct messages are sealed to a peer's key once you've heard their " +
                         "announce; broadcasts and topic posts are signed but public by nature.",

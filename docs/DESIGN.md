@@ -216,12 +216,25 @@ name wins, path-traversal guarded). An **encrypted folder** is sealed manifests
 behind a pre-shared-key topic (§7). Tested end-to-end: publish → flood → pull →
 materialise.
 
-**Known caveat.** Parts live in the ordinary store, which evicts under pressure
-(lowest-stamp → largest → oldest). A file still being assembled is pinned —
-interior manifests included, since losing one would hide its whole subtree and
-strand the transfer with no way to name what went missing — but the store is
-in memory, so a node can only carry what it can hold. A disk-backed chunk store
-is what would let files run to the sizes the manifest tree now allows.
+**Custody and the store.** Parts live in the ordinary store, which evicts under
+pressure (lowest-stamp → largest → oldest). A file still being assembled is
+pinned — interior manifests included, since losing one would hide its whole
+subtree and strand the transfer with no way to name what went missing.
+
+Given a directory (`Node::set_spill_dir`) the store is **write-through**: every
+envelope lands on disk as it arrives, and memory is a cache in front of it. Past
+`set_mem_budget` the coldest resident copies are dropped, not lost, so a node
+carries what its *disk* holds rather than what its RAM does — which is what lets
+a file actually reach the sizes the manifest tree allows. Two things fall out:
+
+- **A restart resumes.** Whatever was on disk is adopted, and the manifests among
+  it re-learned, so an interrupted transfer continues instead of starting over.
+  Adoption is safe because an id *is* the hash of its bytes: a file whose name
+  disagrees with its content is discarded, so a tampered spill directory cannot
+  inject anything.
+- **No directory, no disk.** Nothing is written and the store behaves exactly as
+  the in-memory map it replaced — the right answer on the web, and anywhere else
+  without a filesystem.
 </details>
 
 ## Layer 3 — sessions: a UDP-like link, and SSH over it  ✅ implemented

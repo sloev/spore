@@ -506,14 +506,6 @@ pub struct Rx {
     pub forwards: Vec<Forward>,   // to the transport
 }
 
-struct Stored {
-    wire: Vec<u8>,
-    expiry: u32,
-    stamp: u8,
-    seq: u64,
-    dest: Addr,
-}
-
 // ---------------------------------------------------------------------------
 // §7 Crypto — seal to a recipient prekey (libsodium crypto_box_seal shape).
 // Forward secrecy comes from rotating prekeys daily and deleting the private
@@ -646,7 +638,7 @@ pub struct Node {
     addrs: HashSet<Addr>,
 
     seen: HashMap<Id, u32>, // id -> retain-until
-    store: HashMap<Id, Stored>,
+    store: store::Store,
     paths: Paths,
     peer_prekeys: HashMap<Addr, [u8; 32]>,
     peer_busy: HashMap<Addr, u8>,
@@ -714,7 +706,7 @@ impl Node {
             topics: topics.iter().map(|t| topic_of(t)).collect(),
             addrs,
             seen: HashMap::new(),
-            store: HashMap::new(),
+            store: store::Store::new(),
             paths: Paths::default(),
             peer_prekeys: HashMap::new(),
             peer_busy: HashMap::new(),
@@ -750,6 +742,53 @@ impl Node {
         self.enforce_budget();
     }
 
+    /// Keep the store's bytes in `dir`, holding only a budget of them resident.
+    ///
+    /// Past that budget the coldest wires spill to disk and only their length
+    /// stays in memory, so what a node can carry stops being bounded by its RAM.
+    /// This is what lets a file actually run to the sizes a manifest tree allows.
+    ///
+    /// Anything already in the directory from a previous run is **adopted**, and
+    /// any signed manifest among it re-learned — so a transfer a restart
+    /// interrupted resumes instead of starting over. Adoption is safe because an
+    /// id *is* the hash of its bytes: a file whose name does not match its
+    /// content is discarded, so a tampered spill directory cannot inject
+    /// anything. Returns how many envelopes were adopted.
+    ///
+    /// Without this a node is memory-only, which is the right answer on the web
+    /// and anywhere else with no filesystem.
+    pub fn set_spill_dir(&mut self, dir: &std::path::Path, now: u32) -> std::io::Result<usize> {
+        let adopted = self.store.set_spill_dir(dir, now)?;
+        let n = adopted.len();
+        for wire in adopted {
+            let Ok((e, _)) = Envelope::decode(&wire) else { continue };
+            // We held it before, so we have already relayed it — don't flood it
+            // again just because the process restarted.
+            self.mark_seen(&e);
+            if e.typ == ty::DATA
+                && matches!(
+                    e.payload.first(),
+                    Some(&file::MANIFEST_TAG) | Some(&file::TREE_TAG) | Some(&file::SEALED_TAG)
+                )
+            {
+                self.absorb_manifest(&e);
+            }
+        }
+        Ok(n)
+    }
+
+    /// How many bytes of the store stay in memory before the rest spills to the
+    /// directory set by [`Node::set_spill_dir`]. Defaults to 5 MiB. Without a
+    /// spill directory this has no effect — there is nowhere for bytes to go.
+    pub fn set_mem_budget(&mut self, bytes: usize) {
+        self.store.set_mem_budget(bytes);
+    }
+
+    /// Bytes the store is holding, in memory and on disk together.
+    pub fn store_bytes(&self) -> usize {
+        self.store.bytes()
+    }
+
     pub fn peer_prekey(&self, a: &Addr) -> Option<[u8; 32]> {
         self.peer_prekeys.get(a).copied()
     }
@@ -771,16 +810,12 @@ impl Node {
     // ---- origination -----------------------------------------------------
 
     fn store_put(&mut self, e: &Envelope) {
-        let id = e.id();
-        self.store.insert(
-            id,
-            Stored { wire: e.wire(), expiry: e.expiry, stamp: e.stamp(), seq: self.seq, dest: e.dest },
-        );
+        self.store.put(e.id(), e.wire(), e.expiry, e.stamp(), self.seq, e.dest);
         self.seq += 1;
         self.enforce_budget();
     }
     fn enforce_budget(&mut self) {
-        let mut total: usize = self.store.values().map(|s| s.wire.len()).sum();
+        let mut total = self.store.bytes();
         if total <= self.max_store_bytes {
             return;
         }
@@ -792,18 +827,15 @@ impl Node {
         while total > self.max_store_bytes {
             let victim = self
                 .store
-                .iter()
+                .entries()
                 .filter(|(k, _)| !pinned.contains(*k))
                 .min_by(|a, b| {
-                    a.1.stamp
-                        .cmp(&b.1.stamp)
-                        .then(b.1.wire.len().cmp(&a.1.wire.len()))
-                        .then(a.1.seq.cmp(&b.1.seq))
+                    a.1.stamp.cmp(&b.1.stamp).then(b.1.len.cmp(&a.1.len)).then(a.1.seq.cmp(&b.1.seq))
                 })
                 .map(|(k, _)| *k);
             match victim {
                 Some(k) => {
-                    total -= self.store[&k].wire.len();
+                    total = total.saturating_sub(self.store.meta(&k).map(|s| s.len).unwrap_or(0));
                     self.store.remove(&k);
                 }
                 None => break, // only in-progress file chunks remain — keep them
@@ -1088,7 +1120,7 @@ impl Node {
     /// Our current backpressure `busy` byte (§5.4c): store fill scaled to 0–255.
     /// Neighbours use it to throttle relays toward a swamped peer.
     pub fn busy(&self) -> u8 {
-        let used: usize = self.store.values().map(|s| s.wire.len()).sum();
+        let used = self.store.bytes();
         (used.saturating_mul(255) / self.max_store_bytes.max(1)).min(255) as u8
     }
     /// The `busy` byte a peer last advertised in its ANNOUNCE, if heard.
@@ -1336,7 +1368,7 @@ impl Node {
     /// INV = concatenated 16-byte IDs of stored envelopes relevant to a peer
     /// that follows `peer_topics` (public + those topics + unicast for custody).
     pub fn build_inv(&self, peer_topics: &HashSet<Addr>) -> Vec<u8> {
-        let mut ids: Vec<(&Id, &Stored)> = self.store.iter().collect();
+        let mut ids: Vec<(&Id, &store::Stored)> = self.store.entries().collect();
         ids.sort_by_key(|(_, s)| std::cmp::Reverse(s.expiry)); // newest first
         let mut p = Vec::new();
         for (id, s) in ids {
@@ -1355,7 +1387,7 @@ impl Node {
             if chunk.len() == 16 {
                 let mut id = [0u8; 16];
                 id.copy_from_slice(chunk);
-                if !self.store.contains_key(&id) {
+                if !self.store.contains(&id) {
                     want.extend_from_slice(&id); // request what we lack
                 }
             }
@@ -1377,8 +1409,8 @@ impl Node {
             if chunk.len() == 16 {
                 let mut id = [0u8; 16];
                 id.copy_from_slice(chunk);
-                if let Some(s) = self.store.get(&id) {
-                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: s.wire.clone() });
+                if let Some(wire) = self.store.wire(&id) {
+                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: wire });
                 }
             }
         }
@@ -1389,24 +1421,30 @@ impl Node {
         self.store.len()
     }
     pub fn has(&self, id: &Id) -> bool {
-        self.store.contains_key(id)
+        self.store.contains(id)
     }
 
     /// All stored envelope IDs, concatenated (16 B each) — a bag INV.
     pub fn stored_ids(&self) -> Vec<u8> {
         let mut v = Vec::with_capacity(self.store.len() * 16);
-        for id in self.store.keys() {
+        for id in self.store.ids() {
             v.extend_from_slice(id);
         }
         v
     }
     /// The wire bytes of a stored envelope, if held.
     pub fn get_wire(&self, id: &Id) -> Option<Vec<u8>> {
-        self.store.get(id).map(|s| s.wire.clone())
+        self.store.wire(id)
     }
     /// Every stored envelope as `(id, wire)` — the whole bag.
     pub fn store_wires(&self) -> Vec<(Id, Vec<u8>)> {
-        self.store.iter().map(|(id, s)| (*id, s.wire.clone())).collect()
+        self.store
+            .ids()
+            .copied()
+            .collect::<Vec<_>>()
+            .iter()
+            .filter_map(|id| self.store.wire(id).map(|w| (*id, w)))
+            .collect()
     }
 
     /// Receive-side fragmentation status: for each in-progress fountain
@@ -1627,8 +1665,8 @@ impl Node {
     /// parent meant. `expect` pins the child's depth — it must be exactly one
     /// less than its parent's, or a crafted tree could recurse sideways.
     fn tree_node(&self, id: &Id, expect: u8) -> Option<file::Manifest> {
-        let s = self.store.get(id)?;
-        let (e, _) = Envelope::decode(&s.wire).ok()?;
+        let wire = self.store.wire(id)?;
+        let (e, _) = Envelope::decode(&wire).ok()?;
         let m = file::Manifest::decode(&e.payload)?;
         (m.depth == expect).then_some(m)
     }
@@ -1647,7 +1685,7 @@ impl Node {
     {
         for id in &m.chunk_ids {
             if m.depth == 0 {
-                if !f(id, 0, self.store.contains_key(id)) {
+                if !f(id, 0, self.store.contains(id)) {
                     return false;
                 }
                 continue;
@@ -1739,7 +1777,7 @@ impl Node {
             if !self.has_file(magnet) {
                 continue;
             }
-            let exp = self.store.get(magnet).map(|s| s.expiry).unwrap_or(0);
+            let exp = self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0);
             best.entry(m.name.clone())
                 .and_modify(|(id, e)| {
                     if exp > *e {
@@ -2003,11 +2041,11 @@ impl Node {
             if depth != 0 {
                 return true; // an interior node carries ids, not bytes
             }
-            let Some(s) = self.store.get(id) else {
+            let Some(wire) = self.store.wire(id) else {
                 ok = false;
                 return false;
             };
-            let Ok((ce, _)) = Envelope::decode(&s.wire) else {
+            let Ok((ce, _)) = Envelope::decode(&wire) else {
                 ok = false;
                 return false;
             };
@@ -2129,6 +2167,14 @@ pub mod congestion;
 // ---------------------------------------------------------------------------
 
 pub mod file;
+
+// ---------------------------------------------------------------------------
+// Custody — what a node holds, and where it holds it. Metadata stays resident;
+// the bytes spill to disk past a memory budget, so what a node can carry is
+// bounded by its disk rather than by its RAM.
+// ---------------------------------------------------------------------------
+
+mod store;
 
 // ---------------------------------------------------------------------------
 // Page 2, rule 2 — KISS framing for byte streams (TCP, serial, RFCOMM, TNCs).
@@ -2883,6 +2929,101 @@ mod tests {
         n.manifests.get_mut(&magnet).unwrap().total_len = u64::MAX;
         assert!(n.file_bytes(&magnet).is_none());
         assert!(!n.has_file(&magnet) || n.write_file_to(&magnet, &mut Vec::new()).is_none());
+    }
+
+    /// A scratch directory that cleans itself up.
+    struct TmpDir(std::path::PathBuf);
+    impl TmpDir {
+        fn new(tag: &str) -> TmpDir {
+            let mut p = std::env::temp_dir();
+            p.push(format!("spore-test-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            TmpDir(p)
+        }
+    }
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn the_store_spills_to_disk_and_still_serves_what_it_spilled() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("spill");
+        let mut a = Node::new("a", &[]);
+        a.set_store_budget(64 * 1024 * 1024);
+        a.set_mem_budget(16 * 1024); // tiny, so almost everything spills
+        a.set_spill_dir(&dir.0, now).expect("spill dir");
+
+        let body: Vec<u8> = (0..400_000u32).map(|i| i.wrapping_mul(13) as u8).collect();
+        let (magnet, _) = a.publish_file("big.bin", &body, ZERO_DEST, now);
+
+        // The file is held, but almost none of it is resident.
+        assert!(a.has_file(&magnet), "a spilled file is still held");
+        assert!(a.store_bytes() > body.len(), "the store accounts for all of it");
+        let on_disk = std::fs::read_dir(&dir.0).unwrap().count();
+        assert!(on_disk > 100, "most of it went to disk, got {on_disk} files");
+
+        // …and it reads back byte for byte, from wherever the bytes are.
+        assert_eq!(a.file_bytes(&magnet).as_deref(), Some(&body[..]));
+
+        // A spilled envelope answers a WANT exactly as a resident one does.
+        let ids = a.missing(&magnet, 4);
+        assert!(ids.is_empty(), "we hold every part");
+        let stored = a.stored_ids();
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&stored[..16]);
+        assert!(a.get_wire(&id).is_some(), "a spilled envelope still serves");
+    }
+
+    #[test]
+    fn a_restart_adopts_what_was_spilled_and_resumes_the_transfer() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("adopt");
+        let body: Vec<u8> = (0..200_000u32).map(|i| i.wrapping_mul(7) as u8).collect();
+
+        let magnet = {
+            let mut a = Node::new("a", &[]);
+            a.set_store_budget(64 * 1024 * 1024);
+            a.set_mem_budget(8 * 1024);
+            a.set_spill_dir(&dir.0, now).unwrap();
+            let (magnet, _) = a.publish_file("big.bin", &body, ZERO_DEST, now);
+            assert!(a.has_file(&magnet));
+            magnet
+        }; // the node goes away — power cut, app killed, container reclaimed
+
+        // A fresh node pointed at the same directory picks up where it left off.
+        let mut b = Node::new("b", &[]);
+        b.set_store_budget(64 * 1024 * 1024);
+        b.set_mem_budget(8 * 1024);
+        let adopted = b.set_spill_dir(&dir.0, now).expect("adopt");
+        assert!(adopted > 100, "adopted {adopted} envelopes");
+        assert!(b.has_file(&magnet), "the manifest was re-learned along with the chunks");
+        assert_eq!(b.file_bytes(&magnet).as_deref(), Some(&body[..]));
+    }
+
+    #[test]
+    fn a_spilled_file_whose_name_lies_about_its_content_is_discarded() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("forged");
+
+        // A plausible-looking file whose bytes are not what its name claims.
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 86400, b"not what it says".to_vec());
+        e.flags |= fl::FLOOD;
+        let real = e.id();
+        let mut lie = real;
+        lie[0] ^= 0xff;
+        let name: String = lie.iter().map(|b| format!("{b:02x}")).collect::<String>() + ".spore";
+        std::fs::write(dir.0.join(&name), e.wire()).unwrap();
+        std::fs::write(dir.0.join("not-even-hex.spore"), b"garbage").unwrap();
+
+        let mut n = Node::new("n", &[]);
+        let adopted = n.set_spill_dir(&dir.0, now).unwrap();
+        assert_eq!(adopted, 0, "an id is the hash of its bytes — neither file matched");
+        assert!(!n.has(&lie) && !n.has(&real));
+        assert!(!dir.0.join(&name).exists(), "and the bad file is cleaned up");
     }
 
     #[test]
