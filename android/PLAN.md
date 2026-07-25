@@ -135,20 +135,26 @@ a relay happens. Tasteful — it should still read as a serious mesh tool.
   `NEARBY_WIFI_DEVICES` (Wi-Fi Direct, API 33+), `BLUETOOTH_SCAN`/`_CONNECT`,
   `RECORD_AUDIO` (modem), `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE*`.
 
-## CI + date-versioned APK release
+## CI + APK releases (rolling + tagged)
 
 New workflow `.github/workflows/android.yml` (a new file — **not** frozen, no label
 needed):
 
-- Set up JDK + Android SDK/NDK + Rust + `cargo-ndk`; build the `.so`s; `gradlew
-  assembleRelease`.
-- **Version = the date**: `versionName = YYYY.MM.DD`, `versionCode = YYYYMMDD`
-  (e.g. `20260723`; monotonic and within the versionCode limit for ~120 years).
-- **Release** on a git tag `vYYYY.MM.DD` or manual dispatch → create a GitHub Release
-  with that tag and attach the APK. **PRs** build a debug APK artifact for testing.
+- Set up JDK + Android SDK/NDK + Rust + `cargo-ndk`; build the `.so`s; assemble.
+- **Rolling** — every push to `master` publishes a **pre-release** at the moving
+  `rolling` tag, versioned **`<current version>+<date>`** (current version =
+  latest git tag via `git describe`; date = build date), e.g. `v0.1+2026.07.24`.
+  Always the newest master build; updated on every merge.
+- **Tagged** — pushing a `v*` tag cuts a normal release **at that tag** — the next
+  current version, which rolling builds then version from.
+- **PRs** build a debug APK artifact only.
+- **versionCode** = `YYYYMMDD` (monotonic, ~120 years of headroom); **versionName**
+  = the computed name (CI passes `SPORE_VERSION_NAME`/`_CODE`; local builds fall
+  back to the date).
 - **Signing**: release builds use a keystore from repo secrets
-  (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, passwords). Until those secrets
-  exist, CI ships a **debug-signed** APK so the pipeline is green from day one.
+  (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASS`,
+  `ANDROID_KEY_PASS`). Until those exist, CI ships a **debug-signed** APK so the
+  pipeline is green from day one.
 
 ## Monorepo layout
 

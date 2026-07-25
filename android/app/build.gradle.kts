@@ -8,11 +8,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Version = the build date (see android/PLAN.md). versionCode YYYYMMDD is
-// monotonic and well within the 2^31 limit for ~120 years.
+// Version comes from CI (SPORE_VERSION_NAME/CODE): "<current version>+<date>" on
+// rolling master builds, the tag on tagged releases (see .github/workflows/
+// android.yml). Falls back to the build date for local/PR builds. versionCode
+// YYYYMMDD is monotonic and well within the 2^31 limit for ~120 years.
 val buildDate: Date = Date()
-val dateName: String = SimpleDateFormat("yyyy.MM.dd").format(buildDate)
-val dateCode: Int = SimpleDateFormat("yyyyMMdd").format(buildDate).toInt()
+val dateName: String = System.getenv("SPORE_VERSION_NAME")
+    ?: SimpleDateFormat("yyyy.MM.dd").format(buildDate)
+val dateCode: Int = (System.getenv("SPORE_VERSION_CODE") ?: SimpleDateFormat("yyyyMMdd").format(buildDate)).toInt()
 
 android {
     namespace = "org.spore.node"
