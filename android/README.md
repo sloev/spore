@@ -28,6 +28,12 @@ A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design
 > bridges. Invites are unauthenticated by nature, so the name is shown as a
 > claim and bridges are never joined without a tick.
 >
+> **Files** ride the protocol's own manifest + chunk layer — a signed manifest
+> (magnet) names fountain-coded chunks any relay can carry and serve, so a large
+> file survives lossy links and resumes rather than restarting. To a known peer a
+> file is **sealed**: contents *and* file name, so relays carrying the chunks
+> learn neither.
+>
 > The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
 > Kotlin/Compose app is proven to build by the `android` CI workflow. The
 > hardware-dependent paths (radios, BLE, mic, live peers) are honest templates —

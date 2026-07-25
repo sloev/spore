@@ -146,6 +146,7 @@ fun App() {
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
                 ReceivingBar()
+                TransfersBar()
                 when (val s = screen) {
                     Chats -> ChatsList(addr) { screen = Chat(it) }
                     is Chat -> ChatDetail(s.peer)
@@ -156,6 +157,20 @@ fun App() {
                 }
             }
         }
+    }
+}
+
+/** Files still arriving, with chunk progress. */
+@Composable
+private fun TransfersBar() {
+    val xs by NodeController.transfers.collectAsState()
+    val active = xs.filter { it.have < it.count }
+    if (active.isNotEmpty()) {
+        Text(
+            active.joinToString("  ·  ") { "📎 ${it.have}/${it.count} chunks" },
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 

@@ -573,6 +573,11 @@ pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
     XChaCha20Poly1305::new(Key::from_slice(psk)).decrypt(XNonce::from_slice(&ct[..24]), &ct[24..]).ok()
 }
 
+/// The manifest name a [`Node::publish_file_sealed`] file advertises. The real
+/// name is encrypted inside the sealed content, so a relay carrying the chunks
+/// learns nothing but "some sealed file".
+pub const SEALED_FILE_NAME: &str = "sealed";
+
 /// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`
 /// (X25519, the same kind a `Node` rotates in its ANNOUNCE).
 pub fn prekey_keypair() -> ([u8; 32], [u8; 32]) {
@@ -1563,6 +1568,64 @@ impl Node {
     }
 
     /// True once every chunk named by the manifest is in our store.
+    /// Publish a file **sealed to `dest`'s prekey**: the bytes *and the file
+    /// name* are encrypted, so relays carrying the chunks learn neither. The
+    /// manifest advertises the placeholder name [`SEALED_FILE_NAME`]; the real
+    /// one travels inside the sealed blob as `u16 length · name · bytes`.
+    ///
+    /// `None` if we haven't heard `dest`'s prekey yet (it arrives with their
+    /// ANNOUNCE) — the caller can fall back to [`Node::publish_file`] and say so.
+    pub fn publish_file_sealed(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        dest: Addr,
+        now: u32,
+    ) -> Option<(Id, Vec<Forward>)> {
+        let pk = self.peer_prekey(&dest)?;
+        let nb = name.as_bytes();
+        let nlen = nb.len().min(u16::MAX as usize);
+        let mut inner = Vec::with_capacity(2 + nlen + bytes.len());
+        inner.extend_from_slice(&(nlen as u16).to_be_bytes());
+        inner.extend_from_slice(&nb[..nlen]);
+        inner.extend_from_slice(bytes);
+        let sealed = seal(&inner, &pk);
+        Some(self.publish_file(SEALED_FILE_NAME, &sealed, dest, now))
+    }
+
+    /// Recover a complete file as `(name, bytes)`, decrypting it when it was
+    /// sealed to us. `None` while chunks are still missing, or when the file was
+    /// sealed to someone else — we relay those without ever reading them.
+    pub fn open_file(&self, magnet: &Id) -> Option<(String, Vec<u8>)> {
+        let m = self.manifests.get(magnet)?;
+        let raw = self.file_bytes(magnet)?;
+        if m.name != SEALED_FILE_NAME {
+            return Some((m.name.clone(), raw));
+        }
+        let inner = self.open(&raw)?;
+        if inner.len() < 2 {
+            return None;
+        }
+        let nlen = u16::from_be_bytes([inner[0], inner[1]]) as usize;
+        if 2 + nlen > inner.len() {
+            return None;
+        }
+        let name = String::from_utf8_lossy(&inner[2..2 + nlen]).to_string();
+        Some((name, inner[2 + nlen..].to_vec()))
+    }
+
+    /// Every file we hold a manifest for: `(magnet, advertised name, total
+    /// bytes, chunks held, chunks total)` — a transfer list with progress.
+    pub fn files(&self) -> Vec<(Id, String, u64, u32, u32)> {
+        self.manifests
+            .iter()
+            .map(|(magnet, m)| {
+                let have = m.chunk_ids.iter().filter(|c| self.store.contains_key(*c)).count() as u32;
+                (*magnet, m.name.clone(), m.total_len, have, m.count)
+            })
+            .collect()
+    }
+
     pub fn has_file(&self, magnet: &Id) -> bool {
         match self.manifests.get(magnet) {
             Some(m) => m.chunk_ids.iter().all(|c| self.store.contains_key(c)),
@@ -2295,6 +2358,44 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn sealed_files_hide_their_contents_and_their_name() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        let body: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+        let (magnet, _f) = a.publish_file_sealed("plans.pdf", &body, b.addr, now).expect("prekey known");
+
+        // Nothing on the wire reveals the name or the contents — a relay only
+        // ever sees "some sealed file".
+        for (_, w) in a.store_wires() {
+            assert!(!w.windows(9).any(|x| x == b"plans.pdf"), "the file name leaked");
+            assert!(!w.windows(16).any(|x| body.windows(16).any(|y| x == y)), "file contents leaked");
+        }
+
+        // Move everything A holds to B, as a sync or a chunk fetch would.
+        for (_, w) in a.store_wires() {
+            b.on_rx(&w, 0, Some(a.addr), now);
+        }
+        let (name, got) = b.open_file(&magnet).expect("B has every chunk and can open it");
+        assert_eq!(name, "plans.pdf", "the real name is recovered from inside the seal");
+        assert_eq!(got, body);
+
+        // A third party relays the same chunks but can never read them.
+        let mut c = Node::new("c", &[]);
+        for (_, w) in a.store_wires() {
+            c.on_rx(&w, 0, Some(a.addr), now);
+        }
+        assert!(c.open_file(&magnet).is_none(), "a relay must not be able to open it");
+
+        // Progress is reportable while a transfer is still in flight.
+        let files = b.files();
+        let row = files.iter().find(|(m, ..)| *m == magnet).expect("listed");
+        assert_eq!(row.3, row.4, "B holds every chunk");
     }
 
     #[test]

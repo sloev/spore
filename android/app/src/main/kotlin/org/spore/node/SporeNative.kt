@@ -99,6 +99,18 @@ object SporeNative {
     /** Parse an invite: "addrhex\nname\nbridge…", or null if invalid. */
     external fun nativeInviteDecode(text: String): String?
 
+    /** Publish a file (sealed to dest when possible). "magnethex:1|0". */
+    external fun nativePublishFile(ptr: Long, name: String, bytes: ByteArray, destHex: String): String?
+
+    /** Known files: "magnet:totalBytes:chunksHeld:chunksTotal:name" lines. */
+    external fun nativeFiles(ptr: Long): String
+
+    /** Ask the mesh for the chunks still missing for this file. */
+    external fun nativeFetchFile(ptr: Long, magnetHex: String)
+
+    /** A complete file as u16 nameLen · name · bytes (decrypted), else null. */
+    external fun nativeOpenFile(ptr: Long, magnetHex: String): ByteArray?
+
     /** Direct message: sealed when possible + receipt requested. "idhex:1|0". */
     external fun nativeSendDirect(ptr: Long, dest: ByteArray, payload: ByteArray): String?
 

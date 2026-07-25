@@ -643,6 +643,130 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStoreLen(
     rt(ptr).hub.with_node(|n| n.store_len()) as jint
 }
 
+// -- files: the protocol's manifest/chunk layer, sealed when we can ----------
+
+fn id_from_hex(s: &str) -> Option<spore::Id> {
+    if s.len() != 32 {
+        return None;
+    }
+    let mut id = [0u8; 16];
+    for (i, b) in id.iter_mut().enumerate() {
+        *b = u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(id)
+}
+
+/// Publish a file through the manifest/chunk layer, **sealed to `dest`'s prekey
+/// when we have it** (contents *and* name encrypted). `dest` empty = public.
+/// Returns "magnethex:1" (sealed) or "magnethex:0" (cleartext).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePublishFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    name: JString,
+    bytes: JByteArray,
+    dest_hex: JString,
+) -> jni::sys::jstring {
+    let name: String = env.get_string(&name).map(|s| s.into()).unwrap_or_default();
+    let data = env.convert_byte_array(&bytes).unwrap_or_default();
+    let dhex: String = env.get_string(&dest_hex).map(|s| s.into()).unwrap_or_default();
+
+    let mut dest = [0u8; 8];
+    let mut unicast = false;
+    if dhex.len() == 16 {
+        for (i, b) in dest.iter_mut().enumerate() {
+            match u8::from_str_radix(&dhex[i * 2..i * 2 + 2], 16) {
+                Ok(v) => *b = v,
+                Err(_) => return std::ptr::null_mut(),
+            }
+        }
+        unicast = true;
+    }
+
+    let now = spore::bridge::hub::now();
+    let r = rt(ptr);
+    let (magnet, forwards, sealed) = r.hub.with_node(|n| {
+        if unicast {
+            if let Some((m, f)) = n.publish_file_sealed(&name, &data, dest, now) {
+                return (m, f, true);
+            }
+        }
+        let (m, f) = n.publish_file(&name, &data, dest, now);
+        (m, f, false)
+    });
+    r.hub.originate(forwards);
+    let hex: String = magnet.iter().map(|b| format!("{b:02x}")).collect();
+    let s = format!("{hex}:{}", if sealed { 1 } else { 0 });
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Files we hold a manifest for, one per line:
+/// `magnethex:totalBytes:chunksHeld:chunksTotal:advertisedName`.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFiles(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let rows = rt(ptr).hub.with_node(|n| n.files());
+    let s = rows
+        .iter()
+        .map(|(m, name, total, have, count)| {
+            let hex: String = m.iter().map(|b| format!("{b:02x}")).collect();
+            format!("{hex}:{total}:{have}:{count}:{}", name.replace('\n', " "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Ask the mesh for the chunks we're still missing for this file.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    magnet_hex: JString,
+) {
+    let s: String = match env.get_string(&magnet_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return,
+    };
+    let Some(magnet) = id_from_hex(&s) else { return };
+    let r = rt(ptr);
+    let forwards = r.hub.with_node(|n| n.fetch(&magnet));
+    r.hub.originate(forwards);
+}
+
+/// A complete file as `u16 nameLen · name · bytes`, decrypted if it was sealed
+/// to us. Null while chunks are missing, or if it was sealed to someone else.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeOpenFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    magnet_hex: JString,
+) -> jbyteArray {
+    let s: String = match env.get_string(&magnet_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let Some(magnet) = id_from_hex(&s) else {
+        return std::ptr::null_mut();
+    };
+    let Some((name, bytes)) = rt(ptr).hub.with_node(|n| n.open_file(&magnet)) else {
+        return std::ptr::null_mut();
+    };
+    let nb = name.as_bytes();
+    let nlen = nb.len().min(u16::MAX as usize);
+    let mut out = Vec::with_capacity(2 + nlen + bytes.len());
+    out.extend_from_slice(&(nlen as u16).to_be_bytes());
+    out.extend_from_slice(&nb[..nlen]);
+    out.extend_from_slice(&bytes);
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
 /// Receive-side fragmentation status as "idhex:have/count" lines joined by
 /// '\n' (empty string when nothing is reassembling) — the UI's "receiving X/N".
 #[no_mangle]
