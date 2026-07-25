@@ -36,6 +36,12 @@ object SporeNative {
     /** Register a Kotlin-driven bridge interface; returns its iface id. */
     external fun nativeRegisterIface(ptr: Long): Int
 
+    /** As above, but the link carries at most `bulkBytesPerSec` of others' file chunks. */
+    external fun nativeRegisterIfaceLimited(ptr: Long, bulkBytesPerSec: Int): Int
+
+    /** The bulk budget the core suggests for "audio" / "meshtastic" / "reticulum". */
+    external fun nativeSuggestedBulkBudget(kind: String): Int
+
     /** Poll one outbound frame the node wants sent on `iface`, or null. */
     external fun nativePollForward(ptr: Long, iface: Int): ByteArray?
 

@@ -228,6 +228,45 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeRegisterIface(
     iface as jint
 }
 
+/// Register a Kotlin-driven bridge that will carry at most `bulkBytesPerSec` of
+/// other people's file chunks; returns its iface id.
+///
+/// For slow links — sound, LoRa — so a big transfer somewhere in the mesh cannot
+/// conscript them. Messages, announces and manifests are never counted, so the
+/// link stays fully useful for talking. 0 refuses bulk outright.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRegisterIfaceLimited(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    bulk_bytes_per_sec: jint,
+) -> jint {
+    let Some(r) = rt(ptr) else {
+        return 0;
+    };
+    let (iface, rx) = r.hub.register_limited(bulk_bytes_per_sec.max(0) as u32);
+    r.ifaces.lock().unwrap().insert(iface as i32, rx);
+    iface as jint
+}
+
+/// The bulk budget each slow bridge suggests for itself, so the app doesn't have
+/// to hard-code numbers the core already reasons about.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSuggestedBulkBudget(
+    mut env: JNIEnv,
+    _class: JClass,
+    kind: JString,
+) -> jint {
+    let Ok(k) = env.get_string(&kind) else { return -1 };
+    let k: String = k.into();
+    match k.as_str() {
+        "audio" => spore::bridge::audio::BULK_BYTES_PER_SEC as jint,
+        "meshtastic" => spore::bridge::meshtastic::BULK_BYTES_PER_SEC as jint,
+        "reticulum" => spore::bridge::reticulum::BULK_BYTES_PER_SEC as jint,
+        _ => -1, // unknown: the caller should register unlimited
+    }
+}
+
 /// Poll one outbound frame the node wants transmitted on `iface`, or null.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativePollForward(

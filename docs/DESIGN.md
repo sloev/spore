@@ -209,6 +209,23 @@ the practical ceiling is `max_storable_file_bytes()` — half the store budget,
 leaving the other half to relay with — and beneath that, whatever the slowest
 bridge on the path is willing to carry.
 
+**What a link agrees to carry.** Unbounded files mean a link can be conscripted
+into hauling somebody's gigabyte, and an audio modem at ~23 bytes/s would do
+nothing else for a week. So each interface may register a **bulk budget**
+(`Hub::register_limited`): bytes per second of *other people's file chunks* it
+will relay, as a leaky bucket that accrues a few seconds of burst.
+
+Only chunks count as bulk. Messages, announces, receipts and **manifests** always
+pass, so a paced link stays a full member of the mesh — it still carries the
+conversation, and still tells everyone what exists. It simply declines to be the
+pipe, and because chunks are content-addressed the fetch just asks again and
+another path answers. Defaults live with each bridge: `audio` refuses bulk
+outright (0 B/s), `meshtastic` and `reticulum` default to a conservative 32 B/s
+that a deployment can raise with `Hub::set_bulk_budget`.
+
+This is a **local policy**, not a wire change — nothing about it is negotiated,
+and nothing in the frozen contract moves.
+
 **Folder sync (Syncthing) ✅ implemented:** `bridge::foldersync::publish_dir` turns
 each file in a directory into a manifest on a folder-topic; a subscriber `fetch_all`s
 the chunks and `materialize`s the completed files back to disk (newest manifest per

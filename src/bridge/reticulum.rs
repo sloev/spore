@@ -36,6 +36,15 @@
 /// PLAIN payload; SPORE fragments anything larger. Conservative on purpose.
 pub const RNS_SINGLE_PACKET_MDU: usize = 383;
 
+/// What a Reticulum link will carry of *other people's file chunks*, per second
+/// — see [`crate::bridge::hub::Hub::register_limited`].
+///
+/// A conservative default, not a measurement: RNS spans everything from TCP to
+/// LoRa, and the slowest interface on the path is the one that suffers. Messages,
+/// announces and manifests are never counted against it. Raise it with
+/// `Hub::set_bulk_budget` when the path is known to be fast.
+pub const BULK_BYTES_PER_SEC: u32 = 32;
+
 /// Run the RNS bridge over stdin/stdout: read KISS-framed envelopes from the
 /// companion into the node, and write outbound forwards back as KISS frames.
 /// Blocks until either stream ends. Status goes to **stderr** so it never

@@ -350,10 +350,23 @@ object NodeController {
     private val bleBridges = mutableListOf<BleBridge>()
     private var wifiDirect: WifiDirectBridge? = null
 
+    /**
+     * An iface paced to what this kind of link can actually afford to relay for
+     * other people. Only file chunks are counted — messages, announces and
+     * manifests always pass — so a slow radio stays fully useful for talking
+     * while a large transfer elsewhere in the mesh routes around it.
+     */
+    private fun limitedIface(kind: String): Int {
+        val budget = SporeNative.nativeSuggestedBulkBudget(kind)
+        return if (budget < 0) SporeNative.nativeRegisterIface(ptr)
+        else SporeNative.nativeRegisterIfaceLimited(ptr, budget)
+    }
+
     /** Data-over-sound. UI must have RECORD_AUDIO granted before calling. */
     fun enableAudio(): Boolean {
         if (ptr == 0L || audio != null) return false
-        val iface = SporeNative.nativeRegisterIface(ptr)
+        // Sound moves ~23 bytes a second, so this link talks but does not haul.
+        val iface = limitedIface("audio")
         audio = AudioBridge(ptr, iface).also { it.start() }
         addBridgeState("Audio modem", "16-FSK · mic + speaker", "on")
         return true
@@ -362,7 +375,7 @@ object NodeController {
     /** A paired Meshtastic node over BLE. UI gates on BLUETOOTH_CONNECT. */
     fun enableMeshtasticBle(ctx: Context, device: android.bluetooth.BluetoothDevice) {
         if (ptr == 0L) return
-        val iface = SporeNative.nativeRegisterIface(ptr)
+        val iface = limitedIface("meshtastic")
         val myNode = SporeNative.nativeAddr(ptr).let {
             ((it[0].toInt() and 0xff) shl 24) or ((it[1].toInt() and 0xff) shl 16) or
                 ((it[2].toInt() and 0xff) shl 8) or (it[3].toInt() and 0xff)
@@ -380,7 +393,7 @@ object NodeController {
         freqHz: Long, bwHz: Long, sf: Int, cr: Int, txDbm: Int,
     ) {
         if (ptr == 0L) return
-        val iface = SporeNative.nativeRegisterIface(ptr)
+        val iface = limitedIface("reticulum")
         val b = RNodeBleBridge(ptr, iface, ctx, device, freqHz, bwHz, sf, cr, txDbm)
         bleBridges.add(b)
         addBridgeState("RNode BLE", deviceLabel(device), "connecting")

@@ -13,6 +13,16 @@
 //!   values below; verify for your firmware version.
 
 /// PRIVATE_APP portnum SPORE rides on.
+/// What a Meshtastic link will carry of *other people's file chunks*, per second
+/// — see [`crate::bridge::hub::Hub::register_limited`].
+///
+/// A conservative default, not a measurement: LoRa is duty-cycle limited and
+/// shared by everyone in earshot, and a 237-byte packet is the whole channel for
+/// a moment. Messages, announces and manifests are never counted against it, so
+/// the mesh stays fully conversational; only bulk is paced. Raise it with
+/// `Hub::set_bulk_budget` if your region and preset can afford more.
+pub const BULK_BYTES_PER_SEC: u32 = 32;
+
 pub const PORT_PRIVATE_APP: u32 = 256;
 /// Meshtastic broadcast node number.
 pub const BROADCAST: u32 = 0xFFFF_FFFF;
