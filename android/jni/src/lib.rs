@@ -6,12 +6,12 @@
 //! verifiable in normal CI.
 //!
 //! Kotlin side: `class SporeNative` with matching `external fun native*`.
-use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jboolean, jbyteArray, jint, jlong, JNI_FALSE, JNI_TRUE};
+use jni::objects::{JByteArray, JClass, JFloatArray, JString};
+use jni::sys::{jboolean, jbyteArray, jfloatArray, jint, jlong, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use spore::bridge::hub::{Hub, Shared};
-use spore::{addr_of, Envelope, Forward, Iface, Node, Src};
-use std::collections::HashMap;
+use spore::{addr_of, topic_of, Envelope, Forward, Iface, Node, Src};
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
 use std::thread;
@@ -24,6 +24,11 @@ struct Runtime {
     // hub iface and pumps it by polling for outbound frames + pushing inbound —
     // the same poll model as the delivery inbox, so no Rust→Kotlin callbacks.
     ifaces: Mutex<HashMap<i32, Receiver<Forward>>>,
+    // Streaming audio demodulator state + frames it has completed. The mic PCM is
+    // captured by Kotlin (AudioRecord) and fed here; the DSP is the same tested
+    // `bridge::audio` the desktop daemon uses, so phone and laptop interoperate.
+    demod: Mutex<spore::bridge::audio::Demod>,
+    demod_out: Mutex<VecDeque<Vec<u8>>>,
 }
 
 fn rt<'a>(ptr: jlong) -> &'a Runtime {
@@ -52,8 +57,13 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
     let hub = Hub::new(node);
     let (tx, rx) = channel();
     hub.set_delivery_sink(tx);
-    Box::into_raw(Box::new(Runtime { hub, inbox: Mutex::new(rx), ifaces: Mutex::new(HashMap::new()) }))
-        as jlong
+    Box::into_raw(Box::new(Runtime {
+        hub,
+        inbox: Mutex::new(rx),
+        ifaces: Mutex::new(HashMap::new()),
+        demod: Mutex::new(spore::bridge::audio::Demod::new()),
+        demod_out: Mutex::new(VecDeque::new()),
+    })) as jlong
 }
 
 /// Destroy a runtime.
@@ -269,4 +279,192 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvSrc(
         Some(a) => env.byte_array_from_slice(&a).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut()),
         None => std::ptr::null_mut(),
     }
+}
+
+/// The envelope's 8-byte destination (topic address for feed posts, our address
+/// for DMs, all-zero for public floods).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvDest(
+    env: JNIEnv,
+    _class: JClass,
+    wire: JByteArray,
+) -> jbyteArray {
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    match Envelope::decode(&w) {
+        Ok((e, _)) => {
+            env.byte_array_from_slice(&e.dest).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// The 8-byte topic address for a topic name (feeds/microblogging).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeTopicAddr(
+    mut env: JNIEnv,
+    _class: JClass,
+    topic: JString,
+) -> jbyteArray {
+    let s: String = match env.get_string(&topic) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let a = topic_of(&s);
+    env.byte_array_from_slice(&a).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Originate like nativeSend, but return how many wire frames (fragments) the
+/// payload became — the UI's send-side fragmentation status.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendCounted(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    dest: JByteArray,
+    payload: JByteArray,
+) -> jint {
+    let d = env.convert_byte_array(&dest).unwrap_or_default();
+    let p = env.convert_byte_array(&payload).unwrap_or_default();
+    if d.len() != 8 {
+        return 0;
+    }
+    let mut addr = [0u8; 8];
+    addr.copy_from_slice(&d);
+    let r = rt(ptr);
+    let forwards = r.hub.with_node(|n| n.send(addr, p, spore::bridge::hub::now()));
+    let count = forwards.len() as jint;
+    r.hub.originate(forwards);
+    count
+}
+
+// -- audio modem (16-FSK, same DSP as the desktop daemon) ---------------------
+
+/// Modulate one frame to 48 kHz mono f32 PCM for AudioTrack.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioModulate(
+    env: JNIEnv,
+    _class: JClass,
+    payload: JByteArray,
+) -> jfloatArray {
+    let p = env.convert_byte_array(&payload).unwrap_or_default();
+    let pcm = spore::bridge::audio::modulate(&p);
+    match env.new_float_array(pcm.len() as i32) {
+        Ok(arr) => {
+            let _ = env.set_float_array_region(&arr, 0, &pcm);
+            arr.into_raw()
+        }
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Feed captured mic PCM (48 kHz mono f32) into the streaming demodulator.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioDemodPush(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    samples: JFloatArray,
+) {
+    let len = env.get_array_length(&samples).unwrap_or(0) as usize;
+    if len == 0 {
+        return;
+    }
+    let mut buf = vec![0f32; len];
+    if env.get_float_array_region(&samples, 0, &mut buf).is_err() {
+        return;
+    }
+    let r = rt(ptr);
+    let frames = r.demod.lock().unwrap().push(&buf);
+    if !frames.is_empty() {
+        r.demod_out.lock().unwrap().extend(frames);
+    }
+}
+
+/// Pop one frame the demodulator completed, or null.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioDemodPop(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jbyteArray {
+    match rt(ptr).demod_out.lock().unwrap().pop_front() {
+        Some(f) => env.byte_array_from_slice(&f).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut()),
+        None => std::ptr::null_mut(),
+    }
+}
+
+// -- Meshtastic codec (same protobuf as the desktop bridge) -------------------
+
+/// Wrap an envelope as a Meshtastic MeshPacket (portnum 256) for BLE ToRadio.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeMeshtasticWrap(
+    env: JNIEnv,
+    _class: JClass,
+    env_wire: JByteArray,
+    from_node: jint,
+    packet_id: jint,
+) -> jbyteArray {
+    let w = env.convert_byte_array(&env_wire).unwrap_or_default();
+    let pkt = spore::bridge::meshtastic::encode(
+        &w,
+        from_node as u32,
+        spore::bridge::meshtastic::BROADCAST,
+        packet_id as u32,
+    );
+    env.byte_array_from_slice(&pkt).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Unwrap a MeshPacket; returns the SPORE envelope if it rides portnum 256,
+/// else null.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeMeshtasticUnwrap(
+    env: JNIEnv,
+    _class: JClass,
+    frame: JByteArray,
+) -> jbyteArray {
+    let f = env.convert_byte_array(&frame).unwrap_or_default();
+    match spore::bridge::meshtastic::decode(&f) {
+        Some((_from, port, payload)) if port == spore::bridge::meshtastic::PORT_PRIVATE_APP => {
+            env.byte_array_from_slice(&payload).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+        }
+        _ => std::ptr::null_mut(),
+    }
+}
+
+/// Receive-side fragmentation status as "idhex:have/count" lines joined by
+/// '\n' (empty string when nothing is reassembling) — the UI's "receiving X/N".
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFragStatus(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let rows = rt(ptr).hub.with_node(|n| n.frag_progress());
+    let s = rows
+        .iter()
+        .map(|(id, have, count)| {
+            let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
+            format!("{hex}:{have}/{count}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Start the plain limited-broadcast UDP bridge (255.255.255.255) — used on a
+/// Wi-Fi Direct group where the subnet-directed broadcast isn't discoverable.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdpLimited(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    port: jint,
+) {
+    let r = rt(ptr);
+    let (iface, rx) = r.hub.register();
+    let hub = r.hub.clone();
+    let port = if port > 0 { port as u16 } else { 7373 };
+    thread::spawn(move || {
+        let _ = spore::bridge::udp::run(hub, iface, rx, port);
+    });
 }

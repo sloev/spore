@@ -21,7 +21,7 @@ The emoji in each protocol's title tells you how far it is:
 | Icon | Meaning |
 |---|---|
 | ✅ | **Implemented & tested** — a Rust bridge or JS transport with automated tests in this repo. |
-| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware. |
+| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [`HARDWARE.md`](HARDWARE.md). |
 | 🟡 | **Partial** — a codec, framer, or IP-underlay path is present, but the end-to-end runner is not finished. |
 | ⚪ | **Planned** — a thin shim to write; the shared routing is already done. |
 

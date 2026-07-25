@@ -1,11 +1,16 @@
 name: android
 
-# Builds the SPORE Android APK: cross-compile the Rust JNI lib with cargo-ndk,
-# then assemble the app with Gradle. Uploads a debug APK artifact on every run,
-# and attaches it to a dated GitHub Release when a `v*` tag is pushed. A new
-# workflow file (not frozen); does not touch ci.yml / pr-guard.yml.
+# Builds the SPORE Android APK (Rust JNI via cargo-ndk + Gradle) and releases it:
+#   * push to master  -> a rolling pre-release "<current version>+<date>" at the
+#                        moving `rolling` tag (the current version is the latest
+#                        git tag; date is the build date).
+#   * push a v* tag    -> a normal release AT that tag — the next current version,
+#                        which rolling builds then track from.
+#   * pull_request     -> just build a debug APK artifact.
+# A new workflow file (not frozen); does not touch ci.yml / pr-guard.yml.
 on:
   push:
+    branches: [master]
     tags: ['v*']
   pull_request:
     paths:
@@ -16,13 +21,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # attach the APK to a release on tag
+  contents: write   # create/update releases and move the rolling tag
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need tags for `git describe` (the current version)
 
       - uses: actions/setup-java@v4
         with:
@@ -35,6 +42,22 @@ jobs:
         run: |
           yes | sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Compute version + release kind
+        id: ver
+        run: |
+          date=$(date -u +'%Y.%m.%d')
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            # Tagged: this tag IS the (next) current version.
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "kind=tagged" >> "$GITHUB_OUTPUT"
+          else
+            # Rolling: current version (latest tag, or v0.0) + build date.
+            cur=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0)
+            echo "name=${cur}+${date}" >> "$GITHUB_OUTPUT"
+            echo "kind=$([ "${{ github.event_name }}" = "push" ] && echo rolling || echo none)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "code=$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -59,28 +82,59 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Assemble debug APK
+      - name: Assemble APK (release for master/tags; debug for PRs)
         working-directory: android
-        # Always debug-signed (installable) until a release keystore is added to
-        # repo secrets; see android/PLAN.md.
-        run: gradle :app:assembleDebug
+        env:
+          # With a release keystore in secrets, release builds are properly
+          # signed; otherwise they fall back to the debug key so the APK is still
+          # installable. See android/app/build.gradle.kts.
+          SPORE_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SPORE_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          SPORE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SPORE_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+          SPORE_VERSION_NAME: ${{ steps.ver.outputs.name }}
+          SPORE_VERSION_CODE: ${{ steps.ver.outputs.code }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gradle :app:assembleDebug
+          else
+            gradle :app:assembleRelease
+          fi
 
-      - name: Locate the APK
+      - name: Locate + name the APK
         id: apk
         working-directory: android
-        run: echo "path=$(find app/build/outputs/apk -name '*.apk' | head -1)" >> "$GITHUB_OUTPUT"
+        run: |
+          src=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          out="spore-${{ steps.ver.outputs.name }}.apk"
+          cp "$src" "$out"
+          echo "path=android/$out" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
           name: spore-apk
-          path: android/${{ steps.apk.outputs.path }}
+          path: ${{ steps.apk.outputs.path }}
 
-      - name: Attach APK to release (on tag)
-        if: github.ref_type == 'tag'
+      - name: Rolling release (master)
+        if: steps.ver.outputs.kind == 'rolling'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rolling
+          name: SPORE rolling ${{ steps.ver.outputs.name }}
+          prerelease: true
+          make_latest: false
+          files: ${{ steps.apk.outputs.path }}
+          body: >
+            Rolling SPORE Android node — ${{ steps.ver.outputs.name }} (built from
+            master). Tracks the current version (latest tag) plus the build date;
+            updated on every merge. For a stable build see the latest tagged release.
+
+      - name: Tagged release (v*)
+        if: steps.ver.outputs.kind == 'tagged'
         uses: softprops/action-gh-release@v2
         with:
           name: SPORE ${{ github.ref_name }}
-          files: android/${{ steps.apk.outputs.path }}
+          files: ${{ steps.apk.outputs.path }}
           body: >
-            SPORE Android node — build ${{ github.ref_name }}.
-            Debug-signed until a release keystore is configured in repo secrets.
+            SPORE Android node — ${{ github.ref_name }}. The current version;
+            rolling master builds are versioned from it until the next tag.

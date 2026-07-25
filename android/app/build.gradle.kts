@@ -1,4 +1,5 @@
 import java.text.SimpleDateFormat
+import java.util.Base64
 import java.util.Date
 
 plugins {
@@ -7,11 +8,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Version = the build date (see android/PLAN.md). versionCode YYYYMMDD is
-// monotonic and well within the 2^31 limit for ~120 years.
+// Version comes from CI (SPORE_VERSION_NAME/CODE): "<current version>+<date>" on
+// rolling master builds, the tag on tagged releases (see .github/workflows/
+// android.yml). Falls back to the build date for local/PR builds. versionCode
+// YYYYMMDD is monotonic and well within the 2^31 limit for ~120 years.
 val buildDate: Date = Date()
-val dateName: String = SimpleDateFormat("yyyy.MM.dd").format(buildDate)
-val dateCode: Int = SimpleDateFormat("yyyyMMdd").format(buildDate).toInt()
+val dateName: String = System.getenv("SPORE_VERSION_NAME")
+    ?: SimpleDateFormat("yyyy.MM.dd").format(buildDate)
+val dateCode: Int = (System.getenv("SPORE_VERSION_CODE") ?: SimpleDateFormat("yyyyMMdd").format(buildDate)).toInt()
 
 android {
     namespace = "org.spore.node"
@@ -37,9 +41,27 @@ android {
         jvmTarget = "17"
     }
 
+    // Release signing: if CI provides a keystore (repo secrets, see
+    // .github/workflows/android.yml), sign with it; otherwise fall back to the
+    // debug key so a release build is always installable.
+    val ksB64 = System.getenv("SPORE_KEYSTORE_B64")
+    if (!ksB64.isNullOrBlank()) {
+        val ksFile = layout.buildDirectory.file("spore-release.keystore").get().asFile
+        ksFile.parentFile.mkdirs()
+        ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
+        signingConfigs.create("release") {
+            storeFile = ksFile
+            storePassword = System.getenv("SPORE_KEYSTORE_PASS") ?: ""
+            keyAlias = System.getenv("SPORE_KEY_ALIAS") ?: "spore"
+            keyPassword = System.getenv("SPORE_KEY_PASS") ?: (System.getenv("SPORE_KEYSTORE_PASS") ?: "")
+        }
+    }
+
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
+            signingConfig = if (!ksB64.isNullOrBlank()) signingConfigs.getByName("release")
+            else signingConfigs.getByName("debug")
         }
     }
 
@@ -47,6 +69,16 @@ android {
     // The Rust .so's are dropped into src/main/jniLibs/<abi>/ by cargo-ndk in CI
     // (see .github/workflows/android.yml); Gradle packages them from there.
 }
+
+// The headless-WebView bridges reuse the repo's real JS transports verbatim —
+// copied into assets at build time so browser and phone can't drift.
+val copyWebAssets by tasks.registering(Copy::class) {
+    from(project.file("../../web/transports")) {
+        include("websocket.mjs", "nostr.mjs", "webtorrent.mjs")
+    }
+    into(project.file("src/main/assets/webtransports"))
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(copyWebAssets) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.02")

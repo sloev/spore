@@ -1288,6 +1288,17 @@ impl Node {
         self.store.iter().map(|(id, s)| (*id, s.wire.clone())).collect()
     }
 
+    /// Receive-side fragmentation status: for each in-progress fountain
+    /// reassembly, `(original id, independent fragments held, total needed)` —
+    /// so a UI can show "receiving X/N".
+    pub fn frag_progress(&self) -> Vec<(Id, u8, u8)> {
+        self.frags
+            .iter()
+            .filter(|(_, f)| f.done.is_none())
+            .map(|(id, f)| (*id, f.rows.len() as u8, f.count as u8))
+            .collect()
+    }
+
     // ---- datagram sessions (§ application layer, tag 0x04) ---------------
 
     /// Open a UDP-like session to `peer` on `port`. Returns `None` until we've

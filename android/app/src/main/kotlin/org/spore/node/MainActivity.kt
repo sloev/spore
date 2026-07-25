@@ -3,8 +3,10 @@ package org.spore.node
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -34,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,9 +44,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,16 +61,42 @@ class MainActivity : ComponentActivity() {
 private sealed interface Screen
 private data object Chats : Screen
 private data class Chat(val peer: String) : Screen
+private data object Feed : Screen
 private data object BridgesScreen : Screen
+private data object Advanced : Screen
+
+// Kawaii-but-serious: Meshtastic-adjacent greens with a soft pastel accent.
+private val SporeLightColors = androidx.compose.material3.lightColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF2E7D4F),
+    secondary = androidx.compose.ui.graphics.Color(0xFF57C785),
+    tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE8F4EC),
+)
+private val SporeDarkColors = androidx.compose.material3.darkColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF57C785),
+    secondary = androidx.compose.ui.graphics.Color(0xFF7ADBA2),
+    tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
+)
+
+/** 🍄 with a brief sparkle whenever the node relays/receives (kawaii heartbeat). */
+@Composable
+private fun mascot(): String {
+    val tick by NodeController.relayTick.collectAsState()
+    var sparkle by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        if (tick != 0L) { sparkle = true; delay(1500); sparkle = false }
+    }
+    return if (sparkle) "🍄✨" else "🍄"
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App() {
-    MaterialTheme {
-        // Ask for notification permission on 33+ so the foreground node is visible.
-        val ctx = androidx.compose.ui.platform.LocalContext.current
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    MaterialTheme(colorScheme = if (dark) SporeDarkColors else SporeLightColors) {
+        val ctx = LocalContext.current
         val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-        androidx.compose.runtime.LaunchedEffect(Unit) {
+        LaunchedEffect(Unit) {
             if (Build.VERSION.SDK_INT >= 33 &&
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             ) ask.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -73,46 +104,67 @@ fun App() {
 
         var screen by remember { mutableStateOf<Screen>(Chats) }
         val addr by NodeController.address.collectAsState()
+        val m = mascot()
 
         Scaffold(
             topBar = {
                 TopAppBar(title = {
                     when (val s = screen) {
-                        is Chat -> Text("🍄 " + Petnames.label(s.peer))
-                        BridgesScreen -> Text("🍄 Bridges")
-                        else -> Text("🍄 SPORE")
+                        is Chat -> Text("$m ${Petnames.label(s.peer)}")
+                        Feed -> Text("$m Feed")
+                        BridgesScreen -> Text("$m Bridges")
+                        Advanced -> Text("$m Advanced")
+                        else -> Text("$m SPORE")
                     }
                 }, navigationIcon = {
-                    if (screen is Chat) {
+                    if (screen is Chat || screen == Advanced) {
                         IconButton(onClick = { screen = Chats }) { Text("←") }
+                    }
+                }, actions = {
+                    if (screen !is Chat && screen != Advanced) {
+                        IconButton(onClick = { screen = Advanced }) { Text("⚙") }
                     }
                 })
             },
             bottomBar = {
-                if (screen !is Chat) {
+                if (screen !is Chat && screen != Advanced) {
                     NavigationBar {
-                        NavigationBarItem(
-                            selected = screen == Chats,
-                            onClick = { screen = Chats },
-                            icon = {}, label = { Text("Chats") }
-                        )
-                        NavigationBarItem(
-                            selected = screen == BridgesScreen,
-                            onClick = { screen = BridgesScreen },
-                            icon = {}, label = { Text("Bridges") }
-                        )
+                        NavigationBarItem(selected = screen == Chats, onClick = { screen = Chats }, icon = {}, label = { Text("Chats") })
+                        NavigationBarItem(selected = screen == Feed, onClick = { screen = Feed }, icon = {}, label = { Text("Feed") })
+                        NavigationBarItem(selected = screen == BridgesScreen, onClick = { screen = BridgesScreen }, icon = {}, label = { Text("Bridges") })
                     }
                 }
             }
         ) { pad ->
             Column(Modifier.padding(pad).fillMaxSize()) {
+                ReceivingBar()
                 when (val s = screen) {
                     Chats -> ChatsList(addr) { screen = Chat(it) }
                     is Chat -> ChatDetail(s.peer)
+                    Feed -> FeedScreen()
                     BridgesScreen -> BridgesList()
+                    Advanced -> AdvancedScreen(addr)
                 }
             }
         }
+    }
+}
+
+/** Live receive-side fragmentation status ("receiving X/N"). */
+@Composable
+private fun ReceivingBar() {
+    val recv by NodeController.receiving.collectAsState()
+    if (recv.isNotBlank()) {
+        val lines = recv.lines().filter { it.isNotBlank() }
+        val label = lines.joinToString("  ·  ") { l ->
+            val p = l.substringAfter(':', "?")
+            "⇣ receiving $p"
+        }
+        Text(
+            label,
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -159,11 +211,23 @@ private fun ChatsList(addr: String, open: (String) -> Unit) {
 
 @Composable
 private fun ChatDetail(peer: String) {
+    val ctx = LocalContext.current
     val messages by NodeController.messages.collectAsState()
     val names by Petnames.map.collectAsState()
     var text by remember { mutableStateOf("") }
     var editingName by remember(peer) { mutableStateOf(names[peer] ?: "") }
     val thread = remember(messages, peer) { messages.filter { it.peer == peer } }
+
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && i >= 0) c.getString(i) else null
+            } ?: "file.bin"
+            val data = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (data != null) NodeController.sendFile(peer, name, data)
+        }
+    }
 
     Column(Modifier.padding(16.dp).fillMaxSize()) {
         if (peer != Petnames.PUBLIC) {
@@ -181,10 +245,13 @@ private fun ChatDetail(peer: String) {
             items(thread) { m ->
                 val who = if (m.mine) "you" else Petnames.label(m.peer)
                 val sig = if (!m.mine && !m.verified) "  ⚠ sig BAD" else ""
-                Text("${if (m.mine) "▶" else "◀"} $who: ${m.text}$sig", Modifier.padding(vertical = 2.dp))
+                val frag = if (m.mine && m.fragments > 1) "  ·  ⇡ ${m.fragments} fragments" else ""
+                Text("${if (m.mine) "▶" else "◀"} $who: ${m.text}$sig$frag", Modifier.padding(vertical = 2.dp))
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { pickFile.launch("*/*") }) { Text("📎") }
+            Spacer(Modifier.width(8.dp))
             OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
             Button(onClick = { NodeController.send(peer, text); text = "" }) { Text("Send") }
@@ -193,29 +260,264 @@ private fun ChatDetail(peer: String) {
 }
 
 @Composable
-private fun BridgesList() {
-    val bridges by NodeController.bridges.collectAsState()
-    var tcp by remember { mutableStateOf("") }
+private fun FeedScreen() {
+    val posts by NodeController.posts.collectAsState()
+    val topics by NodeController.topics.collectAsState()
+    var follow by remember { mutableStateOf("") }
+    var compose by remember { mutableStateOf("") }
+    var activeTopic by remember { mutableStateOf<String?>(null) }
+    val shown = remember(posts, activeTopic) {
+        if (activeTopic == null) posts else posts.filter { it.topic == activeTopic }
+    }
+
     Column(Modifier.padding(16.dp).fillMaxSize()) {
-        Text("Bridges relay your signed envelopes across every medium at once.", style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
-                value = tcp, onValueChange = { tcp = it },
-                label = { Text("add TCP (host:port, blank = listen)") }, modifier = Modifier.weight(1f)
+                value = follow, onValueChange = { follow = it },
+                label = { Text("follow a topic, e.g. spore/news") }, modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { NodeController.addTcp(tcp.trim()); tcp = "" }) { Text("Add") }
+            OutlinedButton(onClick = { NodeController.follow(follow); follow = "" }) { Text("Follow") }
         }
         Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(bridges) { b ->
-                Card(Modifier.fillMaxWidth()) {
+        LazyColumn(Modifier.fillMaxWidth().height(40.dp)) {
+            items(listOf<String?>(null) + topics) { t ->
+                Text(
+                    if (t == null) "all" else "#$t",
+                    Modifier.padding(end = 12.dp).clickable { activeTopic = t },
+                    style = if (activeTopic == t) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        if (shown.isEmpty()) {
+            Text("nothing sprouting here yet 🌱", Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center)
+        }
+        LazyColumn(Modifier.weight(1f)) {
+            items(shown.asReversed()) { p ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Column(Modifier.padding(12.dp)) {
-                        Text("${b.kind} · ${b.status}", style = MaterialTheme.typography.titleSmall)
-                        Text(b.detail, style = MaterialTheme.typography.bodySmall)
+                        Text("#${p.topic} · ${Petnames.label(p.author)}${if (!p.verified) " ⚠" else ""}", style = MaterialTheme.typography.bodySmall)
+                        Text(p.text)
                     }
                 }
+            }
+        }
+        val target = activeTopic ?: topics.firstOrNull()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = compose, onValueChange = { compose = it },
+                label = { Text(if (target != null) "post to #$target" else "follow a topic first") },
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { if (target != null) { NodeController.post(target, compose); compose = "" } },
+                enabled = target != null
+            ) { Text("Post") }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedScreen(addr: String) {
+    val ctx = LocalContext.current
+    val topics by NodeController.topics.collectAsState()
+    var showSeed by remember { mutableStateOf(false) }
+    Column(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Identity", style = MaterialTheme.typography.titleSmall)
+                Text("address: $addr", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "followed topics: ${if (topics.isEmpty()) "—" else topics.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Seed (your whole identity)", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Anyone holding these 32 bytes IS this node. Only reveal to move " +
+                        "your identity to another device.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                if (!showSeed) {
+                    OutlinedButton(onClick = { showSeed = true }) { Text("Reveal seed") }
+                } else {
+                    val seedHex = remember {
+                        ctx.getSharedPreferences("spore", android.content.Context.MODE_PRIVATE)
+                            .getString("seed", null)
+                            ?.let { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }
+                            ?.joinToString("") { b -> "%02x".format(b) } ?: "unavailable"
+                    }
+                    Text(seedHex, style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { showSeed = false }) { Text("Hide") }
+                }
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("About", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "SPORE — store-and-forward planetary opportunistic relay envelope. " +
+                        "This phone is a full node: it signs, relays, and delivers across " +
+                        "every enabled bridge. Public domain. 🍄",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BridgesList() {
+    val ctx = LocalContext.current
+    val bridges by NodeController.bridges.collectAsState()
+    var tcp by remember { mutableStateOf("") }
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val askPerms = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.all { it }) pendingAction?.invoke()
+        pendingAction = null
+    }
+
+    fun withPerms(perms: List<String>, action: () -> Unit) {
+        val missing = perms.filter {
+            ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) action()
+        else { pendingAction = action; askPerms.launch(missing.toTypedArray()) }
+    }
+
+    fun bonded(): List<android.bluetooth.BluetoothDevice> = try {
+        val bt = ctx.getSystemService(android.bluetooth.BluetoothManager::class.java)
+        bt?.adapter?.bondedDevices?.toList() ?: emptyList()
+    } catch (_: SecurityException) { emptyList() }
+
+    val blePerms = if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList()
+    val wifiP2pPerms =
+        if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+        else listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    var showMeshPick by remember { mutableStateOf(false) }
+    var showRnodePick by remember { mutableStateOf(false) }
+    var freq by remember { mutableStateOf("867.2") }
+    var bw by remember { mutableStateOf("125") }
+    var sf by remember { mutableStateOf("8") }
+    var cr by remember { mutableStateOf("5") }
+    var tx by remember { mutableStateOf("0") }
+
+    LazyColumn(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Text(
+                "Bridges relay your signed envelopes across every medium at once. 🍄",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        items(bridges) { b ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("${b.kind} · ${b.status}", style = MaterialTheme.typography.titleSmall)
+                    Text(b.detail, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = tcp, onValueChange = { tcp = it },
+                    label = { Text("TCP host:port (blank = listen)") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addTcp(tcp.trim()); tcp = "" }) { Text("Add") }
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(listOf(Manifest.permission.RECORD_AUDIO)) { NodeController.enableAudio() }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Enable audio modem (mic + speaker)") }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(blePerms) { showMeshPick = !showMeshPick }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Add Meshtastic radio (paired BLE)") }
+        }
+        if (showMeshPick) {
+            items(bonded()) { d ->
+                Card(Modifier.fillMaxWidth().clickable {
+                    NodeController.enableMeshtasticBle(ctx, d); showMeshPick = false
+                }) { Text("📻 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", Modifier.padding(12.dp)) }
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(blePerms) { showRnodePick = !showRnodePick }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Add Reticulum RNode (paired BLE)") }
+        }
+        if (showRnodePick) {
+            item {
+                Row {
+                    OutlinedTextField(freq, { freq = it }, label = { Text("MHz") }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(bw, { bw = it }, label = { Text("kHz") }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(sf, { sf = it }, label = { Text("SF") }, modifier = Modifier.weight(0.7f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(cr, { cr = it }, label = { Text("CR") }, modifier = Modifier.weight(0.7f))
+                    Spacer(Modifier.width(4.dp))
+                    OutlinedTextField(tx, { tx = it }, label = { Text("dBm") }, modifier = Modifier.weight(0.7f))
+                }
+            }
+            items(bonded()) { d ->
+                Card(Modifier.fillMaxWidth().clickable {
+                    val f = ((freq.toDoubleOrNull() ?: 867.2) * 1e6).toLong()
+                    val b = ((bw.toDoubleOrNull() ?: 125.0) * 1e3).toLong()
+                    NodeController.enableRNodeBle(
+                        ctx, d, f, b, sf.toIntOrNull() ?: 8, cr.toIntOrNull() ?: 5, tx.toIntOrNull() ?: 0
+                    )
+                    showRnodePick = false
+                }) { Text("📡 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", Modifier.padding(12.dp)) }
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                withPerms(wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Enable Wi-Fi Direct group") }
+        }
+        item {
+            var ws by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = ws, onValueChange = { ws = it },
+                    label = { Text("WebSocket relay wss://…") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addWebSocket(ctx, ws); ws = "" }) { Text("Add") }
+            }
+        }
+        item {
+            var nostr by remember { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = nostr, onValueChange = { nostr = it },
+                    label = { Text("Nostr relay wss://… (rx-only)") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addNostr(ctx, nostr); nostr = "" }) { Text("Add") }
+            }
+        }
+        item {
+            var swarm by remember { mutableStateOf("spore/public") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = swarm, onValueChange = { swarm = it },
+                    label = { Text("WebTorrent swarm name") }, modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { NodeController.addWebTorrent(ctx, swarm) }) { Text("Join") }
             }
         }
     }

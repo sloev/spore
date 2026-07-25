@@ -4,7 +4,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -14,12 +16,27 @@ import androidx.core.app.NotificationCompat
  * only reliable way to keep networking running on modern Android.
  */
 class NodeService : Service() {
+    private var multicastLock: WifiManager.MulticastLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification())
+        // UDP broadcast frames are dropped by most Wi-Fi chips unless this is held.
+        if (multicastLock == null) {
+            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("spore")?.also {
+                it.setReferenceCounted(false)
+                it.acquire()
+            }
+        }
         NodeController.start(applicationContext)
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        try { multicastLock?.release() } catch (_: Exception) {}
+        super.onDestroy()
     }
 
     private fun buildNotification(): Notification {

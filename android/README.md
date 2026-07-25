@@ -2,13 +2,19 @@
 
 A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design.
 
-> **Status: M0 + M1.** A node in a foreground service (identity persisted),
-> the **UDP broadcast** and **TCP** bridges, **petnames**, per-peer **conversations**
-> with a compose box, and a **Bridges** screen. The Rust core + JNI are
-> host-`cargo check`ed in CI; the Kotlin/Compose app is proven by the `android` CI
-> workflow (APK build). Milestones M2–M5 (audio/BLE/Wi-Fi-Direct, the WebView web
-> bridges, feed + files with fragment status, kawaii polish + signed release)
-> follow the plan.
+> **Status: M0–M5 (all milestones).** A full node in a foreground service with a
+> stable persisted identity, and every planned bridge: **UDP broadcast, TCP,
+> audio modem, BT-Meshtastic, BT-Reticulum (RNode), Wi-Fi Direct**, and the
+> web-origin bridges (**WebSocket, Nostr, WebTorrent**) via a headless WebView.
+> UI: per-peer **conversations** with **petnames** and **file sharing**, a
+> microblog **Feed**, live **fragment status** both ways, a **Bridges** screen
+> with permission-gated toggles, and an **Advanced** screen (identity / seed
+> export). Kawaii green theme + a mascot that sparkles when the mesh breathes.
+>
+> The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
+> Kotlin/Compose app is proven to build by the `android` CI workflow. The
+> hardware-dependent paths (radios, BLE, mic, live peers) are honest templates —
+> verify them with [`docs/HARDWARE.md`](../docs/HARDWARE.md).
 
 ## Layout
 
@@ -51,10 +57,16 @@ cd android/jni && cargo check
 ## CI + releases
 
 `.github/workflows/android.yml` builds the `.so`s with cargo-ndk and assembles the
-APK on every android/core change, uploading a **debug APK artifact**. Pushing a
-`vYYYY.MM.DD` tag attaches the APK to a GitHub Release. The app **versions itself by
-build date** (`versionName = YYYY.MM.DD`, `versionCode = YYYYMMDD`).
+APK. Releases come two ways:
 
+- **Rolling** — every push to `master` updates a pre-release at the moving
+  `rolling` tag, versioned **`<current version>+<date>`** (current version = the
+  latest git tag; date = build date), e.g. `v0.1+2026.07.24`. This is always the
+  newest master build.
+- **Tagged** — push a `v*` tag to cut a stable release at that tag (the next
+  current version). Rolling builds then version from it.
+
+PRs build a debug APK artifact only. `versionCode` is `YYYYMMDD` (monotonic).
 Release builds stay **debug-signed** until a release keystore is added to repo
-secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, key/store passwords); the
-plan's M5 wires those in.
+secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASS`,
+`ANDROID_KEY_PASS`).

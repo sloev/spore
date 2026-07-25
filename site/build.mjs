@@ -23,6 +23,7 @@ const pages = [
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
   // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
+  ['docs/HARDWARE.md', 'hardware.html', null],
   ['bindings/README.md', 'bindings.html', null],
   ['reference/README.md', 'reference.html', null],
   ['web/README.md', 'webguide.html', null],
