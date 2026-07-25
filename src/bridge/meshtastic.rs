@@ -245,3 +245,271 @@ pub fn run(
     let t = Mesh { sock, dst, my_node, rng: my_node ^ 0x9e37_79b9 };
     crate::bridge::driver::run_datagram(hub, iface, rx, t)
 }
+
+// ---------------------------------------------------------------------------
+// Serial / USB — Meshtastic's stream API.
+//
+// The same MeshPacket codec as the UDP path; only the pipe differs. On serial a
+// packet is wrapped in a `ToRadio` (outbound) or arrives inside a `FromRadio`
+// (inbound), and each is framed `0x94 0xc3 <len:u16 be> <body>`. The device
+// interleaves plain-text debug logs on the same line, so the de-framer
+// resynchronises on the magic rather than assuming it is at the start.
+// ---------------------------------------------------------------------------
+
+/// Stream API frame magic, first byte.
+pub const STREAM_START1: u8 = 0x94;
+/// Stream API frame magic, second byte.
+pub const STREAM_START2: u8 = 0xc3;
+/// Longest body the firmware will emit; anything claiming more is not a header.
+pub const STREAM_MAX_LEN: usize = 512;
+
+/// Frame a MeshPacket as a `ToRadio` for the serial stream.
+pub fn stream_encode(pkt: &[u8]) -> Vec<u8> {
+    let mut to_radio = Vec::new();
+    put_bytes(&mut to_radio, 1, pkt); // ToRadio.packet = 1
+    let mut out = Vec::with_capacity(4 + to_radio.len());
+    out.push(STREAM_START1);
+    out.push(STREAM_START2);
+    out.extend_from_slice(&(to_radio.len() as u16).to_be_bytes());
+    out.extend_from_slice(&to_radio);
+    out
+}
+
+/// Pull the `MeshPacket` out of a `FromRadio` body (field 2), if it has one.
+/// Other `FromRadio` variants — config, node info, log records — return `None`.
+pub fn from_radio_packet(body: &[u8]) -> Option<Vec<u8>> {
+    let mut o = 0usize;
+    while o < body.len() {
+        let (tag, no) = get_varint(body, o)?;
+        o = no;
+        let (field, wire) = ((tag >> 3) as u32, (tag & 7) as u8);
+        match wire {
+            0 => o = get_varint(body, o)?.1,
+            5 => o = o.checked_add(4)?,
+            1 => o = o.checked_add(8)?,
+            2 => {
+                let (len, no) = get_varint(body, o)?;
+                let (start, len) = (no, len as usize);
+                let end = start.checked_add(len)?;
+                if end > body.len() {
+                    return None;
+                }
+                if field == 2 {
+                    return Some(body[start..end].to_vec());
+                }
+                o = end;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Streaming de-framer for the serial link.
+#[derive(Default)]
+pub struct StreamFramer {
+    buf: Vec<u8>,
+}
+
+impl StreamFramer {
+    pub fn new() -> StreamFramer {
+        StreamFramer { buf: Vec::new() }
+    }
+
+    /// Feed freshly read bytes; returns every complete frame body they finished.
+    /// Debug-log text between frames is skipped, and a length that could not be
+    /// real is treated as a coincidence in that text rather than a frame.
+    pub fn push(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
+        self.buf.extend_from_slice(bytes);
+        let mut out = Vec::new();
+        loop {
+            let magic = self.buf.windows(2).position(|w| w[0] == STREAM_START1 && w[1] == STREAM_START2);
+            let Some(i) = magic else {
+                // No frame is starting. Keep only a trailing byte, which might
+                // be the first half of a magic split across two reads.
+                if self.buf.len() > 1 {
+                    self.buf.drain(..self.buf.len() - 1);
+                }
+                return out;
+            };
+            if i > 0 {
+                self.buf.drain(..i); // drop the log noise ahead of it
+            }
+            if self.buf.len() < 4 {
+                return out; // header still arriving
+            }
+            let len = u16::from_be_bytes([self.buf[2], self.buf[3]]) as usize;
+            if len > STREAM_MAX_LEN {
+                self.buf.drain(..2); // not a header after all — resync past it
+                continue;
+            }
+            if self.buf.len() < 4 + len {
+                return out; // body still arriving
+            }
+            out.push(self.buf[4..4 + len].to_vec());
+            self.buf.drain(..4 + len);
+        }
+    }
+}
+
+/// Bridge a Meshtastic device over any byte stream: read `FromRadio` frames from
+/// `r`, write `ToRadio` frames to `w`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_stream<R, W>(
+    hub: crate::bridge::hub::Shared,
+    iface: crate::Iface,
+    rx: std::sync::mpsc::Receiver<crate::Forward>,
+    mut r: R,
+    mut w: W,
+) -> std::io::Result<()>
+where
+    R: std::io::Read + Send + 'static,
+    W: std::io::Write,
+{
+    // A LoRa packet is 237 bytes; anything bigger has to be fountain-fragmented
+    // by the core rather than discovered at the radio.
+    hub.with_node(|n| n.mtu = n.mtu.min(237));
+
+    let a = hub.addr();
+    let my_node = u32::from_be_bytes([a[0], a[1], a[2], a[3]]);
+
+    // Reader thread: FromRadio frames → the shared node.
+    let rhub = hub.clone();
+    std::thread::spawn(move || {
+        let mut framer = StreamFramer::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match r.read(&mut buf) {
+                Ok(0) | Err(_) => break, // device unplugged or pipe closed
+                Ok(n) => {
+                    for body in framer.push(&buf[..n]) {
+                        let Some(pkt) = from_radio_packet(&body) else { continue };
+                        // Only our port, and never our own packet echoed back.
+                        if let Some((from, port, payload)) = decode(&pkt) {
+                            if port == PORT_PRIVATE_APP && from != my_node && !payload.is_empty() {
+                                rhub.on_rx(iface, &payload, None);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Main loop: outbound forwards → ToRadio frames. `recv` blocks, so this
+    // never busy-waits.
+    let mut rng = my_node ^ 0x9e37_79b9;
+    loop {
+        let Ok(f) = rx.recv() else { return Ok(()) }; // hub gone
+        let (crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. }) = f;
+        rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+        let pkt = encode(&bytes, my_node, BROADCAST, rng);
+        w.write_all(&stream_encode(&pkt))?;
+        w.flush()?;
+    }
+}
+
+/// Bridge a Meshtastic device on a serial port, by path.
+///
+/// The line must already be configured — this deliberately links no termios, in
+/// keeping with the audio bridge taking PCM on a pipe rather than owning a sound
+/// card. On Linux: `stty -F /dev/ttyUSB0 115200 raw -echo` first.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_serial(
+    hub: crate::bridge::hub::Shared,
+    iface: crate::Iface,
+    rx: std::sync::mpsc::Receiver<crate::Forward>,
+    path: &str,
+) -> std::io::Result<()> {
+    let r = std::fs::File::open(path)?;
+    let w = std::fs::OpenOptions::new().write(true).open(path)?;
+    println!("  [meshtastic] iface {iface} on {path} (stream API, 237-byte MTU)");
+    run_stream(hub, iface, rx, r, w)
+}
+
+/// Bridge a Meshtastic device over stdin/stdout, so any external tool can supply
+/// the port (`socat`, `cu`, an ssh tunnel to a remote radio).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_pipe(
+    hub: crate::bridge::hub::Shared,
+    iface: crate::Iface,
+    rx: std::sync::mpsc::Receiver<crate::Forward>,
+) -> std::io::Result<()> {
+    eprintln!("  [meshtastic] iface {iface} — stream API on stdin/stdout");
+    run_stream(hub, iface, rx, std::io::stdin(), std::io::stdout())
+}
+
+#[cfg(test)]
+mod serial_tests {
+    use super::*;
+
+    #[test]
+    fn a_packet_survives_the_serial_framing_both_ways() {
+        let env: &[u8] = &[1, 2, 3, 0x94, 0xc3, 0, 255];
+        let pkt = encode(env, 0xdead_beef, BROADCAST, 7);
+        let framed = stream_encode(&pkt);
+        assert_eq!(&framed[..2], &[STREAM_START1, STREAM_START2]);
+
+        // The device echoes a MeshPacket back inside a FromRadio (field 2).
+        let mut from_radio = Vec::new();
+        put_bytes(&mut from_radio, 2, &pkt);
+        let mut wire = vec![STREAM_START1, STREAM_START2];
+        wire.extend_from_slice(&(from_radio.len() as u16).to_be_bytes());
+        wire.extend_from_slice(&from_radio);
+
+        let mut framer = StreamFramer::new();
+        let bodies = framer.push(&wire);
+        assert_eq!(bodies.len(), 1);
+        let got = from_radio_packet(&bodies[0]).expect("a FromRadio carrying a packet");
+        let (from, port, payload) = decode(&got).expect("decodes");
+        assert_eq!(from, 0xdead_beef);
+        assert_eq!(port, PORT_PRIVATE_APP);
+        assert_eq!(payload, env);
+    }
+
+    #[test]
+    fn the_deframer_resynchronises_past_the_devices_debug_logs() {
+        let pkt = encode(b"hello", 1, BROADCAST, 1);
+        let mut from_radio = Vec::new();
+        put_bytes(&mut from_radio, 2, &pkt);
+        let mut frame = vec![STREAM_START1, STREAM_START2];
+        frame.extend_from_slice(&(from_radio.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&from_radio);
+
+        let mut wire = b"INFO  | Radio init\n".to_vec(); // logs share the line
+        wire.extend_from_slice(&frame);
+        wire.extend_from_slice(b"DEBUG | sent\n");
+
+        // Split every byte into its own read: the framer must not care.
+        let mut framer = StreamFramer::new();
+        let mut bodies = Vec::new();
+        for b in &wire {
+            bodies.extend(framer.push(&[*b]));
+        }
+        assert_eq!(bodies.len(), 1, "one frame, found among the noise");
+        assert!(from_radio_packet(&bodies[0]).is_some());
+
+        // Trailing text must not accumulate without bound.
+        for _ in 0..1000 {
+            framer.push(b"chatter chatter chatter\n");
+        }
+        assert!(framer.buf.len() <= 1, "log noise cannot grow the buffer");
+    }
+
+    #[test]
+    fn a_bogus_length_is_treated_as_coincidence_not_a_frame() {
+        // 0x94 0xc3 can appear inside log text; a length past the firmware's
+        // maximum is the tell.
+        let mut framer = StreamFramer::new();
+        let mut wire = vec![STREAM_START1, STREAM_START2, 0xff, 0xff];
+        let pkt = encode(b"real", 1, BROADCAST, 1);
+        let mut from_radio = Vec::new();
+        put_bytes(&mut from_radio, 2, &pkt);
+        wire.extend_from_slice(&[STREAM_START1, STREAM_START2]);
+        wire.extend_from_slice(&(from_radio.len() as u16).to_be_bytes());
+        wire.extend_from_slice(&from_radio);
+
+        let bodies = framer.push(&wire);
+        assert_eq!(bodies.len(), 1, "resynced onto the real frame behind it");
+    }
+}

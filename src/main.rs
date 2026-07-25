@@ -358,6 +358,7 @@ enum Spec {
     Tcp(Option<String>),
     Folder(std::path::PathBuf),
     Meshtastic,
+    MeshtasticSerial(Option<String>),
     Http(u16),
     Audio,
     Reticulum,
@@ -452,6 +453,10 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "http" => Ok(Spec::Http(v.parse().map_err(|_| format!("bad http port `{v}`"))?)),
             "ssb" if !v.is_empty() => Ok(Spec::Ssb(v.into())),
             "ssb" => Err("`ssb:` needs a log directory".into()),
+            "meshtastic-serial" | "mesh-serial" if !v.is_empty() => {
+                Ok(Spec::MeshtasticSerial(Some(v.to_string())))
+            }
+            "meshtastic-serial" | "mesh-serial" => Ok(Spec::MeshtasticSerial(None)),
             other => Err(format!("unknown bridge `{other}`")),
         }
     } else {
@@ -460,6 +465,7 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "broadcast" | "lan" => Ok(Spec::Broadcast(None)),
             "tcp" => Ok(Spec::Tcp(None)),
             "meshtastic" | "mesh" => Ok(Spec::Meshtastic),
+            "meshtastic-serial" | "mesh-serial" => Ok(Spec::MeshtasticSerial(None)),
             "http" => Ok(Spec::Http(7373)),
             "audio" | "sound" => Ok(Spec::Audio),
             "reticulum" | "rns" => Ok(Spec::Reticulum),
@@ -538,9 +544,21 @@ fn run_config(cfg: Config) {
                 })
             }
             Spec::Meshtastic => {
-                let (iface, rx) = hub.register();
+                let (iface, rx) = hub.register_limited(spore::bridge::meshtastic::BULK_BYTES_PER_SEC);
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::meshtastic::run(h, iface, rx) {
+                        eprintln!("  [meshtastic] {e}");
+                    }
+                })
+            }
+            Spec::MeshtasticSerial(path) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::meshtastic::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    let r = match &path {
+                        Some(p) => spore::bridge::meshtastic::run_serial(h, iface, rx, p),
+                        None => spore::bridge::meshtastic::run_pipe(h, iface, rx),
+                    };
+                    if let Err(e) = r {
                         eprintln!("  [meshtastic] {e}");
                     }
                 })
@@ -554,7 +572,7 @@ fn run_config(cfg: Config) {
                 })
             }
             Spec::Audio => {
-                let (iface, rx) = hub.register();
+                let (iface, rx) = hub.register_limited(spore::bridge::audio::BULK_BYTES_PER_SEC);
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::audio::run_pipe(h, iface, rx) {
                         eprintln!("  [audio] {e}");
@@ -562,7 +580,7 @@ fn run_config(cfg: Config) {
                 })
             }
             Spec::Reticulum => {
-                let (iface, rx) = hub.register();
+                let (iface, rx) = hub.register_limited(spore::bridge::reticulum::BULK_BYTES_PER_SEC);
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::reticulum::run_pipe(h, iface, rx) {
                         eprintln!("  [reticulum] {e}");

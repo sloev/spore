@@ -312,6 +312,15 @@ own replies back — so the radio mesh carries your traffic for miles, and SPORE
 sees "one more link." Messages are automatically chopped to fit the radio's small
 packet size.
 
+No Wi-Fi on the radio? Plug it in over USB instead — same codec, different pipe:
+
+```sh
+stty -F /dev/ttyUSB0 115200 raw -echo
+spore meshtastic-serial:/dev/ttyUSB0
+# …or let another tool own the port:
+socat /dev/ttyUSB0,b115200,raw - | spore meshtastic-serial
+```
+
 <details>
 <summary>Deep dive: how the bridge works, and what to check before trusting it</summary>
 
