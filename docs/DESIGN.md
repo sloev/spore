@@ -70,6 +70,7 @@ that the message is addressed to.
 | `0x06` | receipt/ACK (spec §8) | ✅ implemented |
 | `0x07` | file chunk | ✅ implemented |
 | `0x08` | file manifest (interior — names manifests) | ✅ implemented |
+| `0x09` | file manifest (sealed root — per-chunk encryption) | ✅ implemented |
 | `'O'` (0x4F) | mix onion (spec §9) | ✅ implemented |
 
 Fragments are the one exception: they're recognised by the `FRAGMENT` header flag,
@@ -182,6 +183,26 @@ let forwards = node.fetch(&magnet);   // one frame of WANT; verify on arrival
 let file = node.file_bytes(&magnet);  // Some(bytes) once complete
 node.write_file_to(&magnet, &mut f)?; // …or stream it, one chunk in memory
 ```
+
+**Sealing to one recipient.** `publish_file_sealed` encrypts **each chunk on its
+own** under a per-file key, and seals that key — with the real file name — into
+the root manifest's header:
+
+```
+sealed root = SIGNED [0x09][depth:1][hdr_len:2][hdr][file_id:16][chunk_size:4][count:4][total_len:8][name_len:2]["sealed"][id:16 × count]
+        hdr = seal([key:32][name_len:2][name], recipient prekey)
+      chunk = [0x07][file_id:16][index:4][ XChaCha20-Poly1305(key, nonce = index, plaintext) ]
+```
+
+The key is fresh per file, so the chunk index is a safe nonce and costs 24 bytes
+less than a random one — leaving only the 16-byte tag, which the chunk size
+already had room for. **A sealed chunk therefore rides exactly the frame an open
+one does.** The recipient decrypts a chunk at a time straight to disk, so a
+sealed file costs one chunk of memory rather than all of it, and `total_len`
+stays the plaintext length so progress means what it says. Relays carrying the
+chunks learn neither the contents nor the name; interior manifests carry nothing
+but hashes, so they are never sealed. Files sealed the older whole-blob way still
+open — `open_file` keeps that path.
 
 **What bounds a file now.** Not the wire format. Every chunk lives in the store, so
 the practical ceiling is `max_storable_file_bytes()` — half the store budget,

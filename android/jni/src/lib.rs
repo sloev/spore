@@ -872,6 +872,65 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFetchFile(
     r.hub.originate(forwards);
 }
 
+/// The file's real name, decrypted from the sealed header when it was sealed to
+/// us. Null if we don't know it, or it was sealed to someone else. Does not
+/// touch the file's bytes.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeFileName(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    magnet_hex: JString,
+) -> jni::sys::jstring {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let s: String = match env.get_string(&magnet_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let Some(magnet) = id_from_hex(&s) else {
+        return std::ptr::null_mut();
+    };
+    let Some(name) = r.hub.with_node(|n| n.file_name(&magnet)) else {
+        return std::ptr::null_mut();
+    };
+    env.new_string(name).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Write a completed file straight to `path`, decrypting as it goes, and return
+/// the bytes written (-1 on failure). Nothing larger than one chunk is ever held
+/// in memory, and the bytes never cross into the JVM heap — which is the whole
+/// point of having it here rather than returning an array.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSaveFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    magnet_hex: JString,
+    path: JString,
+) -> jlong {
+    let Some(r) = rt(ptr) else { return -1 };
+    let (Ok(magnet_s), Ok(path_s)) = (env.get_string(&magnet_hex), env.get_string(&path)) else {
+        return -1;
+    };
+    let (magnet_s, path_s): (String, String) = (magnet_s.into(), path_s.into());
+    let Some(magnet) = id_from_hex(&magnet_s) else { return -1 };
+
+    let Ok(f) = std::fs::File::create(&path_s) else { return -1 };
+    let mut w = std::io::BufWriter::new(f);
+    let written = r.hub.with_node(|n| n.open_file_to(&magnet, &mut w)).map(|(_, n)| n);
+    let flushed = std::io::Write::flush(&mut w).is_ok();
+    match written {
+        Some(n) if flushed => n as jlong,
+        // Don't leave a half-written file behind looking like the real thing.
+        _ => {
+            let _ = std::fs::remove_file(&path_s);
+            -1
+        }
+    }
+}
+
 /// A complete file as `u16 nameLen · name · bytes`, decrypted if it was sealed
 /// to us. Null while chunks are missing, or if it was sealed to someone else.
 #[no_mangle]

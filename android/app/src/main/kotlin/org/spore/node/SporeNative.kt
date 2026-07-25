@@ -117,6 +117,12 @@ object SporeNative {
     /** A complete file as u16 nameLen · name · bytes (decrypted), else null. */
     external fun nativeOpenFile(ptr: Long, magnetHex: String): ByteArray?
 
+    /** The file's real name (decrypted if sealed to us), without its bytes. */
+    external fun nativeFileName(ptr: Long, magnetHex: String): String?
+
+    /** Write a complete file to `path`, decrypting as it streams. -1 on failure. */
+    external fun nativeSaveFile(ptr: Long, magnetHex: String, path: String): Long
+
     /** Direct message: sealed when possible + receipt requested. "idhex:1|0". */
     external fun nativeSendDirect(ptr: Long, dest: ByteArray, payload: ByteArray): String?
 

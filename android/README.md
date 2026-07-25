@@ -34,7 +34,8 @@ A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design
 > manifests nest into a tree, so file size is bounded by what the phone will
 > store (64 MB by default, ~30 MB per file), not by the wire format. To a known
 > peer a file is **sealed**: contents *and* file name, so relays carrying the
-> chunks learn neither.
+> chunks learn neither. Sealing is per chunk, and the core writes a received file
+> straight to disk as it decrypts, so the bytes never pass through the JVM heap.
 >
 > The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
 > Kotlin/Compose app is proven to build by the `android` CI workflow. The

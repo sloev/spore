@@ -578,6 +578,32 @@ pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
 /// learns nothing but "some sealed file".
 pub const SEALED_FILE_NAME: &str = "sealed";
 
+/// Encrypt one chunk of a sealed file under that file's key.
+///
+/// The key is freshly generated per file, so the chunk index is a safe nonce —
+/// no two chunks can ever share one, and a counter costs 24 fewer bytes per
+/// chunk than a random nonce would. Adds only the 16-byte tag, which is what
+/// lets a sealed chunk keep riding the same frame an unsealed one does.
+fn chunk_seal(plain: &[u8], key: &[u8; 32], index: u32) -> Vec<u8> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    let mut nonce = [0u8; 24];
+    nonce[20..].copy_from_slice(&index.to_be_bytes());
+    XChaCha20Poly1305::new(Key::from_slice(key))
+        .encrypt(XNonce::from_slice(&nonce), plain)
+        .expect("chunk seal")
+}
+
+/// Open one chunk of a sealed file. `None` if the key or index is wrong, or the
+/// bytes were tampered with — the tag makes every chunk self-checking.
+fn chunk_open(ct: &[u8], key: &[u8; 32], index: u32) -> Option<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    let mut nonce = [0u8; 24];
+    nonce[20..].copy_from_slice(&index.to_be_bytes());
+    XChaCha20Poly1305::new(Key::from_slice(key)).decrypt(XNonce::from_slice(&nonce), ct).ok()
+}
+
 /// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`
 /// (X25519, the same kind a `Node` rotates in its ANNOUNCE).
 pub fn prekey_keypair() -> ([u8; 32], [u8; 32]) {
@@ -1194,7 +1220,10 @@ impl Node {
         // ride a per-file topic nobody subscribes to, and are unsigned besides.
         if deliverable
             && e.typ == ty::DATA
-            && matches!(e.payload.first(), Some(&file::MANIFEST_TAG) | Some(&file::TREE_TAG))
+            && matches!(
+                e.payload.first(),
+                Some(&file::MANIFEST_TAG) | Some(&file::TREE_TAG) | Some(&file::SEALED_TAG)
+            )
         {
             self.absorb_manifest(e);
         }
@@ -1470,6 +1499,24 @@ impl Node {
     /// manifests whose root is still a single 16-byte magnet. Files small enough
     /// for one manifest produce exactly the bytes they always did.
     pub fn publish_file(&mut self, name: &str, bytes: &[u8], dest: Addr, now: u32) -> (Id, Vec<Forward>) {
+        self.publish_object(name, bytes, dest, now, None, Vec::new())
+    }
+
+    /// The shared body of [`Node::publish_file`] and
+    /// [`Node::publish_file_sealed`]: chunk, encrypt the chunks if there is a
+    /// key, grow interior levels until what remains fits the signed root.
+    ///
+    /// Sealing changes only what goes *inside* a chunk. The tree above is the
+    /// same shape either way, because it carries nothing but hashes.
+    fn publish_object(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        dest: Addr,
+        now: u32,
+        key: Option<&[u8; 32]>,
+        sealed_hdr: Vec<u8>,
+    ) -> (Id, Vec<Forward>) {
         let chunk_size = self.mtu.saturating_sub(64).max(1);
         let count = bytes.len().div_ceil(chunk_size).max(1);
         let expiry = now + 7 * 86400;
@@ -1479,16 +1526,22 @@ impl Node {
         let mut ft = [0u8; 8];
         ft.copy_from_slice(&Sha256::digest(file_id)[..8]);
 
-        // (id, bytes of file covered) for the level we are currently grouping.
+        // (id, plaintext bytes of file covered) for the level being grouped.
         let mut level: Vec<(Id, u64)> = Vec::with_capacity(count);
         for i in 0..count {
             let start = i * chunk_size;
             let end = ((i + 1) * chunk_size).min(bytes.len());
-            let mut payload = Vec::with_capacity(21 + (end - start));
+            // The AEAD tag adds 16 bytes, which the chunk size already has room
+            // for — a sealed chunk rides the same frame an open one does.
+            let body = match key {
+                Some(k) => chunk_seal(&bytes[start..end], k, i as u32),
+                None => bytes[start..end].to_vec(),
+            };
+            let mut payload = Vec::with_capacity(21 + body.len());
             payload.push(file::CHUNK_TAG);
             payload.extend_from_slice(&file_id);
             payload.extend_from_slice(&(i as u32).to_be_bytes());
-            payload.extend_from_slice(&bytes[start..end]);
+            payload.extend_from_slice(&body);
             let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
             ce.flags |= fl::FLOOD;
             level.push((ce.id(), (end - start) as u64));
@@ -1505,7 +1558,9 @@ impl Node {
         // level directly — 0 while `level` is still chunks. Each grouping pass
         // buries the level one deeper.
         let mut depth = 0u8;
-        while depth < file::MAX_DEPTH && level.len() > file::root_fanout(self.mtu, name.len(), depth) {
+        while depth < file::MAX_DEPTH
+            && level.len() > file::root_fanout(self.mtu, name.len(), depth, sealed_hdr.len())
+        {
             let mut next = Vec::with_capacity(level.len().div_ceil(fanout));
             for group in level.chunks(fanout) {
                 let covered: u64 = group.iter().map(|(_, n)| *n).sum();
@@ -1517,6 +1572,7 @@ impl Node {
                     name: String::new(),
                     chunk_ids: group.iter().map(|(id, _)| *id).collect(),
                     depth,
+                    sealed_hdr: Vec::new(),
                 };
                 let mut ne = Envelope::new(ty::DATA, ft, expiry, node.encode());
                 ne.flags |= fl::FLOOD;
@@ -1536,6 +1592,7 @@ impl Node {
             name: name.to_string(),
             chunk_ids: level.iter().map(|(id, _)| *id).collect(),
             depth,
+            sealed_hdr,
         };
         let mut me = Envelope::new(ty::DATA, dest, expiry, manifest.encode());
         if dest == ZERO_DEST || self.topics.contains(&dest) {
@@ -1699,9 +1756,13 @@ impl Node {
 
     /// True once every chunk named by the manifest is in our store.
     /// Publish a file **sealed to `dest`'s prekey**: the bytes *and the file
-    /// name* are encrypted, so relays carrying the chunks learn neither. The
-    /// manifest advertises the placeholder name [`SEALED_FILE_NAME`]; the real
-    /// one travels inside the sealed blob as `u16 length · name · bytes`.
+    /// name* are encrypted, so relays carrying the chunks learn neither.
+    ///
+    /// Each chunk is encrypted **on its own** under a per-file key, and that key
+    /// — with the real file name — travels sealed in the root manifest's header.
+    /// So the recipient decrypts a chunk at a time straight to wherever it is
+    /// putting the file, and a sealed file costs one chunk of memory instead of
+    /// all of it. The manifest advertises the placeholder [`SEALED_FILE_NAME`].
     ///
     /// `None` if we haven't heard `dest`'s prekey yet (it arrives with their
     /// ANNOUNCE) — the caller can fall back to [`Node::publish_file`] and say so.
@@ -1713,25 +1774,100 @@ impl Node {
         now: u32,
     ) -> Option<(Id, Vec<Forward>)> {
         let pk = self.peer_prekey(&dest)?;
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+
+        // Header (sealed to the recipient): the file key, then the real name.
         let nb = name.as_bytes();
         let nlen = nb.len().min(u16::MAX as usize);
-        let mut inner = Vec::with_capacity(2 + nlen + bytes.len());
-        inner.extend_from_slice(&(nlen as u16).to_be_bytes());
-        inner.extend_from_slice(&nb[..nlen]);
-        inner.extend_from_slice(bytes);
-        let sealed = seal(&inner, &pk);
-        Some(self.publish_file(SEALED_FILE_NAME, &sealed, dest, now))
+        let mut hdr = Vec::with_capacity(34 + nlen);
+        hdr.extend_from_slice(&key);
+        hdr.extend_from_slice(&(nlen as u16).to_be_bytes());
+        hdr.extend_from_slice(&nb[..nlen]);
+        let sealed_hdr = seal(&hdr, &pk);
+
+        // On a very small link the sealed header can fill the root by itself,
+        // leaving no room for even one id. Say so, rather than minting a root
+        // no link could carry — the caller can fall back to publishing in the
+        // clear, which is a choice only they can make.
+        if file::root_fanout(self.mtu, SEALED_FILE_NAME.len(), 0, sealed_hdr.len()) == 0 {
+            return None;
+        }
+
+        Some(self.publish_object(SEALED_FILE_NAME, bytes, dest, now, Some(&key), sealed_hdr))
+    }
+
+    /// Open a sealed root's header with our prekey: `(file key, real name)`.
+    /// `None` when it was sealed to someone else — which is most of what a relay
+    /// carries, and it never learns more than that.
+    fn open_sealed_header(&self, m: &file::Manifest) -> Option<([u8; 32], String)> {
+        let opened = self.open(&m.sealed_hdr)?;
+        if opened.len() < 34 {
+            return None;
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&opened[..32]);
+        let nlen = u16::from_be_bytes([opened[32], opened[33]]) as usize;
+        if 34 + nlen > opened.len() {
+            return None;
+        }
+        Some((key, String::from_utf8_lossy(&opened[34..34 + nlen]).to_string()))
     }
 
     /// Recover a complete file as `(name, bytes)`, decrypting it when it was
-    /// sealed to us. `None` while chunks are still missing, or when the file was
+    /// sealed to us. `None` while parts are still missing, or when the file was
     /// sealed to someone else — we relay those without ever reading them.
+    ///
+    /// For anything large prefer [`Node::open_file_to`], which writes the file
+    /// out as it decrypts instead of building the whole thing in memory.
     pub fn open_file(&self, magnet: &Id) -> Option<(String, Vec<u8>)> {
+        let hint = self.manifests.get(magnet)?.total_len.min(1 << 20) as usize;
+        let mut out = Vec::with_capacity(hint);
+        let (name, _) = self.open_file_to(magnet, &mut out)?;
+        Some((name, out))
+    }
+
+    /// The file's real name — decrypted out of the sealed header when it was
+    /// sealed to us. `None` if we don't know the manifest, or it was sealed to
+    /// someone else. Cheap for everything but the legacy whole-blob form: it
+    /// never touches the chunks.
+    pub fn file_name(&self, magnet: &Id) -> Option<String> {
         let m = self.manifests.get(magnet)?;
-        let raw = self.file_bytes(magnet)?;
-        if m.name != SEALED_FILE_NAME {
-            return Some((m.name.clone(), raw));
+        if !m.sealed_hdr.is_empty() {
+            return self.open_sealed_header(m).map(|(_, name)| name);
         }
+        if m.name == SEALED_FILE_NAME {
+            // Legacy: the name sits inside the sealed blob, so it costs a read.
+            return self.open_file(magnet).map(|(name, _)| name);
+        }
+        Some(m.name.clone())
+    }
+
+    /// Write a complete file out as `(name, bytes written)`, decrypting it when
+    /// it was sealed to us — **the form to prefer for anything large.**
+    ///
+    /// A sealed file is decrypted a chunk at a time on the way to `w`, so peak
+    /// memory is one chunk however big the file is. `None` while parts are
+    /// missing, or when it was sealed to someone else.
+    pub fn open_file_to<W: std::io::Write>(&self, magnet: &Id, w: &mut W) -> Option<(String, u64)> {
+        let m = self.manifests.get(magnet)?;
+
+        // Sealed per chunk: decrypt on the way out.
+        if !m.sealed_hdr.is_empty() {
+            let (key, name) = self.open_sealed_header(m)?;
+            let n = self.assemble(magnet, w, Some(&key))?;
+            return Some((name, n));
+        }
+        // Not sealed at all: the bytes are the file.
+        if m.name != SEALED_FILE_NAME {
+            let n = self.assemble(magnet, w, None)?;
+            return Some((m.name.clone(), n));
+        }
+
+        // Legacy: the whole file was sealed as one blob before chunking, so it
+        // cannot be streamed — it has to be decrypted entire. Kept so files
+        // published by older nodes still open.
+        let raw = self.file_bytes(magnet)?;
         let inner = self.open(&raw)?;
         if inner.len() < 2 {
             return None;
@@ -1741,7 +1877,9 @@ impl Node {
             return None;
         }
         let name = String::from_utf8_lossy(&inner[2..2 + nlen]).to_string();
-        Some((name, inner[2 + nlen..].to_vec()))
+        let body = &inner[2 + nlen..];
+        w.write_all(body).ok()?;
+        Some((name, body.len() as u64))
     }
 
     /// The largest file [`Node::publish_file`] can announce at this node's MTU.
@@ -1759,7 +1897,7 @@ impl Node {
     pub fn max_file_bytes(&self) -> usize {
         let chunk = self.mtu.saturating_sub(64).max(1);
         // Allow for a long file name in the signed root.
-        let mut ids = file::root_fanout(self.mtu, 96, file::MAX_DEPTH);
+        let mut ids = file::root_fanout(self.mtu, 96, file::MAX_DEPTH, 0);
         let fanout = file::interior_fanout(self.mtu);
         for _ in 0..file::MAX_DEPTH {
             ids = ids.saturating_mul(fanout);
@@ -1773,7 +1911,7 @@ impl Node {
     /// existed, and one round trip is enough to learn every chunk id.
     pub fn max_flat_file_bytes(&self) -> usize {
         let chunk = self.mtu.saturating_sub(64).max(1);
-        file::root_fanout(self.mtu, 96, 0) * chunk
+        file::root_fanout(self.mtu, 96, 0, 0) * chunk
     }
 
     /// The ceiling on everything this node holds at once, files included.
@@ -1835,14 +1973,24 @@ impl Node {
         complete
     }
 
-    /// Write the file straight out to `w`, chunk by chunk, returning the bytes
-    /// written. `None` if any part is still missing.
+    /// Write the file's raw bytes out to `w`, chunk by chunk, returning the
+    /// count. `None` if any part is missing — or if the file is sealed, since
+    /// its raw bytes are ciphertext and its length is the plaintext's; use
+    /// [`Node::open_file_to`] for those.
     ///
     /// This is the form to prefer for anything large: only one chunk is in
     /// memory at a time, so a file bounded by disk is not also bounded by RAM.
-    /// A file sealed to a peer still arrives as ciphertext here — [`Node::open_file`]
-    /// is what decrypts, and it does so whole.
     pub fn write_file_to<W: std::io::Write>(&self, magnet: &Id, w: &mut W) -> Option<u64> {
+        if !self.manifests.get(magnet)?.sealed_hdr.is_empty() {
+            return None;
+        }
+        self.assemble(magnet, w, None)
+    }
+
+    /// Walk the leaves in file order, writing each chunk out as it goes and
+    /// decrypting first when `key` is set. One chunk is in memory at a time,
+    /// which is what keeps a large file — sealed or not — off the heap.
+    fn assemble<W: std::io::Write>(&self, magnet: &Id, w: &mut W, key: Option<&[u8; 32]>) -> Option<u64> {
         let root = self.manifests.get(magnet)?;
         let total = root.total_len;
         let mut written = 0u64;
@@ -1867,7 +2015,24 @@ impl Node {
                 ok = false; // not a well-formed chunk
                 return false;
             }
-            let body = &ce.payload[21..];
+            // The chunk carries the index it was encrypted under, and the id
+            // that named it is a hash of those very bytes, so it is as
+            // trustworthy as the chunk itself.
+            let index = u32::from_be_bytes([ce.payload[17], ce.payload[18], ce.payload[19], ce.payload[20]]);
+            let plain;
+            let body = match key {
+                Some(k) => match chunk_open(&ce.payload[21..], k, index) {
+                    Some(p) => {
+                        plain = p;
+                        &plain[..]
+                    }
+                    None => {
+                        ok = false;
+                        return false;
+                    }
+                },
+                None => &ce.payload[21..],
+            };
             let take = total.saturating_sub(written).min(body.len() as u64) as usize;
             if w.write_all(&body[..take]).is_err() {
                 ok = false;
@@ -2694,6 +2859,7 @@ mod tests {
             name: String::new(),
             chunk_ids: vec![],
             depth: 1,
+            sealed_hdr: Vec::new(),
         };
         let mut enc = m.encode();
         assert_eq!(enc[0], file::TREE_TAG);
@@ -2717,6 +2883,103 @@ mod tests {
         n.manifests.get_mut(&magnet).unwrap().total_len = u64::MAX;
         assert!(n.file_bytes(&magnet).is_none());
         assert!(!n.has_file(&magnet) || n.write_file_to(&magnet, &mut Vec::new()).is_none());
+    }
+
+    #[test]
+    fn a_sealed_file_is_encrypted_one_chunk_at_a_time() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Past what one sealed manifest can list, so this is a tree as well.
+        let body: Vec<u8> = (0..120_000u32).map(|i| i.wrapping_mul(29) as u8).collect();
+        let (magnet, _) = a.publish_file_sealed("plans.pdf", &body, b.addr, now).expect("prekey known");
+
+        let root = a.manifests.get(&magnet).unwrap();
+        assert_eq!(root.total_len, body.len() as u64, "sealing does not change the length");
+        assert_eq!(root.name, SEALED_FILE_NAME, "the advertised name says nothing");
+        assert!(!root.sealed_hdr.is_empty(), "the key travels sealed in the root");
+        assert!(root.depth > 0, "big enough to be a tree as well as sealed");
+
+        // Sample the plaintext rather than cross-product every window against
+        // every wire — a few probes catch a plaintext chunk just as well.
+        let probes: Vec<&[u8]> = (0..8).map(|i| &body[i * 9_000..i * 9_000 + 32]).collect();
+        for (_, w) in a.store_wires() {
+            assert!(w.len() <= a.mtu, "a sealed chunk must still fit the link");
+            assert!(!w.windows(9).any(|x| x == b"plans.pdf"), "the file name leaked");
+            for p in &probes {
+                assert!(!w.windows(32).any(|x| x == *p), "file contents leaked");
+            }
+        }
+
+        for (_, w) in a.store_wires() {
+            b.on_rx(&w, 0, Some(a.addr), now);
+        }
+
+        let mut out = Vec::new();
+        let (name, n) = b.open_file_to(&magnet, &mut out).expect("B can open it");
+        assert_eq!(name, "plans.pdf", "the real name comes out of the sealed header");
+        assert_eq!(n, body.len() as u64);
+        assert_eq!(out, body);
+
+        // The raw path refuses rather than handing back ciphertext that would
+        // look like a short file.
+        assert!(b.write_file_to(&magnet, &mut Vec::new()).is_none());
+
+        // The property that makes streaming possible: any one chunk decrypts on
+        // its own, with no other chunk present.
+        let held = b.manifests.get(&magnet).unwrap();
+        let (key, _) = b.open_sealed_header(held).expect("sealed to B");
+        let mut leaves = Vec::new();
+        b.walk_tree(held, &mut |id, depth, _| {
+            if depth == 0 {
+                leaves.push(*id);
+            }
+            true
+        });
+        let wire = b.get_wire(&leaves[3]).expect("a middle chunk");
+        let (ce, _) = Envelope::decode(&wire).unwrap();
+        let idx = u32::from_be_bytes([ce.payload[17], ce.payload[18], ce.payload[19], ce.payload[20]]);
+        let plain = chunk_open(&ce.payload[21..], &key, idx).expect("one chunk opens alone");
+        let start = idx as usize * held.chunk_size as usize;
+        assert_eq!(plain, body[start..start + plain.len()]);
+
+        // A relay carries every part and can read none of it.
+        let mut c = Node::new("c", &[]);
+        for (_, w) in a.store_wires() {
+            c.on_rx(&w, 0, Some(a.addr), now);
+        }
+        let (root_env, _) = Envelope::decode(&a.get_wire(&magnet).unwrap()).unwrap();
+        c.absorb_manifest(&root_env).expect("the root is signed, so anyone may parse it");
+        assert!(c.has_file(&magnet), "the relay holds every part");
+        assert!(c.open_file(&magnet).is_none(), "…and can read none of it");
+    }
+
+    #[test]
+    fn a_file_sealed_the_old_whole_blob_way_still_opens() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Reproduce what a node published before chunks were sealed one by one:
+        // name and bytes sealed as a single blob, then chunked, under the
+        // placeholder name.
+        let body: Vec<u8> = (0..2_000u32).map(|i| (i % 251) as u8).collect();
+        let pk = a.peer_prekey(&b.addr).expect("prekey known");
+        let mut inner = Vec::new();
+        inner.extend_from_slice(&9u16.to_be_bytes());
+        inner.extend_from_slice(b"plans.pdf");
+        inner.extend_from_slice(&body);
+        let (magnet, _) = a.publish_file(SEALED_FILE_NAME, &seal(&inner, &pk), b.addr, now);
+
+        for (_, w) in a.store_wires() {
+            b.on_rx(&w, 0, Some(a.addr), now);
+        }
+        let (name, got) = b.open_file(&magnet).expect("the legacy form still opens");
+        assert_eq!(name, "plans.pdf");
+        assert_eq!(got, body);
     }
 
     #[test]

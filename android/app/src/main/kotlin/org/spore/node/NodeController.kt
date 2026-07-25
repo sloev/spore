@@ -282,23 +282,20 @@ object NodeController {
                 continue
             }
             if (magnet in savedMagnets) continue
-            // Complete: decrypt if it was sealed to us, then write it out.
-            val blob = SporeNative.nativeOpenFile(ptr, magnet) ?: continue
-            if (blob.size < 2) continue
-            val nlen = ((blob[0].toInt() and 0xff) shl 8) or (blob[1].toInt() and 0xff)
-            if (2 + nlen > blob.size) continue
+            // Complete: ask for the name, then let the core stream the file to
+            // disk, decrypting a chunk at a time. The bytes never come through
+            // the JVM heap, so a big file costs a chunk rather than three copies.
             // '/' is sanitised away, so a name can't escape the directory.
-            val fname = blob.copyOfRange(2, 2 + nlen).toString(Charsets.UTF_8)
+            val fname = (SporeNative.nativeFileName(ptr, magnet) ?: continue)
                 .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "file.bin" }
-            val bytes = blob.copyOfRange(2 + nlen, blob.size)
             val dir = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
             val f = File(dir, fname)
-            val okSave = runCatching { f.writeBytes(bytes) }.isSuccess
+            val written = SporeNative.nativeSaveFile(ptr, magnet, f.absolutePath)
             savedMagnets.add(magnet)
             append(
                 Msg(
                     lastFileSender,
-                    if (okSave) "📎 received ${f.name} (${bytes.size / 1024} KB) → ${f.path}"
+                    if (written >= 0) "📎 received ${f.name} (${written / 1024} KB) → ${f.path}"
                     else "⚠ received ${f.name} but could not save it",
                     mine = false, verified = true
                 )
