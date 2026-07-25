@@ -10,10 +10,16 @@ A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design
 > stable persisted identity, and every planned bridge: **UDP broadcast, TCP,
 > audio modem, BT-Meshtastic, BT-Reticulum (RNode), Wi-Fi Direct**, and the
 > web-origin bridges (**WebSocket, Nostr, WebTorrent**) via a headless WebView.
-> UI: per-peer **conversations** with **petnames** and **file sharing**, a
-> microblog **Feed**, live **fragment status** both ways, a **Bridges** screen
-> with permission-gated toggles, and an **Advanced** screen (identity / seed
-> export). Kawaii green theme + a mascot that sparkles when the mesh breathes.
+> UI: a **Nearby** list of nodes you've heard from, per-peer **conversations**
+> with **petnames** and **file sharing**, a microblog **Feed**, live **fragment
+> status** both ways, a **Bridges** screen with permission-gated toggles, and an
+> **Advanced** screen (identity / seed export / node health). Kawaii green theme
+> + a mascot that sparkles when the mesh breathes.
+>
+> Protocol behaviour: the node **announces itself** (so peers learn its address,
+> prekey and a path back), **seals direct messages** to a peer's prekey once
+> heard (🔒), and asks for **delivery receipts** (✓ delivered). Broadcasts and
+> topic posts are signed but public by nature — the UI says so.
 >
 > The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
 > Kotlin/Compose app is proven to build by the `android` CI workflow. The

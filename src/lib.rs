@@ -893,6 +893,56 @@ impl Node {
         self.acked.contains(id)
     }
 
+    /// Send a **direct message**: sealed to the peer's prekey when we know it
+    /// (§7), and flagged `ACKREQ` so the recipient returns a delivery receipt
+    /// (§8). Returns the envelope id — poll [`Node::acked`] for delivery — and
+    /// whether it actually went out encrypted.
+    ///
+    /// A peer's prekey arrives with their ANNOUNCE, so the first message to a
+    /// stranger may go as signed cleartext; once we've heard them, everything
+    /// after is sealed. This is the one call a messenger UI needs.
+    pub fn send_direct(&mut self, dest: Addr, plaintext: &[u8], now: u32) -> (Id, Vec<Forward>, bool) {
+        let (payload, encrypted) = match self.peer_prekey(&dest) {
+            Some(pk) => (seal(plaintext, &pk), true),
+            None => (plaintext.to_vec(), false),
+        };
+        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        e.flags |= fl::ACKREQ;
+        if encrypted {
+            e.flags |= fl::ENCRYPTED;
+        }
+        e.sign(&self.sk);
+        // Unicast with no known path: flood to discover it (§5.6).
+        if self.paths.fresh(&dest, now).is_none() {
+            e.flags |= fl::FLOOD;
+            e.sign(&self.sk);
+        }
+        let id = e.id();
+        self.mark_seen(&e);
+        self.store_put(&e);
+        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
+        (id, self.forward_intents(&e, NO_IFACE, now), encrypted)
+    }
+
+    /// Peers we've heard from, freshest first: `(address, seconds since last
+    /// heard, whether we hold their prekey)`. A peer appears once any signed
+    /// traffic — usually their ANNOUNCE — has reached us; holding their prekey
+    /// is what makes an encrypted message to them possible.
+    pub fn peers(&self, now: u32) -> Vec<(Addr, u32, bool)> {
+        let mut v: Vec<(Addr, u32, bool)> = self
+            .paths
+            .map
+            .iter()
+            .filter(|(a, _)| !self.addrs.contains(*a))
+            .filter_map(|(a, ps)| {
+                let newest = ps.iter().map(|p| p.age).max()?;
+                Some((*a, now.saturating_sub(newest), self.peer_prekeys.contains_key(a)))
+            })
+            .collect();
+        v.sort_by_key(|(_, age, _)| *age);
+        v
+    }
+
     /// Resend any ACKREQ messages whose backoff has elapsed without a receipt
     /// (§5.6: flooding is route discovery). Drops exhausted or acked ones.
     pub fn resend_unacked(&mut self, now: u32) -> Vec<Forward> {
@@ -2216,6 +2266,43 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn send_direct_seals_to_the_peer_and_reports_delivery() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // The ANNOUNCE exchange makes each side a known peer, with a prekey.
+        let peers = a.peers(now);
+        assert_eq!(peers.len(), 1, "exactly one peer, and not ourselves");
+        assert_eq!(peers[0].0, b.addr);
+        assert!(peers[0].2, "prekey learned from the ANNOUNCE");
+
+        // A direct message is sealed to that prekey and asks for a receipt.
+        let (id, fwds, encrypted) = a.send_direct(b.addr, b"meet at the north pier", now);
+        assert!(encrypted, "prekey known => sealed");
+        let wire = fwd_bytes(&fwds[0]);
+        let (e, _) = Envelope::decode(&wire).unwrap();
+        assert!(e.flags & fl::ENCRYPTED != 0, "marked ENCRYPTED");
+        assert!(e.flags & fl::ACKREQ != 0, "marked ACKREQ");
+        assert!(!e.payload.windows(4).any(|w| w == b"meet"), "the plaintext must never appear on the wire");
+
+        // B opens it with its prekey secret, and answers with a receipt.
+        assert!(!a.acked(&id));
+        let brx = b.on_rx(&wire, 0, Some(a.addr), now);
+        let opened = brx.delivered.iter().find_map(|d| b.open(&d.payload));
+        assert_eq!(opened.expect("B decrypts"), b"meet at the north pier");
+        let receipt = brx.forwards.first().map(fwd_bytes).expect("B emitted a receipt");
+        a.on_rx(&receipt, 0, Some(b.addr), now);
+        assert!(a.acked(&id), "the UI can show it delivered");
+
+        // To a stranger we have no prekey for, it still sends — as cleartext.
+        let c = Node::new("c", &[]);
+        let (_, _, enc2) = a.send_direct(c.addr, b"hello stranger", now);
+        assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
     }
 
     #[test]

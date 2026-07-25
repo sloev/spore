@@ -431,6 +431,156 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeMeshtasticUnwrap(
     }
 }
 
+// -- peers, encrypted direct messages, delivery receipts ---------------------
+
+/// Flood this node's ANNOUNCE on every interface. Peers learn our address,
+/// prekey (so they can encrypt to us) and a path back — call it periodically.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeBeacon(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) {
+    rt(ptr).hub.beacon();
+}
+
+/// Peers we've heard from, freshest first, as "addrhex:secondsAgo:hasPrekey"
+/// lines ("" when we haven't met anyone yet).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePeers(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let now = spore::bridge::hub::now();
+    let rows = rt(ptr).hub.with_node(|n| n.peers(now));
+    let s = rows
+        .iter()
+        .map(|(a, age, key)| {
+            let hex: String = a.iter().map(|b| format!("{b:02x}")).collect();
+            format!("{hex}:{age}:{}", if *key { 1 } else { 0 })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Send a direct message: sealed to the peer's prekey when known, and flagged
+/// for a delivery receipt. Returns "idhex:1" (encrypted) or "idhex:0"
+/// (cleartext — we haven't heard their ANNOUNCE yet).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendDirect(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    dest: JByteArray,
+    payload: JByteArray,
+) -> jni::sys::jstring {
+    let d = env.convert_byte_array(&dest).unwrap_or_default();
+    let p = env.convert_byte_array(&payload).unwrap_or_default();
+    if d.len() != 8 {
+        return std::ptr::null_mut();
+    }
+    let mut addr = [0u8; 8];
+    addr.copy_from_slice(&d);
+    let r = rt(ptr);
+    let (id, forwards, encrypted) = r.hub.with_node(|n| n.send_direct(addr, &p, spore::bridge::hub::now()));
+    r.hub.originate(forwards);
+    let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
+    let s = format!("{hex}:{}", if encrypted { 1 } else { 0 });
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Has a delivery receipt for this envelope id (hex) come back?
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeAcked(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    id_hex: JString,
+) -> jboolean {
+    let s: String = match env.get_string(&id_hex) {
+        Ok(s) => s.into(),
+        Err(_) => return JNI_FALSE,
+    };
+    if s.len() != 32 {
+        return JNI_FALSE;
+    }
+    let mut id = [0u8; 16];
+    for (i, b) in id.iter_mut().enumerate() {
+        match u8::from_str_radix(&s[i * 2..i * 2 + 2], 16) {
+            Ok(v) => *b = v,
+            Err(_) => return JNI_FALSE,
+        }
+    }
+    if rt(ptr).hub.with_node(|n| n.acked(&id)) {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+/// Resend ACKREQ messages whose backoff elapsed without a receipt (§5.6).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeResendUnacked(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) {
+    let r = rt(ptr);
+    let forwards = r.hub.with_node(|n| n.resend_unacked(spore::bridge::hub::now()));
+    r.hub.originate(forwards);
+}
+
+/// The readable payload of a delivered envelope: decrypted with our prekey
+/// secret when it is ENCRYPTED, otherwise the payload as-is. Null if it is
+/// sealed to someone else (or malformed).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvPlaintext(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    wire: JByteArray,
+) -> jbyteArray {
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    let Ok((e, _)) = Envelope::decode(&w) else {
+        return std::ptr::null_mut();
+    };
+    let out = if e.flags & spore::fl::ENCRYPTED != 0 {
+        match rt(ptr).hub.with_node(|n| n.open(&e.payload)) {
+            Some(p) => p,
+            None => return std::ptr::null_mut(),
+        }
+    } else {
+        e.payload
+    };
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Whether an envelope was sealed (for the UI's lock indicator).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvEncrypted(
+    env: JNIEnv,
+    _class: JClass,
+    wire: JByteArray,
+) -> jboolean {
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    match Envelope::decode(&w) {
+        Ok((e, _)) if e.flags & spore::fl::ENCRYPTED != 0 => JNI_TRUE,
+        _ => JNI_FALSE,
+    }
+}
+
+/// How many envelopes this node is currently storing and relaying for others.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeStoreLen(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jint {
+    rt(ptr).hub.with_node(|n| n.store_len()) as jint
+}
+
 /// Receive-side fragmentation status as "idhex:have/count" lines joined by
 /// '\n' (empty string when nothing is reassembling) — the UI's "receiving X/N".
 #[no_mangle]

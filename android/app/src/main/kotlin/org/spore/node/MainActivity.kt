@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -77,6 +78,10 @@ private val SporeDarkColors = androidx.compose.material3.darkColorScheme(
     secondary = androidx.compose.ui.graphics.Color(0xFF7ADBA2),
     tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
 )
+
+/** Wall-clock HH:mm for a message stamp. */
+private fun timeOf(ts: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
 
 /** 🍄 with a brief sparkle whenever the node relays/receives (kawaii heartbeat). */
 @Composable
@@ -170,39 +175,91 @@ private fun ReceivingBar() {
 
 @Composable
 private fun ChatsList(addr: String, open: (String) -> Unit) {
+    val ctx = LocalContext.current
     val messages by NodeController.messages.collectAsState()
     val names by Petnames.map.collectAsState()
+    val nearby by NodeController.peers.collectAsState()
     var newPeer by remember { mutableStateOf("") }
 
-    val peers = remember(messages, names) {
+    val threads = remember(messages, names) {
         (messages.map { it.peer } + Petnames.PUBLIC + names.keys).distinct()
     }
     Column(Modifier.padding(16.dp).fillMaxSize()) {
-        Text("your addr $addr", style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(8.dp))
-        Row {
-            OutlinedTextField(
-                value = newPeer, onValueChange = { newPeer = it },
-                label = { Text("open chat with address (16 hex)") }, modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.width(8.dp))
+        // Your address is what others need to reach you — make it one tap to hand over.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("you: $addr", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             OutlinedButton(onClick = {
-                val h = newPeer.trim().lowercase()
-                if (h.length == 16) { open(h); newPeer = "" }
-            }) { Text("Open") }
+                val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("SPORE address", addr))
+            }) { Text("Copy") }
+            Spacer(Modifier.width(4.dp))
+            OutlinedButton(onClick = {
+                val i = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "My SPORE address: $addr")
+                }
+                ctx.startActivity(Intent.createChooser(i, "Share your SPORE address"))
+            }) { Text("Share") }
         }
         Spacer(Modifier.height(8.dp))
-        if (peers.isEmpty()) {
-            Text("no spores nearby yet 🍄", Modifier.fillMaxWidth().padding(32.dp), textAlign = TextAlign.Center)
-        }
+
         LazyColumn(Modifier.weight(1f)) {
-            items(peers) { peer ->
-                val last = messages.lastOrNull { it.peer == peer }?.text ?: "—"
+            // Who's actually out there right now — the mesh view a radio user expects.
+            if (nearby.isNotEmpty()) {
+                item {
+                    Text("Nearby (${nearby.size})", style = MaterialTheme.typography.titleSmall)
+                }
+                items(nearby) { p ->
+                    val ago = if (p.secondsAgo < 60) "${p.secondsAgo}s ago" else "${p.secondsAgo / 60}m ago"
+                    Card(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { open(p.addr) }) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "📡 ${Petnames.label(p.addr)}",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                (if (p.hasKey) "🔒 " else "") + ago,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+                item { Spacer(Modifier.height(12.dp)) }
+            } else {
+                item {
+                    Text(
+                        "no spores nearby yet 🍄\nadd a bridge, and anyone in range appears here",
+                        Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            item { Text("Conversations", style = MaterialTheme.typography.titleSmall) }
+            items(threads) { peer ->
+                val last = messages.lastOrNull { it.peer == peer }
                 Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { open(peer) }) {
                     Column(Modifier.padding(12.dp)) {
                         Text(Petnames.label(peer), style = MaterialTheme.typography.titleMedium)
-                        Text(last, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                        Text(
+                            (if (last?.encrypted == true) "🔒 " else "") + (last?.text ?: "—"),
+                            style = MaterialTheme.typography.bodySmall, maxLines = 1
+                        )
                     }
+                }
+            }
+            item {
+                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newPeer, onValueChange = { newPeer = it },
+                        label = { Text("open chat by address (16 hex)") }, modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = {
+                        val h = newPeer.trim().lowercase()
+                        if (h.length == 16) { open(h); newPeer = "" }
+                    }) { Text("Open") }
                 }
             }
         }
@@ -244,9 +301,18 @@ private fun ChatDetail(peer: String) {
         LazyColumn(Modifier.weight(1f)) {
             items(thread) { m ->
                 val who = if (m.mine) "you" else Petnames.label(m.peer)
-                val sig = if (!m.mine && !m.verified) "  ⚠ sig BAD" else ""
-                val frag = if (m.mine && m.fragments > 1) "  ·  ⇡ ${m.fragments} fragments" else ""
-                Text("${if (m.mine) "▶" else "◀"} $who: ${m.text}$sig$frag", Modifier.padding(vertical = 2.dp))
+                val lock = if (m.encrypted) "🔒 " else ""
+                Column(Modifier.padding(vertical = 3.dp)) {
+                    Text("${if (m.mine) "▶" else "◀"} $lock$who: ${m.text}")
+                    // One quiet metadata line: when, signature, delivery, fragments.
+                    val bits = buildList {
+                        add(timeOf(m.ts))
+                        if (!m.mine && !m.verified) add("⚠ signature BAD")
+                        if (m.mine && m.id != null) add(if (m.delivered) "✓ delivered" else "· sent")
+                        if (m.mine && m.fragments > 1) add("⇡ ${m.fragments} fragments")
+                    }
+                    Text(bits.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -280,11 +346,12 @@ private fun FeedScreen() {
             OutlinedButton(onClick = { NodeController.follow(follow); follow = "" }) { Text("Follow") }
         }
         Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.fillMaxWidth().height(40.dp)) {
+        // Topic chips read across, not down — a one-line filter strip.
+        LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(listOf<String?>(null) + topics) { t ->
                 Text(
                     if (t == null) "all" else "#$t",
-                    Modifier.padding(end = 12.dp).clickable { activeTopic = t },
+                    Modifier.padding(vertical = 8.dp).clickable { activeTopic = t },
                     style = if (activeTopic == t) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall
                 )
             }
@@ -330,6 +397,24 @@ private fun AdvancedScreen(addr: String) {
                 Text("address: $addr", style = MaterialTheme.typography.bodySmall)
                 Text(
                     "followed topics: ${if (topics.isEmpty()) "—" else topics.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+        val nearby by NodeController.peers.collectAsState()
+        val stored by NodeController.storeCount.collectAsState()
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Node", style = MaterialTheme.typography.titleSmall)
+                Text("peers heard: ${nearby.size}", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "can encrypt to: ${nearby.count { it.hasKey }} of them",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text("envelopes relayed/stored: $stored", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Direct messages are sealed to a peer's key once you've heard their " +
+                        "announce; broadcasts and topic posts are signed but public by nature.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }

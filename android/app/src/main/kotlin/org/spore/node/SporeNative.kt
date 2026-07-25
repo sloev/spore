@@ -83,4 +83,28 @@ object SporeNative {
 
     /** In-progress reassemblies as "idhex:have/count" lines ("" = none). */
     external fun nativeFragStatus(ptr: Long): String
+
+    /** Flood our ANNOUNCE so peers learn our address, prekey and a path back. */
+    external fun nativeBeacon(ptr: Long)
+
+    /** Peers heard from, freshest first: "addrhex:secondsAgo:hasPrekey" lines. */
+    external fun nativePeers(ptr: Long): String
+
+    /** Direct message: sealed when possible + receipt requested. "idhex:1|0". */
+    external fun nativeSendDirect(ptr: Long, dest: ByteArray, payload: ByteArray): String?
+
+    /** Has a delivery receipt for this envelope id (hex) arrived? */
+    external fun nativeAcked(ptr: Long, idHex: String): Boolean
+
+    /** Resend ACKREQ messages whose backoff elapsed without a receipt. */
+    external fun nativeResendUnacked(ptr: Long)
+
+    /** Readable payload: decrypted if sealed to us, else as-is; null if not ours. */
+    external fun nativeEnvPlaintext(ptr: Long, wire: ByteArray): ByteArray?
+
+    /** Was this envelope sealed? (lock indicator) */
+    external fun nativeEnvEncrypted(wire: ByteArray): Boolean
+
+    /** How many envelopes we're storing and relaying for the mesh. */
+    external fun nativeStoreLen(ptr: Long): Int
 }

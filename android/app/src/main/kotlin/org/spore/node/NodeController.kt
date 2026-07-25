@@ -18,8 +18,14 @@ data class Msg(
     val mine: Boolean,
     val verified: Boolean,
     val fragments: Int = 1, // wire frames the payload became (send-side status)
+    val encrypted: Boolean = false, // sealed to the peer's prekey (§7)
+    val id: String? = null, // envelope id, for delivery receipts (mine only)
+    val delivered: Boolean = false, // a receipt came back (§8)
     val ts: Long = System.currentTimeMillis(),
 )
+
+/** A node we've heard from: how long ago, and whether we can encrypt to it. */
+data class Peer(val addr: String, val secondsAgo: Int, val hasKey: Boolean)
 
 /** One microblog post on a followed topic. */
 data class Post(val topic: String, val author: String, val text: String, val verified: Boolean, val ts: Long = System.currentTimeMillis())
@@ -35,12 +41,15 @@ data class BridgeState(val kind: String, val detail: String, val status: String)
 object NodeController {
     private var ptr: Long = 0L
     private var pollJob: Job? = null
+    private var houseJob: Job? = null
     private lateinit var appCtx: Context
 
     val messages = MutableStateFlow<List<Msg>>(emptyList())
     val posts = MutableStateFlow<List<Post>>(emptyList())
     val topics = MutableStateFlow<List<String>>(emptyList()) // followed topic names
     val bridges = MutableStateFlow<List<BridgeState>>(emptyList())
+    val peers = MutableStateFlow<List<Peer>>(emptyList()) // nodes we've heard from
+    val storeCount = MutableStateFlow(0) // envelopes held for the mesh
     val address = MutableStateFlow("")
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
     val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
@@ -93,6 +102,37 @@ object NodeController {
                 if (idle) delay(100)
             }
         }
+
+        // Housekeeping: announce ourselves so peers learn our address, prekey and
+        // a path back (without this nobody can encrypt to us, and we're invisible
+        // until we speak); refresh the peer list; retry unacknowledged messages;
+        // and mark delivered anything whose receipt has come back.
+        houseJob = CoroutineScope(Dispatchers.IO).launch {
+            var tick = 0
+            while (isActive) {
+                SporeNative.nativeBeacon(ptr)
+                SporeNative.nativeResendUnacked(ptr)
+                peers.value = SporeNative.nativePeers(ptr).lines().filter { it.isNotBlank() }
+                    .mapNotNull { line ->
+                        val p = line.split(':')
+                        if (p.size == 3) Peer(p[0], p[1].toIntOrNull() ?: 0, p[2] == "1") else null
+                    }
+                storeCount.value = SporeNative.nativeStoreLen(ptr)
+                refreshDelivery()
+                // Beacon briskly at first so a fresh node is discovered quickly,
+                // then settle down to stay cheap on battery.
+                delay(if (tick++ < 6) 5_000L else 30_000L)
+            }
+        }
+    }
+
+    /** Flip any of our messages whose delivery receipt has arrived. */
+    private fun refreshDelivery() {
+        val pending = messages.value.filter { it.mine && it.id != null && !it.delivered }
+        if (pending.isEmpty()) return
+        val nowDelivered = pending.filter { SporeNative.nativeAcked(ptr, it.id!!) }.map { it.id }.toSet()
+        if (nowDelivered.isEmpty()) return
+        messages.value = messages.value.map { if (it.id in nowDelivered) it.copy(delivered = true) else it }
     }
 
     /** Classify a delivered envelope: feed post, file, or plain message. */
@@ -100,7 +140,10 @@ object NodeController {
         val ok = SporeNative.nativeEnvVerify(wire)
         val src = SporeNative.nativeEnvSrc(wire)?.toHex() ?: Petnames.PUBLIC
         val dest = SporeNative.nativeEnvDest(wire)?.toHex()
-        val payload = SporeNative.nativeEnvPayload(wire) ?: return
+        val sealed = SporeNative.nativeEnvEncrypted(wire)
+        // Sealed envelopes are opened with our prekey secret; one addressed to
+        // someone else simply won't open, and we relay it without reading it.
+        val payload = SporeNative.nativeEnvPlaintext(ptr, wire) ?: return
 
         // A broadcast (all-zero dest) belongs in the shared "everyone" thread, not
         // in a private conversation with whoever happened to send it.
@@ -118,7 +161,7 @@ object NodeController {
                 // Never write an unverified file to storage: an envelope whose
                 // signature doesn't check out could come from anyone in range.
                 if (!ok) {
-                    append(Msg(thread, "⚠ dropped an unsigned file — signature did not verify", mine = false, verified = false))
+                    append(Msg(thread, "⚠ dropped an unsigned file — signature did not verify", mine = false, verified = false, encrypted = sealed))
                     return
                 }
                 // '/' is sanitised away, so a name can't escape the directory.
@@ -131,19 +174,31 @@ object NodeController {
                 val saved = runCatching { f.writeBytes(data) }.isSuccess
                 val text = if (saved) "📎 received ${f.name} (${data.size / 1024} KB) → ${f.path}"
                 else "⚠ received ${f.name} but could not save it"
-                append(Msg(thread, text, mine = false, verified = ok))
+                append(Msg(thread, text, mine = false, verified = ok, encrypted = sealed))
                 return
             }
         }
-        append(Msg(thread, payload.toString(Charsets.UTF_8), mine = false, verified = ok))
+        append(Msg(thread, payload.toString(Charsets.UTF_8), mine = false, verified = ok, encrypted = sealed))
     }
 
-    /** Send a text to a peer (address hex) or everyone (Petnames.PUBLIC). */
+    /**
+     * Send a text to a peer (address hex) or everyone (Petnames.PUBLIC).
+     * A direct message is sealed to the peer's prekey when we've heard their
+     * ANNOUNCE, and asks for a delivery receipt; a broadcast can be neither.
+     */
     fun send(peer: String, text: String) {
         if (ptr == 0L || text.isEmpty()) return
         val dest = destOf(peer) ?: return
-        val n = SporeNative.nativeSendCounted(ptr, dest, text.toByteArray(Charsets.UTF_8))
-        append(Msg(peer, text, mine = true, verified = true, fragments = n))
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (peer == Petnames.PUBLIC) {
+            val n = SporeNative.nativeSendCounted(ptr, dest, bytes)
+            append(Msg(peer, text, mine = true, verified = true, fragments = n))
+            return
+        }
+        val res = SporeNative.nativeSendDirect(ptr, dest, bytes)?.split(':')
+        val id = res?.getOrNull(0)
+        val enc = res?.getOrNull(1) == "1"
+        append(Msg(peer, text, mine = true, verified = true, encrypted = enc, id = id))
     }
 
     /** Send a file (framed with the app-layer header) to a peer. */
