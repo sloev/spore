@@ -366,6 +366,9 @@ enum Spec {
     I2pAccept(String),
     Copyparty(String),
     UdpGroup(String, String),
+    ReticulumTcp(String),
+    ReticulumUdp(String, String),
+    Icmp(String),
     Http(u16),
     Audio,
     Reticulum,
@@ -466,6 +469,12 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
                 Spec::Ax25Tcp(v.to_string())
             }),
             "tor" | "onion" if !v.is_empty() => Ok(Spec::Tor(v.to_string())),
+            "reticulum-tcp" | "rns-tcp" if !v.is_empty() => Ok(Spec::ReticulumTcp(v.to_string())),
+            "reticulum-udp" | "rns-udp" if v.contains("->") => {
+                let (b, p) = v.split_once("->").unwrap();
+                Ok(Spec::ReticulumUdp(b.trim().to_string(), p.trim().to_string()))
+            }
+            "icmp" | "ping" if !v.is_empty() => Ok(Spec::Icmp(v.to_string())),
             "i2p" if !v.is_empty() => Ok(Spec::I2p(v.to_string())),
             "i2p-accept" => Ok(Spec::I2pAccept(v.to_string())),
             "copyparty" | "webdav" if !v.is_empty() => Ok(Spec::Copyparty(v.to_string())),
@@ -495,6 +504,9 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "ax25" | "kiss" => Err("`ax25` needs a TNC (ax25: HOST:PORT, or a /dev path)".into()),
             "tor" | "onion" => Err("`tor` needs an onion (tor: abc…xyz.onion[:port])".into()),
             "i2p" => Err("`i2p` needs a destination (i2p: <b32>.b32.i2p)".into()),
+            "reticulum-tcp" | "rns-tcp" => Err("`reticulum-tcp` needs the companion's HOST:PORT".into()),
+            "reticulum-udp" | "rns-udp" => Err("`reticulum-udp` needs BIND -> PEER".into()),
+            "icmp" | "ping" => Err("`icmp` needs a peer IPv4 (icmp: 192.168.1.42)".into()),
             "i2p-accept" => Ok(Spec::I2pAccept(String::new())),
             "copyparty" | "webdav" => Err("`copyparty` needs a URL (copyparty: http://host/bag/)".into()),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
@@ -620,6 +632,36 @@ fn run_config(cfg: Config) {
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::i2p::run(h, iface, rx, &target) {
                         eprintln!("  [i2p] {e}");
+                    }
+                })
+            }
+            Spec::ReticulumTcp(target) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::reticulum::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::reticulum::run_tcp(h, iface, rx, &target) {
+                        eprintln!("  [reticulum] {e}");
+                    }
+                })
+            }
+            Spec::ReticulumUdp(bind, peer) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::reticulum::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::reticulum::run_udp(h, iface, rx, &bind, &peer) {
+                        eprintln!("  [reticulum] {e}");
+                    }
+                })
+            }
+            Spec::Icmp(peer) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    #[cfg(target_os = "linux")]
+                    if let Err(e) = spore::bridge::icmp::run(h, iface, rx, &peer) {
+                        eprintln!("  [icmp] {e}");
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = (h, iface, rx, peer);
+                        eprintln!("  [icmp] raw ICMP is Linux-only");
                     }
                 })
             }

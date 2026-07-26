@@ -35,6 +35,7 @@ pub mod copyparty;
 pub mod foldersync;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod i2p;
+pub mod icmp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod store;
 #[cfg(not(target_arch = "wasm32"))]

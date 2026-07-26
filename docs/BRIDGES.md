@@ -199,6 +199,7 @@ Status is the emoji on each name. Follow the link for the deep dive.
 | [DMR ⚪](#dmr) | dgram | `u32` | var | IP-over-DMR data |
 | [goTenna ⚪](#gotenna) | dgram | `u32` | ~200 | consumer mesh radio |
 | [Audio modem ✅](#audio) | dgram | `()` | 4 K/frame | data-over-sound, 16-FSK |
+| [ICMP echo (ping) 🧪](#icmp) | dgram | `Ipv4Addr` | 1400 | envelopes in ping payloads (Linux raw socket) |
 | [JANUS (sonar) ⚪](#janus) | dgram | `u8` | 32 | underwater acoustic (NATO STANAG 4748) |
 | [QR stream 🟡](#qr) | dgram | `()` | ~1 K | armored envelopes as scanned codes |
 | [Iridium SBD ⚪](#iridium) | dgram | `u32` | 340 | satellite short-burst data |
@@ -223,6 +224,7 @@ See [Reticulum](#reticulum).
 | Pipe | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
 | [Reticulum — RNS payload 🧪](#reticulum) | dgram | `[u8;16]` | 383 | envelopes on a shared RNS destination (native, via companion) |
+| [Reticulum — companion TCP/UDP 🧪](#reticulum) | dgram/stream | — | 383 | reach the companion over the network, not a pipe |
 | [Reticulum — RNode serial ⚪](#reticulum) | stream | `[u8;16]` | 500 | LoRa RNode over USB (native) |
 | [Reticulum — Web Serial 🧪](#reticulum) | stream | `[u8;16]` | 500 | RNode over USB from a browser tab |
 | [Reticulum — Bluetooth 🧪](#reticulum) | stream | `[u8;16]` | 500 | RNode over BLE (Nordic UART) |
@@ -895,6 +897,57 @@ comes from an encrypted envelope payload; authenticity always from the signature
 prior art in data-over-sound.
 </details>
 
+<a id="icmp"></a>
+## ICMP echo (ping) 🧪
+
+**Summary.** Every IP host answers ping and almost every firewall passes it, so
+the echo payload is a carrier that reaches where a new port cannot: a captive
+portal that allows only "diagnostics", a host you can reach but not connect to.
+An envelope rides in the echo payload; a one-byte marker keeps the world's
+ordinary pings out of the router.
+
+| Field | Value |
+|---|---|
+| Driver form | `dgram` |
+| `U` | `Ipv4Addr` |
+| MTU | 1400 (one echo payload, no IP fragmentation) |
+| State | stateless |
+| Status | 🧪 codec tested; raw-socket runner is a Linux `CAP_NET_RAW` template |
+| Code | `bridge::icmp` |
+
+<details><summary>Deep dive: the covert-channel family (ping, DHCP, ARP, …)</summary>
+
+`bridge::icmp` is the worked example of a broader idea: **any protocol with a
+field that holds arbitrary bytes is a carrier.** SPORE only needs to move bytes,
+and it assumes every link is hostile, so smuggling those bytes through a protocol
+never meant for data costs nothing in security — the envelope is still signed and
+sealed.
+
+The module is split so the honest part is verifiable: the **codec**
+(`encode_echo` / `decode_echo`, checksum and all) is pure and unit-tested,
+including the odd-length and rejected-ordinary-ping cases; the **runner** needs a
+raw socket, which needs `CAP_NET_RAW` and Linux, and cannot be exercised in CI —
+so it is a template whose framing is tested and whose socket call is not. Grant it
+without root: `sudo setcap cap_net_raw+ep ./spore`.
+
+The same pattern extends to the rest of the family, each differing only in *which*
+field carries the bytes, and each a raw-socket (often L2, often root) runner over
+a tested codec:
+
+- **DHCP** — a vendor/private option (e.g. 224–254) on the broadcast that every
+  LAN already floods; no association needed.
+- **ARP** — the sparest carrier: a broadcast that crosses no router, with only the
+  frame's minimum-length padding to hide in (~18 bytes), so a fountain fragment at
+  a time.
+- **DNS** — a query name (base32 label) to a resolver you don't control, the
+  classic egress from a filtered network.
+
+These share one caution beyond the usual: they are **conspicuous**. A covert
+channel is a transport, not a cloak — traffic analysis sees a host that pings a
+lot. Use them to get *out* of somewhere restrictive, not to hide that you are
+communicating; §9 mix mode is the tool for the latter.
+</details>
+
 <a id="janus"></a>
 ## JANUS (underwater sonar) ⚪
 
@@ -1071,7 +1124,7 @@ over the same LoRa air Reticulum uses, but does not route RNS packets.
 | MTU | 500 (RNS) / ~255 (LoRa PHY) |
 | Bulk budget | 32 B/s (conservative default; the slowest interface on the path is what suffers) |
 | State | stateless (RNS) / stateful (serial, BLE) |
-| Status | 🧪 RNS payload (`bridge::reticulum` + companion) · 🧪 Web Serial & BLE (RNode host mode) |
+| Status | 🧪 RNS payload (`bridge::reticulum` + companion, via stdio/TCP/UDP) · 🧪 Web Serial & BLE (RNode host mode) |
 | Code | `bridge::reticulum` + [`tools/reticulum_companion.py`](../tools/reticulum_companion.py); [`web/transports/reticulum.mjs`](../web/transports/reticulum.mjs) |
 
 <details><summary>Deep dive</summary>
