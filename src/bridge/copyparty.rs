@@ -27,6 +27,12 @@ use std::net::TcpStream;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
+/// Caps on what a share is allowed to make us hold. A listing of a very large
+/// bag is the biggest legitimate response, and an envelope is at most a few KB.
+const MAX_BODY: u64 = 8 * 1024 * 1024;
+const MAX_LINE: u64 = 16 * 1024;
+const MAX_HEADERS: usize = 100;
+
 /// A parsed `http://host[:port]/path/` target.
 struct Share {
     host: String,
@@ -62,6 +68,10 @@ impl Share {
     }
 
     /// One request; returns `(status, body)`.
+    ///
+    /// Every read is bounded. The server is chosen by whoever wrote the config,
+    /// but a share can be compromised or simply broken, and "it streams forever"
+    /// must not be a way to take the node down.
     fn request(&self, method: &str, target: &str, body: &[u8]) -> std::io::Result<(u16, Vec<u8>)> {
         let mut s = self.connect()?;
         let head = format!(
@@ -78,21 +88,28 @@ impl Share {
 
         let mut r = BufReader::new(s);
         let mut status_line = String::new();
-        r.read_line(&mut status_line)?;
+        (&mut r).take(MAX_LINE).read_line(&mut status_line)?;
         let status = status_line
             .split_whitespace()
             .nth(1)
             .and_then(|c| c.parse().ok())
             .ok_or_else(|| std::io::Error::other(format!("copyparty: bad status: {status_line:?}")))?;
-        // Skip headers; `Connection: close` means the body runs to EOF.
-        loop {
+        // Skip headers; `Connection: close` means the body runs to EOF. Both the
+        // number of headers and each one's length are capped, so neither an
+        // endless header block nor an endless single header can hold us.
+        for _ in 0..MAX_HEADERS {
             let mut line = String::new();
-            if r.read_line(&mut line)? == 0 || line.trim().is_empty() {
+            if (&mut r).take(MAX_LINE).read_line(&mut line)? == 0 || line.trim().is_empty() {
                 break;
             }
         }
         let mut out = Vec::new();
-        r.read_to_end(&mut out)?;
+        r.take(MAX_BODY).read_to_end(&mut out)?;
+        if out.len() as u64 == MAX_BODY {
+            return Err(std::io::Error::other(format!(
+                "copyparty: response from {target} hit the {MAX_BODY}-byte cap"
+            )));
+        }
         Ok((status, out))
     }
 }

@@ -73,14 +73,33 @@ pub fn run_http(hub: super::hub::Shared, iface: Iface, port: u16) -> std::io::Re
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+/// Refuse a request that outgrew a limit, and say which one.
+fn bad_request(s: &mut std::net::TcpStream, status: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let _ = s
+        .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes());
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn serve(hub: &super::hub::Shared, iface: Iface, s: &mut std::net::TcpStream) -> std::io::Result<()> {
     use std::io::{Read, Write};
+
+    // This is a listening server: anything that can reach the port controls
+    // both of these loops. A client that never sends the header terminator, or
+    // that announces a Content-Length of a terabyte, must not be able to make us
+    // allocate until we die.
+    const MAX_HEAD: usize = 16 * 1024;
+    const MAX_BODY: usize = 8 * 1024 * 1024;
 
     let mut buf = Vec::new();
     let mut tmp = [0u8; 4096];
     let head_end = loop {
         if let Some(p) = find_sub(&buf, b"\r\n\r\n") {
             break p;
+        }
+        if buf.len() > MAX_HEAD {
+            return bad_request(s, "431 Request Header Fields Too Large");
         }
         let n = s.read(&mut tmp)?;
         if n == 0 {
@@ -99,6 +118,9 @@ fn serve(hub: &super::hub::Shared, iface: Iface, s: &mut std::net::TcpStream) ->
             content_len = v.trim().parse().unwrap_or(0);
         }
     }
+    if content_len > MAX_BODY {
+        return bad_request(s, "413 Payload Too Large");
+    }
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < content_len {
         let n = s.read(&mut tmp)?;
@@ -106,6 +128,9 @@ fn serve(hub: &super::hub::Shared, iface: Iface, s: &mut std::net::TcpStream) ->
             break;
         }
         body.extend_from_slice(&tmp[..n]);
+        if body.len() > MAX_BODY {
+            return bad_request(s, "413 Payload Too Large");
+        }
     }
     body.truncate(content_len);
 
@@ -139,4 +164,59 @@ fn serve(hub: &super::hub::Shared, iface: Iface, s: &mut std::net::TcpStream) ->
 #[cfg(not(target_arch = "wasm32"))]
 fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod limit_tests {
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::Duration;
+
+    /// Run the bag server against one client connection.
+    fn one_request(send: impl FnOnce(&mut TcpStream) + Send + 'static) -> String {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let hub = crate::bridge::hub::Hub::new(crate::Node::new("bag", &[]));
+        let iface = hub.register_pull();
+
+        let server = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let _ = super::serve(&hub, iface, &mut c);
+        });
+
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        send(&mut c);
+        let mut resp = String::new();
+        let _ = c.read_to_string(&mut resp);
+        let _ = server.join();
+        resp
+    }
+
+    /// A listening server is reachable by anyone. A client that opens a request
+    /// and never finishes the header must be cut off, not buffered forever.
+    #[test]
+    fn an_endless_header_is_refused_rather_than_buffered() {
+        let resp = one_request(|c| {
+            let _ = c.write_all(b"POST /spore/push HTTP/1.1\r\n");
+            // Header lines that never terminate the block.
+            let filler = "X-Pad: ".to_string() + &"a".repeat(1000) + "\r\n";
+            for _ in 0..40 {
+                if c.write_all(filler.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        });
+        assert!(resp.contains("431"), "expected a 431, got {resp:?}");
+    }
+
+    /// Content-Length is a number the client picks. It must be checked before it
+    /// is believed.
+    #[test]
+    fn an_absurd_content_length_is_refused_before_it_is_allocated() {
+        let resp = one_request(|c| {
+            let _ = c.write_all(b"POST /spore/push HTTP/1.1\r\nContent-Length: 99999999999\r\n\r\n");
+        });
+        assert!(resp.contains("413"), "expected a 413, got {resp:?}");
+    }
 }

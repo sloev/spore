@@ -43,6 +43,43 @@ module, so the number and its reasoning stay together; override at runtime with
 `Hub::set_bulk_budget`. Media fast enough not to care (UDP, TCP, WebRTC, the web
 overlays) set no budget at all and are unchanged.
 
+## Bridge security — what a bridge is trusted with
+
+**Nothing.** A bridge moves bytes; it is never trusted for authenticity, secrecy
+or honesty. Envelopes are signed and sealed end to end (§2, §7), ids are content
+hashes, and path learning binds only from *signed* frames. A hostile link can
+drop, delay, replay or reorder — all of which the router already survives — but
+it cannot forge, read a sealed payload, or make a node believe a false address.
+
+What a bridge **can** do wrong is spend our resources. Every bridge parses input
+from something it does not control, and the failure mode is not a forged message
+but an out-of-memory. So the rule for every bridge in this repo is:
+
+> **Every read from a peer is bounded, and every length that comes off the wire
+> is checked before it is believed.**
+
+The limits, and where they live:
+
+| Bound | Value | Why |
+|---|---|---|
+| `kiss_stream::MAX_FRAME` | 64 KiB | A peer that opens a KISS frame and never closes it. 46× the default MTU. |
+| `bag` request header | 16 KiB | A client that never sends the header terminator → `431`. |
+| `bag` request body | 8 MiB | `Content-Length` is a number the client picks → `413`. |
+| `copyparty` response | 8 MiB body, 16 KiB/line, 100 headers | A share can be compromised or simply broken. |
+| `i2p` control line | 8 KiB | Anything on port 7656 that streams without a newline. |
+| store adoption | 1 MiB/file | A spill directory is on disk, where anything can drop a file. |
+
+Two properties worth stating because they are easy to lose:
+
+- **An overrun resynchronises rather than disconnecting.** A KISS frame that
+  exceeds the cap is abandoned and the next delimiter starts a clean one; a
+  corrupt or hostile stream costs one frame, not the link.
+- **Escaping buys no extra room.** KISS escape pairs are two bytes on the wire
+  and one in the buffer, and the cap counts the decoded byte — so a peer cannot
+  double the memory cost by escaping everything.
+
+Each of these is covered by a test that fails if the bound is removed.
+
 ## TLS — deliberately not linked in
 
 Several media on this page speak only TLS: Matrix, XMPP, e-mail, `wss://` Nostr

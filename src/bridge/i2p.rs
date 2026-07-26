@@ -21,9 +21,7 @@
 
 use super::hub::Shared;
 use crate::*;
-#[cfg(test)]
-use std::io::Read;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -39,11 +37,24 @@ fn bad(msg: impl Into<String>) -> std::io::Error {
     std::io::Error::other(msg.into())
 }
 
-/// Read one `\n`-terminated SAM reply line.
+/// Longest SAM control line we will assemble. Real ones are well under this; a
+/// full destination is ~520 base64 characters.
+const MAX_LINE: u64 = 8 * 1024;
+
+/// Read one `\n`-terminated SAM reply line, bounded.
+///
+/// `read_line` on its own has no limit, so anything sitting on port 7656 that
+/// streams bytes without a newline would make us buffer until we die. The SAM
+/// bridge is normally local and trusted, but "normally" is not a security
+/// property, and the cost of the bound is nothing.
 fn read_line(r: &mut BufReader<TcpStream>) -> std::io::Result<String> {
     let mut line = String::new();
-    if r.read_line(&mut line)? == 0 {
+    let n = r.take(MAX_LINE).read_line(&mut line)?;
+    if n == 0 {
         return Err(bad("SAM bridge closed the connection"));
+    }
+    if !line.ends_with('\n') {
+        return Err(bad("SAM sent an oversized line with no terminator"));
     }
     Ok(line.trim_end().to_string())
 }
