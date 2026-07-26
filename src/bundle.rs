@@ -39,12 +39,12 @@ impl Node {
         let mut out: Vec<(Id, String, bool)> = self
             .manifests
             .iter()
-            .filter(|(magnet, _)| self.store.get(*magnet).map(|s| s.dest) == Some(t))
+            .filter(|(magnet, _)| self.store.meta(magnet).map(|s| s.dest) == Some(t))
             .map(|(magnet, m)| (*magnet, m.name.clone(), self.has_file(magnet)))
             .collect();
         // Newest first, by the manifest envelope's expiry.
         out.sort_by_key(|(magnet, _, _)| {
-            std::cmp::Reverse(self.store.get(magnet).map(|s| s.expiry).unwrap_or(0))
+            std::cmp::Reverse(self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0))
         });
         out
     }

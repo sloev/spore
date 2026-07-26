@@ -51,7 +51,9 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
   lossy, out-of-order, one-way subset once `count` independent chunks arrive.
 - **Files** — `publish_file` mints a **magnet** (a signed manifest indexing chunk
   envelopes by content ID); peers `fetch` missing chunks via WANT and verify each
-  for free, because a chunk's ID is the hash of its bytes. BitTorrent from the
+  for free, because a chunk's ID is the hash of its bytes. Past what one manifest
+  can list, manifests nest into a **Merkle tree** — still one magnet, still one
+  signature at the root, and no size the format cares about. BitTorrent from the
   envelope primitive.
 - **Sessions** — a UDP-like datagram link keyed on a cryptographic address (so it
   survives roaming), plus a simple QUIC-style Go-Back-N reliable stream for
@@ -309,6 +311,15 @@ with its UDP feature on, it shouts every mesh message onto the local network. Th
 own replies back — so the radio mesh carries your traffic for miles, and SPORE just
 sees "one more link." Messages are automatically chopped to fit the radio's small
 packet size.
+
+No Wi-Fi on the radio? Plug it in over USB instead — same codec, different pipe:
+
+```sh
+stty -F /dev/ttyUSB0 115200 raw -echo
+spore meshtastic-serial:/dev/ttyUSB0
+# …or let another tool own the port:
+socat /dev/ttyUSB0,b115200,raw - | spore meshtastic-serial
+```
 
 <details>
 <summary>Deep dive: how the bridge works, and what to check before trusting it</summary>

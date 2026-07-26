@@ -36,6 +36,12 @@ object SporeNative {
     /** Register a Kotlin-driven bridge interface; returns its iface id. */
     external fun nativeRegisterIface(ptr: Long): Int
 
+    /** As above, but the link carries at most `bulkBytesPerSec` of others' file chunks. */
+    external fun nativeRegisterIfaceLimited(ptr: Long, bulkBytesPerSec: Int): Int
+
+    /** The bulk budget the core suggests for "audio" / "meshtastic" / "reticulum". */
+    external fun nativeSuggestedBulkBudget(kind: String): Int
+
     /** Poll one outbound frame the node wants sent on `iface`, or null. */
     external fun nativePollForward(ptr: Long, iface: Int): ByteArray?
 
@@ -102,6 +108,15 @@ object SporeNative {
     /** Publish a file (sealed to dest when possible). "magnethex:1|0". */
     external fun nativePublishFile(ptr: Long, name: String, bytes: ByteArray, destHex: String): String?
 
+    /** Largest file this node can share right now (bounded by the store). */
+    external fun nativeMaxFileBytes(ptr: Long): Int
+
+    /** Set how many bytes this node keeps for stored traffic (files included). */
+    external fun nativeSetStoreBudget(ptr: Long, bytes: Int)
+
+    /** Back the store with `dir`, keeping `memBytes` resident. Returns envelopes adopted. */
+    external fun nativeSetSpillDir(ptr: Long, dir: String, memBytes: Int, now: Int): Int
+
     /** Known files: "magnet:totalBytes:chunksHeld:chunksTotal:name" lines. */
     external fun nativeFiles(ptr: Long): String
 
@@ -110,6 +125,12 @@ object SporeNative {
 
     /** A complete file as u16 nameLen · name · bytes (decrypted), else null. */
     external fun nativeOpenFile(ptr: Long, magnetHex: String): ByteArray?
+
+    /** The file's real name (decrypted if sealed to us), without its bytes. */
+    external fun nativeFileName(ptr: Long, magnetHex: String): String?
+
+    /** Write a complete file to `path`, decrypting as it streams. -1 on failure. */
+    external fun nativeSaveFile(ptr: Long, magnetHex: String, path: String): Long
 
     /** Direct message: sealed when possible + receipt requested. "idhex:1|0". */
     external fun nativeSendDirect(ptr: Long, dest: ByteArray, payload: ByteArray): String?

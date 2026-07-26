@@ -28,6 +28,21 @@ The emoji in each protocol's title tells you how far it is:
 Throughout, `U` is the **underlay address type** (how a medium names a peer) and
 **Form** is the driver form (`dgram` / `stream` / `store`, see below).
 
+**Bulk budget.** Since files became manifest trees they can be arbitrarily large,
+so any link can be conscripted into hauling one. Each interface may therefore
+register a *bulk budget* — bytes per second of **other people's file chunks** it
+is willing to relay ([`Hub::register_limited`](../src/bridge/hub.rs)) — as a
+leaky bucket that accrues a few seconds of burst.
+
+Only chunks count as bulk. Messages, announces, receipts and **manifests** always
+pass, so a paced link stays a full member of the mesh: it still carries the
+conversation, and still tells everyone what exists. It declines only to be the
+pipe, and because chunks are named by content the fetch simply asks again and
+another path answers. The default for each medium is a constant in that bridge's
+module, so the number and its reasoning stay together; override at runtime with
+`Hub::set_bulk_budget`. Media fast enough not to care (UDP, TCP, WebRTC, the web
+overlays) set no budget at all and are unchanged.
+
 ## Bridge architecture
 
 Because the router is medium-independent, **every bridge reduces to the same three
@@ -116,7 +131,7 @@ codec, so `U` and MTU never change. See [Meshtastic](#meshtastic).
 | Pipe | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
 | [Meshtastic — WiFi-UDP ✅](#meshtastic) | dgram | `u32` | 237 | multicast on the LAN (`bridge::meshtastic::run`) |
-| [Meshtastic — USB serial 🟡](#meshtastic) | stream | `u32` | 237 | same protobuf, framed on the serial stream |
+| [Meshtastic — USB serial 🧪](#meshtastic) | stream | `u32` | 237 | same protobuf, framed on the serial stream |
 | [Meshtastic — Web Serial 🧪](#meshtastic) | stream | `u32` | 237 | browser → node over USB (`web/transports/meshtastic.mjs`) |
 | [Meshtastic — Bluetooth 🧪](#meshtastic) | stream | `u32` | 237 | browser → node over BLE |
 
@@ -753,6 +768,7 @@ implemented and tested, with a browser twin bit-compatible with the native modem
 | Driver form | `dgram` |
 | `U` | `()` (broadcast-only) |
 | MTU | 4 KB/frame |
+| Bulk budget | **0 B/s** — carries messages, announces and manifests; refuses file chunks |
 | State | null |
 | Status | ✅ implemented & tested |
 | Code | `bridge::audio` (native), [`web/transports/audio.mjs`](../web/transports/audio.mjs) (browser twin) |
@@ -774,6 +790,14 @@ The Rust and JS implementations are **byte-identical**: the browser twin's SHA-2
 CRC and tone plan were verified against the native modem, and frames roundtrip
 under noise. So a browser tab and a native `spore-audio` pipe exchange real
 envelopes over the air.
+
+**Throughput and what it means for files.** 16 tones × 4 bits at ~47 symbols/s is
+about **23 bytes per second**, so a single 1336-byte file chunk would occupy the
+channel for a minute. Hence a bulk budget of zero: a sound link relays messages,
+announces and manifests at full speed — telling the mesh you exist and what you
+have, which is what an audio link is *for* — and declines to haul chunks. Because
+chunks are content-addressed, whoever wants them asks again and a faster path
+answers; nothing fails, it just routes around.
 
 **SPORE bridge mapping.** `U = ()`, broadcast-only; the streaming demodulator scans
 for the sync word at sub-symbol resolution to tolerate lead-in silence and timing
@@ -895,8 +919,9 @@ number) and MTU (237) never change; only the transport under the codec differs.
 | Driver form | `dgram` (UDP) / `stream` (serial, BLE) |
 | `U` | `u32` (Meshtastic node number) |
 | MTU | 237 bytes (LoRa payload budget) |
+| Bulk budget | 32 B/s (conservative default; raise per region/preset) |
 | State | stateless (UDP) / stateful (serial, BLE) |
-| Status | ✅ WiFi-UDP (`bridge::meshtastic::run`) · 🟡 USB serial (native runner TODO) · 🧪 Web Serial & BLE |
+| Status | ✅ WiFi-UDP (`bridge::meshtastic::run`) · 🧪 USB serial (`run_serial` / `run_pipe`) · 🧪 Web Serial & BLE |
 | Code | `bridge::meshtastic` (codec + UDP), [`web/transports/meshtastic.mjs`](../web/transports/meshtastic.mjs) |
 
 <details><summary>Deep dive</summary>
@@ -962,6 +987,7 @@ over the same LoRa air Reticulum uses, but does not route RNS packets.
 | Driver form | `dgram` (IP iface) / `stream` (RNode serial/BLE) |
 | `U` | `[u8;16]` (RNS destination) or `()` (raw RNode broadcast) |
 | MTU | 500 (RNS) / ~255 (LoRa PHY) |
+| Bulk budget | 32 B/s (conservative default; the slowest interface on the path is what suffers) |
 | State | stateless (RNS) / stateful (serial, BLE) |
 | Status | 🧪 RNS payload (`bridge::reticulum` + companion) · 🧪 Web Serial & BLE (RNode host mode) |
 | Code | `bridge::reticulum` + [`tools/reticulum_companion.py`](../tools/reticulum_companion.py); [`web/transports/reticulum.mjs`](../web/transports/reticulum.mjs) |

@@ -36,6 +36,16 @@ pub const SAMPLE_RATE: u32 = 48_000;
 pub const SYMBOL_LEN: usize = 1024;
 /// 16 tones ⇒ 4 bits per symbol ⇒ ~23 bytes/s.
 const TONES: usize = 16;
+
+/// What this link will carry of *other people's file chunks*, per second — see
+/// [`crate::bridge::hub::Hub::register_limited`].
+///
+/// Zero. At ~23 bytes/s one 1336-byte chunk occupies the channel for a minute,
+/// so a sound link that served bulk would serve nothing else. It still carries
+/// messages, announces and manifests at full speed, which is what an audio link
+/// is actually for: telling the mesh you exist and what you have. Whoever wants
+/// the chunks asks again and a faster path answers.
+pub const BULK_BYTES_PER_SEC: u32 = 0;
 const BASE_BIN: usize = 32; // 1500 Hz
 const SPACING_BIN: usize = 4; // 187.5 Hz between tones — well separated at this window
 const SYNC: [u8; 6] = [15, 0, 15, 0, 12, 3];

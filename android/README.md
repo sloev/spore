@@ -30,9 +30,15 @@ A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design
 >
 > **Files** ride the protocol's own manifest + chunk layer — a signed manifest
 > (magnet) names fountain-coded chunks any relay can carry and serve, so a large
-> file survives lossy links and resumes rather than restarting. To a known peer a
-> file is **sealed**: contents *and* file name, so relays carrying the chunks
-> learn neither.
+> file survives lossy links and resumes rather than restarting. Past ~93 KB the
+> manifests nest into a tree, so file size is bounded by what the phone will
+> store (256 MB of app-private storage by default, ~120 MB per file) rather than
+> by the wire format or by the heap — only 8 MB stays in RAM. The store is
+> written through to disk, so **killing the app does not restart a transfer**:
+> on next launch the chunks are adopted and the fetch picks up. To a known
+> peer a file is **sealed**: contents *and* file name, so relays carrying the
+> chunks learn neither. Sealing is per chunk, and the core writes a received file
+> straight to disk as it decrypts, so the bytes never pass through the JVM heap.
 >
 > The Rust core + JNI are host-`cargo check`ed and unit-tested in CI; the
 > Kotlin/Compose app is proven to build by the `android` CI workflow. The

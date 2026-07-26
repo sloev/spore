@@ -506,14 +506,6 @@ pub struct Rx {
     pub forwards: Vec<Forward>,   // to the transport
 }
 
-struct Stored {
-    wire: Vec<u8>,
-    expiry: u32,
-    stamp: u8,
-    seq: u64,
-    dest: Addr,
-}
-
 // ---------------------------------------------------------------------------
 // §7 Crypto — seal to a recipient prekey (libsodium crypto_box_seal shape).
 // Forward secrecy comes from rotating prekeys daily and deleting the private
@@ -578,6 +570,32 @@ pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
 /// learns nothing but "some sealed file".
 pub const SEALED_FILE_NAME: &str = "sealed";
 
+/// Encrypt one chunk of a sealed file under that file's key.
+///
+/// The key is freshly generated per file, so the chunk index is a safe nonce —
+/// no two chunks can ever share one, and a counter costs 24 fewer bytes per
+/// chunk than a random nonce would. Adds only the 16-byte tag, which is what
+/// lets a sealed chunk keep riding the same frame an unsealed one does.
+fn chunk_seal(plain: &[u8], key: &[u8; 32], index: u32) -> Vec<u8> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    let mut nonce = [0u8; 24];
+    nonce[20..].copy_from_slice(&index.to_be_bytes());
+    XChaCha20Poly1305::new(Key::from_slice(key))
+        .encrypt(XNonce::from_slice(&nonce), plain)
+        .expect("chunk seal")
+}
+
+/// Open one chunk of a sealed file. `None` if the key or index is wrong, or the
+/// bytes were tampered with — the tag makes every chunk self-checking.
+fn chunk_open(ct: &[u8], key: &[u8; 32], index: u32) -> Option<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    let mut nonce = [0u8; 24];
+    nonce[20..].copy_from_slice(&index.to_be_bytes());
+    XChaCha20Poly1305::new(Key::from_slice(key)).decrypt(XNonce::from_slice(&nonce), ct).ok()
+}
+
 /// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`
 /// (X25519, the same kind a `Node` rotates in its ANNOUNCE).
 pub fn prekey_keypair() -> ([u8; 32], [u8; 32]) {
@@ -620,7 +638,7 @@ pub struct Node {
     addrs: HashSet<Addr>,
 
     seen: HashMap<Id, u32>, // id -> retain-until
-    store: HashMap<Id, Stored>,
+    store: store::Store,
     paths: Paths,
     peer_prekeys: HashMap<Addr, [u8; 32]>,
     peer_busy: HashMap<Addr, u8>,
@@ -688,7 +706,7 @@ impl Node {
             topics: topics.iter().map(|t| topic_of(t)).collect(),
             addrs,
             seen: HashMap::new(),
-            store: HashMap::new(),
+            store: store::Store::new(),
             paths: Paths::default(),
             peer_prekeys: HashMap::new(),
             peer_busy: HashMap::new(),
@@ -724,6 +742,53 @@ impl Node {
         self.enforce_budget();
     }
 
+    /// Keep the store's bytes in `dir`, holding only a budget of them resident.
+    ///
+    /// Past that budget the coldest wires spill to disk and only their length
+    /// stays in memory, so what a node can carry stops being bounded by its RAM.
+    /// This is what lets a file actually run to the sizes a manifest tree allows.
+    ///
+    /// Anything already in the directory from a previous run is **adopted**, and
+    /// any signed manifest among it re-learned — so a transfer a restart
+    /// interrupted resumes instead of starting over. Adoption is safe because an
+    /// id *is* the hash of its bytes: a file whose name does not match its
+    /// content is discarded, so a tampered spill directory cannot inject
+    /// anything. Returns how many envelopes were adopted.
+    ///
+    /// Without this a node is memory-only, which is the right answer on the web
+    /// and anywhere else with no filesystem.
+    pub fn set_spill_dir(&mut self, dir: &std::path::Path, now: u32) -> std::io::Result<usize> {
+        let adopted = self.store.set_spill_dir(dir, now)?;
+        let n = adopted.len();
+        for wire in adopted {
+            let Ok((e, _)) = Envelope::decode(&wire) else { continue };
+            // We held it before, so we have already relayed it — don't flood it
+            // again just because the process restarted.
+            self.mark_seen(&e);
+            if e.typ == ty::DATA
+                && matches!(
+                    e.payload.first(),
+                    Some(&file::MANIFEST_TAG) | Some(&file::TREE_TAG) | Some(&file::SEALED_TAG)
+                )
+            {
+                self.absorb_manifest(&e);
+            }
+        }
+        Ok(n)
+    }
+
+    /// How many bytes of the store stay in memory before the rest spills to the
+    /// directory set by [`Node::set_spill_dir`]. Defaults to 5 MiB. Without a
+    /// spill directory this has no effect — there is nowhere for bytes to go.
+    pub fn set_mem_budget(&mut self, bytes: usize) {
+        self.store.set_mem_budget(bytes);
+    }
+
+    /// Bytes the store is holding, in memory and on disk together.
+    pub fn store_bytes(&self) -> usize {
+        self.store.bytes()
+    }
+
     pub fn peer_prekey(&self, a: &Addr) -> Option<[u8; 32]> {
         self.peer_prekeys.get(a).copied()
     }
@@ -745,16 +810,12 @@ impl Node {
     // ---- origination -----------------------------------------------------
 
     fn store_put(&mut self, e: &Envelope) {
-        let id = e.id();
-        self.store.insert(
-            id,
-            Stored { wire: e.wire(), expiry: e.expiry, stamp: e.stamp(), seq: self.seq, dest: e.dest },
-        );
+        self.store.put(e.id(), e.wire(), e.expiry, e.stamp(), self.seq, e.dest);
         self.seq += 1;
         self.enforce_budget();
     }
     fn enforce_budget(&mut self) {
-        let mut total: usize = self.store.values().map(|s| s.wire.len()).sum();
+        let mut total = self.store.bytes();
         if total <= self.max_store_bytes {
             return;
         }
@@ -766,18 +827,15 @@ impl Node {
         while total > self.max_store_bytes {
             let victim = self
                 .store
-                .iter()
+                .entries()
                 .filter(|(k, _)| !pinned.contains(*k))
                 .min_by(|a, b| {
-                    a.1.stamp
-                        .cmp(&b.1.stamp)
-                        .then(b.1.wire.len().cmp(&a.1.wire.len()))
-                        .then(a.1.seq.cmp(&b.1.seq))
+                    a.1.stamp.cmp(&b.1.stamp).then(b.1.len.cmp(&a.1.len)).then(a.1.seq.cmp(&b.1.seq))
                 })
                 .map(|(k, _)| *k);
             match victim {
                 Some(k) => {
-                    total -= self.store[&k].wire.len();
+                    total = total.saturating_sub(self.store.meta(&k).map(|s| s.len).unwrap_or(0));
                     self.store.remove(&k);
                 }
                 None => break, // only in-progress file chunks remain — keep them
@@ -796,11 +854,15 @@ impl Node {
                 continue;
             }
             pinned.insert(*magnet);
-            for c in &m.chunk_ids {
-                if self.store.contains_key(c) {
-                    pinned.insert(*c);
+            // Interior manifests are pinned alongside the chunks: evicting one
+            // mid-fetch would hide its whole subtree and stall the transfer with
+            // no way to name what went missing.
+            self.walk_tree(m, &mut |id, _, held| {
+                if held {
+                    pinned.insert(*id);
                 }
-            }
+                true
+            });
         }
         pinned
     }
@@ -1058,7 +1120,7 @@ impl Node {
     /// Our current backpressure `busy` byte (§5.4c): store fill scaled to 0–255.
     /// Neighbours use it to throttle relays toward a swamped peer.
     pub fn busy(&self) -> u8 {
-        let used: usize = self.store.values().map(|s| s.wire.len()).sum();
+        let used = self.store.bytes();
         (used.saturating_mul(255) / self.max_store_bytes.max(1)).min(255) as u8
     }
     /// The `busy` byte a peer last advertised in its ANNOUNCE, if heard.
@@ -1186,7 +1248,15 @@ impl Node {
         }
 
         // Auto-learn manifests addressed to us (endpoint demux on the app tag).
-        if deliverable && e.typ == ty::DATA && e.payload.first() == Some(&file::MANIFEST_TAG) {
+        // Either root tag counts; interior nodes never reach here, since they
+        // ride a per-file topic nobody subscribes to, and are unsigned besides.
+        if deliverable
+            && e.typ == ty::DATA
+            && matches!(
+                e.payload.first(),
+                Some(&file::MANIFEST_TAG) | Some(&file::TREE_TAG) | Some(&file::SEALED_TAG)
+            )
+        {
             self.absorb_manifest(e);
         }
 
@@ -1298,7 +1368,7 @@ impl Node {
     /// INV = concatenated 16-byte IDs of stored envelopes relevant to a peer
     /// that follows `peer_topics` (public + those topics + unicast for custody).
     pub fn build_inv(&self, peer_topics: &HashSet<Addr>) -> Vec<u8> {
-        let mut ids: Vec<(&Id, &Stored)> = self.store.iter().collect();
+        let mut ids: Vec<(&Id, &store::Stored)> = self.store.entries().collect();
         ids.sort_by_key(|(_, s)| std::cmp::Reverse(s.expiry)); // newest first
         let mut p = Vec::new();
         for (id, s) in ids {
@@ -1317,7 +1387,7 @@ impl Node {
             if chunk.len() == 16 {
                 let mut id = [0u8; 16];
                 id.copy_from_slice(chunk);
-                if !self.store.contains_key(&id) {
+                if !self.store.contains(&id) {
                     want.extend_from_slice(&id); // request what we lack
                 }
             }
@@ -1339,8 +1409,8 @@ impl Node {
             if chunk.len() == 16 {
                 let mut id = [0u8; 16];
                 id.copy_from_slice(chunk);
-                if let Some(s) = self.store.get(&id) {
-                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: s.wire.clone() });
+                if let Some(wire) = self.store.wire(&id) {
+                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: wire });
                 }
             }
         }
@@ -1351,24 +1421,30 @@ impl Node {
         self.store.len()
     }
     pub fn has(&self, id: &Id) -> bool {
-        self.store.contains_key(id)
+        self.store.contains(id)
     }
 
     /// All stored envelope IDs, concatenated (16 B each) — a bag INV.
     pub fn stored_ids(&self) -> Vec<u8> {
         let mut v = Vec::with_capacity(self.store.len() * 16);
-        for id in self.store.keys() {
+        for id in self.store.ids() {
             v.extend_from_slice(id);
         }
         v
     }
     /// The wire bytes of a stored envelope, if held.
     pub fn get_wire(&self, id: &Id) -> Option<Vec<u8>> {
-        self.store.get(id).map(|s| s.wire.clone())
+        self.store.wire(id)
     }
     /// Every stored envelope as `(id, wire)` — the whole bag.
     pub fn store_wires(&self) -> Vec<(Id, Vec<u8>)> {
-        self.store.iter().map(|(id, s)| (*id, s.wire.clone())).collect()
+        self.store
+            .ids()
+            .copied()
+            .collect::<Vec<_>>()
+            .iter()
+            .filter_map(|id| self.store.wire(id).map(|w| (*id, w)))
+            .collect()
     }
 
     /// Receive-side fragmentation status: for each in-progress fountain
@@ -1454,7 +1530,31 @@ impl Node {
     /// a signed manifest that lists those IDs. Returns the manifest ID — the
     /// **magnet** — and the `Forward`s to flood the small manifest. The data
     /// itself is pulled on demand (§6 custody / swarm), BitTorrent-style.
+    ///
+    /// A manifest is one envelope, so it can only name so many chunks. Past that
+    /// the chunk ids are grouped under **interior manifests** and those are
+    /// grouped again, until what remains fits the signed root — a Merkle tree of
+    /// manifests whose root is still a single 16-byte magnet. Files small enough
+    /// for one manifest produce exactly the bytes they always did.
     pub fn publish_file(&mut self, name: &str, bytes: &[u8], dest: Addr, now: u32) -> (Id, Vec<Forward>) {
+        self.publish_object(name, bytes, dest, now, None, Vec::new())
+    }
+
+    /// The shared body of [`Node::publish_file`] and
+    /// [`Node::publish_file_sealed`]: chunk, encrypt the chunks if there is a
+    /// key, grow interior levels until what remains fits the signed root.
+    ///
+    /// Sealing changes only what goes *inside* a chunk. The tree above is the
+    /// same shape either way, because it carries nothing but hashes.
+    fn publish_object(
+        &mut self,
+        name: &str,
+        bytes: &[u8],
+        dest: Addr,
+        now: u32,
+        key: Option<&[u8; 32]>,
+        sealed_hdr: Vec<u8>,
+    ) -> (Id, Vec<Forward>) {
         let chunk_size = self.mtu.saturating_sub(64).max(1);
         let count = bytes.len().div_ceil(chunk_size).max(1);
         let expiry = now + 7 * 86400;
@@ -1464,29 +1564,73 @@ impl Node {
         let mut ft = [0u8; 8];
         ft.copy_from_slice(&Sha256::digest(file_id)[..8]);
 
-        let mut chunk_ids = Vec::with_capacity(count);
+        // (id, plaintext bytes of file covered) for the level being grouped.
+        let mut level: Vec<(Id, u64)> = Vec::with_capacity(count);
         for i in 0..count {
             let start = i * chunk_size;
             let end = ((i + 1) * chunk_size).min(bytes.len());
-            let mut payload = Vec::with_capacity(21 + (end - start));
+            // The AEAD tag adds 16 bytes, which the chunk size already has room
+            // for — a sealed chunk rides the same frame an open one does.
+            let body = match key {
+                Some(k) => chunk_seal(&bytes[start..end], k, i as u32),
+                None => bytes[start..end].to_vec(),
+            };
+            let mut payload = Vec::with_capacity(21 + body.len());
             payload.push(file::CHUNK_TAG);
             payload.extend_from_slice(&file_id);
             payload.extend_from_slice(&(i as u32).to_be_bytes());
-            payload.extend_from_slice(&bytes[start..end]);
+            payload.extend_from_slice(&body);
             let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
             ce.flags |= fl::FLOOD;
-            chunk_ids.push(ce.id());
+            level.push((ce.id(), (end - start) as u64));
             self.mark_seen(&ce);
             self.store_put(&ce);
+        }
+
+        // Grow interior levels until the remaining ids fit the signed root.
+        // Interior nodes are unsigned and unnamed: the parent names them by
+        // content id, which is hash enough, and dropping the signature buys back
+        // ~96 bytes of fan-out per node.
+        let fanout = file::interior_fanout(self.mtu).max(2);
+        // `depth` is the depth a manifest would have if it named the current
+        // level directly — 0 while `level` is still chunks. Each grouping pass
+        // buries the level one deeper.
+        let mut depth = 0u8;
+        while depth < file::MAX_DEPTH
+            && level.len() > file::root_fanout(self.mtu, name.len(), depth, sealed_hdr.len())
+        {
+            let mut next = Vec::with_capacity(level.len().div_ceil(fanout));
+            for group in level.chunks(fanout) {
+                let covered: u64 = group.iter().map(|(_, n)| *n).sum();
+                let node = file::Manifest {
+                    file_id,
+                    chunk_size: chunk_size as u32,
+                    count: group.len() as u32,
+                    total_len: covered,
+                    name: String::new(),
+                    chunk_ids: group.iter().map(|(id, _)| *id).collect(),
+                    depth,
+                    sealed_hdr: Vec::new(),
+                };
+                let mut ne = Envelope::new(ty::DATA, ft, expiry, node.encode());
+                ne.flags |= fl::FLOOD;
+                next.push((ne.id(), covered));
+                self.mark_seen(&ne);
+                self.store_put(&ne);
+            }
+            level = next;
+            depth += 1;
         }
 
         let manifest = file::Manifest {
             file_id,
             chunk_size: chunk_size as u32,
-            count: count as u32,
+            count: level.len() as u32,
             total_len: bytes.len() as u64,
             name: name.to_string(),
-            chunk_ids,
+            chunk_ids: level.iter().map(|(id, _)| *id).collect(),
+            depth,
+            sealed_hdr,
         };
         let mut me = Envelope::new(ty::DATA, dest, expiry, manifest.encode());
         if dest == ZERO_DEST || self.topics.contains(&dest) {
@@ -1513,24 +1657,105 @@ impl Node {
         Some(magnet)
     }
 
-    /// Ask neighbours for the chunks of `magnet` we don't hold yet. Reuses the
-    /// WANT machinery: a chunk is an ordinary stored envelope, named by content,
-    /// so any peer that has it answers from its store.
-    pub fn fetch(&mut self, magnet: &Id) -> Vec<Forward> {
-        let Some(m) = self.manifests.get(magnet) else {
-            return Vec::new();
-        };
-        let mut want = Vec::new();
-        for cid in &m.chunk_ids {
-            if !self.store.contains_key(cid) {
-                want.extend_from_slice(cid);
+    /// Read an interior manifest out of the store.
+    ///
+    /// Interior nodes are unsigned on purpose, so this must never be reached
+    /// from anything but a parent's id list: the store is keyed by content hash,
+    /// so an id a verified parent named can only resolve to the bytes that
+    /// parent meant. `expect` pins the child's depth — it must be exactly one
+    /// less than its parent's, or a crafted tree could recurse sideways.
+    fn tree_node(&self, id: &Id, expect: u8) -> Option<file::Manifest> {
+        let wire = self.store.wire(id)?;
+        let (e, _) = Envelope::decode(&wire).ok()?;
+        let m = file::Manifest::decode(&e.payload)?;
+        (m.depth == expect).then_some(m)
+    }
+
+    /// Depth-first walk of a manifest tree, in file order.
+    ///
+    /// Calls `f(id, depth, held)` for every id the tree names — `depth == 0` for
+    /// a data chunk, higher for an interior node — where `held` says whether we
+    /// have it. A held interior node is descended into right after its call; an
+    /// unheld one hides its whole subtree, which is exactly why the walk reports
+    /// it. Returning `false` from `f` stops the walk, so callers that only need
+    /// the next few ids never pay for the whole tree.
+    fn walk_tree<F>(&self, m: &file::Manifest, f: &mut F) -> bool
+    where
+        F: FnMut(&Id, u8, bool) -> bool,
+    {
+        for id in &m.chunk_ids {
+            if m.depth == 0 {
+                if !f(id, 0, self.store.contains(id)) {
+                    return false;
+                }
+                continue;
+            }
+            let child = self.tree_node(id, m.depth - 1);
+            if !f(id, m.depth, child.is_some()) {
+                return false;
+            }
+            if let Some(c) = child {
+                if !self.walk_tree(&c, f) {
+                    return false;
+                }
             }
         }
-        if want.is_empty() {
+        true
+    }
+
+    /// The next ids needed to make progress on `magnet`, at most `limit`, in
+    /// file order. Interior nodes surface before the chunks beneath them because
+    /// the walk reports a node before descending — so a tree resolves top-down
+    /// without needing a separate scheduling pass.
+    pub fn missing(&self, magnet: &Id, limit: usize) -> Vec<Id> {
+        let Some(root) = self.manifests.get(magnet) else {
             return Vec::new();
+        };
+        let mut out = Vec::new();
+        if limit == 0 {
+            return out;
         }
-        let bytes = Envelope::new(ty::WANT, ZERO_DEST, 0, want).wire();
-        vec![Forward::Flood { except: NO_IFACE, bytes }]
+        self.walk_tree(root, &mut |id, _, held| {
+            if !held {
+                out.push(*id);
+            }
+            out.len() < limit
+        });
+        out
+    }
+
+    /// How many ids fit in one WANT frame at this node's MTU.
+    fn want_window(&self) -> usize {
+        (self.mtu.saturating_sub(file::INTERIOR_ENV_OVERHEAD) / 16).max(1)
+    }
+
+    /// Ask neighbours for the parts of `magnet` we don't hold yet. Reuses the
+    /// WANT machinery: a chunk — and equally a sub-manifest — is an ordinary
+    /// stored envelope, named by content, so any peer that has it answers from
+    /// its store.
+    ///
+    /// One call asks for one frame's worth. A large file needs many, which is
+    /// the point: the request is paced by the link rather than by the file.
+    pub fn fetch(&mut self, magnet: &Id) -> Vec<Forward> {
+        self.fetch_n(magnet, 1)
+    }
+
+    /// Ask for up to `frames` frames' worth at once — successive,
+    /// non-overlapping windows, so a link with room for more than one packet in
+    /// flight can use it. A slow link should stay at `1`: every id asked for is
+    /// a reply someone else has to carry back.
+    pub fn fetch_n(&mut self, magnet: &Id, frames: usize) -> Vec<Forward> {
+        let window = self.want_window();
+        self.missing(magnet, window.saturating_mul(frames.max(1)))
+            .chunks(window)
+            .map(|w| {
+                let payload: Vec<u8> = w.iter().flatten().copied().collect();
+                Forward::Flood {
+                    except: NO_IFACE,
+                    bytes: Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire(),
+                }
+            })
+            .collect()
     }
 
     /// Request the chunks of every manifest we know but don't yet hold — the
@@ -1552,7 +1777,7 @@ impl Node {
             if !self.has_file(magnet) {
                 continue;
             }
-            let exp = self.store.get(magnet).map(|s| s.expiry).unwrap_or(0);
+            let exp = self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0);
             best.entry(m.name.clone())
                 .and_modify(|(id, e)| {
                     if exp > *e {
@@ -1569,9 +1794,13 @@ impl Node {
 
     /// True once every chunk named by the manifest is in our store.
     /// Publish a file **sealed to `dest`'s prekey**: the bytes *and the file
-    /// name* are encrypted, so relays carrying the chunks learn neither. The
-    /// manifest advertises the placeholder name [`SEALED_FILE_NAME`]; the real
-    /// one travels inside the sealed blob as `u16 length · name · bytes`.
+    /// name* are encrypted, so relays carrying the chunks learn neither.
+    ///
+    /// Each chunk is encrypted **on its own** under a per-file key, and that key
+    /// — with the real file name — travels sealed in the root manifest's header.
+    /// So the recipient decrypts a chunk at a time straight to wherever it is
+    /// putting the file, and a sealed file costs one chunk of memory instead of
+    /// all of it. The manifest advertises the placeholder [`SEALED_FILE_NAME`].
     ///
     /// `None` if we haven't heard `dest`'s prekey yet (it arrives with their
     /// ANNOUNCE) — the caller can fall back to [`Node::publish_file`] and say so.
@@ -1583,25 +1812,100 @@ impl Node {
         now: u32,
     ) -> Option<(Id, Vec<Forward>)> {
         let pk = self.peer_prekey(&dest)?;
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+
+        // Header (sealed to the recipient): the file key, then the real name.
         let nb = name.as_bytes();
         let nlen = nb.len().min(u16::MAX as usize);
-        let mut inner = Vec::with_capacity(2 + nlen + bytes.len());
-        inner.extend_from_slice(&(nlen as u16).to_be_bytes());
-        inner.extend_from_slice(&nb[..nlen]);
-        inner.extend_from_slice(bytes);
-        let sealed = seal(&inner, &pk);
-        Some(self.publish_file(SEALED_FILE_NAME, &sealed, dest, now))
+        let mut hdr = Vec::with_capacity(34 + nlen);
+        hdr.extend_from_slice(&key);
+        hdr.extend_from_slice(&(nlen as u16).to_be_bytes());
+        hdr.extend_from_slice(&nb[..nlen]);
+        let sealed_hdr = seal(&hdr, &pk);
+
+        // On a very small link the sealed header can fill the root by itself,
+        // leaving no room for even one id. Say so, rather than minting a root
+        // no link could carry — the caller can fall back to publishing in the
+        // clear, which is a choice only they can make.
+        if file::root_fanout(self.mtu, SEALED_FILE_NAME.len(), 0, sealed_hdr.len()) == 0 {
+            return None;
+        }
+
+        Some(self.publish_object(SEALED_FILE_NAME, bytes, dest, now, Some(&key), sealed_hdr))
+    }
+
+    /// Open a sealed root's header with our prekey: `(file key, real name)`.
+    /// `None` when it was sealed to someone else — which is most of what a relay
+    /// carries, and it never learns more than that.
+    fn open_sealed_header(&self, m: &file::Manifest) -> Option<([u8; 32], String)> {
+        let opened = self.open(&m.sealed_hdr)?;
+        if opened.len() < 34 {
+            return None;
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&opened[..32]);
+        let nlen = u16::from_be_bytes([opened[32], opened[33]]) as usize;
+        if 34 + nlen > opened.len() {
+            return None;
+        }
+        Some((key, String::from_utf8_lossy(&opened[34..34 + nlen]).to_string()))
     }
 
     /// Recover a complete file as `(name, bytes)`, decrypting it when it was
-    /// sealed to us. `None` while chunks are still missing, or when the file was
+    /// sealed to us. `None` while parts are still missing, or when the file was
     /// sealed to someone else — we relay those without ever reading them.
+    ///
+    /// For anything large prefer [`Node::open_file_to`], which writes the file
+    /// out as it decrypts instead of building the whole thing in memory.
     pub fn open_file(&self, magnet: &Id) -> Option<(String, Vec<u8>)> {
+        let hint = self.manifests.get(magnet)?.total_len.min(1 << 20) as usize;
+        let mut out = Vec::with_capacity(hint);
+        let (name, _) = self.open_file_to(magnet, &mut out)?;
+        Some((name, out))
+    }
+
+    /// The file's real name — decrypted out of the sealed header when it was
+    /// sealed to us. `None` if we don't know the manifest, or it was sealed to
+    /// someone else. Cheap for everything but the legacy whole-blob form: it
+    /// never touches the chunks.
+    pub fn file_name(&self, magnet: &Id) -> Option<String> {
         let m = self.manifests.get(magnet)?;
-        let raw = self.file_bytes(magnet)?;
-        if m.name != SEALED_FILE_NAME {
-            return Some((m.name.clone(), raw));
+        if !m.sealed_hdr.is_empty() {
+            return self.open_sealed_header(m).map(|(_, name)| name);
         }
+        if m.name == SEALED_FILE_NAME {
+            // Legacy: the name sits inside the sealed blob, so it costs a read.
+            return self.open_file(magnet).map(|(name, _)| name);
+        }
+        Some(m.name.clone())
+    }
+
+    /// Write a complete file out as `(name, bytes written)`, decrypting it when
+    /// it was sealed to us — **the form to prefer for anything large.**
+    ///
+    /// A sealed file is decrypted a chunk at a time on the way to `w`, so peak
+    /// memory is one chunk however big the file is. `None` while parts are
+    /// missing, or when it was sealed to someone else.
+    pub fn open_file_to<W: std::io::Write>(&self, magnet: &Id, w: &mut W) -> Option<(String, u64)> {
+        let m = self.manifests.get(magnet)?;
+
+        // Sealed per chunk: decrypt on the way out.
+        if !m.sealed_hdr.is_empty() {
+            let (key, name) = self.open_sealed_header(m)?;
+            let n = self.assemble(magnet, w, Some(&key))?;
+            return Some((name, n));
+        }
+        // Not sealed at all: the bytes are the file.
+        if m.name != SEALED_FILE_NAME {
+            let n = self.assemble(magnet, w, None)?;
+            return Some((m.name.clone(), n));
+        }
+
+        // Legacy: the whole file was sealed as one blob before chunking, so it
+        // cannot be streamed — it has to be decrypted entire. Kept so files
+        // published by older nodes still open.
+        let raw = self.file_bytes(magnet)?;
         let inner = self.open(&raw)?;
         if inner.len() < 2 {
             return None;
@@ -1611,43 +1915,185 @@ impl Node {
             return None;
         }
         let name = String::from_utf8_lossy(&inner[2..2 + nlen]).to_string();
-        Some((name, inner[2 + nlen..].to_vec()))
+        let body = &inner[2 + nlen..];
+        w.write_all(body).ok()?;
+        Some((name, body.len() as u64))
+    }
+
+    /// The largest file [`Node::publish_file`] can announce at this node's MTU.
+    ///
+    /// A manifest is one envelope, so a single one can only name so many chunks
+    /// (~94 KB of file at a 1400-byte MTU). Interior manifests lift that: each
+    /// level multiplies capacity by the interior fan-out, up to
+    /// [`file::MAX_DEPTH`] levels — some terabytes, i.e. no practical protocol
+    /// limit. What actually bounds a transfer now is the store budget at each
+    /// hop and what the slowest bridge on the path is willing to carry, not the
+    /// manifest.
+    ///
+    /// Sealing (`publish_file_sealed`) grows the payload by ~48 bytes plus the
+    /// file name, so leave a little headroom under this figure.
+    pub fn max_file_bytes(&self) -> usize {
+        let chunk = self.mtu.saturating_sub(64).max(1);
+        // Allow for a long file name in the signed root.
+        let mut ids = file::root_fanout(self.mtu, 96, file::MAX_DEPTH, 0);
+        let fanout = file::interior_fanout(self.mtu);
+        for _ in 0..file::MAX_DEPTH {
+            ids = ids.saturating_mul(fanout);
+        }
+        ids.saturating_mul(chunk)
+    }
+
+    /// The largest file whose manifest fits a **single** envelope — the point
+    /// past which [`Node::publish_file`] starts building a tree. Below this a
+    /// file is announced by one manifest, exactly as it was before trees
+    /// existed, and one round trip is enough to learn every chunk id.
+    pub fn max_flat_file_bytes(&self) -> usize {
+        let chunk = self.mtu.saturating_sub(64).max(1);
+        file::root_fanout(self.mtu, 96, 0, 0) * chunk
+    }
+
+    /// The ceiling on everything this node holds at once, files included.
+    pub fn store_budget(&self) -> usize {
+        self.max_store_bytes
+    }
+
+    /// The largest file this node can publish and still serve from its own
+    /// store — **the limit an application should actually enforce.**
+    ///
+    /// Since manifests grew into trees, the protocol stopped being what bounds a
+    /// file; the store did. Every chunk lives there as its own envelope, so a
+    /// file costs a little more than its own length, and a node that spent its
+    /// whole budget on one file would have nothing left to relay with. Hence
+    /// half the budget, not all of it. Raise it with [`Node::set_store_budget`].
+    pub fn max_storable_file_bytes(&self) -> usize {
+        let chunk = self.mtu.saturating_sub(64).max(1);
+        // A chunk envelope costs about a whole frame once its header, file id
+        // and index are counted, so charge the file a frame per chunk.
+        (self.max_store_bytes / 2 / self.mtu.max(1)) * chunk
     }
 
     /// Every file we hold a manifest for: `(magnet, advertised name, total
     /// bytes, chunks held, chunks total)` — a transfer list with progress.
+    /// Chunks held is a *lower bound* while the tree is still resolving: chunks
+    /// under an interior node we haven't got yet are not yet nameable, so they
+    /// cannot be counted. Costs one tree walk per file, so poll it at UI rates,
+    /// not per packet.
     pub fn files(&self) -> Vec<(Id, String, u64, u32, u32)> {
         self.manifests
             .iter()
             .map(|(magnet, m)| {
-                let have = m.chunk_ids.iter().filter(|c| self.store.contains_key(*c)).count() as u32;
-                (*magnet, m.name.clone(), m.total_len, have, m.count)
+                let total = if m.chunk_size == 0 {
+                    m.count
+                } else {
+                    m.total_len.div_ceil(m.chunk_size as u64) as u32
+                };
+                let mut have = 0u32;
+                self.walk_tree(m, &mut |_, depth, held| {
+                    if depth == 0 && held {
+                        have += 1;
+                    }
+                    true
+                });
+                (*magnet, m.name.clone(), m.total_len, have, total.max(1))
             })
             .collect()
     }
 
     pub fn has_file(&self, magnet: &Id) -> bool {
-        match self.manifests.get(magnet) {
-            Some(m) => m.chunk_ids.iter().all(|c| self.store.contains_key(c)),
-            None => false,
-        }
+        let Some(root) = self.manifests.get(magnet) else {
+            return false;
+        };
+        let mut complete = true;
+        self.walk_tree(root, &mut |_, _, held| {
+            complete = held;
+            held // the first gap ends the walk
+        });
+        complete
     }
 
-    /// Reassemble the file, or `None` if a chunk is still missing. Every chunk
-    /// is content-verified for free: we only count it as present if the store
-    /// holds an envelope whose ID equals the one the signed manifest named.
-    pub fn file_bytes(&self, magnet: &Id) -> Option<Vec<u8>> {
-        let m = self.manifests.get(magnet)?;
-        let mut out = Vec::with_capacity(m.total_len as usize);
-        for cid in &m.chunk_ids {
-            let s = self.store.get(cid)?;
-            let (ce, _) = Envelope::decode(&s.wire).ok()?;
-            if ce.payload.len() < 21 {
-                return None; // not a well-formed chunk
-            }
-            out.extend_from_slice(&ce.payload[21..]);
+    /// Write the file's raw bytes out to `w`, chunk by chunk, returning the
+    /// count. `None` if any part is missing — or if the file is sealed, since
+    /// its raw bytes are ciphertext and its length is the plaintext's; use
+    /// [`Node::open_file_to`] for those.
+    ///
+    /// This is the form to prefer for anything large: only one chunk is in
+    /// memory at a time, so a file bounded by disk is not also bounded by RAM.
+    pub fn write_file_to<W: std::io::Write>(&self, magnet: &Id, w: &mut W) -> Option<u64> {
+        if !self.manifests.get(magnet)?.sealed_hdr.is_empty() {
+            return None;
         }
-        out.truncate(m.total_len as usize);
+        self.assemble(magnet, w, None)
+    }
+
+    /// Walk the leaves in file order, writing each chunk out as it goes and
+    /// decrypting first when `key` is set. One chunk is in memory at a time,
+    /// which is what keeps a large file — sealed or not — off the heap.
+    fn assemble<W: std::io::Write>(&self, magnet: &Id, w: &mut W, key: Option<&[u8; 32]>) -> Option<u64> {
+        let root = self.manifests.get(magnet)?;
+        let total = root.total_len;
+        let mut written = 0u64;
+        let mut ok = true;
+        self.walk_tree(root, &mut |id, depth, held| {
+            if !held {
+                ok = false;
+                return false;
+            }
+            if depth != 0 {
+                return true; // an interior node carries ids, not bytes
+            }
+            let Some(wire) = self.store.wire(id) else {
+                ok = false;
+                return false;
+            };
+            let Ok((ce, _)) = Envelope::decode(&wire) else {
+                ok = false;
+                return false;
+            };
+            if ce.payload.len() < 21 {
+                ok = false; // not a well-formed chunk
+                return false;
+            }
+            // The chunk carries the index it was encrypted under, and the id
+            // that named it is a hash of those very bytes, so it is as
+            // trustworthy as the chunk itself.
+            let index = u32::from_be_bytes([ce.payload[17], ce.payload[18], ce.payload[19], ce.payload[20]]);
+            let plain;
+            let body = match key {
+                Some(k) => match chunk_open(&ce.payload[21..], k, index) {
+                    Some(p) => {
+                        plain = p;
+                        &plain[..]
+                    }
+                    None => {
+                        ok = false;
+                        return false;
+                    }
+                },
+                None => &ce.payload[21..],
+            };
+            let take = total.saturating_sub(written).min(body.len() as u64) as usize;
+            if w.write_all(&body[..take]).is_err() {
+                ok = false;
+                return false;
+            }
+            written += take as u64;
+            true
+        });
+        (ok && written == total).then_some(written)
+    }
+
+    /// Reassemble the file, or `None` if a part is still missing. Every chunk
+    /// is content-verified for free: we only count it as present if the store
+    /// holds an envelope whose ID equals the one its parent named, and the root
+    /// that anchors those names is signed.
+    pub fn file_bytes(&self, magnet: &Id) -> Option<Vec<u8>> {
+        let root = self.manifests.get(magnet)?;
+        // `total_len` comes off the wire, so reserve against it only up to a
+        // sane bound — a manifest claiming u64::MAX must not be able to abort us
+        // on the allocation. Beyond the hint the Vec just grows.
+        let hint = root.total_len.min(1 << 20) as usize;
+        let mut out = Vec::with_capacity(hint);
+        self.write_file_to(magnet, &mut out)?;
         Some(out)
     }
 
@@ -1721,6 +2167,14 @@ pub mod congestion;
 // ---------------------------------------------------------------------------
 
 pub mod file;
+
+// ---------------------------------------------------------------------------
+// Custody — what a node holds, and where it holds it. Metadata stays resident;
+// the bytes spill to disk past a memory budget, so what a node can carry is
+// bounded by its disk rather than by its RAM.
+// ---------------------------------------------------------------------------
+
+mod store;
 
 // ---------------------------------------------------------------------------
 // Page 2, rule 2 — KISS framing for byte streams (TCP, serial, RFCOMM, TNCs).
@@ -2358,6 +2812,336 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn a_file_that_fits_one_manifest_keeps_the_pre_tree_encoding() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        let body = vec![3u8; n.max_flat_file_bytes()];
+        let (magnet, _) = n.publish_file("small.bin", &body, ZERO_DEST, now);
+
+        let wire = n.get_wire(&magnet).expect("manifest stored");
+        assert!(wire.len() <= n.mtu, "a flat manifest fits one frame");
+        let (e, _) = Envelope::decode(&wire).unwrap();
+        assert_eq!(
+            e.payload.first(),
+            Some(&file::MANIFEST_TAG),
+            "small files must stay byte-compatible with nodes that predate trees"
+        );
+        assert_eq!(file::Manifest::decode(&e.payload).unwrap().depth, 0);
+        assert_eq!(n.file_bytes(&magnet).as_deref(), Some(&body[..]));
+    }
+
+    #[test]
+    fn a_file_past_one_manifest_grows_a_tree_but_keeps_one_magnet() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        // A small MTU buys deep trees for the price of a small file.
+        n.mtu = 200;
+        let body: Vec<u8> = (0..30_000u32).map(|i| i.wrapping_mul(31) as u8).collect();
+        assert!(body.len() > n.max_flat_file_bytes() * 8, "big enough to need levels");
+
+        let (magnet, forwards) = n.publish_file("deep.bin", &body, ZERO_DEST, now);
+        let wire = n.get_wire(&magnet).expect("root stored");
+        assert!(wire.len() <= n.mtu, "the root is one frame however big the file is");
+        assert_eq!(forwards.len(), 1, "one magnet floods — the file itself is pulled");
+
+        let (e, _) = Envelope::decode(&wire).unwrap();
+        assert_eq!(e.payload.first(), Some(&file::TREE_TAG));
+        let root = file::Manifest::decode(&e.payload).unwrap();
+        assert!(root.depth >= 2, "30 KB at a 200-byte MTU needs levels, got {}", root.depth);
+        assert_eq!(root.total_len, body.len() as u64);
+
+        assert!(n.has_file(&magnet));
+        assert_eq!(n.file_bytes(&magnet).as_deref(), Some(&body[..]));
+    }
+
+    #[test]
+    fn a_tree_resolves_top_down_through_windowed_fetches() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        a.mtu = 200;
+        b.mtu = 200;
+        meet(&mut a, &mut b, now);
+
+        let body: Vec<u8> = (0..12_000u32).map(|i| i.wrapping_mul(17) as u8).collect();
+        let (magnet, forwards) = a.publish_file("deep.bin", &body, ZERO_DEST, now);
+
+        // Only the root reaches B. It names sub-manifests, not chunks, so B
+        // cannot yet name a single byte of the file.
+        for f in forwards {
+            b.on_rx(&fwd_bytes(&f), 0, Some(a.addr), now);
+        }
+        assert!(!b.has_file(&magnet), "B holds the map's first page only");
+
+        let mut rounds = 0;
+        while !b.has_file(&magnet) && rounds < 500 {
+            let want = b.fetch(&magnet);
+            assert!(!want.is_empty(), "B still needs parts but asked for nothing");
+            for f in &want {
+                let wire = fwd_bytes(f);
+                assert!(wire.len() <= b.mtu, "a WANT must fit the link it rides");
+                for answer in a.on_rx(&wire, 0, Some(b.addr), now).forwards {
+                    b.on_rx(&fwd_bytes(&answer), 0, Some(a.addr), now);
+                }
+            }
+            rounds += 1;
+        }
+
+        assert!(b.has_file(&magnet), "B never completed the file");
+        assert_eq!(b.file_bytes(&magnet).as_deref(), Some(&body[..]));
+        assert!(rounds > 1, "a tree this size cannot arrive in one frame");
+    }
+
+    #[test]
+    fn a_tree_node_at_an_impossible_depth_is_refused() {
+        let m = file::Manifest {
+            file_id: [1u8; 16],
+            chunk_size: 100,
+            count: 0,
+            total_len: 0,
+            name: String::new(),
+            chunk_ids: vec![],
+            depth: 1,
+            sealed_hdr: Vec::new(),
+        };
+        let mut enc = m.encode();
+        assert_eq!(enc[0], file::TREE_TAG);
+
+        enc[1] = 0; // leaf depth under the interior tag
+        assert!(file::Manifest::decode(&enc).is_none());
+        enc[1] = file::MAX_DEPTH + 1; // deeper than we are willing to walk
+        assert!(file::Manifest::decode(&enc).is_none());
+        enc[1] = file::MAX_DEPTH;
+        assert!(file::Manifest::decode(&enc).is_some());
+    }
+
+    #[test]
+    fn a_manifest_claiming_an_absurd_size_cannot_exhaust_memory() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        let (magnet, _) = n.publish_file("t.bin", b"tiny", ZERO_DEST, now);
+
+        // total_len arrives off the wire. Reassembly must fail on the bytes it
+        // cannot find, not on the allocator it was asked to trust.
+        n.manifests.get_mut(&magnet).unwrap().total_len = u64::MAX;
+        assert!(n.file_bytes(&magnet).is_none());
+        assert!(!n.has_file(&magnet) || n.write_file_to(&magnet, &mut Vec::new()).is_none());
+    }
+
+    /// A scratch directory that cleans itself up.
+    struct TmpDir(std::path::PathBuf);
+    impl TmpDir {
+        fn new(tag: &str) -> TmpDir {
+            let mut p = std::env::temp_dir();
+            p.push(format!("spore-test-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            TmpDir(p)
+        }
+    }
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn the_store_spills_to_disk_and_still_serves_what_it_spilled() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("spill");
+        let mut a = Node::new("a", &[]);
+        a.set_store_budget(64 * 1024 * 1024);
+        a.set_mem_budget(16 * 1024); // tiny, so almost everything spills
+        a.set_spill_dir(&dir.0, now).expect("spill dir");
+
+        let body: Vec<u8> = (0..400_000u32).map(|i| i.wrapping_mul(13) as u8).collect();
+        let (magnet, _) = a.publish_file("big.bin", &body, ZERO_DEST, now);
+
+        // The file is held, but almost none of it is resident.
+        assert!(a.has_file(&magnet), "a spilled file is still held");
+        assert!(a.store_bytes() > body.len(), "the store accounts for all of it");
+        let on_disk = std::fs::read_dir(&dir.0).unwrap().count();
+        assert!(on_disk > 100, "most of it went to disk, got {on_disk} files");
+
+        // …and it reads back byte for byte, from wherever the bytes are.
+        assert_eq!(a.file_bytes(&magnet).as_deref(), Some(&body[..]));
+
+        // A spilled envelope answers a WANT exactly as a resident one does.
+        let ids = a.missing(&magnet, 4);
+        assert!(ids.is_empty(), "we hold every part");
+        let stored = a.stored_ids();
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&stored[..16]);
+        assert!(a.get_wire(&id).is_some(), "a spilled envelope still serves");
+    }
+
+    #[test]
+    fn a_restart_adopts_what_was_spilled_and_resumes_the_transfer() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("adopt");
+        let body: Vec<u8> = (0..200_000u32).map(|i| i.wrapping_mul(7) as u8).collect();
+
+        let magnet = {
+            let mut a = Node::new("a", &[]);
+            a.set_store_budget(64 * 1024 * 1024);
+            a.set_mem_budget(8 * 1024);
+            a.set_spill_dir(&dir.0, now).unwrap();
+            let (magnet, _) = a.publish_file("big.bin", &body, ZERO_DEST, now);
+            assert!(a.has_file(&magnet));
+            magnet
+        }; // the node goes away — power cut, app killed, container reclaimed
+
+        // A fresh node pointed at the same directory picks up where it left off.
+        let mut b = Node::new("b", &[]);
+        b.set_store_budget(64 * 1024 * 1024);
+        b.set_mem_budget(8 * 1024);
+        let adopted = b.set_spill_dir(&dir.0, now).expect("adopt");
+        assert!(adopted > 100, "adopted {adopted} envelopes");
+        assert!(b.has_file(&magnet), "the manifest was re-learned along with the chunks");
+        assert_eq!(b.file_bytes(&magnet).as_deref(), Some(&body[..]));
+    }
+
+    #[test]
+    fn a_spilled_file_whose_name_lies_about_its_content_is_discarded() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("forged");
+
+        // A plausible-looking file whose bytes are not what its name claims.
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 86400, b"not what it says".to_vec());
+        e.flags |= fl::FLOOD;
+        let real = e.id();
+        let mut lie = real;
+        lie[0] ^= 0xff;
+        let name: String = lie.iter().map(|b| format!("{b:02x}")).collect::<String>() + ".spore";
+        std::fs::write(dir.0.join(&name), e.wire()).unwrap();
+        std::fs::write(dir.0.join("not-even-hex.spore"), b"garbage").unwrap();
+
+        let mut n = Node::new("n", &[]);
+        let adopted = n.set_spill_dir(&dir.0, now).unwrap();
+        assert_eq!(adopted, 0, "an id is the hash of its bytes — neither file matched");
+        assert!(!n.has(&lie) && !n.has(&real));
+        assert!(!dir.0.join(&name).exists(), "and the bad file is cleaned up");
+    }
+
+    #[test]
+    fn a_sealed_file_is_encrypted_one_chunk_at_a_time() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Past what one sealed manifest can list, so this is a tree as well.
+        let body: Vec<u8> = (0..120_000u32).map(|i| i.wrapping_mul(29) as u8).collect();
+        let (magnet, _) = a.publish_file_sealed("plans.pdf", &body, b.addr, now).expect("prekey known");
+
+        let root = a.manifests.get(&magnet).unwrap();
+        assert_eq!(root.total_len, body.len() as u64, "sealing does not change the length");
+        assert_eq!(root.name, SEALED_FILE_NAME, "the advertised name says nothing");
+        assert!(!root.sealed_hdr.is_empty(), "the key travels sealed in the root");
+        assert!(root.depth > 0, "big enough to be a tree as well as sealed");
+
+        // Sample the plaintext rather than cross-product every window against
+        // every wire — a few probes catch a plaintext chunk just as well.
+        let probes: Vec<&[u8]> = (0..8).map(|i| &body[i * 9_000..i * 9_000 + 32]).collect();
+        for (_, w) in a.store_wires() {
+            assert!(w.len() <= a.mtu, "a sealed chunk must still fit the link");
+            assert!(!w.windows(9).any(|x| x == b"plans.pdf"), "the file name leaked");
+            for p in &probes {
+                assert!(!w.windows(32).any(|x| x == *p), "file contents leaked");
+            }
+        }
+
+        for (_, w) in a.store_wires() {
+            b.on_rx(&w, 0, Some(a.addr), now);
+        }
+
+        let mut out = Vec::new();
+        let (name, n) = b.open_file_to(&magnet, &mut out).expect("B can open it");
+        assert_eq!(name, "plans.pdf", "the real name comes out of the sealed header");
+        assert_eq!(n, body.len() as u64);
+        assert_eq!(out, body);
+
+        // The raw path refuses rather than handing back ciphertext that would
+        // look like a short file.
+        assert!(b.write_file_to(&magnet, &mut Vec::new()).is_none());
+
+        // The property that makes streaming possible: any one chunk decrypts on
+        // its own, with no other chunk present.
+        let held = b.manifests.get(&magnet).unwrap();
+        let (key, _) = b.open_sealed_header(held).expect("sealed to B");
+        let mut leaves = Vec::new();
+        b.walk_tree(held, &mut |id, depth, _| {
+            if depth == 0 {
+                leaves.push(*id);
+            }
+            true
+        });
+        let wire = b.get_wire(&leaves[3]).expect("a middle chunk");
+        let (ce, _) = Envelope::decode(&wire).unwrap();
+        let idx = u32::from_be_bytes([ce.payload[17], ce.payload[18], ce.payload[19], ce.payload[20]]);
+        let plain = chunk_open(&ce.payload[21..], &key, idx).expect("one chunk opens alone");
+        let start = idx as usize * held.chunk_size as usize;
+        assert_eq!(plain, body[start..start + plain.len()]);
+
+        // A relay carries every part and can read none of it.
+        let mut c = Node::new("c", &[]);
+        for (_, w) in a.store_wires() {
+            c.on_rx(&w, 0, Some(a.addr), now);
+        }
+        let (root_env, _) = Envelope::decode(&a.get_wire(&magnet).unwrap()).unwrap();
+        c.absorb_manifest(&root_env).expect("the root is signed, so anyone may parse it");
+        assert!(c.has_file(&magnet), "the relay holds every part");
+        assert!(c.open_file(&magnet).is_none(), "…and can read none of it");
+    }
+
+    #[test]
+    fn a_file_sealed_the_old_whole_blob_way_still_opens() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Reproduce what a node published before chunks were sealed one by one:
+        // name and bytes sealed as a single blob, then chunked, under the
+        // placeholder name.
+        let body: Vec<u8> = (0..2_000u32).map(|i| (i % 251) as u8).collect();
+        let pk = a.peer_prekey(&b.addr).expect("prekey known");
+        let mut inner = Vec::new();
+        inner.extend_from_slice(&9u16.to_be_bytes());
+        inner.extend_from_slice(b"plans.pdf");
+        inner.extend_from_slice(&body);
+        let (magnet, _) = a.publish_file(SEALED_FILE_NAME, &seal(&inner, &pk), b.addr, now);
+
+        for (_, w) in a.store_wires() {
+            b.on_rx(&w, 0, Some(a.addr), now);
+        }
+        let (name, got) = b.open_file(&magnet).expect("the legacy form still opens");
+        assert_eq!(name, "plans.pdf");
+        assert_eq!(got, body);
+    }
+
+    #[test]
+    fn writing_a_file_out_streams_it_without_a_whole_second_copy() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        n.mtu = 200;
+        let body: Vec<u8> = (0..9_000u32).map(|i| (i % 253) as u8).collect();
+        let (magnet, _) = n.publish_file("s.bin", &body, ZERO_DEST, now);
+
+        let mut out = Vec::new();
+        assert_eq!(n.write_file_to(&magnet, &mut out), Some(body.len() as u64));
+        assert_eq!(out, body);
+
+        // A node holding the root but no chunks reports nothing, rather than
+        // handing back a short file that looks complete.
+        let mut fresh = Node::new("fresh", &[]);
+        fresh.mtu = 200;
+        let (root, _) = Envelope::decode(&n.get_wire(&magnet).unwrap()).unwrap();
+        fresh.absorb_manifest(&root).expect("the root is signed");
+        assert!(fresh.write_file_to(&magnet, &mut Vec::new()).is_none());
     }
 
     #[test]

@@ -61,6 +61,7 @@ object NodeController {
     val bridges = MutableStateFlow<List<BridgeState>>(emptyList())
     val peers = MutableStateFlow<List<Peer>>(emptyList()) // nodes we've heard from
     val storeCount = MutableStateFlow(0) // envelopes held for the mesh
+    val resumed = MutableStateFlow(0) // envelopes adopted from disk at startup
     val transfers = MutableStateFlow<List<Transfer>>(emptyList()) // files in flight
     val address = MutableStateFlow("")
     val myName = MutableStateFlow("") // the name we announce (a hint for others)
@@ -69,8 +70,17 @@ object NodeController {
 
     // Files ride the protocol's own manifest + chunk layer: a signed manifest
     // (magnet) names fountain-coded chunks that any relay can carry and serve.
-    // First payload byte of a manifest (src/file.rs MANIFEST_TAG).
+    // First payload byte of a manifest: a leaf one names chunks, an interior one
+    // names manifests a level down (src/file.rs MANIFEST_TAG / TREE_TAG). A big
+    // file arrives as a tree of these, but it is still one magnet.
     private const val MANIFEST_TAG: Byte = 0x01
+    private const val TREE_TAG: Byte = 0x08
+
+    // What we keep for stored traffic — our own files plus what we relay. The
+    // bytes live on disk; only MEM_BUDGET_BYTES of them stay in RAM, so the
+    // ceiling on a transfer is storage rather than the heap of a phone app.
+    private const val STORE_BUDGET_BYTES = 256 * 1024 * 1024
+    private const val MEM_BUDGET_BYTES = 8 * 1024 * 1024
     private var lastFileSender: String = Petnames.PUBLIC   // thread for the next completed file
     private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
@@ -91,6 +101,18 @@ object NodeController {
             prefs.edit().putString("seed", Base64.encodeToString(fresh, Base64.NO_WRAP)).apply()
         }
         address.value = SporeNative.nativeAddr(ptr).toHex()
+        // The core defaults to a desktop-ish 10 MB held entirely in memory.
+        // Since manifests became trees this budget — not the wire format — is
+        // what decides how big a file we can share and how much we can relay, so
+        // back it with app-private storage and keep only a working set in RAM.
+        SporeNative.nativeSetStoreBudget(ptr, STORE_BUDGET_BYTES)
+        val spill = File(appCtx.filesDir, "store").apply { mkdirs() }
+        val adopted = SporeNative.nativeSetSpillDir(
+            ptr, spill.absolutePath, MEM_BUDGET_BYTES, (System.currentTimeMillis() / 1000).toInt()
+        )
+        // Anything still on disk from last time is ours again — including
+        // half-finished transfers, which resume rather than restart.
+        resumed.value = adopted.coerceAtLeast(0)
         // The name we announce; peers offer it as the default petname for us.
         myName.value = prefs.getString("myname", "") ?: ""
         if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
@@ -181,7 +203,7 @@ object NodeController {
         // A file manifest is not chat text: the core absorbs it automatically,
         // then the housekeeping loop fetches its chunks and saves the result.
         // Remember who sent it so the finished file lands in their conversation.
-        if (payload.isNotEmpty() && payload[0] == MANIFEST_TAG) {
+        if (payload.isNotEmpty() && (payload[0] == MANIFEST_TAG || payload[0] == TREE_TAG)) {
             if (!ok) {
                 append(Msg(thread, "⚠ ignored an unsigned file offer", mine = false, verified = false))
                 return
@@ -222,6 +244,19 @@ object NodeController {
      */
     fun sendFile(peer: String, name: String, data: ByteArray) {
         if (ptr == 0L || data.isEmpty()) return
+        // Manifests are trees now, so a file's size is bounded by the store every
+        // chunk has to sit in — not by what one envelope can list. Refuse clearly
+        // rather than publishing chunks we would immediately evict and then be
+        // unable to serve.
+        val cap = maxFileBytes()
+        if (data.size > cap) {
+            append(
+                Msg(peer, "⚠ $name is ${data.size / 1024 / 1024} MB — this node keeps room for " +
+                    "about ${cap / 1024 / 1024} MB per file. Send it in parts.",
+                    mine = true, verified = true)
+            )
+            return
+        }
         val destHex = if (peer == Petnames.PUBLIC) "" else peer
         val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return
         val sealed = res.getOrNull(1) == "1"
@@ -231,6 +266,12 @@ object NodeController {
             Msg(peer, "📎 shared $name (${data.size / 1024} KB · $how)",
                 mine = true, verified = true, encrypted = sealed)
         )
+    }
+
+    /** Largest file we can share right now (store-bound, minus sealing overhead). */
+    fun maxFileBytes(): Int {
+        if (ptr == 0L) return 0
+        return (SporeNative.nativeMaxFileBytes(ptr) - 160).coerceAtLeast(0)
     }
 
     /**
@@ -253,23 +294,20 @@ object NodeController {
                 continue
             }
             if (magnet in savedMagnets) continue
-            // Complete: decrypt if it was sealed to us, then write it out.
-            val blob = SporeNative.nativeOpenFile(ptr, magnet) ?: continue
-            if (blob.size < 2) continue
-            val nlen = ((blob[0].toInt() and 0xff) shl 8) or (blob[1].toInt() and 0xff)
-            if (2 + nlen > blob.size) continue
+            // Complete: ask for the name, then let the core stream the file to
+            // disk, decrypting a chunk at a time. The bytes never come through
+            // the JVM heap, so a big file costs a chunk rather than three copies.
             // '/' is sanitised away, so a name can't escape the directory.
-            val fname = blob.copyOfRange(2, 2 + nlen).toString(Charsets.UTF_8)
+            val fname = (SporeNative.nativeFileName(ptr, magnet) ?: continue)
                 .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "file.bin" }
-            val bytes = blob.copyOfRange(2 + nlen, blob.size)
             val dir = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
             val f = File(dir, fname)
-            val okSave = runCatching { f.writeBytes(bytes) }.isSuccess
+            val written = SporeNative.nativeSaveFile(ptr, magnet, f.absolutePath)
             savedMagnets.add(magnet)
             append(
                 Msg(
                     lastFileSender,
-                    if (okSave) "📎 received ${f.name} (${bytes.size / 1024} KB) → ${f.path}"
+                    if (written >= 0) "📎 received ${f.name} (${written / 1024} KB) → ${f.path}"
                     else "⚠ received ${f.name} but could not save it",
                     mine = false, verified = true
                 )
@@ -312,10 +350,23 @@ object NodeController {
     private val bleBridges = mutableListOf<BleBridge>()
     private var wifiDirect: WifiDirectBridge? = null
 
+    /**
+     * An iface paced to what this kind of link can actually afford to relay for
+     * other people. Only file chunks are counted — messages, announces and
+     * manifests always pass — so a slow radio stays fully useful for talking
+     * while a large transfer elsewhere in the mesh routes around it.
+     */
+    private fun limitedIface(kind: String): Int {
+        val budget = SporeNative.nativeSuggestedBulkBudget(kind)
+        return if (budget < 0) SporeNative.nativeRegisterIface(ptr)
+        else SporeNative.nativeRegisterIfaceLimited(ptr, budget)
+    }
+
     /** Data-over-sound. UI must have RECORD_AUDIO granted before calling. */
     fun enableAudio(): Boolean {
         if (ptr == 0L || audio != null) return false
-        val iface = SporeNative.nativeRegisterIface(ptr)
+        // Sound moves ~23 bytes a second, so this link talks but does not haul.
+        val iface = limitedIface("audio")
         audio = AudioBridge(ptr, iface).also { it.start() }
         addBridgeState("Audio modem", "16-FSK · mic + speaker", "on")
         return true
@@ -324,7 +375,7 @@ object NodeController {
     /** A paired Meshtastic node over BLE. UI gates on BLUETOOTH_CONNECT. */
     fun enableMeshtasticBle(ctx: Context, device: android.bluetooth.BluetoothDevice) {
         if (ptr == 0L) return
-        val iface = SporeNative.nativeRegisterIface(ptr)
+        val iface = limitedIface("meshtastic")
         val myNode = SporeNative.nativeAddr(ptr).let {
             ((it[0].toInt() and 0xff) shl 24) or ((it[1].toInt() and 0xff) shl 16) or
                 ((it[2].toInt() and 0xff) shl 8) or (it[3].toInt() and 0xff)
@@ -342,7 +393,7 @@ object NodeController {
         freqHz: Long, bwHz: Long, sf: Int, cr: Int, txDbm: Int,
     ) {
         if (ptr == 0L) return
-        val iface = SporeNative.nativeRegisterIface(ptr)
+        val iface = limitedIface("reticulum")
         val b = RNodeBleBridge(ptr, iface, ctx, device, freqHz, bwHz, sf, cr, txDbm)
         bleBridges.add(b)
         addBridgeState("RNode BLE", deviceLabel(device), "connecting")
