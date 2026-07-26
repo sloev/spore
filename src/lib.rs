@@ -263,7 +263,17 @@ impl Envelope {
 
 /// Selection bitmap for repair chunk `idx`: first `count` bits (MSB-first) of
 /// SHA-256(orig_id ‖ idx). Empty selection maps to data chunk (idx mod count).
+///
+/// `count` is caller-supplied and, on the receive path, comes off the wire. Zero
+/// is rejected here as well as at the caller: the fallback below is `idx % count`
+/// and a panic in a pure helper is a poor place to learn that. The digest holds
+/// 32 bytes, so `count` must also stay within the 256 bits it can index — the
+/// sender asserts `count <= 255` and the wire field is a `u8`, but the bound is
+/// checked rather than assumed, because both of those are facts about *callers*.
 fn selection(orig_id: &Id, idx: u8, count: usize) -> BitVec {
+    if count == 0 || count > 256 {
+        return BitVec::zeros(count.min(256));
+    }
     let mut h = Sha256::new();
     Digest::update(&mut h, orig_id);
     Digest::update(&mut h, [idx]);
@@ -361,6 +371,14 @@ impl Fountain {
             return self.done.clone();
         }
         let count = count as usize;
+        // `count` is one byte taken straight off the wire. A set of zero chunks
+        // cannot reassemble into anything, and believing it reaches
+        // `idx % count` below — a division by zero, which is a panic, which is
+        // the whole node. Any peer could send that: a public FRAGMENT with a
+        // zero count needs no key and no forgery.
+        if count == 0 {
+            return None;
+        }
         if self.count == 0 {
             self.count = count;
             self.chunk = chunk_bytes.len();
@@ -2205,6 +2223,12 @@ pub mod kiss;
 // ---------------------------------------------------------------------------
 
 pub mod armor;
+
+/// Malformed-input robustness: every parser reachable from a stranger, fed
+/// arbitrary and near-miss bytes. Test-only, and in `src/` rather than `tests/`
+/// because the freeze guard treats all of `tests/` as frozen contract.
+#[cfg(test)]
+mod robustness;
 
 // ---------------------------------------------------------------------------
 // L4 Request/response — RPC as a convention (tags 0x02 request, 0x03 response).
