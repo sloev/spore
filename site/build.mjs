@@ -63,6 +63,110 @@ function rewriteLinks(html, self) {
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Share row (front page only).
+//
+// Most of these are plain intent URLs built at build time. Two are not:
+// Mastodon has no central host, so the instance is asked for once and kept in
+// localStorage; Signal and Matrix have no web share intent at all, so they go
+// through the OS share sheet (navigator.share) and fall back to the clipboard.
+// Saying so is better than shipping links that quietly do nothing.
+// ---------------------------------------------------------------------------
+const SHARE = {
+  url: 'https://sloev.github.io/spore/',
+  title: 'SPORE — messages that ride anything, with no servers',
+  text:
+    'SPORE: a signed postcard that travels over the internet, a walkie-talkie, ' +
+    'Bluetooth, LoRa, a USB stick, a QR code, or a person reading it aloud. ' +
+    'Same delivery rules on all of them. Public domain.',
+};
+
+function shareBar() {
+  const u = encodeURIComponent(SHARE.url);
+  const t = encodeURIComponent(SHARE.title);
+  const txt = encodeURIComponent(SHARE.text);
+  const both = encodeURIComponent(`${SHARE.title} — ${SHARE.url}`);
+
+  // [label, href, title]. `null` href = handled by the script below.
+  const links = [
+    ['Hacker News', `https://news.ycombinator.com/submitlink?u=${u}&t=${t}`, 'Submit to Hacker News'],
+    ['Lobsters', `https://lobste.rs/stories/new?url=${u}&title=${t}`, 'Submit to Lobsters'],
+    ['Reddit', `https://www.reddit.com/submit?url=${u}&title=${t}`, 'Submit to Reddit'],
+    ['Mastodon', null, 'Toot it from your own instance'],
+    ['Bluesky', `https://bsky.app/intent/compose?text=${both}`, 'Post to Bluesky'],
+    ['Telegram', `https://t.me/share/url?url=${u}&text=${txt}`, 'Send on Telegram'],
+    ['Signal', null, 'Signal has no web share link — uses your share sheet, or copies'],
+    ['Matrix', null, 'Matrix has no web share link — uses your share sheet, or copies'],
+    ['Delta Chat', `mailto:?subject=${t}&body=${txt}%0A%0A${u}`, 'Delta Chat (or any mail app)'],
+    ['WhatsApp', `https://wa.me/?text=${both}`, 'Send on WhatsApp'],
+    ['Facebook', `https://www.facebook.com/sharer/sharer.php?u=${u}`, 'Share on Facebook'],
+    ['Copy link', null, 'Copy the link to the clipboard'],
+  ];
+
+  const buttons = links
+    .map(([label, href, title]) =>
+      href
+        ? `<a class="share-btn" href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${label}</a>`
+        : `<button class="share-btn" type="button" data-share="${label}" title="${title}">${label}</button>`
+    )
+    .join('');
+
+  return `<section class="share" aria-label="Share SPORE">
+  <h2>Pass it on</h2>
+  <p>Continuity is just redundancy that outlives its sources — and it only works
+  if the copies are already scattered before they're needed.</p>
+  <div class="share-row">${buttons}</div>
+</section>
+<script>
+(function () {
+  var URL_ = ${JSON.stringify(SHARE.url)};
+  var TITLE = ${JSON.stringify(SHARE.title)};
+  var TEXT = ${JSON.stringify(SHARE.text)};
+
+  function flash(btn, msg) {
+    var was = btn.textContent;
+    btn.textContent = msg;
+    setTimeout(function () { btn.textContent = was; }, 1600);
+  }
+  function copy(btn) {
+    var s = TITLE + ' — ' + URL_;
+    var done = function () { flash(btn, 'Copied ✓'); };
+    if (navigator.clipboard) navigator.clipboard.writeText(s).then(done, function () { prompt('Copy:', s); });
+    else prompt('Copy:', s);
+  }
+  // Signal and Matrix: no intent URL exists, so offer the OS share sheet (which
+  // lists them on a phone) and fall back to the clipboard on a desktop.
+  function sheet(btn) {
+    if (navigator.share) {
+      navigator.share({ title: TITLE, text: TEXT, url: URL_ }).catch(function () {});
+    } else {
+      copy(btn);
+    }
+  }
+  function mastodon(btn) {
+    var host = localStorage.getItem('spore.mastodon') || '';
+    host = prompt('Your Mastodon instance:', host || 'mastodon.social');
+    if (!host) return;
+    host = host.trim().replace(/^https?:\\/\\//, '').replace(/\\/.*$/, '');
+    if (!host) return;
+    localStorage.setItem('spore.mastodon', host);
+    window.open('https://' + host + '/share?text=' +
+      encodeURIComponent(TITLE + ' — ' + URL_ + '\\n\\n' + TEXT), '_blank', 'noopener');
+  }
+
+  document.querySelectorAll('[data-share]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var kind = btn.getAttribute('data-share');
+      if (kind === 'Mastodon') mastodon(btn);
+      else if (kind === 'Copy link') copy(btn);
+      else sheet(btn);
+    });
+  });
+})();
+</script>`;
+}
+
 function nav(self) {
   const items = navLinks
     .map(({ dst, label }) => {
@@ -110,7 +214,12 @@ for (const [src, dst, label] of pages) {
   }
   const md = fs.readFileSync(abs, 'utf8');
   const title = label && label !== 'Home' ? `SPORE — ${label}` : 'SPORE';
-  const html = rewriteLinks(marked.parse(md), dst);
+  let html = rewriteLinks(marked.parse(md), dst);
+  if (dst === 'index.html') {
+    // Right after the intro, before the first section — seen without scrolling,
+    // without interrupting the opening pitch.
+    html = html.replace('<h2', shareBar() + '<h2');
+  }
   fs.writeFileSync(path.join(out, dst), page(title, html, dst));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
