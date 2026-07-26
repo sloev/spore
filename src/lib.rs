@@ -2915,7 +2915,7 @@ mod tests {
 
         // ...while a genuinely mined stamp still passes freely, on the same
         // exhausted bucket, which is what "priority is bought" means.
-        assert!(q.admit(src, 100, congestion::STAMP_EXEMPT_CLASS, now), "real work still buys it");
+        assert!(q.admit(src, 100, congestion::STAMP_QUOTA_BYPASS_BITS, now), "real work still buys it");
         assert!(q.admit(src, 5000, 255, now), "and the highest class is never throttled");
     }
 
@@ -3457,11 +3457,11 @@ mod tests {
 
         // (c) Backpressure: idle admits all; busy drops unstamped; *mined* mail
         // rides. A low class is not mined — class 3 is eight hashes' work — so it
-        // is throttled like anything else; only STAMP_EXEMPT_CLASS buys the pass.
+        // is throttled like anything else; only STAMP_QUOTA_BYPASS_BITS buys the pass.
         assert!(admit(0, 0, 200));
         assert!(!admit(255, 0, 100));
         assert!(!admit(255, 3, 100), "a nearly-free stamp must not dodge backpressure");
-        assert!(admit(255, congestion::STAMP_EXEMPT_CLASS, 100), "real work rides");
+        assert!(admit(255, congestion::STAMP_QUOTA_BYPASS_BITS, 100), "real work rides");
     }
 
     #[test]

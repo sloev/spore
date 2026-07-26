@@ -505,6 +505,41 @@ Tested as primitives; (a) and (b) are wired live into the TCP bridge, (c) into t
 ANNOUNCE busy byte, (d) into receipts.
 </details>
 
+### What "relays never verify" does and does not mean
+
+SPEC §2 says: "**SRC8** only toward peers that provably hold your key; relays never
+verify — endpoints do." That sentence is about the cost of *forwarding*: a relay
+moves bytes it cannot read toward a destination it is not, and making it check an
+Ed25519 signature on every envelope in transit would tax the smallest nodes for a
+guarantee the endpoint provides anyway. That still holds. Forwarding does not
+verify.
+
+It is not a licence to write unauthenticated claims into local state. A relay keeps
+three tables that an attacker would like to choose the contents of:
+
+| Table | What a forged entry buys |
+|---|---|
+| Neighbour bindings (`Neighbors`) | directed sends for a victim unicast to the attacker |
+| Path table (`Paths`) | a victim's address bound to the attacker's interface |
+| Quota attribution (`Quotas`) | a victim's byte budget drained by an attacker's junk |
+
+All three once accepted the `SIGNED` **flag** as proof, and a flag is one bit
+chosen by whoever wrote the frame — so all three were forgeable with a copied
+public key and 64 zero bytes (see S-002, S-004 in
+[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md)). The rule is therefore narrower
+than "relays verify" and wider than "relays never verify":
+
+> **Verify before binding trust state; do not verify to forward.**
+
+The cost is bounded on purpose. The check runs once per envelope, reused across all
+three tables, and only *after* the dedup and expiry checks — so replays and stale
+mail are dropped before any crypto, and a duplicate never pays twice. What remains
+is one verify per newly-seen signed envelope, which on an ESP32 relaying LoRa is a
+real per-envelope cost and was accepted knowingly: a relay that can be told a false
+address is worse than a relay that is slower. If profiling shows it dominating on
+constrained hardware, the next lever is caching "id → verified" for the `seen`
+lifetime, trading memory for CPU rather than trading away the check.
+
 ## Bridges & bindings — SPORE rides everything
 
 A bridge is *not part of the protocol*. It only moves envelope bytes in and out of

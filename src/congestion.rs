@@ -95,28 +95,30 @@ impl TokenBucket {
     }
 }
 
-/// (d) Per-source quotas (§10): a token bucket *per originating address* so no
-/// single node can flood the mesh beyond a sustained byte rate. A relay charges
-/// each signed envelope against its source's bucket before storing/forwarding
-/// it; over-budget traffic is dropped (still delivered locally if it's for us).
-/// Stamped (proof-of-work) mail bypasses the quota, matching `admit`.
-/// The lowest stamp class that buys a full exemption from the per-source quota.
+/// The lowest stamp class that buys a full exemption from the per-source quota,
+/// and from backpressure in [`admit`].
 ///
-/// The spec is explicit that "priority is bought, not claimed" (§2) and that a
-/// stamp is "proof of work" (§10) — so the exemption has to cost something. A
-/// stamp is the count of leading zero bits of the envelope id, which is a hash,
-/// so **class 1 is not work**: half of all envelopes have it by chance and
+/// Pinned here with its reasoning so a future diff does not re-litigate it.
+/// **SPEC §10** defines a stamp as "n leading zero bits of ID = class n, mined via
+/// a payload nonce; priority is proof of work"; **SPEC §2** that "priority is
+/// bought, not claimed". Both require the exemption to cost something.
+///
+/// A stamp is the count of leading zero bits of the envelope id, and the id is a
+/// hash — so **class 1 is not work**: half of all envelopes have it by chance and
 /// grinding one costs about two tries. Exempting `stamp > 0`, as this once did,
-/// therefore let roughly half of all traffic past the quota at random and let a
-/// flooder past it deliberately for double the hashing — which is to say §10 did
-/// not bound anything.
+/// let roughly half of all traffic past the quota at random and let a flooder past
+/// it deliberately for double the hashing, which is to say §10 bounded nothing.
+/// Measured before the change: 12 of 20 arbitrary junk envelopes were exempt.
 ///
 /// 16 bits is ~65k tries: milliseconds on a laptop, seconds on a microcontroller,
-/// affordable once for an genuinely urgent message and ruinous for a flooder who
-/// must pay it *per envelope*. Below this class mail still flows — it is charged
-/// to its source's budget like anything else, and stamp still orders eviction and
-/// TX priority (§10.3). This constant governs one thing: skipping the bucket.
-pub const STAMP_EXEMPT_CLASS: u8 = 16;
+/// affordable once for a genuinely urgent message and ruinous for a flooder who
+/// must pay it *per envelope*. Below this class mail still flows — charged to its
+/// source's budget like anything else — and stamp still orders eviction and TX
+/// priority (§10.3). This constant governs one thing: skipping the bucket.
+///
+/// Deployers who need the old permissive behaviour can lower it; see the deployer
+/// note in `docs/BRIDGES.md`.
+pub const STAMP_QUOTA_BYPASS_BITS: u8 = 16;
 
 /// Bucket for traffic that names a source we could not verify — see
 /// [`Quotas::admit`] and the attribution rules in `Node::ingest`. One shared
@@ -124,6 +126,12 @@ pub const STAMP_EXEMPT_CLASS: u8 = 16;
 /// particular victim's budget.
 pub const UNATTRIBUTED: Addr = [0u8; 8];
 
+/// (d) Per-source quotas (§10): a token bucket *per originating address* so no
+/// single node can flood the mesh beyond a sustained byte rate. A relay charges
+/// each signed envelope against its source's bucket before storing/forwarding
+/// it; over-budget traffic is dropped (still delivered locally if it's for us).
+/// Sufficiently stamped (proof-of-work) mail bypasses the quota, matching
+/// `admit` — see [`STAMP_QUOTA_BYPASS_BITS`] for what "sufficiently" costs.
 pub struct Quotas {
     rate: u32,
     max_sources: usize,
@@ -135,9 +143,9 @@ impl Quotas {
         Quotas { rate: rate_bytes_per_sec, max_sources: 4096, per_src: HashMap::new() }
     }
     /// Charge `bytes` from `src`'s budget; `true` if within quota. Mail stamped
-    /// to at least [`STAMP_EXEMPT_CLASS`] (proof-of-work) always passes.
+    /// to at least [`STAMP_QUOTA_BYPASS_BITS`] (proof-of-work) always passes.
     pub fn admit(&mut self, src: Addr, bytes: u32, stamp: u8, now: u32) -> bool {
-        if stamp >= STAMP_EXEMPT_CLASS {
+        if stamp >= STAMP_QUOTA_BYPASS_BITS {
             return true;
         }
         if self.per_src.len() >= self.max_sources && !self.per_src.contains_key(&src) {
@@ -163,12 +171,12 @@ impl Quotas {
 /// neighbours admit a send with probability (255−busy)/255 and let stamped
 /// (proof-of-work priority) mail through regardless. `roll` is a random byte.
 ///
-/// "Stamped" means [`STAMP_EXEMPT_CLASS`] or better, for the same reason it does
+/// "Stamped" means [`STAMP_QUOTA_BYPASS_BITS`] or better, for the same reason it does
 /// in [`Quotas::admit`]: class 1 is two hashes' work, so treating any non-zero
 /// stamp as priority would let a sender ignore a busy peer's backpressure for
 /// free — and backpressure only works if ignoring it costs more than heeding it.
 pub fn admit(busy: u8, stamp: u8, roll: u8) -> bool {
-    if busy == 0 || stamp >= STAMP_EXEMPT_CLASS {
+    if busy == 0 || stamp >= STAMP_QUOTA_BYPASS_BITS {
         return true;
     }
     (roll as u16) < (255 - busy as u16)

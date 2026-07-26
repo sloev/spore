@@ -109,6 +109,34 @@ Two further properties worth stating because they are easy to lose:
 
 Each of these is covered by a test that fails if the bound is removed.
 
+### Deployer note: what a stamp has to cost
+
+`congestion::STAMP_QUOTA_BYPASS_BITS` is **16**. Mail stamped to at least that
+class skips the per-source quota (§10d) and a busy peer's backpressure (§10c);
+below it, mail still flows but is charged to its source's budget like anything
+else, and stamp still orders eviction and TX priority (§10.3).
+
+This was `stamp > 0`, which bounded nothing. A stamp is the leading zero bits of
+the envelope id, and the id is a hash, so class 1 costs about two tries and half
+of all envelopes have it by accident — measured, 12 of 20 arbitrary junk envelopes
+were exempt from the quota by luck alone. SPEC is explicit that "priority is
+bought, not claimed" (§2) and that a stamp is "proof of work" (§10); the exemption
+has to cost something for either sentence to be true.
+
+Consequences a deployer should know:
+
+- **A node running this is stricter than an older one.** It throttles low-class
+  stamped traffic that older relays pass. That is a local policy difference, not
+  a wire incompatibility — nothing about the envelope changed, and the two
+  interoperate.
+- **16 bits is ~65k tries**: milliseconds on a laptop, seconds on a
+  microcontroller. Affordable once for a genuinely urgent message, ruinous for a
+  flooder paying it per envelope. Raise it on fast networks; lower it (or set it
+  to 1) to restore the old permissive behaviour if you need bit-identical
+  admission against a 1.0 relay fleet.
+- **`sos` still outranks policy** by convention — that is a routing preference,
+  not a quota exemption, and is unaffected.
+
 ## TLS — deliberately not linked in
 
 Several media on this page speak only TLS: Matrix, XMPP, e-mail, `wss://` Nostr
