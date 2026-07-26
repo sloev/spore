@@ -51,6 +51,19 @@ hashes, and path learning binds only from *signed* frames. A hostile link can
 drop, delay, replay or reorder — all of which the router already survives — but
 it cannot forge, read a sealed payload, or make a node believe a false address.
 
+That last one is load-bearing and was, until recently, not actually enforced.
+Bridges learn `SPORE address → underlay address` by snooping, and both learning
+paths — `Neighbors::snoop` and the node's own path table — accepted the `SIGNED`
+**flag** as proof. A flag is one bit chosen by whoever wrote the frame. Copy a
+victim's *public* key into `src`, set the bit, attach 64 zero bytes, and the
+victim's address bound to your underlay address: every directed send for them
+unicast to you instead. Sealed payloads stayed unreadable, so this stole no
+content — it redirected delivery, which is the same guarantee by a different
+door. Both paths now verify the signature, and `Src::Short` (8 bytes of address,
+no key, nothing to verify *against*) teaches nothing at all. A bridge that
+declines to learn falls back to broadcast, which always reaches the peer; a
+bridge that learns a forged binding does not.
+
 What a bridge **can** do wrong is spend our resources. Every bridge parses input
 from something it does not control, and the failure mode is not a forged message
 but an out-of-memory. So the rule for every bridge in this repo is:

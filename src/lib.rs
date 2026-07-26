@@ -1213,9 +1213,18 @@ impl Node {
 
         // Path learning: the first copy of a signed envelope raced every route
         // and won, so its src is reachable via the interface that delivered it.
+        //
+        // The signature is verified rather than believed from the flag, for the
+        // same reason `Neighbors::snoop` does it: the flag is attacker-chosen, so
+        // a forgery carrying a victim's public key would bind that victim's
+        // address to whatever interface the forgery arrived on. The cheap checks
+        // (dedup, expiry) have already run above, so a verify only happens for a
+        // frame that is new and still live.
         if e.flags & fl::SIGNED != 0 {
             if let Src::Full(pk) = &e.src {
-                self.paths.learn(addr_of(pk), iface, nbr, now);
+                if e.verify() {
+                    self.paths.learn(addr_of(pk), iface, nbr, now);
+                }
             }
         }
 
@@ -2766,6 +2775,68 @@ mod tests {
     }
 
     #[test]
+    fn a_forged_signature_cannot_bind_a_victims_address() {
+        // The attack the signature check exists to stop. Nothing secret is
+        // needed: a public key is public, and the SIGNED flag is one bit.
+        let now = 1_700_000_000;
+        let mut nbrs: bridge::Neighbors<u32> = bridge::Neighbors::new(3600);
+        let victim = Node::new("victim", &[]);
+
+        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec());
+        forged.src = Src::Full(victim.sk.verifying_key().to_bytes());
+        forged.flags |= fl::SIGNED;
+        forged.sig = Some([0u8; 64]);
+        assert!(!forged.verify(), "the forgery is not actually signed");
+
+        assert_eq!(nbrs.snoop(&forged.wire(), 666u32, now), None, "must teach nothing");
+        assert_eq!(
+            nbrs.resolve(&victim.addr, now),
+            None,
+            "a directed send must not be unicast to the forger"
+        );
+    }
+
+    #[test]
+    fn a_short_source_is_a_claim_not_evidence() {
+        // SRC8 carries an 8-byte address and no key, so there is nothing to
+        // verify against — anyone can name anyone. It must not bind.
+        let now = 1_700_000_000;
+        let mut nbrs: bridge::Neighbors<u32> = bridge::Neighbors::new(3600);
+        let victim = Node::new("victim", &[]);
+
+        let mut short = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"y".to_vec());
+        short.src = Src::Short(victim.addr);
+        short.flags |= fl::SIGNED | fl::SRC8;
+        short.sig = Some([0u8; 64]);
+
+        assert_eq!(nbrs.snoop(&short.wire(), 777u32, now), None);
+        assert_eq!(nbrs.resolve(&victim.addr, now), None);
+    }
+
+    #[test]
+    fn path_learning_also_refuses_a_forged_signature() {
+        // The same forgery aimed at the node's own path table: it would bind the
+        // victim to whichever interface the forgery arrived on.
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        let victim = Node::new("victim", &[]);
+
+        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"z".to_vec());
+        forged.src = Src::Full(victim.sk.verifying_key().to_bytes());
+        forged.flags |= fl::SIGNED;
+        forged.sig = Some([0u8; 64]);
+
+        n.on_rx(&forged.wire(), 7, None, now);
+        assert!(n.paths.fresh(&victim.addr, now).is_none(), "no path learned from a forgery");
+
+        // ...while a genuinely signed envelope from the same node still teaches.
+        let mut real = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"z".to_vec());
+        real.sign(&victim.sk);
+        n.on_rx(&real.wire(), 7, None, now);
+        assert!(n.paths.fresh(&victim.addr, now).is_some(), "a real signature still learns");
+    }
+
+    #[test]
     fn neighbors_snoop_resolve_and_expire() {
         let now = 1_700_000_000;
         // U here is a stand-in underlay address (e.g. a Meshtastic node number).
@@ -2780,6 +2851,16 @@ mod tests {
         // Unsigned frames must not populate the table (can't verify the source).
         let unsigned = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec()).wire();
         assert_eq!(nbrs.snoop(&unsigned, 99u32, now), None);
+
+        // Nor may a frame that merely *claims* to be signed. Setting the flag is
+        // free, so the signature itself has to be checked — see the two forgery
+        // tests below, which is where that is proven.
+        let mut liar = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec());
+        liar.src = Src::Full(a.sk.verifying_key().to_bytes());
+        liar.flags |= fl::SIGNED;
+        liar.sig = Some([0u8; 64]);
+        assert_eq!(nbrs.snoop(&liar.wire(), 98u32, now), None);
+        assert_eq!(nbrs.resolve(&a.addr, now), Some(42), "the real binding is untouched");
 
         // Unknown address -> None -> the bridge would broadcast.
         assert_eq!(nbrs.resolve(&[9u8; 8], now), None);
