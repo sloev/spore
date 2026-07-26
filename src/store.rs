@@ -16,6 +16,7 @@
 //! anywhere else without a filesystem.
 
 use super::*;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// Whether an envelope's bytes are still resident.
@@ -55,6 +56,48 @@ pub(crate) struct Store {
 
 /// Largest spilled file we will read back. One envelope, generously — anything
 /// bigger cannot be a valid entry, since its id would not match.
+/// Largest on-disk envelope file any bridge or the store will read into memory.
+///
+/// Every directory SPORE reads from is, by design, written by something else — a
+/// spill dir, a synced folder, an SSB log, a spool. "Adopt whatever is here" must
+/// never mean "read a terabyte into memory".
+pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
+
+/// Read a file, refusing to buffer more than `max` bytes.
+///
+/// The bound is on the **read**, not on a preceding `metadata` call. Checking the
+/// size first and then calling `fs::read` is two syscalls with a gap between them,
+/// and every directory this is used on is writable by someone else — so the file
+/// can be replaced or extended in that gap and the read would buffer whatever is
+/// there at the later moment. A stat is a useful fast reject; it is not the bound.
+pub fn read_capped(path: &Path, max: u64) -> io::Result<Vec<u8>> {
+    use io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(path)?.take(max + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > max {
+        return Err(io::Error::other("file over cap"));
+    }
+    Ok(buf)
+}
+
+/// Most filenames a folder-style bridge remembers having imported.
+///
+/// These sets exist only to avoid re-reading a file we already ingested, and they
+/// grow by one entry per filename ever seen — unbounded, in a directory whose
+/// contents someone else controls. Forgetting is cheap: the node's own dedup
+/// (`seen`) drops a re-imported envelope, so an overflow costs one wasted read per
+/// file, not a duplicate delivery.
+pub const MAX_KNOWN_FILENAMES: usize = 4096;
+
+/// Keep an imported-filenames set bounded. Clears wholesale on overflow rather
+/// than evicting one entry, because the set has no ordering worth preserving and a
+/// single clear is cheaper than repeated arbitrary eviction.
+pub fn bound_known(known: &mut HashSet<String>) {
+    if known.len() > MAX_KNOWN_FILENAMES {
+        known.clear();
+    }
+}
+
 const MAX_ADOPT_BYTES: u64 = 1024 * 1024;
 
 /// `<hexid>.spore`, the same name [`crate::bridge::store`] uses on disk.
@@ -212,7 +255,7 @@ impl Store {
                 }
                 Err(_) => continue,
             }
-            let Ok(wire) = std::fs::read(&path) else { continue };
+            let Ok(wire) = read_capped(&path, MAX_ADOPT_BYTES) else { continue };
             let Ok((e, n)) = Envelope::decode(&wire) else {
                 let _ = std::fs::remove_file(&path);
                 continue;
@@ -234,5 +277,42 @@ impl Store {
         }
         self.shed();
         Ok(adopted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_capped_bounds_the_read_not_a_preceding_stat() {
+        // The class of bug this exists to stop, and why a `metadata` check is not
+        // enough on its own: the two are separate syscalls, and every directory
+        // this is used on is written by someone else. Same finding as the spool
+        // bridge, which is why both now share this one helper.
+        let mut p = std::env::temp_dir();
+        p.push(format!("spore-readcapped-{}", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+
+        std::fs::write(&p, vec![0u8; 4096]).unwrap();
+        assert_eq!(read_capped(&p, 4096).unwrap().len(), 4096, "exactly at the cap is fine");
+        assert!(read_capped(&p, 4095).is_err(), "one byte over must refuse");
+
+        // A file far larger than the cap must not be buffered at all.
+        std::fs::write(&p, vec![7u8; 1024 * 1024]).unwrap();
+        assert!(read_capped(&p, 1024).is_err());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn known_filename_sets_stay_bounded() {
+        // Folder-style bridges remember what they imported: one entry per filename
+        // ever seen, in a directory whose contents someone else controls.
+        let mut known: HashSet<String> = HashSet::new();
+        for i in 0..(MAX_KNOWN_FILENAMES * 3) {
+            known.insert(format!("{i}.spore"));
+            bound_known(&mut known);
+        }
+        assert!(known.len() <= MAX_KNOWN_FILENAMES, "held {}", known.len());
     }
 }

@@ -17,7 +17,10 @@ pub fn publish_dir(node: &mut Node, dir: &Path, topic: Addr, now: u32) -> io::Re
             continue;
         }
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("file").to_string();
-        let bytes = fs::read(&path)?;
+        // A synced folder is written by Syncthing/Dropbox/whatever, not by us.
+        let Ok(bytes) = crate::store::read_capped(&path, crate::store::MAX_FILE_BYTES) else {
+            continue;
+        };
         let (_magnet, f) = node.publish_file(&name, &bytes, topic, now);
         out.extend(f);
     }

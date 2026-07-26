@@ -39,6 +39,8 @@ than fixing a crash, it says so explicitly.
 | [S-012](#s-012) | Reflection / amplification | **High** | ✅ | ✅ | ✅ | yes (per-link WANT budget) |
 | [S-013](#s-013) | Resource exhaustion (10 tables) | **High** | ✅ | ✅ | ✅ | yes (eviction under pressure) |
 | [S-014](#s-014) | False continuity claim (MSRV) | Low | ✅ | ✅ | ✅ (CI) | no |
+| [S-015](#s-015) | Remote OOM (5 unbounded reads) | Medium | ✅ | ✅ | ✅ | no |
+| [S-016](#s-016) | Resource exhaustion (filename sets) | Low | ✅ | ✅ | ✅ | no |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -485,6 +487,61 @@ again — it had already rotted twice.
 
 ---
 
+## S-015
+
+**The same unbounded read, in every file-backed bridge nobody had audited.**
+Medium. `src/store.rs` (core adoption), `src/bridge/store.rs` (×2),
+`src/bridge/foldersync.rs`, `src/bridge/ssb.rs`.
+
+**Root cause.** Five `fs::read` / `read_to_string` calls with no size limit, on
+directories that another program writes to *by design* — that is what a synced
+folder, an SSB log and a spill directory are. Two of them, including the core
+store's adoption path, had a `metadata` size check immediately before the read:
+the same stat-then-read gap as S-007, with the same comment explaining why the
+stat was enough. It is not; they are separate syscalls and the file can change
+between them.
+
+**Why the earlier audit missed it.** #15 fixed "spill adoption in `store.rs`" —
+and it did, in `src/store.rs`, with `MAX_ADOPT_BYTES`. But that fix only capped the
+*stat*, and there is a second `store.rs` one directory down (`src/bridge/store.rs`,
+the folder bridge) that was never looked at. Two files with the same name, one
+audited and one not. Worth recording as a lesson about how the gap happened rather
+than only what it was.
+
+**Exploit.** Drop one large file into any watched directory. Not remote in the
+network sense — it needs write access to the folder — but a synced folder is
+routinely shared with a whole cloud account or a whole LAN, which is the premise
+of those bridges.
+
+**Patch.** One shared `store::read_capped(path, max)` that bounds the **read**,
+used by all five sites plus the spool bridge, whose private near-duplicate was
+deleted. A stat may still fast-reject; it is no longer mistaken for the bound.
+
+**Tests.** `read_capped_bounds_the_read_not_a_preceding_stat`, plus the existing
+spool test now exercising the shared helper.
+
+---
+
+## S-016
+
+**Imported-filename sets grew forever.** Low. `src/bridge/store.rs`,
+`src/bridge/ssb.rs`, `src/bridge/copyparty.rs`.
+
+**Root cause.** Each folder-style bridge keeps `HashSet<String>` of filenames it
+has already imported, to avoid re-reading them. One entry per filename ever seen,
+never forgotten, in a directory whose contents someone else controls — including a
+rotating log, which grows it without any adversary at all.
+
+**Patch.** `store::bound_known` clears the set past `MAX_KNOWN_FILENAMES` (4096).
+Clearing wholesale rather than evicting one entry, because the set has no ordering
+worth preserving. Forgetting is cheap here in a way worth stating: the node's own
+dedup (`seen`) drops a re-imported envelope, so an overflow costs one wasted file
+read, not a duplicate delivery.
+
+**Test.** `known_filename_sets_stay_bounded`.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -500,6 +557,9 @@ because two external reviews asserted several of these as defects.
 | "wasm randomness unvalidated" | CI already asserts the wasm has exactly one import and that it is `spore_fill_random` — stricter than the proposed check. |
 | "No reproducible-build verification" | CI regenerates `reference/vectors.json` and fails on any diff, and runs `check_docs_sync.py`. Not bit-for-bit binary reproducibility, but determinism is verified. |
 | Fountain `count > 256` indexing past the digest | Not reachable: the wire field is a `u8` and the sender asserts `count <= 255`. Guarded anyway in S-001, because those are facts about callers. |
+| `tor` SOCKS5 reply allocates from a wire byte | Bounded: the length is a `u8`, so `vec![0u8; skip + 2]` is at most 257 bytes. |
+| `udp` reads `/proc/net/route` unbounded | A kernel file, not attacker-controlled. |
+| `meshtastic` / `ssb` base64 `with_capacity` | Sized from our own buffer's length, not from a wire-declared length. |
 
 ## Still open
 
@@ -507,5 +567,11 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
-- **Bridges never audited**: `ssb`, `foldersync`, `csma`, `meshtastic`, `audio`,
-  `serial`, `tcp`, `hub`, `ax25`, `tor`, `udp`.
+- **`hub` holds `Mutex<Node>` behind 13 `lock().unwrap()` calls.** A panic anywhere
+  under the lock poisons it, and every later `unwrap` then panics too — one fault
+  becomes a dead node rather than a dropped operation. Deferred to the
+  ratchet/mix/lock-ordering review rather than patched piecemeal.
+- **`meshtastic` and `audio` codecs** are read but not yet fuzzed as thoroughly as
+  the core parsers; both are reachable from a hostile medium.
+- **Hardware-verified status** for every 🧪 bridge. No marketing claim until the
+  `HARDWARE.md` procedure has actually been run.

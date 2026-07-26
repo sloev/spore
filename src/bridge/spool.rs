@@ -92,7 +92,7 @@ fn ingest_dir(hub: &super::hub::Shared, iface: Iface, dir: &Path) -> io::Result<
             }
             Err(_) => continue,
         }
-        let Ok(bytes) = read_bounded(&path) else { continue };
+        let Ok(bytes) = crate::store::read_capped(&path, MAX_SPOOL_FILE) else { continue };
         // Only accept a file whose bytes actually hash to the id in its name,
         // so a spool cannot smuggle in something under a chosen name.
         match Envelope::decode(&bytes) {
@@ -109,24 +109,6 @@ fn ingest_dir(hub: &super::hub::Shared, iface: Iface, dir: &Path) -> io::Result<
 
 fn is_named_for(name: &str, id: &Id) -> bool {
     name == super::store::filename(id)
-}
-
-/// Read a spool file, refusing to buffer more than [`MAX_SPOOL_FILE`].
-///
-/// The `metadata` check in [`ingest_dir`] is a fast reject, not the bound: the
-/// spool is written by someone else *by definition* — that is what a spool is —
-/// so the file can be replaced or extended between the stat and the read, and a
-/// plain `fs::read` would then buffer whatever is there now. The cap has to be on
-/// the read itself. A file that is over it is left for the next sweep, whose stat
-/// now sees the real size and removes it.
-fn read_bounded(path: &Path) -> io::Result<Vec<u8>> {
-    use io::Read;
-    let mut buf = Vec::new();
-    fs::File::open(path)?.take(MAX_SPOOL_FILE + 1).read_to_end(&mut buf)?;
-    if buf.len() as u64 > MAX_SPOOL_FILE {
-        return Err(io::Error::other("spool file over cap"));
-    }
-    Ok(buf)
 }
 
 #[cfg(test)]
@@ -210,11 +192,17 @@ mod tests {
         let d = Tmp::new("toctou");
         let path = d.0.join("b".repeat(32) + ".spore");
         fs::write(&path, vec![0u8; (MAX_SPOOL_FILE + 1) as usize]).unwrap();
-        assert!(read_bounded(&path).is_err(), "over-cap file must not be read into memory");
+        assert!(
+            crate::store::read_capped(&path, MAX_SPOOL_FILE).is_err(),
+            "over-cap file must not be read into memory"
+        );
 
         // And a file just under the cap still arrives intact.
         fs::write(&path, vec![7u8; (MAX_SPOOL_FILE - 1) as usize]).unwrap();
-        assert_eq!(read_bounded(&path).unwrap().len(), (MAX_SPOOL_FILE - 1) as usize);
+        assert_eq!(
+            crate::store::read_capped(&path, MAX_SPOOL_FILE).unwrap().len(),
+            (MAX_SPOOL_FILE - 1) as usize
+        );
     }
 
     #[test]

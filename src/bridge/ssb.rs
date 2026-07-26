@@ -65,7 +65,12 @@ pub fn run(
                 if !known.insert(name) {
                     continue;
                 }
-                if let Ok(text) = fs::read_to_string(&path) {
+                crate::store::bound_known(&mut known);
+                // An SSB log directory is written by the SSB client, so the read
+                // is capped and the bytes are lossily decoded rather than trusted
+                // to be UTF-8.
+                if let Ok(raw) = crate::store::read_capped(&path, crate::store::MAX_FILE_BYTES) {
+                    let text = String::from_utf8_lossy(&raw);
                     if let Some(env) = unwrap(&text) {
                         hub.on_rx(iface, &env, None);
                     }
