@@ -44,13 +44,31 @@ impl SporeBytes {
 /// `b` must have come from this library and not been freed already.
 #[no_mangle]
 pub unsafe extern "C" fn spore_bytes_free(b: SporeBytes) {
-    if !b.data.is_null() {
-        let s = std::slice::from_raw_parts_mut(b.data, b.len);
-        drop(Box::from_raw(s as *mut [u8]));
-    }
+    guard((), || {
+        if !b.data.is_null() {
+            let s = std::slice::from_raw_parts_mut(b.data, b.len);
+            drop(Box::from_raw(s as *mut [u8]));
+        }
+    })
 }
 
 // -- small helpers -----------------------------------------------------------
+
+/// Run `f`, returning `fallback` if it panics.
+///
+/// A panic unwinding out of an `extern "C"` function is undefined behaviour —
+/// not "an error the caller sees", but genuinely undefined, because the foreign
+/// frames above have no unwind tables. Every entry point below therefore catches
+/// before it can reach the boundary and returns the same failure value it would
+/// return for bad input: a null [`SporeBytes`], a `0`, or nothing at all.
+///
+/// This is a backstop, not an excuse: the helpers are written not to panic in the
+/// first place. But `spore` is a library whose callers are Python, Go and JS
+/// wrappers, and a panic reaching them would corrupt the host process rather than
+/// raise anything catchable in those languages.
+fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(fallback)
+}
 
 unsafe fn slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
     if ptr.is_null() {
@@ -59,14 +77,27 @@ unsafe fn slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
         std::slice::from_raw_parts(ptr, len)
     }
 }
+/// A fixed-size key read from a caller pointer.
+///
+/// `copy_from_slice` panics on a length mismatch, and `slice` yields an empty
+/// slice for a null pointer — so the obvious spelling of this made every function
+/// taking a key abort the process on a null argument, which a wrapper passing
+/// `None`/`nil` does by accident. A short or null pointer now yields zeroes: a
+/// well-defined wrong key, which fails as a wrong key does, instead of UB.
 unsafe fn arr32(ptr: *const u8) -> [u8; 32] {
     let mut a = [0u8; 32];
-    a.copy_from_slice(slice(ptr, 32));
+    let s = slice(ptr, 32);
+    if s.len() == 32 {
+        a.copy_from_slice(s);
+    }
     a
 }
 unsafe fn arr8(ptr: *const u8) -> Addr {
     let mut a = [0u8; 8];
-    a.copy_from_slice(slice(ptr, 8));
+    let s = slice(ptr, 8);
+    if s.len() == 8 {
+        a.copy_from_slice(s);
+    }
     a
 }
 
@@ -78,12 +109,14 @@ unsafe fn arr8(ptr: *const u8) -> Addr {
 /// `out_sk` and `out_pk` must each point to 32 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_keypair(out_sk: *mut u8, out_pk: *mut u8) {
-    let mut seed = [0u8; 32];
-    OsRng.fill_bytes(&mut seed);
-    let sk = SigningKey::from_bytes(&seed);
-    let pk = sk.verifying_key().to_bytes();
-    std::ptr::copy_nonoverlapping(seed.as_ptr(), out_sk, 32);
-    std::ptr::copy_nonoverlapping(pk.as_ptr(), out_pk, 32);
+    guard((), || {
+        let mut seed = [0u8; 32];
+        OsRng.fill_bytes(&mut seed);
+        let sk = SigningKey::from_bytes(&seed);
+        let pk = sk.verifying_key().to_bytes();
+        std::ptr::copy_nonoverlapping(seed.as_ptr(), out_sk, 32);
+        std::ptr::copy_nonoverlapping(pk.as_ptr(), out_pk, 32);
+    })
 }
 
 /// Generate an X25519 encryption prekey pair: writes 32-byte secret and public.
@@ -92,9 +125,11 @@ pub unsafe extern "C" fn spore_keypair(out_sk: *mut u8, out_pk: *mut u8) {
 /// `out_sec` and `out_pub` must each point to 32 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_prekey(out_sec: *mut u8, out_pub: *mut u8) {
-    let (sec, pubk) = prekey_keypair();
-    std::ptr::copy_nonoverlapping(sec.as_ptr(), out_sec, 32);
-    std::ptr::copy_nonoverlapping(pubk.as_ptr(), out_pub, 32);
+    guard((), || {
+        let (sec, pubk) = prekey_keypair();
+        std::ptr::copy_nonoverlapping(sec.as_ptr(), out_sec, 32);
+        std::ptr::copy_nonoverlapping(pubk.as_ptr(), out_pub, 32);
+    })
 }
 
 /// SPORE address = SHA-256(pubkey)[..8]. Writes 8 bytes.
@@ -103,8 +138,10 @@ pub unsafe extern "C" fn spore_prekey(out_sec: *mut u8, out_pub: *mut u8) {
 /// `pk` points to 32 bytes, `out` to 8 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_addr_of(pk: *const u8, out: *mut u8) {
-    let a = addr_of(&arr32(pk));
-    std::ptr::copy_nonoverlapping(a.as_ptr(), out, 8);
+    guard((), || {
+        let a = addr_of(&arr32(pk));
+        std::ptr::copy_nonoverlapping(a.as_ptr(), out, 8);
+    })
 }
 
 /// Topic address = SHA-256(utf8)[..8]. Writes 8 bytes.
@@ -113,9 +150,11 @@ pub unsafe extern "C" fn spore_addr_of(pk: *const u8, out: *mut u8) {
 /// `s`/`s_len` describe a byte string; `out` points to 8 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_topic_of(s: *const u8, s_len: usize, out: *mut u8) {
-    let name = String::from_utf8_lossy(slice(s, s_len));
-    let a = topic_of(&name);
-    std::ptr::copy_nonoverlapping(a.as_ptr(), out, 8);
+    guard((), || {
+        let name = String::from_utf8_lossy(slice(s, s_len));
+        let a = topic_of(&name);
+        std::ptr::copy_nonoverlapping(a.as_ptr(), out, 8);
+    })
 }
 
 // -- sealing / encrypted topics ----------------------------------------------
@@ -127,7 +166,7 @@ pub unsafe extern "C" fn spore_topic_of(s: *const u8, s_len: usize, out: *mut u8
 /// `msg`/`msg_len` describe the plaintext; `recip_prekey` points to 32 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_seal(msg: *const u8, msg_len: usize, recip_prekey: *const u8) -> SporeBytes {
-    SporeBytes::from_vec(seal(slice(msg, msg_len), &arr32(recip_prekey)))
+    guard(SporeBytes::null(), || SporeBytes::from_vec(seal(slice(msg, msg_len), &arr32(recip_prekey))))
 }
 
 /// Open a sealed box with a prekey secret (32 B). Null on failure.
@@ -140,7 +179,9 @@ pub unsafe extern "C" fn spore_open(
     sealed_len: usize,
     prekey_sec: *const u8,
 ) -> SporeBytes {
-    SporeBytes::or_null(open_sealed(slice(sealed, sealed_len), &arr32(prekey_sec)))
+    guard(SporeBytes::null(), || {
+        SporeBytes::or_null(open_sealed(slice(sealed, sealed_len), &arr32(prekey_sec)))
+    })
 }
 
 /// Encrypt for a topic under a 32-byte pre-shared key (XChaCha20-Poly1305).
@@ -149,7 +190,7 @@ pub unsafe extern "C" fn spore_open(
 /// `msg`/`msg_len` describe the plaintext; `psk` points to 32 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_topic_seal(msg: *const u8, msg_len: usize, psk: *const u8) -> SporeBytes {
-    SporeBytes::from_vec(topic_seal(slice(msg, msg_len), &arr32(psk)))
+    guard(SporeBytes::null(), || SporeBytes::from_vec(topic_seal(slice(msg, msg_len), &arr32(psk))))
 }
 
 /// Decrypt a topic payload with the pre-shared key. Null on failure.
@@ -158,7 +199,7 @@ pub unsafe extern "C" fn spore_topic_seal(msg: *const u8, msg_len: usize, psk: *
 /// `ct`/`ct_len` describe the ciphertext; `psk` points to 32 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *const u8) -> SporeBytes {
-    SporeBytes::or_null(topic_open(slice(ct, ct_len), &arr32(psk)))
+    guard(SporeBytes::null(), || SporeBytes::or_null(topic_open(slice(ct, ct_len), &arr32(psk))))
 }
 
 // -- text armor --------------------------------------------------------------
@@ -169,7 +210,7 @@ pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *co
 /// `env`/`env_len` describe the envelope bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_armor_wrap(env: *const u8, env_len: usize) -> SporeBytes {
-    SporeBytes::from_vec(armor::wrap(slice(env, env_len)).into_bytes())
+    guard(SporeBytes::null(), || SporeBytes::from_vec(armor::wrap(slice(env, env_len)).into_bytes()))
 }
 
 /// Recover envelope bytes from armor found anywhere in `text`. Null if none.
@@ -178,8 +219,10 @@ pub unsafe extern "C" fn spore_armor_wrap(env: *const u8, env_len: usize) -> Spo
 /// `text`/`text_len` describe a UTF-8 string.
 #[no_mangle]
 pub unsafe extern "C" fn spore_armor_unwrap(text: *const u8, text_len: usize) -> SporeBytes {
-    let s = String::from_utf8_lossy(slice(text, text_len));
-    SporeBytes::or_null(armor::unwrap(&s))
+    guard(SporeBytes::null(), || {
+        let s = String::from_utf8_lossy(slice(text, text_len));
+        SporeBytes::or_null(armor::unwrap(&s))
+    })
 }
 
 // -- messages (signed DATA envelopes) ----------------------------------------
@@ -196,10 +239,12 @@ pub unsafe extern "C" fn spore_message_new(
     payload: *const u8,
     payload_len: usize,
 ) -> SporeBytes {
-    let sk = SigningKey::from_bytes(&arr32(sk));
-    let mut e = Envelope::new(ty::DATA, arr8(dest), expiry, slice(payload, payload_len).to_vec());
-    e.sign(&sk);
-    SporeBytes::from_vec(e.wire())
+    guard(SporeBytes::null(), || {
+        let sk = SigningKey::from_bytes(&arr32(sk));
+        let mut e = Envelope::new(ty::DATA, arr8(dest), expiry, slice(payload, payload_len).to_vec());
+        e.sign(&sk);
+        SporeBytes::from_vec(e.wire())
+    })
 }
 
 /// Verify a signed envelope's signature. Returns 1 if valid, else 0.
@@ -208,10 +253,10 @@ pub unsafe extern "C" fn spore_message_new(
 /// `wire`/`wire_len` describe the envelope bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_message_verify(wire: *const u8, wire_len: usize) -> u8 {
-    match Envelope::decode(slice(wire, wire_len)) {
+    guard(0, || match Envelope::decode(slice(wire, wire_len)) {
         Ok((e, _)) => e.verify() as u8,
         Err(_) => 0,
-    }
+    })
 }
 
 /// Write an envelope's 16-byte content ID to `out`. Returns 1 on success, 0 if
@@ -221,14 +266,14 @@ pub unsafe extern "C" fn spore_message_verify(wire: *const u8, wire_len: usize) 
 /// `wire`/`wire_len` describe the envelope; `out` points to 16 writable bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_message_id(wire: *const u8, wire_len: usize, out: *mut u8) -> u8 {
-    match Envelope::decode(slice(wire, wire_len)) {
+    guard(0, || match Envelope::decode(slice(wire, wire_len)) {
         Ok((e, _)) => {
             let id = e.id();
             std::ptr::copy_nonoverlapping(id.as_ptr(), out, 16);
             1
         }
         Err(_) => 0,
-    }
+    })
 }
 
 /// Extract an envelope's payload. Null if the bytes don't decode.
@@ -237,10 +282,10 @@ pub unsafe extern "C" fn spore_message_id(wire: *const u8, wire_len: usize, out:
 /// `wire`/`wire_len` describe the envelope bytes.
 #[no_mangle]
 pub unsafe extern "C" fn spore_message_payload(wire: *const u8, wire_len: usize) -> SporeBytes {
-    match Envelope::decode(slice(wire, wire_len)) {
+    guard(SporeBytes::null(), || match Envelope::decode(slice(wire, wire_len)) {
         Ok((e, _)) => SporeBytes::from_vec(e.payload),
         Err(_) => SporeBytes::null(),
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -279,5 +324,50 @@ mod tests {
             spore_bytes_free(opened);
             spore_bytes_free(sealed);
         }
+    }
+
+    #[test]
+    fn null_pointers_return_failure_instead_of_unwinding() {
+        // A wrapper that passes None/nil/null reaches here as a null pointer.
+        // Before the guard, `copy_from_slice` panicked on the length mismatch and
+        // that panic unwound across the C ABI, which is undefined behaviour — not
+        // a catchable exception in Python, Go or JS, but a corrupted host process.
+        unsafe {
+            let mut out = [0u8; 8];
+            spore_addr_of(std::ptr::null(), out.as_mut_ptr()); // must not abort
+            spore_topic_of(std::ptr::null(), 0, out.as_mut_ptr());
+
+            let b = spore_seal(std::ptr::null(), 0, std::ptr::null());
+            spore_bytes_free(b);
+
+            // Opening with a null key is a wrong key, not a crash.
+            let b = spore_open(std::ptr::null(), 0, std::ptr::null());
+            assert!(b.data.is_null(), "a null key fails as a wrong key does");
+
+            let b = spore_topic_open(std::ptr::null(), 0, std::ptr::null());
+            assert!(b.data.is_null());
+
+            assert_eq!(spore_message_verify(std::ptr::null(), 0), 0);
+            let mut id = [0u8; 16];
+            assert_eq!(spore_message_id(std::ptr::null(), 0, id.as_mut_ptr()), 0);
+            let b = spore_message_payload(std::ptr::null(), 0);
+            assert!(b.data.is_null());
+
+            // Freeing a null buffer is a no-op, not a double free.
+            spore_bytes_free(SporeBytes::null());
+        }
+    }
+
+    #[test]
+    fn a_panic_inside_the_boundary_becomes_a_failure_value() {
+        // The guard itself, exercised directly: whatever goes wrong inside, the
+        // caller gets the documented failure value rather than an unwind.
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {})); // keep the test output clean
+        let v = guard(0u8, || panic!("boom"));
+        let b = guard(SporeBytes::null(), || -> SporeBytes { panic!("boom") });
+        std::panic::set_hook(hook);
+        assert_eq!(v, 0, "a panic yields the fallback");
+        assert!(b.data.is_null());
     }
 }
