@@ -36,6 +36,7 @@ than fixing a crash, it says so explicitly.
 | [S-009](#s-009) | Silent packet loss | Low | ✅ | ✅ | ✅ | no |
 | [S-010](#s-010) | False continuity claim | Low | ✅ | ✅ | n/a | no |
 | [S-011](#s-011) | Public API panic | Low | ✅ | ✅ | ✅ | yes (`send` returns `Result`) |
+| [S-012](#s-012) | Reflection / amplification | **High** | ✅ | ✅ | ✅ | yes (per-link WANT budget) |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -353,6 +354,47 @@ only to respect a constraint that turned out not to bind.
 
 ---
 
+## S-012
+
+**WANT was a 32x unauthenticated amplifier.** High. `src/lib.rs` — `on_want`,
+`on_inv`.
+
+**Root cause.** A WANT payload is a list of 16-byte ids and `on_want` answered each
+one with a whole stored envelope. The payload length is a `u16`, so one packet can
+list ~4095 ids. Per §6, INV/WANT are per-link, `hops=0`, consumed on receipt —
+which also means they return from `on_rx` *before* dedup and before the quota.
+
+**Exploit.** Send one small unsigned WANT listing ids the victim holds; receive
+their whole store back. Nothing is signed, so this needs no identity, and nothing
+dedups it, so the identical packet can be replayed forever. Three costs, not one:
+bandwidth, disk (`store.wire` reads from the spill directory on eviction), and — on
+a radio link — airtime that §10 caps at 10% by law. Worth noting the reflection
+angle: on a bridge where the source address is not verified (UDP, broadcast), the
+flood can be aimed at a third party.
+
+**Reproduced.** Measured before the fix: a 6,418-byte WANT returned 205,600 bytes
+across 400 envelopes — **32.0x** — and an identical replay served all 400 again.
+The ceiling is the largest envelope divided by 16, around 4000x.
+
+**Patch.** Two bounds, because they address different halves. `MAX_IDS_PER_GOSSIP`
+(64) caps what one packet can buy. A per-interface `TokenBucket`
+(`DEFAULT_GOSSIP_BUDGET`, 32 KiB/s) caps a *stream* of them. Per-interface rather
+than per-source because a WANT carries no identity worth having — the link it
+arrived on is the only attributable thing. `on_inv` takes the same id cap, since an
+INV listing thousands of ids we lack would have us emit an equally large WANT.
+
+**After.** The same measurement gives 5.0x for a single packet, and a replay serves
+**0**. Gossip still works: a modest WANT is answered in full, a different link has
+its own budget, and the bucket refills over time.
+
+**Behaviour change.** A link that asks for more than its share is served partially
+and must ask again. That is what gossip already tolerates — an id not served now is
+offered on the next round — so nothing is lost, only paced.
+
+**Tests.** `a_want_cannot_be_used_as_an_amplifier`, `ordinary_gossip_still_works`.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -378,7 +420,6 @@ Carried deliberately, not overlooked.
   the offline path S-010 just fixed.
 - **`seen`, `frags`, ack and rpc/feed tables** need the S-006 treatment: bounds
   and timeouts, not just TTLs.
-- **INV/WANT** admission is unbounded — a classic amplification surface.
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
 - **Bridges never audited**: `ssb`, `foldersync`, `csma`, `meshtastic`, `audio`,

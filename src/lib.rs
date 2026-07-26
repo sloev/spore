@@ -52,6 +52,31 @@ const FRAG_OVERHEAD: usize = 36;
 /// for.
 pub const MAX_FOUNTAIN_CHUNKS: usize = 255;
 
+/// Most ids honoured from a single INV or WANT.
+///
+/// The payload length is a `u16`, so one packet can list ~4095 ids, and `on_want`
+/// answers each one with a *whole stored envelope*. That is reflection with gain:
+/// measured at **32x** with 400-byte payloads, and the ceiling is the largest
+/// envelope over 16 bytes — around 4000x. INV/WANT are also consumed before dedup
+/// and before the quota (§6: per-link, hops=0, never stored, never relayed), so an
+/// attacker can replay one identical request forever, and on a radio link every
+/// reply spends airtime that §10 caps at 10% by law.
+///
+/// Capping the ids honoured bounds the work one packet can buy. The requester
+/// loses nothing real: INV/WANT are gossip, so an id not served now is offered
+/// again on the next round.
+pub const MAX_IDS_PER_GOSSIP: usize = 64;
+
+/// Bytes per second of stored envelopes one interface may pull out of us with
+/// WANT.
+///
+/// The per-id cap above bounds a single packet; this bounds a *stream* of them,
+/// which is the other half of the same problem. Per-interface rather than
+/// per-source, because a WANT carries no identity worth having — it is unsigned
+/// per-link gossip — so the link it arrived on is the only thing we can attribute
+/// it to.
+pub const DEFAULT_GOSSIP_BUDGET: u32 = 32 * 1024;
+
 /// An object too large to carry as one fountain set — returned by
 /// [`Node::send`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -705,6 +730,8 @@ pub struct Node {
     feed_inbox: Vec<feed::Event>,              // feed events on subscribed topics (L5)
     quotas: congestion::Quotas,                // per-source flood quota (§10)
     pinned: HashSet<Id>,                       // magnets a seed-vault keeps forever
+    gossip: HashMap<Iface, congestion::TokenBucket>, // per-link WANT service budget
+    gossip_rate: u32,
 }
 
 struct Pending {
@@ -772,7 +799,17 @@ impl Node {
             feed_inbox: Vec::new(),
             quotas: congestion::Quotas::new(DEFAULT_SOURCE_QUOTA),
             pinned: HashSet::new(),
+            gossip: HashMap::new(),
+            gossip_rate: DEFAULT_GOSSIP_BUDGET,
         }
+    }
+
+    /// Set how many bytes per second of stored envelopes each interface may pull
+    /// out of this node with WANT. Defaults to [`DEFAULT_GOSSIP_BUDGET`]; raise it
+    /// on a fast link, lower it on metered airtime.
+    pub fn set_gossip_budget(&mut self, bytes_per_sec: u32) {
+        self.gossip_rate = bytes_per_sec;
+        self.gossip.clear();
     }
 
     /// Set the per-source flood quota (§10): the sustained bytes/second any single
@@ -1251,7 +1288,7 @@ impl Node {
         // never deduped, never relayed (§6).
         match e.typ {
             ty::INV => return self.on_inv(&e, iface, nbr),
-            ty::WANT => return self.on_want(&e, iface, nbr),
+            ty::WANT => return self.on_want(&e, iface, nbr, now),
             _ => {}
         }
         self.ingest(&e, iface, nbr, now, true)
@@ -1456,7 +1493,10 @@ impl Node {
 
     fn on_inv(&self, e: &Envelope, iface: Iface, nbr: Option<Addr>) -> Rx {
         let mut want = Vec::new();
-        for chunk in e.payload.chunks(16) {
+        // Bounded for the same reason `on_want` is, and additionally because the
+        // reply is *our* traffic: an INV listing thousands of ids we lack would
+        // have us emit a WANT just as large.
+        for chunk in e.payload.chunks(16).take(MAX_IDS_PER_GOSSIP) {
             if chunk.len() == 16 {
                 let mut id = [0u8; 16];
                 id.copy_from_slice(chunk);
@@ -1476,16 +1516,23 @@ impl Node {
         rx
     }
 
-    fn on_want(&self, e: &Envelope, iface: Iface, nbr: Option<Addr>) -> Rx {
+    fn on_want(&mut self, e: &Envelope, iface: Iface, nbr: Option<Addr>, now: u32) -> Rx {
         let mut rx = Rx::default();
-        for chunk in e.payload.chunks(16) {
-            if chunk.len() == 16 {
-                let mut id = [0u8; 16];
-                id.copy_from_slice(chunk);
-                if let Some(wire) = self.store.wire(&id) {
-                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: wire });
-                }
+        let rate = self.gossip_rate;
+        for chunk in e.payload.chunks(16).take(MAX_IDS_PER_GOSSIP) {
+            if chunk.len() != 16 {
+                continue;
             }
+            let mut id = [0u8; 16];
+            id.copy_from_slice(chunk);
+            // `store.wire` may read from the spill directory, so an unbounded WANT
+            // buys disk reads as well as bandwidth.
+            let Some(wire) = self.store.wire(&id) else { continue };
+            let bucket = self.gossip.entry(iface).or_insert_with(|| congestion::TokenBucket::new(rate));
+            if !bucket.allow(wire.len() as u32, now) {
+                break; // this link has spent its share; it can ask again later
+            }
+            rx.forwards.push(Forward::Directed { iface, nbr, bytes: wire });
         }
         rx
     }
@@ -2955,6 +3002,79 @@ mod tests {
         // exhausted bucket, which is what "priority is bought" means.
         assert!(q.admit(src, 100, congestion::STAMP_QUOTA_BYPASS_BITS, now), "real work still buys it");
         assert!(q.admit(src, 5000, 255, now), "and the highest class is never throttled");
+    }
+
+    #[test]
+    fn a_want_cannot_be_used_as_an_amplifier() {
+        // One unsigned WANT once pulled a full stored envelope for every id it
+        // listed — measured at 32x gain, and replayable forever because INV/WANT
+        // are consumed before dedup and before the quota (§6). On a radio link
+        // every reply also spends airtime that §10 caps at 10% by law.
+        let now = 1_700_000_000;
+        let mut victim = Node::new("victim", &[]);
+        let mut ids = Vec::new();
+        for i in 0..400u32 {
+            let f = victim.originate(ZERO_DEST, vec![(i % 251) as u8; 400], now);
+            if let Some(Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f.into_iter().next()
+            {
+                ids.push(Envelope::decode(&bytes).unwrap().0.id());
+            }
+        }
+        let mut payload = Vec::new();
+        for id in &ids {
+            payload.extend_from_slice(id);
+        }
+        let want = Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire();
+
+        let rx = victim.on_rx(&want, 1, None, now);
+        assert!(
+            rx.forwards.len() <= MAX_IDS_PER_GOSSIP,
+            "one packet must not buy more than {MAX_IDS_PER_GOSSIP} envelopes, got {}",
+            rx.forwards.len()
+        );
+
+        // The per-link budget is what bounds a *stream* of these. Replaying the
+        // same request must not keep paying out.
+        let mut served = 0;
+        for _ in 0..20 {
+            served += victim.on_rx(&want, 1, None, now).forwards.len();
+        }
+        assert_eq!(served, 0, "a spent link budget must not refill within the same second");
+
+        // ...while a different link still gets service, and time still refills.
+        assert!(!victim.on_rx(&want, 2, None, now).forwards.is_empty(), "per-link, not global");
+        assert!(!victim.on_rx(&want, 1, None, now + 60).forwards.is_empty(), "refills over time");
+    }
+
+    #[test]
+    fn ordinary_gossip_still_works() {
+        // The bound must not break the mechanism it protects: a modest WANT from a
+        // real peer is answered in full.
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut ids = Vec::new();
+        for i in 0..5u8 {
+            let f = a.originate(ZERO_DEST, vec![i; 100], now);
+            if let Some(Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f.into_iter().next()
+            {
+                ids.push(Envelope::decode(&bytes).unwrap().0.id());
+            }
+        }
+        let mut payload = Vec::new();
+        for id in &ids {
+            payload.extend_from_slice(id);
+        }
+        let want = Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire();
+        assert_eq!(a.on_rx(&want, 1, None, now).forwards.len(), 5, "every id we hold is served");
+
+        // An INV offering ids we lack still produces a WANT asking for them.
+        let mut inv_payload = Vec::new();
+        for i in 0..5u8 {
+            inv_payload.extend_from_slice(&[i; 16]);
+        }
+        let inv = Envelope::new(ty::INV, ZERO_DEST, 0, inv_payload).wire();
+        let rx = a.on_rx(&inv, 1, None, now);
+        assert_eq!(rx.forwards.len(), 1, "one WANT asking for what we lack");
     }
 
     #[test]
