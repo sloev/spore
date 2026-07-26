@@ -15,8 +15,11 @@ Two rules for this file:
 - **Severity describes reachability, not cleverness.** "Any peer on the medium,
   no key, one packet" outranks anything needing a position or a secret.
 
-Nothing here changes the frozen 1.0 wire format. Where a fix changes *behaviour*
-(as opposed to fixing a crash), it says so explicitly.
+**Nothing here changes the wire format.** `gen_vectors` output stays byte-identical
+to `reference/vectors.json` throughout, so every reference decoder, vector and
+`spore.h` symbol is untouched. One finding (S-011) does change a frozen *Rust*
+signature, which is called out in its entry. Where a fix changes *behaviour* rather
+than fixing a crash, it says so explicitly.
 
 ## Summary
 
