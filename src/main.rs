@@ -365,6 +365,7 @@ enum Spec {
     I2p(String),
     I2pAccept(String),
     Copyparty(String),
+    UdpGroup(String, String),
     Http(u16),
     Audio,
     Reticulum,
@@ -468,6 +469,13 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "i2p" if !v.is_empty() => Ok(Spec::I2p(v.to_string())),
             "i2p-accept" => Ok(Spec::I2pAccept(v.to_string())),
             "copyparty" | "webdav" if !v.is_empty() => Ok(Spec::Copyparty(v.to_string())),
+            // `group: BIND -> GROUP` — an explicit pair, IPv4 or IPv6. What an
+            // overlay (Yggdrasil, cjdns) or a multi-homed mesh node needs.
+            "group" if v.contains("->") => {
+                let (b, g) = v.split_once("->").unwrap();
+                Ok(Spec::UdpGroup(b.trim().to_string(), g.trim().to_string()))
+            }
+            "group" => Err("`group` needs BIND -> GROUP (group: [::]:7373 -> [ff02::7373]:7373)".into()),
             "meshtastic-serial" | "mesh-serial" if !v.is_empty() => {
                 Ok(Spec::MeshtasticSerial(Some(v.to_string())))
             }
@@ -620,6 +628,14 @@ fn run_config(cfg: Config) {
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::i2p::run_accept(h, iface, rx, &sam) {
                         eprintln!("  [i2p] {e}");
+                    }
+                })
+            }
+            Spec::UdpGroup(bind, group) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::udp::run_group(h, iface, rx, &bind, &group) {
+                        eprintln!("  [udp] {e}");
                     }
                 })
             }

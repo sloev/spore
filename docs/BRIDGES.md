@@ -197,9 +197,9 @@ unchanged** — point it at the right address on the overlay's interface.
 
 | Overlay | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
-| [BATMAN-adv 🟡](#batman) | dgram | `[u8;6]` | 1500 | L2 mesh; UDP broadcast on `bat0` |
-| [Yggdrasil / cjdns 🟡](#yggdrasil) | dgram | `Ipv6Addr` | 1280 | end-to-end encrypted IPv6 overlay |
-| [Thread 🟡](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh for low-power IPv6 |
+| [BATMAN-adv 🧪](#batman) | dgram | `[u8;6]` | 1500 | L2 mesh; `udp::run_group` pinned to `bat0` |
+| [Yggdrasil / cjdns 🧪](#yggdrasil) | dgram | `Ipv6Addr` | 1280 | IPv6 overlay; `udp::run_group` on `ff02::7373` |
+| [Thread 🧪](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh; `udp::run_group` on the mesh iface |
 | [Tor (onion service) 🧪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous via SOCKS5 |
 | [I2P 🧪](#i2p) | stream | b32 dest | 1200 | garlic-routed streams via SAM v3 |
 | [Veilid ⚪](#veilid) | dgram | node id | var | private-routed DHT |
@@ -374,7 +374,7 @@ existing UDP bridge rides it unchanged.
 | `U` | `Ipv4Addr` |
 | MTU | 1500 |
 | State | stateful (group lifecycle) |
-| Status | 🟡 partial — works today via the UDP bridge over the P2P interface |
+| Status | 🧪 implemented — `udp::run_group` pinned to the P2P interface's address |
 | Code | `bridge::udp::run_primary` pointed at the `p2p0` interface |
 
 <details><summary>Deep dive</summary>
@@ -1100,7 +1100,7 @@ address on the overlay's interface. Only the non-IP or browser-native ones need
 their own shim.
 
 <a id="batman"></a>
-## BATMAN-adv 🟡
+## BATMAN-adv 🧪
 
 **Summary.** B.A.T.M.A.N.-adv is a Linux kernel L2 mesh: nodes join a virtual switch
 (`bat0`) that spans many radio hops as if it were one Ethernet segment. SPORE floods
@@ -1112,7 +1112,7 @@ it with the existing UDP broadcast bridge on `bat0`.
 | `U` | `[u8;6]` |
 | MTU | 1500 |
 | State | stateless |
-| Status | 🟡 partial — works via the UDP bridge on `bat0` |
+| Status | 🧪 implemented — `udp::run_group` bound to `bat0`'s address |
 | Code | `bridge::udp::run_primary` bound to `bat0` |
 
 <details><summary>Deep dive</summary>
@@ -1126,7 +1126,7 @@ the `bat0` interface. `U` is the batman node MAC as seen by UDP.
 </details>
 
 <a id="yggdrasil"></a>
-## Yggdrasil / cjdns 🟡
+## Yggdrasil / cjdns 🧪
 
 **Summary.** End-to-end encrypted IPv6 overlays where your address is derived from
 your public key, self-organising into a global mesh. Because they present a normal
@@ -1138,7 +1138,7 @@ IPv6 `tun`, SPORE's UDP bridge rides them directly.
 | `U` | `Ipv6Addr` |
 | MTU | 1280 |
 | State | stateless |
-| Status | 🟡 partial — works via the UDP bridge over the tun |
+| Status | 🧪 implemented — `udp::run_group` binds the tun and floods `ff02::7373` |
 | Code | `bridge::udp` on the Yggdrasil/cjdns interface |
 
 <details><summary>Deep dive</summary>
@@ -1153,7 +1153,7 @@ overlay layer, but SPORE still authenticates with its own signature. Keep to the
 </details>
 
 <a id="thread"></a>
-## Thread 🟡
+## Thread 🧪
 
 **Summary.** Thread is a low-power 802.15.4 mesh presenting IPv6 (6LoWPAN) — common
 in smart-home devices. Envelopes ride UDP over the Thread network.
@@ -1164,7 +1164,7 @@ in smart-home devices. Envelopes ride UDP over the Thread network.
 | `U` | `Ipv6Addr` |
 | MTU | 1280 (IPv6; fragmented over 802.15.4) |
 | State | stateless |
-| Status | 🟡 partial — UDP over 6LoWPAN |
+| Status | 🧪 implemented — `udp::run_group` on the mesh interface (IPv6 multicast) |
 | Code | `bridge::udp` over the Thread interface |
 
 <details><summary>Deep dive</summary>

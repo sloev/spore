@@ -8,12 +8,16 @@
 //!   `192.168.1.255`), auto-discovered from the OS, on [`SPORE_LAN_PORT`]. This
 //!   is the "just works on this LAN" default: SPORE finds the network you're
 //!   actually on and floods there, no address or port to configure.
+//! - [`run_group`] — an explicit bind address and an explicit destination, IPv4
+//!   *or* IPv6. This is what an overlay needs: Yggdrasil and cjdns present an
+//!   IPv6 `tun` with no broadcast at all, and a BATMAN or Thread node with
+//!   several interfaces has to say which one it means.
 
 use super::driver::{run_datagram, DatagramTransport};
 use super::hub::Shared;
 use crate::{Forward, Iface};
 use std::io::ErrorKind;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
@@ -49,6 +53,90 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, port: u16) -> std::
     let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, port).into();
     println!("  [udp] iface {iface} on :{port} (limited broadcast)");
     run_datagram(hub, iface, rx, Udp { sock, bcast })
+}
+
+/// The spec's multicast groups (Page 2). IPv6 has no broadcast, so an overlay
+/// that is IPv6-only reaches its neighbours here instead.
+pub const SPORE_MCAST_V4: Ipv4Addr = Ipv4Addr::new(239, 73, 73, 73);
+/// Link-local scope, so it stays on the overlay rather than leaking upstream.
+pub const SPORE_MCAST_V6: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0x7373);
+
+/// Bridge on an explicit `bind` address, flooding to an explicit `group`.
+///
+/// The general form behind the two convenience runners, and the one an overlay
+/// wants:
+///
+/// ```text
+/// bind "[::]:7373"        group "[ff02::7373]:7373"     # Yggdrasil, cjdns
+/// bind "10.0.0.5:7373"    group "10.0.0.255:7373"       # one interface of many
+/// bind "0.0.0.0:7373"     group "239.73.73.73:7373"     # IPv4 multicast
+/// ```
+///
+/// Multicast groups are joined on the bound interface; broadcast is enabled when
+/// the group is a broadcast address. Pinning `bind` to one interface's address is
+/// how a multi-homed host (BATMAN's `bat0`, a Thread `wpan0`) says which network
+/// it means — the kernel then sources from that interface.
+pub fn run_group(
+    hub: Shared,
+    iface: Iface,
+    rx: Receiver<Forward>,
+    bind: &str,
+    group: &str,
+) -> std::io::Result<()> {
+    let (bind_addr, dest, how) = plan(bind, group)?;
+    let sock = UdpSocket::bind(bind_addr)?;
+    sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+
+    // A join can fail for reasons that are the network's rather than ours — a
+    // container without multicast, an interface still coming up. Say so and
+    // carry on: unicast to snooped peers still works, so a link that cannot
+    // flood is still better than no link.
+    match how {
+        Join::MulticastV4(g, local) => {
+            if let Err(e) = sock.join_multicast_v4(&g, &local) {
+                eprintln!("  [udp] iface {iface} could not join {g}: {e} (unicast only)");
+            }
+        }
+        // Interface 0 = "let the kernel choose", which follows the route to the
+        // bound address — the right answer on a single-overlay host.
+        Join::MulticastV6(g) => {
+            if let Err(e) = sock.join_multicast_v6(&g, 0) {
+                eprintln!("  [udp] iface {iface} could not join {g}: {e} (unicast only)");
+            }
+        }
+        Join::Broadcast => sock.set_broadcast(true)?,
+        Join::None => {}
+    }
+
+    println!("  [udp] iface {iface} on {bind_addr} -> {dest}");
+    run_datagram(hub, iface, rx, Udp { sock, bcast: dest })
+}
+
+/// What a `bind`/`group` pair asks the socket to do.
+#[derive(Debug, PartialEq, Eq)]
+enum Join {
+    MulticastV4(Ipv4Addr, Ipv4Addr),
+    MulticastV6(Ipv6Addr),
+    Broadcast,
+    None,
+}
+
+/// Decide the socket setup from two address strings, without touching a socket.
+/// Kept separate so the decision is testable anywhere, including CI runners with
+/// no multicast at all.
+fn plan(bind: &str, group: &str) -> std::io::Result<(SocketAddr, SocketAddr, Join)> {
+    let bind_addr: SocketAddr =
+        bind.parse().map_err(|_| std::io::Error::other(format!("udp: bad bind address {bind:?}")))?;
+    let dest: SocketAddr =
+        group.parse().map_err(|_| std::io::Error::other(format!("udp: bad group address {group:?}")))?;
+    let how = match (bind_addr.ip(), dest.ip()) {
+        (IpAddr::V4(local), IpAddr::V4(g)) if g.is_multicast() => Join::MulticastV4(g, local),
+        (IpAddr::V4(_), IpAddr::V4(_)) => Join::Broadcast,
+        (IpAddr::V6(_), IpAddr::V6(g)) if g.is_multicast() => Join::MulticastV6(g),
+        (IpAddr::V6(_), IpAddr::V6(_)) => Join::None,
+        _ => return Err(std::io::Error::other("udp: bind and group must both be IPv4 or both IPv6")),
+    };
+    Ok((bind_addr, dest, how))
 }
 
 /// The standardized SPORE LAN port. Nodes that speak `run_primary` agree on this
@@ -161,6 +249,40 @@ mod tests {
     fn proc_route_hex_is_little_endian() {
         assert_eq!(hex_le_to_be("0001A8C0").map(Ipv4Addr::from), Some(Ipv4Addr::new(192, 168, 1, 0)));
         assert_eq!(hex_le_to_be("00FFFFFF").map(Ipv4Addr::from), Some(Ipv4Addr::new(255, 255, 255, 0)));
+    }
+
+    /// The socket setup is decided before any socket exists, so this is the
+    /// same code the bridge runs — not a copy of it — and it works on a CI
+    /// runner with no multicast.
+    #[test]
+    fn bind_and_group_decide_the_socket_setup() {
+        // An IPv6 overlay (Yggdrasil, cjdns): no broadcast exists, so multicast.
+        let (_, _, how) = plan("[::]:7373", "[ff02::7373]:7373").unwrap();
+        assert_eq!(how, Join::MulticastV6(SPORE_MCAST_V6));
+
+        // One interface of several (bat0, wpan0): pin the source address.
+        let (b, d, how) = plan("10.0.0.5:7373", "10.0.0.255:7373").unwrap();
+        assert_eq!(how, Join::Broadcast);
+        assert_eq!(b.ip().to_string(), "10.0.0.5", "the bind pins the interface");
+        assert_eq!(d.ip().to_string(), "10.0.0.255");
+
+        // IPv4 multicast joins on the bound interface, not a guessed one.
+        let (_, _, how) = plan("10.0.0.5:7373", "239.73.73.73:7373").unwrap();
+        assert_eq!(how, Join::MulticastV4(SPORE_MCAST_V4, Ipv4Addr::new(10, 0, 0, 5)));
+
+        // Mixing families silently sends nowhere, so it is refused up front.
+        assert!(plan("0.0.0.0:7373", "[ff02::7373]:7373").is_err(), "v4 bind, v6 group");
+        assert!(plan("[::]:7373", "239.73.73.73:7373").is_err(), "v6 bind, v4 group");
+        // And a typo is an error, not a silent fallback to broadcast-everything.
+        assert!(plan("nonsense", "239.73.73.73:7373").is_err());
+        assert!(plan("0.0.0.0:7373", "nonsense").is_err());
+    }
+
+    #[test]
+    fn the_spec_groups_are_the_documented_ones() {
+        assert_eq!(SPORE_MCAST_V4.to_string(), "239.73.73.73");
+        assert_eq!(SPORE_MCAST_V6.to_string(), "ff02::7373");
+        assert!(SPORE_MCAST_V4.is_multicast() && SPORE_MCAST_V6.is_multicast());
     }
 
     #[test]

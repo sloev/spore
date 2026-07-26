@@ -122,6 +122,8 @@ bridges:
   - tor: abc…xyz.onion     # dial a peer's onion service through Tor's SOCKS proxy
   - i2p: abc…xyz.b32.i2p   # dial an I2P destination via the SAM bridge
   - copyparty: http://box:3923/bag/   # a shared HTTP/WebDAV directory
+  - group: "[::]:7373 -> [ff02::7373]:7373"   # IPv6 overlay (Yggdrasil, cjdns)
+  - group: "10.0.0.5:7373 -> 10.0.0.255:7373" # pin one interface (bat0, wpan0)
   - ssb: ./ssb-log         # a Secure Scuttlebutt append-only log folder
 ```
 
