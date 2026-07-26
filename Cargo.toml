@@ -2,6 +2,13 @@
 name = "spore"
 version = "1.0.0"
 edition = "2021"
+# The oldest toolchain that builds this, verified rather than asserted: `cargo
+# +1.75 test` passes. It matters because CONTINUITY.md promises a rebuild on
+# whatever machine survives, and that is not a promise you can keep on a toolchain
+# you never tried. `Cargo.lock` is kept at version 3 for the same reason — a v4
+# lockfile cannot even be *parsed* by 1.75, which silently defeated the dependency
+# pins below.
+rust-version = "1.75"
 description = "SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope: a reference implementation"
 license = "Unlicense"
 
@@ -22,6 +29,13 @@ rand = "0.8"
 # Pin transitive deps to versions compatible with Rust 1.75 (no edition2024).
 zeroize = "=1.7.0"
 base64ct = "=1.6.0"
+# `zeroize` is a facade; the derive macro is a *separate* crate that the pin above
+# does not constrain, and zeroize_derive 1.5 moved to edition2024 — which needs a
+# far newer Cargo than 1.75 and so defeated the pin it sits behind. Nothing here
+# uses `#[derive(Zeroize)]`; it arrives via chacha20poly1305/crypto_box enabling
+# the feature. Pinned rather than disabled because the feature belongs to those
+# crates, not to us.
+zeroize_derive = "=1.4.2"
 
 # On the web (wasm32) OsRng needs a randomness source. We use getrandom's
 # `custom` backend and route it to a JS import (`spore_fill_random`) so the wasm

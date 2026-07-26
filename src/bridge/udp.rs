@@ -208,7 +208,9 @@ fn netmask_for(ip: Ipv4Addr) -> Option<Ipv4Addr> {
         }
         if (ip_be & mask) == dest {
             let plen = mask.count_ones();
-            if best.is_none_or(|(_, bp)| plen > bp) {
+            // `Option::is_none_or` would read better but was stabilised in 1.82,
+            // and the MSRV here is 1.75 (see `rust-version` in Cargo.toml).
+            if best.map_or(true, |(_, bp)| plen > bp) {
                 best = Some((mask, plen));
             }
         }

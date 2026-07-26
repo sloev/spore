@@ -15,8 +15,7 @@ pub fn run(
     rx: std::sync::mpsc::Receiver<Forward>,
     dir: std::path::PathBuf,
 ) -> io::Result<()> {
-    use std::collections::HashSet;
-    let mut known: HashSet<String> = HashSet::new();
+    let mut known: HashSet<String> = HashSet::new(); // HashSet comes from crate::*
     println!("  [folder] iface {iface} syncing {}", dir.display());
     loop {
         // Import new files (reading = receiving).

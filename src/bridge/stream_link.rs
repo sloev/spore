@@ -185,7 +185,8 @@ mod tests {
                 move || {
                     // Alternate: refuse, then connect-and-immediately-drop.
                     let n = seen.fetch_add(1, Ordering::SeqCst);
-                    if n.is_multiple_of(2) {
+                    if n % 2 == 0 {
+                        // `is_multiple_of` is 1.87; MSRV 1.75
                         Err(std::io::Error::other("nobody home"))
                     } else {
                         Ok(Dead)

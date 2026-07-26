@@ -38,6 +38,7 @@ than fixing a crash, it says so explicitly.
 | [S-011](#s-011) | Public API panic | Low | ✅ | ✅ | ✅ | yes (`send` returns `Result`) |
 | [S-012](#s-012) | Reflection / amplification | **High** | ✅ | ✅ | ✅ | yes (per-link WANT budget) |
 | [S-013](#s-013) | Resource exhaustion (10 tables) | **High** | ✅ | ✅ | ✅ | yes (eviction under pressure) |
+| [S-014](#s-014) | False continuity claim (MSRV) | Low | ✅ | ✅ | ✅ (CI) | no |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -444,6 +445,46 @@ one duplicate relay. Nothing here can make the node *wrong*, only forgetful.
 
 ---
 
+## S-014
+
+**The declared MSRV was unbuildable, twice over.** Low, but the same shape as
+S-010. `Cargo.toml`, `Cargo.lock`.
+
+**Root cause.** A comment on the dependency pins read "compatible with Rust 1.75
+(no edition2024)", and there was no `rust-version` field for anything to check.
+Two independent breaks had accumulated behind that comment:
+
+1. `Cargo.lock` was at **version 4**, which Cargo 1.75 cannot *parse at all* — it
+   fails before resolution, so the pins never even get consulted.
+2. `zeroize` was pinned to `=1.7.0`, but `zeroize` is a facade and the derive macro
+   is a **separate crate**. `zeroize_derive` 1.5 moved to edition2024, which needs a
+   far newer Cargo. The pin constrained the thing that was safe and missed the thing
+   that broke.
+
+**Impact.** Not an attack. It is `CONTINUITY.md`'s promise again — "a repo clone
+plus a Rust toolchain rebuilds everything offline" — failing on exactly the machine
+that promise is for: an old one, offline, with no way to upgrade Cargo.
+
+**Reproduced.** `cargo +1.75 build` → `lock file version 4 was found, but this
+version of Cargo does not understand this lock file`. With the lock at v3 →
+`feature edition2024 is required`. Then three test-only uses of APIs newer than
+1.75 (`iter_repeat_n` ×2, `is_multiple_of`) and one `Option::is_none_or` in
+`bridge::udp`.
+
+**Patch.** Made 1.75 real rather than aspirational: `zeroize_derive` pinned to
+`=1.4.2`, lockfile regenerated at version 3, `is_none_or`/`repeat_n`/
+`is_multiple_of` replaced with equivalents available in 1.75, and
+`rust-version = "1.75"` declared so Cargo itself enforces it. **132 tests pass on
+`cargo +1.75`**, and stable is unaffected.
+
+**Regression test.** `.github/workflows/msrv.yml` reads `rust-version` from
+`Cargo.toml`, installs exactly that toolchain, runs the suite, and checks the
+lockfile is still parseable by it. A separate workflow rather than a job in
+`ci.yml`, which the freeze guard's regex covers. Without this the claim simply rots
+again — it had already rotted twice.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -464,9 +505,6 @@ because two external reviews asserted several of these as defects.
 
 Carried deliberately, not overlooked.
 
-- **`Cargo.lock` is version 4** while the dependency pins claim Rust 1.75
-  compatibility. The MSRV story and the lockfile disagree, which matters most for
-  the offline path S-010 just fixed.
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
 - **Bridges never audited**: `ssb`, `foldersync`, `csma`, `meshtastic`, `audio`,
