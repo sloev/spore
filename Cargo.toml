@@ -29,5 +29,11 @@ base64ct = "=1.6.0"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["custom"] }
 
+# The ICMP raw-socket runner needs socket()/SOCK_RAW, which std does not expose.
+# libc is already in the tree (via rand/getrandom), so this declares an existing
+# crate rather than adding one, and only on Linux where the runner compiles.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [profile.release]
 opt-level = 2

@@ -53,6 +53,10 @@ pub(crate) struct Store {
     total_bytes: usize,
 }
 
+/// Largest spilled file we will read back. One envelope, generously — anything
+/// bigger cannot be a valid entry, since its id would not match.
+const MAX_ADOPT_BYTES: u64 = 1024 * 1024;
+
 /// `<hexid>.spore`, the same name [`crate::bridge::store`] uses on disk.
 fn filename(id: &Id) -> String {
     let mut s = String::with_capacity(38);
@@ -196,6 +200,17 @@ impl Store {
             let Some(id) = id_from_filename(name) else { continue };
             if self.map.contains_key(&id) {
                 continue;
+            }
+            // Check the size before reading it. The directory is ours, but a
+            // spill dir is on disk where anything can drop a file, and "adopt
+            // whatever is here" must not mean "read a terabyte into memory".
+            match std::fs::metadata(&path) {
+                Ok(m) if m.len() <= MAX_ADOPT_BYTES => {}
+                Ok(_) => {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                Err(_) => continue,
             }
             let Ok(wire) = std::fs::read(&path) else { continue };
             let Ok((e, n)) = Envelope::decode(&wire) else {

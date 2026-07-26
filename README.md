@@ -117,8 +117,18 @@ bridges:
   - meshtastic             # a Meshtastic WiFi-UDP mesh
   - http: 8088             # an HTTP bag: push / inv / want
   - audio                  # data-over-sound (f32 PCM on stdin/stdout)
-  - reticulum              # RNS payload via tools/reticulum_companion.py
+  - reticulum              # RNS payload via tools/reticulum_companion.py (stdio)
+  - reticulum-tcp: host:4242          # …or reach the companion over TCP
+  - reticulum-udp: "0.0.0.0:0 -> host:4242"  # …or UDP
+  - icmp: 192.168.1.42     # envelopes in ping payloads (Linux, cap_net_raw)
+  - ax25: localhost:8001   # a KISS TNC over TCP (Direwolf), or a /dev/tty path
+  - tor: abc…xyz.onion     # dial a peer's onion service through Tor's SOCKS proxy
+  - i2p: abc…xyz.b32.i2p   # dial an I2P destination via the SAM bridge
+  - copyparty: http://box:3923/bag/   # a shared HTTP/WebDAV directory
+  - group: "[::]:7373 -> [ff02::7373]:7373"   # IPv6 overlay (Yggdrasil, cjdns)
+  - group: "10.0.0.5:7373 -> 10.0.0.255:7373" # pin one interface (bat0, wpan0)
   - ssb: ./ssb-log         # a Secure Scuttlebutt append-only log folder
+  - spool: "./out -> ./in" # tx/rx dirs moved by NNCP, UUCP, rsync or a USB stick
 ```
 
 See [`spore.example.yaml`](spore.example.yaml). The demo (no argument) drives the

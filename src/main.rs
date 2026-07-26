@@ -359,6 +359,17 @@ enum Spec {
     Folder(std::path::PathBuf),
     Meshtastic,
     MeshtasticSerial(Option<String>),
+    Ax25Tcp(String),
+    Ax25Serial(String),
+    Tor(String),
+    I2p(String),
+    I2pAccept(String),
+    Copyparty(String),
+    UdpGroup(String, String),
+    ReticulumTcp(String),
+    ReticulumUdp(String, String),
+    Icmp(String),
+    Spool(String, String),
     Http(u16),
     Audio,
     Reticulum,
@@ -453,6 +464,35 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "http" => Ok(Spec::Http(v.parse().map_err(|_| format!("bad http port `{v}`"))?)),
             "ssb" if !v.is_empty() => Ok(Spec::Ssb(v.into())),
             "ssb" => Err("`ssb:` needs a log directory".into()),
+            "ax25" | "kiss" if !v.is_empty() => Ok(if v.starts_with('/') {
+                Spec::Ax25Serial(v.to_string())
+            } else {
+                Spec::Ax25Tcp(v.to_string())
+            }),
+            "tor" | "onion" if !v.is_empty() => Ok(Spec::Tor(v.to_string())),
+            "reticulum-tcp" | "rns-tcp" if !v.is_empty() => Ok(Spec::ReticulumTcp(v.to_string())),
+            "reticulum-udp" | "rns-udp" if v.contains("->") => {
+                let (b, p) = v.split_once("->").unwrap();
+                Ok(Spec::ReticulumUdp(b.trim().to_string(), p.trim().to_string()))
+            }
+            "icmp" | "ping" if !v.is_empty() => Ok(Spec::Icmp(v.to_string())),
+            // `spool: TX -> RX` — outbound and inbound directories, moved by
+            // NNCP, UUCP, rsync or a USB stick.
+            "spool" | "nncp" | "uucp" if v.contains("->") => {
+                let (t, r) = v.split_once("->").unwrap();
+                Ok(Spec::Spool(t.trim().to_string(), r.trim().to_string()))
+            }
+            "spool" | "nncp" | "uucp" => Err("needs TX -> RX (spool: ./out -> ./in)".into()),
+            "i2p" if !v.is_empty() => Ok(Spec::I2p(v.to_string())),
+            "i2p-accept" => Ok(Spec::I2pAccept(v.to_string())),
+            "copyparty" | "webdav" if !v.is_empty() => Ok(Spec::Copyparty(v.to_string())),
+            // `group: BIND -> GROUP` — an explicit pair, IPv4 or IPv6. What an
+            // overlay (Yggdrasil, cjdns) or a multi-homed mesh node needs.
+            "group" if v.contains("->") => {
+                let (b, g) = v.split_once("->").unwrap();
+                Ok(Spec::UdpGroup(b.trim().to_string(), g.trim().to_string()))
+            }
+            "group" => Err("`group` needs BIND -> GROUP (group: [::]:7373 -> [ff02::7373]:7373)".into()),
             "meshtastic-serial" | "mesh-serial" if !v.is_empty() => {
                 Ok(Spec::MeshtasticSerial(Some(v.to_string())))
             }
@@ -469,6 +509,14 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "http" => Ok(Spec::Http(7373)),
             "audio" | "sound" => Ok(Spec::Audio),
             "reticulum" | "rns" => Ok(Spec::Reticulum),
+            "ax25" | "kiss" => Err("`ax25` needs a TNC (ax25: HOST:PORT, or a /dev path)".into()),
+            "tor" | "onion" => Err("`tor` needs an onion (tor: abc…xyz.onion[:port])".into()),
+            "i2p" => Err("`i2p` needs a destination (i2p: <b32>.b32.i2p)".into()),
+            "reticulum-tcp" | "rns-tcp" => Err("`reticulum-tcp` needs the companion's HOST:PORT".into()),
+            "reticulum-udp" | "rns-udp" => Err("`reticulum-udp` needs BIND -> PEER".into()),
+            "icmp" | "ping" => Err("`icmp` needs a peer IPv4 (icmp: 192.168.1.42)".into()),
+            "i2p-accept" => Ok(Spec::I2pAccept(String::new())),
+            "copyparty" | "webdav" => Err("`copyparty` needs a URL (copyparty: http://host/bag/)".into()),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
             "ssb" => Err("`ssb` needs a log directory (ssb: DIR)".into()),
             other => Err(format!("unknown bridge `{other}`")),
@@ -560,6 +608,101 @@ fn run_config(cfg: Config) {
                     };
                     if let Err(e) = r {
                         eprintln!("  [meshtastic] {e}");
+                    }
+                })
+            }
+            Spec::Ax25Tcp(target) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::ax25::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::ax25::run_tcp(h, iface, rx, &target) {
+                        eprintln!("  [ax25] {e}");
+                    }
+                })
+            }
+            Spec::Ax25Serial(path) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::ax25::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::ax25::run_serial(h, iface, rx, &path) {
+                        eprintln!("  [ax25] {e}");
+                    }
+                })
+            }
+            Spec::Tor(target) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::tor::run(h, iface, rx, &target) {
+                        eprintln!("  [tor] {e}");
+                    }
+                })
+            }
+            Spec::I2p(target) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::i2p::run(h, iface, rx, &target) {
+                        eprintln!("  [i2p] {e}");
+                    }
+                })
+            }
+            Spec::ReticulumTcp(target) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::reticulum::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::reticulum::run_tcp(h, iface, rx, &target) {
+                        eprintln!("  [reticulum] {e}");
+                    }
+                })
+            }
+            Spec::ReticulumUdp(bind, peer) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::reticulum::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::reticulum::run_udp(h, iface, rx, &bind, &peer) {
+                        eprintln!("  [reticulum] {e}");
+                    }
+                })
+            }
+            Spec::Icmp(peer) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    #[cfg(target_os = "linux")]
+                    if let Err(e) = spore::bridge::icmp::run(h, iface, rx, &peer) {
+                        eprintln!("  [icmp] {e}");
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        let _ = (h, iface, rx, peer);
+                        eprintln!("  [icmp] raw ICMP is Linux-only");
+                    }
+                })
+            }
+            Spec::Spool(tx, rx) => {
+                let (iface, rxc) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::spool::run(h, iface, rxc, tx.into(), rx.into()) {
+                        eprintln!("  [spool] {e}");
+                    }
+                })
+            }
+            Spec::I2pAccept(sam) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::i2p::run_accept(h, iface, rx, &sam) {
+                        eprintln!("  [i2p] {e}");
+                    }
+                })
+            }
+            Spec::UdpGroup(bind, group) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::udp::run_group(h, iface, rx, &bind, &group) {
+                        eprintln!("  [udp] {e}");
+                    }
+                })
+            }
+            Spec::Copyparty(url) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    let every = std::time::Duration::from_secs(5);
+                    if let Err(e) = spore::bridge::copyparty::run(h, iface, rx, &url, every) {
+                        eprintln!("  [copyparty] {e}");
                     }
                 })
             }

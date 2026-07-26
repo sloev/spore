@@ -19,3 +19,11 @@ bridges:
   - audio                    # data-over-sound modem (f32 PCM on stdin/stdout)
   - reticulum                # RNS payload via tools/reticulum_companion.py (KISS on stdin/stdout)
   - ssb: ./ssb-log           # a Secure Scuttlebutt append-only log folder
+  # - ax25: localhost:8001        # KISS TNC over TCP (Direwolf KISSPORT)
+  # - ax25: /dev/ttyUSB0          # …or a hardware TNC on serial (stty first)
+  # - tor: abc…xyz.onion          # dial a peer's onion via Tor's SOCKS proxy
+  # - i2p: abc…xyz.b32.i2p        # I2P destination via the SAM bridge (:7656)
+  # - copyparty: http://box:3923/bag/   # shared HTTP dir; TLS goes in a tunnel
+  # - reticulum-tcp: 10.0.0.9:4242      # companion over TCP, not a pipe
+  # - reticulum-udp: 0.0.0.0:0 -> 10.0.0.9:4242
+  # - icmp: 192.168.1.42                # ping payloads; sudo setcap cap_net_raw+ep

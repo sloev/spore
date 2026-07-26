@@ -25,8 +25,13 @@
 //!   larger objects fountain-fragment above the bridge like on any medium.
 //!
 //! ## Running
+//! Over a socket (the companion can be on another host, no fifos):
 //! ```text
-//! # two fifos wire the daemon and the companion together (bidirectional):
+//! python3 tools/reticulum_companion.py --listen tcp:4242   # on the RNS host
+//! spore reticulum-tcp:10.0.0.9:4242                         # anywhere on the LAN
+//! ```
+//! Or over stdio, the original way:
+//! ```text
 //! mkfifo /tmp/spore_up /tmp/spore_down
 //! python3 tools/reticulum_companion.py < /tmp/spore_up > /tmp/spore_down &
 //! spore reticulum  < /tmp/spore_down > /tmp/spore_up
@@ -97,6 +102,106 @@ pub fn run_pipe(
             Err(_) => return Ok(()), // hub gone
         }
     }
+}
+
+/// Run the RNS bridge to a companion reachable over **TCP**, reconnecting.
+///
+/// The same KISS-framed envelopes as [`run_pipe`], but the companion can live on
+/// another host — so one machine's `rns` instance (with its own TCP/UDP/LoRa
+/// interfaces configured) serves a fleet of SPORE nodes over the LAN, and the
+/// awkward `mkfifo` dance is gone. `target` is `host:port`; the companion listens
+/// there with `--listen tcp:PORT`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_tcp(
+    hub: crate::bridge::hub::Shared,
+    iface: crate::Iface,
+    rx: std::sync::mpsc::Receiver<crate::Forward>,
+    target: &str,
+) -> std::io::Result<()> {
+    use std::time::Duration;
+    hub.with_node(|n| n.mtu = n.mtu.min(RNS_SINGLE_PACKET_MDU));
+    println!("  [reticulum] iface {iface} — KISS to companion at {target} (TCP)");
+    let target = target.to_string();
+    super::stream_link::run_reconnecting(
+        hub,
+        iface,
+        rx,
+        move || {
+            let s = std::net::TcpStream::connect(&target)?;
+            s.set_read_timeout(Some(Duration::from_millis(200)))?;
+            Ok(s)
+        },
+        "reticulum",
+    )
+}
+
+/// Run the RNS bridge to a companion over **UDP**.
+///
+/// `bind` is our local `host:port`; `peer` is the companion's `host:port`. One
+/// envelope per datagram (KISS-framed for parity with the other transports, and
+/// so a fragmented frame split across datagrams still reassembles). Datagram
+/// loss is fine — SPORE re-asks — which is what makes UDP a legitimate choice
+/// here rather than a corner cut.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_udp(
+    hub: crate::bridge::hub::Shared,
+    iface: crate::Iface,
+    rx: std::sync::mpsc::Receiver<crate::Forward>,
+    bind: &str,
+    peer: &str,
+) -> std::io::Result<()> {
+    use std::net::{SocketAddr, UdpSocket};
+    use std::time::Duration;
+
+    let peer: SocketAddr =
+        peer.parse().map_err(|_| std::io::Error::other(format!("reticulum: bad peer {peer:?}")))?;
+    let sock = UdpSocket::bind(bind)?;
+    sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+    hub.with_node(|n| n.mtu = n.mtu.min(RNS_SINGLE_PACKET_MDU));
+    println!("  [reticulum] iface {iface} — KISS to companion at {peer} (UDP, bound {bind})");
+
+    struct Rns {
+        sock: UdpSocket,
+        peer: SocketAddr,
+        framer: super::kiss_stream::KissStream,
+        out: std::collections::VecDeque<Vec<u8>>,
+    }
+    impl super::driver::DatagramTransport for Rns {
+        type Addr = SocketAddr;
+        fn recv(&mut self) -> super::driver::Received<SocketAddr> {
+            // Drain any frames a previous datagram completed before reading more.
+            if let Some(f) = self.out.pop_front() {
+                return Ok(Some((f, Some(self.peer))));
+            }
+            let mut buf = [0u8; 2048];
+            match self.sock.recv_from(&mut buf) {
+                Ok((n, _)) => {
+                    for f in self.framer.push(&buf[..n]) {
+                        self.out.push_back(f);
+                    }
+                    Ok(self.out.pop_front().map(|f| (f, Some(self.peer))))
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    Ok(None)
+                }
+                Err(e) => Err(e),
+            }
+        }
+        fn send(&mut self, _to: Option<&SocketAddr>, env: &[u8]) -> std::io::Result<()> {
+            self.sock.send_to(&crate::kiss::encode(env), self.peer)?;
+            Ok(())
+        }
+    }
+
+    super::driver::run_datagram(
+        hub,
+        iface,
+        rx,
+        Rns { sock, peer, framer: super::kiss_stream::KissStream::new(), out: Default::default() },
+    )
 }
 
 #[cfg(test)]

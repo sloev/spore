@@ -43,6 +43,86 @@ module, so the number and its reasoning stay together; override at runtime with
 `Hub::set_bulk_budget`. Media fast enough not to care (UDP, TCP, WebRTC, the web
 overlays) set no budget at all and are unchanged.
 
+## Bridge security — what a bridge is trusted with
+
+**Nothing.** A bridge moves bytes; it is never trusted for authenticity, secrecy
+or honesty. Envelopes are signed and sealed end to end (§2, §7), ids are content
+hashes, and path learning binds only from *signed* frames. A hostile link can
+drop, delay, replay or reorder — all of which the router already survives — but
+it cannot forge, read a sealed payload, or make a node believe a false address.
+
+What a bridge **can** do wrong is spend our resources. Every bridge parses input
+from something it does not control, and the failure mode is not a forged message
+but an out-of-memory. So the rule for every bridge in this repo is:
+
+> **Every read from a peer is bounded, and every length that comes off the wire
+> is checked before it is believed.**
+
+The limits, and where they live:
+
+| Bound | Value | Why |
+|---|---|---|
+| `kiss_stream::MAX_FRAME` | 64 KiB | A peer that opens a KISS frame and never closes it. 46× the default MTU. |
+| `bag` request header | 16 KiB | A client that never sends the header terminator → `431`. |
+| `bag` request body | 8 MiB | `Content-Length` is a number the client picks → `413`. |
+| `copyparty` response | 8 MiB body, 16 KiB/line, 100 headers | A share can be compromised or simply broken. |
+| `i2p` control line | 8 KiB | Anything on port 7656 that streams without a newline. |
+| store adoption | 1 MiB/file | A spill directory is on disk, where anything can drop a file. |
+
+Two properties worth stating because they are easy to lose:
+
+- **An overrun resynchronises rather than disconnecting.** A KISS frame that
+  exceeds the cap is abandoned and the next delimiter starts a clean one; a
+  corrupt or hostile stream costs one frame, not the link.
+- **Escaping buys no extra room.** KISS escape pairs are two bytes on the wire
+  and one in the buffer, and the cap counts the decoded byte — so a peer cannot
+  double the memory cost by escaping everything.
+
+Each of these is covered by a test that fails if the bound is removed.
+
+## TLS — deliberately not linked in
+
+Several media on this page speak only TLS: Matrix, XMPP, e-mail, `wss://` Nostr
+relays, most public HTTP shares. SPORE links **no TLS stack**, and that is a
+decision rather than an omission.
+
+**SPORE does not need TLS for security.** Envelopes are signed and sealed
+end-to-end (§2, §7); a link is assumed hostile whatever it is made of. TLS here
+buys exactly one thing — *permission to talk to a server that insists on it*.
+Paying for that with a TLS implementation and its certificate machinery, in a
+project whose premise is that one person can audit and rebuild the whole thing
+from a printed spec, is a bad trade.
+
+So TLS is terminated **outside the process**, the same way sound cards, serial
+line settings and Reticulum itself already are:
+
+```sh
+# HTTPS share -> plaintext on localhost, then point a bridge at the tunnel
+socat TCP-LISTEN:8080,fork,reuseaddr OPENSSL:files.example.org:443
+spore copyparty:http://127.0.0.1:8080/bag/
+
+# or with stunnel, which verifies certificates properly
+stunnel -c -d 127.0.0.1:8080 -r files.example.org:443
+```
+
+Three consequences worth being explicit about:
+
+- **Certificate verification is the tunnel's job.** `socat OPENSSL:` verifies by
+  default; `openssl s_client` does not unless told to. Configure it as carefully
+  as you would any TLS client, because SPORE cannot check it for you.
+- **The plaintext hop is real.** Bind the tunnel to loopback. On a shared machine
+  that hop is visible to other users — though it carries signed, sealed envelopes,
+  so what leaks is traffic analysis, not content.
+- **TLS alone does not deliver Matrix or XMPP.** Those also need their protocol
+  (Matrix's client-server API and JSON, XMPP's XML streams). The tunnel removes
+  the *transport* blocker; the protocol work is still unwritten. What it does
+  unlock today is every HTTP-shaped store: copyparty, WebDAV, an HTTPS bag.
+
+If a single-binary story ever matters more than the dependency budget, the clean
+way in is an optional cargo feature that swaps the tunnel for a pure-Rust TLS
+client — not a default dependency, and not something hand-rolled. **Nobody should
+write their own TLS.**
+
 ## Bridge architecture
 
 Because the router is medium-independent, **every bridge reduces to the same three
@@ -114,11 +194,12 @@ Status is the emoji on each name. Follow the link for the deep dive.
 | [Z-Wave ⚪](#z-wave) | dgram | `u8` | 54 | sub-GHz home-automation mesh |
 | [LoRaWAN ⚪](#lorawan) | dgram | `u32` | 51–222 | long-range via a network server |
 | [LoRa P2P ⚪](#lora-p2p) | dgram | `()` | 255 | raw LoRa, no network server |
-| [Ham AX.25 / KISS 🟡](#ax25) | dgram | `String` | 256 | packet radio over a TNC |
+| [Ham AX.25 / KISS 🧪](#ax25) | stream | `()` | 256 | packet radio over a TNC (TCP or serial) |
 | [APRS ⚪](#aprs) | dgram | call-ssid | ~200 | messages over AX.25 / APRS-IS |
 | [DMR ⚪](#dmr) | dgram | `u32` | var | IP-over-DMR data |
 | [goTenna ⚪](#gotenna) | dgram | `u32` | ~200 | consumer mesh radio |
 | [Audio modem ✅](#audio) | dgram | `()` | 4 K/frame | data-over-sound, 16-FSK |
+| [ICMP echo (ping) 🧪](#icmp) | dgram | `Ipv4Addr` | 1400 | envelopes in ping payloads (Linux raw socket) |
 | [JANUS (sonar) ⚪](#janus) | dgram | `u8` | 32 | underwater acoustic (NATO STANAG 4748) |
 | [QR stream 🟡](#qr) | dgram | `()` | ~1 K | armored envelopes as scanned codes |
 | [Iridium SBD ⚪](#iridium) | dgram | `u32` | 340 | satellite short-burst data |
@@ -143,6 +224,7 @@ See [Reticulum](#reticulum).
 | Pipe | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
 | [Reticulum — RNS payload 🧪](#reticulum) | dgram | `[u8;16]` | 383 | envelopes on a shared RNS destination (native, via companion) |
+| [Reticulum — companion TCP/UDP 🧪](#reticulum) | dgram/stream | — | 383 | reach the companion over the network, not a pipe |
 | [Reticulum — RNode serial ⚪](#reticulum) | stream | `[u8;16]` | 500 | LoRa RNode over USB (native) |
 | [Reticulum — Web Serial 🧪](#reticulum) | stream | `[u8;16]` | 500 | RNode over USB from a browser tab |
 | [Reticulum — Bluetooth 🧪](#reticulum) | stream | `[u8;16]` | 500 | RNode over BLE (Nordic UART) |
@@ -154,11 +236,11 @@ unchanged** — point it at the right address on the overlay's interface.
 
 | Overlay | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
-| [BATMAN-adv 🟡](#batman) | dgram | `[u8;6]` | 1500 | L2 mesh; UDP broadcast on `bat0` |
-| [Yggdrasil / cjdns 🟡](#yggdrasil) | dgram | `Ipv6Addr` | 1280 | end-to-end encrypted IPv6 overlay |
-| [Thread 🟡](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh for low-power IPv6 |
-| [Tor (onion service) ⚪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous |
-| [I2P ⚪](#i2p) | dgram | b32 dest | ~1200 | garlic-routed datagrams (SAM) |
+| [BATMAN-adv 🧪](#batman) | dgram | `[u8;6]` | 1500 | L2 mesh; `udp::run_group` pinned to `bat0` |
+| [Yggdrasil / cjdns 🧪](#yggdrasil) | dgram | `Ipv6Addr` | 1280 | IPv6 overlay; `udp::run_group` on `ff02::7373` |
+| [Thread 🧪](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh; `udp::run_group` on the mesh iface |
+| [Tor (onion service) 🧪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous via SOCKS5 |
+| [I2P 🧪](#i2p) | stream | b32 dest | 1200 | garlic-routed streams via SAM v3 |
 | [Veilid ⚪](#veilid) | dgram | node id | var | private-routed DHT |
 | [libp2p (gossipsub) ⚪](#libp2p) | stream | PeerId | var | pub/sub overlay; IPFS swarm |
 | [WebSocket ✅](#websocket) | stream | conn | 64 K | binary frames to a relay or peer |
@@ -176,7 +258,7 @@ Systems that already store and pass on messages — the pattern SPORE *is*.
 |---|---|---|---|---|
 | [Folder / USB / Syncthing ✅](#folder) | store | — | — | `*.spore` files in a synced directory |
 | [HTTP bag ✅](#http-bag) | store | conn | 64 K | pull envelopes from an HTTP endpoint |
-| [Copyparty ⚪](#copyparty) | store | URL | 64 K | envelopes in a copyparty share (HTTP/WebDAV) |
+| [Copyparty 🧪](#copyparty) | store | URL | 64 K | envelopes in a copyparty share (HTTP/WebDAV) |
 | [Text armor ✅](#text-armor) | store | — | ~150 | SMS/paper/voice-safe base32 with a checksum |
 | [Nostr 🟡](#nostr) | store | relay | var | events on any relay (kind-30078) |
 | [SSB (Secure Scuttlebutt) 🟡](#ssb) | store | feed | var | `spore-v1` content in an append log |
@@ -187,8 +269,8 @@ Systems that already store and pass on messages — the pattern SPORE *is*.
 | [Briar ⚪](#briar) | stream | contact | var | Tor + BLE friend-to-friend |
 | [Tox ⚪](#tox) | dgram | ToxID | ~1200 | P2P DHT messaging |
 | [DTN / Bundle Protocol v7 ⚪](#bpv7) | store | EID | var | RFC 9171 delay-tolerant bundles |
-| [NNCP ⚪](#nncp) | store | node id | var | encrypted node-to-node copy |
-| [UUCP ⚪](#uucp) | store | host | var | the original store-and-forward |
+| [NNCP 🧪](#nncp) | store | node id | var | `bridge::spool` moved by `nncp-xfer` / areas |
+| [UUCP 🧪](#uucp) | store | host | var | `bridge::spool` moved by `uucp` / `uucico` |
 | [Serval Rhizome ⚪](#rhizome) | store | SID | var | mesh store-and-forward |
 | [Hypercore / Hyperswarm ⚪](#hypercore) | stream | key | var | append-log replication |
 | [Earthstar / Willow ⚪](#willow) | store | share | var | offline-first sync protocol |
@@ -331,7 +413,7 @@ existing UDP bridge rides it unchanged.
 | `U` | `Ipv4Addr` |
 | MTU | 1500 |
 | State | stateful (group lifecycle) |
-| Status | 🟡 partial — works today via the UDP bridge over the P2P interface |
+| Status | 🧪 implemented — `udp::run_group` pinned to the P2P interface's address |
 | Code | `bridge::udp::run_primary` pointed at the `p2p0` interface |
 
 <details><summary>Deep dive</summary>
@@ -626,22 +708,24 @@ LoRa PHY is proprietary to Semtech.
 </details>
 
 <a id="ax25"></a>
-## Ham AX.25 / KISS 🟡
+## Ham AX.25 / KISS 🧪
 
 **Summary.** AX.25 is the amateur-radio packet protocol; KISS is the minimal framing
 between a host and a Terminal Node Controller (TNC). Together they move data over HF/
 VHF/UHF radio across regional distances with no infrastructure — the classic
-off-grid long-haul link. SPORE's KISS framer is implemented; the TNC runner is the
-remaining glue.
+off-grid long-haul link. A TNC speaks KISS, which is already SPORE's stream
+framing, so the bridge is only a matter of reaching one: over TCP (Direwolf's
+`KISSPORT`, most networked TNCs) or over a serial port (hardware TNCs on USB).
 
 | Field | Value |
 |---|---|
-| Driver form | `dgram` (UI frames) |
-| `U` | `String` (call-ssid) or `()` |
+| Driver form | `stream` (KISS) |
+| `U` | `()` — the TNC decides who hears it |
 | MTU | 256 (typical AX.25 paclen) |
-| State | stateless (UI/unconnected) |
-| Status | 🟡 partial — `KissStream` framer present, TNC runner TODO |
-| Code | `bridge::kiss_stream::KissStream` |
+| Bulk budget | **0 B/s** — 1200-baud packet is ~150 B/s shared; carries messages, not files |
+| State | stateful (the TNC link) |
+| Status | 🧪 implemented — `run_tcp` / `run_serial`, not hardware-verified here |
+| Code | `bridge::ax25` (+ `bridge::kiss_stream::KissStream`) |
 
 <details><summary>Deep dive</summary>
 
@@ -811,6 +895,57 @@ comes from an encrypted envelope payload; authenticity always from the signature
 
 **References.** SPORE-native; see `src/bridge/audio.rs` and the ggwave project for
 prior art in data-over-sound.
+</details>
+
+<a id="icmp"></a>
+## ICMP echo (ping) 🧪
+
+**Summary.** Every IP host answers ping and almost every firewall passes it, so
+the echo payload is a carrier that reaches where a new port cannot: a captive
+portal that allows only "diagnostics", a host you can reach but not connect to.
+An envelope rides in the echo payload; a one-byte marker keeps the world's
+ordinary pings out of the router.
+
+| Field | Value |
+|---|---|
+| Driver form | `dgram` |
+| `U` | `Ipv4Addr` |
+| MTU | 1400 (one echo payload, no IP fragmentation) |
+| State | stateless |
+| Status | 🧪 codec tested; raw-socket runner is a Linux `CAP_NET_RAW` template |
+| Code | `bridge::icmp` |
+
+<details><summary>Deep dive: the covert-channel family (ping, DHCP, ARP, …)</summary>
+
+`bridge::icmp` is the worked example of a broader idea: **any protocol with a
+field that holds arbitrary bytes is a carrier.** SPORE only needs to move bytes,
+and it assumes every link is hostile, so smuggling those bytes through a protocol
+never meant for data costs nothing in security — the envelope is still signed and
+sealed.
+
+The module is split so the honest part is verifiable: the **codec**
+(`encode_echo` / `decode_echo`, checksum and all) is pure and unit-tested,
+including the odd-length and rejected-ordinary-ping cases; the **runner** needs a
+raw socket, which needs `CAP_NET_RAW` and Linux, and cannot be exercised in CI —
+so it is a template whose framing is tested and whose socket call is not. Grant it
+without root: `sudo setcap cap_net_raw+ep ./spore`.
+
+The same pattern extends to the rest of the family, each differing only in *which*
+field carries the bytes, and each a raw-socket (often L2, often root) runner over
+a tested codec:
+
+- **DHCP** — a vendor/private option (e.g. 224–254) on the broadcast that every
+  LAN already floods; no association needed.
+- **ARP** — the sparest carrier: a broadcast that crosses no router, with only the
+  frame's minimum-length padding to hide in (~18 bytes), so a fountain fragment at
+  a time.
+- **DNS** — a query name (base32 label) to a resolver you don't control, the
+  classic egress from a filtered network.
+
+These share one caution beyond the usual: they are **conspicuous**. A covert
+channel is a transport, not a cloak — traffic analysis sees a host that pings a
+lot. Use them to get *out* of somewhere restrictive, not to hide that you are
+communicating; §9 mix mode is the tool for the latter.
 </details>
 
 <a id="janus"></a>
@@ -989,7 +1124,7 @@ over the same LoRa air Reticulum uses, but does not route RNS packets.
 | MTU | 500 (RNS) / ~255 (LoRa PHY) |
 | Bulk budget | 32 B/s (conservative default; the slowest interface on the path is what suffers) |
 | State | stateless (RNS) / stateful (serial, BLE) |
-| Status | 🧪 RNS payload (`bridge::reticulum` + companion) · 🧪 Web Serial & BLE (RNode host mode) |
+| Status | 🧪 RNS payload (`bridge::reticulum` + companion, via stdio/TCP/UDP) · 🧪 Web Serial & BLE (RNode host mode) |
 | Code | `bridge::reticulum` + [`tools/reticulum_companion.py`](../tools/reticulum_companion.py); [`web/transports/reticulum.mjs`](../web/transports/reticulum.mjs) |
 
 <details><summary>Deep dive</summary>
@@ -1055,7 +1190,7 @@ address on the overlay's interface. Only the non-IP or browser-native ones need
 their own shim.
 
 <a id="batman"></a>
-## BATMAN-adv 🟡
+## BATMAN-adv 🧪
 
 **Summary.** B.A.T.M.A.N.-adv is a Linux kernel L2 mesh: nodes join a virtual switch
 (`bat0`) that spans many radio hops as if it were one Ethernet segment. SPORE floods
@@ -1067,7 +1202,7 @@ it with the existing UDP broadcast bridge on `bat0`.
 | `U` | `[u8;6]` |
 | MTU | 1500 |
 | State | stateless |
-| Status | 🟡 partial — works via the UDP bridge on `bat0` |
+| Status | 🧪 implemented — `udp::run_group` bound to `bat0`'s address |
 | Code | `bridge::udp::run_primary` bound to `bat0` |
 
 <details><summary>Deep dive</summary>
@@ -1081,7 +1216,7 @@ the `bat0` interface. `U` is the batman node MAC as seen by UDP.
 </details>
 
 <a id="yggdrasil"></a>
-## Yggdrasil / cjdns 🟡
+## Yggdrasil / cjdns 🧪
 
 **Summary.** End-to-end encrypted IPv6 overlays where your address is derived from
 your public key, self-organising into a global mesh. Because they present a normal
@@ -1093,7 +1228,7 @@ IPv6 `tun`, SPORE's UDP bridge rides them directly.
 | `U` | `Ipv6Addr` |
 | MTU | 1280 |
 | State | stateless |
-| Status | 🟡 partial — works via the UDP bridge over the tun |
+| Status | 🧪 implemented — `udp::run_group` binds the tun and floods `ff02::7373` |
 | Code | `bridge::udp` on the Yggdrasil/cjdns interface |
 
 <details><summary>Deep dive</summary>
@@ -1108,7 +1243,7 @@ overlay layer, but SPORE still authenticates with its own signature. Keep to the
 </details>
 
 <a id="thread"></a>
-## Thread 🟡
+## Thread 🧪
 
 **Summary.** Thread is a low-power 802.15.4 mesh presenting IPv6 (6LoWPAN) — common
 in smart-home devices. Envelopes ride UDP over the Thread network.
@@ -1119,7 +1254,7 @@ in smart-home devices. Envelopes ride UDP over the Thread network.
 | `U` | `Ipv6Addr` |
 | MTU | 1280 (IPv6; fragmented over 802.15.4) |
 | State | stateless |
-| Status | 🟡 partial — UDP over 6LoWPAN |
+| Status | 🧪 implemented — `udp::run_group` on the mesh interface (IPv6 multicast) |
 | Code | `bridge::udp` over the Thread interface |
 
 <details><summary>Deep dive</summary>
@@ -1133,7 +1268,7 @@ border router bridges to wider IP if present. 802.15.4's tiny frames mean heavy
 </details>
 
 <a id="tor"></a>
-## Tor (onion service) ⚪
+## Tor (onion service) 🧪
 
 **Summary.** Tor onion services give a location-hidden, end-to-end encrypted
 rendezvous reachable by a `.onion` address with no public IP. A bridge would run a
@@ -1146,8 +1281,8 @@ network location.
 | `U` | `.onion` address |
 | MTU | 64 K (stream) |
 | State | stateful |
-| Status | ⚪ planned |
-| Code | a TCP/WebSocket bridge dialled through the Tor SOCKS proxy |
+| Status | 🧪 implemented — dial-out via SOCKS5 (reconnecting); inbound is a `torrc` onion service in front of `bridge::tcp` |
+| Code | `bridge::tor` |
 
 <details><summary>Deep dive</summary>
 
@@ -1164,7 +1299,7 @@ still required for authenticity.
 </details>
 
 <a id="i2p"></a>
-## I2P ⚪
+## I2P 🧪
 
 **Summary.** The Invisible Internet Project: a garlic-routed anonymity overlay with
 its own datagram service (via SAM). A natural fit for SPORE's datagram model over an
@@ -1172,12 +1307,12 @@ anonymous network.
 
 | Field | Value |
 |---|---|
-| Driver form | `dgram` |
+| Driver form | `stream` (KISS over a SAM stream) |
 | `U` | b32 destination |
-| MTU | ~1200 (repliable datagram) |
-| State | stateless |
-| Status | ⚪ planned |
-| Code | SAM v3 datagram session |
+| MTU | 1200 |
+| State | stateful (SAM session + stream) |
+| Status | 🧪 implemented — `STREAM CONNECT` out, `STREAM ACCEPT` in, reconnecting |
+| Code | `bridge::i2p` |
 
 <details><summary>Deep dive</summary>
 
@@ -1532,7 +1667,7 @@ SPORE-native (`bridge::bag`).
 </details>
 
 <a id="copyparty"></a>
-## Copyparty ⚪
+## Copyparty 🧪
 
 **Summary.** Copyparty is a portable file server with HTTP/WebDAV upload, a browser
 UI, and no database. Pointed at a share, it becomes a self-hosted [HTTP bag](#http-bag)
@@ -1543,9 +1678,9 @@ with a nice UI and resumable uploads.
 | Driver form | `store` |
 | `U` | URL |
 | MTU | 64 K |
-| State | stateful |
-| Status | ⚪ planned |
-| Code | HTTP/WebDAV client against a copyparty share |
+| State | stateless (poll + `PUT`) |
+| Status | 🧪 implemented — `http://` shares; put TLS in a tunnel (see below) |
+| Code | `bridge::copyparty` |
 
 <details><summary>Deep dive</summary>
 
@@ -1850,7 +1985,7 @@ matrix — two store-carry-forward systems stacked.
 </details>
 
 <a id="nncp"></a>
-## NNCP ⚪
+## NNCP 🧪
 
 **Summary.** NNCP (Node-to-Node Copy) is a modern suite for secure, offline
 store-and-forward: encrypted packets moved by any transport (files, USB, email,
@@ -1858,24 +1993,37 @@ online) between named nodes. A clean, security-first carrier.
 
 | Field | Value |
 |---|---|
-| Driver form | `store` |
+| Driver form | `store` (spool) |
 | `U` | node id |
 | MTU | variable |
 | State | stateless |
-| Status | ⚪ planned |
-| Code | wrap envelopes as NNCP packets |
+| Status | 🧪 via `bridge::spool` — the SPORE side is tested; the NNCP wiring is config |
+| Code | `bridge::spool` |
 
 <details><summary>Deep dive</summary>
 
-**SPORE bridge mapping.** Hand envelopes to `nncp-file`/`nncp-exec` addressed to a
-node; NNCP encrypts and moves them by whatever transport, and the far side delivers
-into a spool the bridge polls. `U` is the NNCP node id.
+SPORE writes outbound envelopes into a `tx/` directory and consumes inbound ones
+from `rx/` ([`bridge::spool`](../src/bridge/spool.rs)); NNCP is what carries `tx`
+to the peer and fills `rx`. That split is exactly NNCP's own model, so the wiring
+is NNCP config, not code:
+
+```sh
+# outbound: package the tx directory to a node, on a schedule or when it fills
+nncp-file ./spool/tx/ node:spore-in
+# inbound: nncp-toss unpacks received packets into the peer's rx directory
+spore "spool: ./spool/tx -> ./spool/rx"
+```
+
+`nncp-xfer` (USB), `nncp-daemon`/`nncp-caller` (online) or `nncp-file` over any
+medium then move the packets. NNCP adds its own strong crypto on top of SPORE's,
+and the spool bridge validates every inbound file against its content id, so a
+tampered packet is dropped rather than trusted.
 
 **References.** [NNCP](http://www.nncpgo.org/).
 </details>
 
 <a id="uucp"></a>
-## UUCP ⚪
+## UUCP 🧪
 
 **Summary.** The original Unix-to-Unix Copy — the store-and-forward system that ran
 early e-mail and Usenet over dial-up. Still runnable, and a fittingly robust,
@@ -1883,18 +2031,26 @@ low-tech carrier.
 
 | Field | Value |
 |---|---|
-| Driver form | `store` |
+| Driver form | `store` (spool) |
 | `U` | host name |
 | MTU | variable |
 | State | stateless |
-| Status | ⚪ planned |
-| Code | `uux`/`uucp` spool |
+| Status | 🧪 via `bridge::spool` — the SPORE side is tested; the UUCP wiring is config |
+| Code | `bridge::spool` |
 
 <details><summary>Deep dive</summary>
 
-**SPORE bridge mapping.** Queue envelopes as UUCP jobs to a host; the far side's
-spool is polled for inbound. `U` is the UUCP host name. Works over serial, TCP, or
-sneakernet.
+The same [`bridge::spool`](../src/bridge/spool.rs) as NNCP, moved by UUCP instead:
+`uucp` the `tx/` files to the peer's `rx/`, over serial, TCP or sneakernet.
+
+```sh
+# outbound: copy tx to the peer (a cron, or uucico on a schedule)
+uucp ./spool/tx/* peer!~/spore-in/
+spore "spool: ./spool/tx -> ./spool/rx"
+```
+
+`U` is the UUCP host name. The spool bridge is medium-blind — it never learns
+whether UUCP moved the files over a modem or a fibre, which is the point.
 
 **References.** [Taylor UUCP](https://www.gnu.org/software/uucp/uucp.html).
 </details>

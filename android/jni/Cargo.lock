@@ -512,6 +512,7 @@ dependencies = [
  "crypto_box",
  "ed25519-dalek",
  "getrandom",
+ "libc",
  "rand",
  "sha2",
  "x25519-dalek",

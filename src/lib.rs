@@ -3005,6 +3005,20 @@ mod tests {
     }
 
     #[test]
+    fn an_absurdly_large_spilled_file_is_not_read_into_memory() {
+        let now = 1_700_000_000;
+        let dir = TmpDir::new("huge");
+        // A file whose *name* is a plausible id but whose body is far too big to
+        // be an envelope. Adoption must judge it by size before reading it.
+        let name = "a".repeat(32) + ".spore";
+        std::fs::write(dir.0.join(&name), vec![0u8; 4 * 1024 * 1024]).unwrap();
+
+        let mut n = Node::new("n", &[]);
+        assert_eq!(n.set_spill_dir(&dir.0, now).unwrap(), 0, "oversized file must not be adopted");
+        assert!(!dir.0.join(&name).exists(), "and it is cleaned up rather than retried forever");
+    }
+
+    #[test]
     fn a_spilled_file_whose_name_lies_about_its_content_is_discarded() {
         let now = 1_700_000_000;
         let dir = TmpDir::new("forged");
