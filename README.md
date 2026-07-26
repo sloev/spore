@@ -120,6 +120,8 @@ bridges:
   - reticulum              # RNS payload via tools/reticulum_companion.py
   - ax25: localhost:8001   # a KISS TNC over TCP (Direwolf), or a /dev/tty path
   - tor: abc…xyz.onion     # dial a peer's onion service through Tor's SOCKS proxy
+  - i2p: abc…xyz.b32.i2p   # dial an I2P destination via the SAM bridge
+  - copyparty: http://box:3923/bag/   # a shared HTTP/WebDAV directory
   - ssb: ./ssb-log         # a Secure Scuttlebutt append-only log folder
 ```
 

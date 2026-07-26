@@ -30,7 +30,11 @@ pub mod ssb;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ax25;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod copyparty;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod foldersync;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod i2p;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod store;
 #[cfg(not(target_arch = "wasm32"))]

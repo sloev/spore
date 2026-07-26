@@ -43,6 +43,49 @@ module, so the number and its reasoning stay together; override at runtime with
 `Hub::set_bulk_budget`. Media fast enough not to care (UDP, TCP, WebRTC, the web
 overlays) set no budget at all and are unchanged.
 
+## TLS — deliberately not linked in
+
+Several media on this page speak only TLS: Matrix, XMPP, e-mail, `wss://` Nostr
+relays, most public HTTP shares. SPORE links **no TLS stack**, and that is a
+decision rather than an omission.
+
+**SPORE does not need TLS for security.** Envelopes are signed and sealed
+end-to-end (§2, §7); a link is assumed hostile whatever it is made of. TLS here
+buys exactly one thing — *permission to talk to a server that insists on it*.
+Paying for that with a TLS implementation and its certificate machinery, in a
+project whose premise is that one person can audit and rebuild the whole thing
+from a printed spec, is a bad trade.
+
+So TLS is terminated **outside the process**, the same way sound cards, serial
+line settings and Reticulum itself already are:
+
+```sh
+# HTTPS share -> plaintext on localhost, then point a bridge at the tunnel
+socat TCP-LISTEN:8080,fork,reuseaddr OPENSSL:files.example.org:443
+spore copyparty:http://127.0.0.1:8080/bag/
+
+# or with stunnel, which verifies certificates properly
+stunnel -c -d 127.0.0.1:8080 -r files.example.org:443
+```
+
+Three consequences worth being explicit about:
+
+- **Certificate verification is the tunnel's job.** `socat OPENSSL:` verifies by
+  default; `openssl s_client` does not unless told to. Configure it as carefully
+  as you would any TLS client, because SPORE cannot check it for you.
+- **The plaintext hop is real.** Bind the tunnel to loopback. On a shared machine
+  that hop is visible to other users — though it carries signed, sealed envelopes,
+  so what leaks is traffic analysis, not content.
+- **TLS alone does not deliver Matrix or XMPP.** Those also need their protocol
+  (Matrix's client-server API and JSON, XMPP's XML streams). The tunnel removes
+  the *transport* blocker; the protocol work is still unwritten. What it does
+  unlock today is every HTTP-shaped store: copyparty, WebDAV, an HTTPS bag.
+
+If a single-binary story ever matters more than the dependency budget, the clean
+way in is an optional cargo feature that swaps the tunnel for a pure-Rust TLS
+client — not a default dependency, and not something hand-rolled. **Nobody should
+write their own TLS.**
+
 ## Bridge architecture
 
 Because the router is medium-independent, **every bridge reduces to the same three
@@ -158,7 +201,7 @@ unchanged** — point it at the right address on the overlay's interface.
 | [Yggdrasil / cjdns 🟡](#yggdrasil) | dgram | `Ipv6Addr` | 1280 | end-to-end encrypted IPv6 overlay |
 | [Thread 🟡](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh for low-power IPv6 |
 | [Tor (onion service) 🧪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous via SOCKS5 |
-| [I2P ⚪](#i2p) | dgram | b32 dest | ~1200 | garlic-routed datagrams (SAM) |
+| [I2P 🧪](#i2p) | stream | b32 dest | 1200 | garlic-routed streams via SAM v3 |
 | [Veilid ⚪](#veilid) | dgram | node id | var | private-routed DHT |
 | [libp2p (gossipsub) ⚪](#libp2p) | stream | PeerId | var | pub/sub overlay; IPFS swarm |
 | [WebSocket ✅](#websocket) | stream | conn | 64 K | binary frames to a relay or peer |
@@ -176,7 +219,7 @@ Systems that already store and pass on messages — the pattern SPORE *is*.
 |---|---|---|---|---|
 | [Folder / USB / Syncthing ✅](#folder) | store | — | — | `*.spore` files in a synced directory |
 | [HTTP bag ✅](#http-bag) | store | conn | 64 K | pull envelopes from an HTTP endpoint |
-| [Copyparty ⚪](#copyparty) | store | URL | 64 K | envelopes in a copyparty share (HTTP/WebDAV) |
+| [Copyparty 🧪](#copyparty) | store | URL | 64 K | envelopes in a copyparty share (HTTP/WebDAV) |
 | [Text armor ✅](#text-armor) | store | — | ~150 | SMS/paper/voice-safe base32 with a checksum |
 | [Nostr 🟡](#nostr) | store | relay | var | events on any relay (kind-30078) |
 | [SSB (Secure Scuttlebutt) 🟡](#ssb) | store | feed | var | `spore-v1` content in an append log |
@@ -1166,7 +1209,7 @@ still required for authenticity.
 </details>
 
 <a id="i2p"></a>
-## I2P ⚪
+## I2P 🧪
 
 **Summary.** The Invisible Internet Project: a garlic-routed anonymity overlay with
 its own datagram service (via SAM). A natural fit for SPORE's datagram model over an
@@ -1174,12 +1217,12 @@ anonymous network.
 
 | Field | Value |
 |---|---|
-| Driver form | `dgram` |
+| Driver form | `stream` (KISS over a SAM stream) |
 | `U` | b32 destination |
-| MTU | ~1200 (repliable datagram) |
-| State | stateless |
-| Status | ⚪ planned |
-| Code | SAM v3 datagram session |
+| MTU | 1200 |
+| State | stateful (SAM session + stream) |
+| Status | 🧪 implemented — `STREAM CONNECT` dial-out; `STREAM ACCEPT` still to come |
+| Code | `bridge::i2p` |
 
 <details><summary>Deep dive</summary>
 
@@ -1534,7 +1577,7 @@ SPORE-native (`bridge::bag`).
 </details>
 
 <a id="copyparty"></a>
-## Copyparty ⚪
+## Copyparty 🧪
 
 **Summary.** Copyparty is a portable file server with HTTP/WebDAV upload, a browser
 UI, and no database. Pointed at a share, it becomes a self-hosted [HTTP bag](#http-bag)
@@ -1545,9 +1588,9 @@ with a nice UI and resumable uploads.
 | Driver form | `store` |
 | `U` | URL |
 | MTU | 64 K |
-| State | stateful |
-| Status | ⚪ planned |
-| Code | HTTP/WebDAV client against a copyparty share |
+| State | stateless (poll + `PUT`) |
+| Status | 🧪 implemented — `http://` shares; put TLS in a tunnel (see below) |
+| Code | `bridge::copyparty` |
 
 <details><summary>Deep dive</summary>
 

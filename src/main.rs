@@ -362,6 +362,8 @@ enum Spec {
     Ax25Tcp(String),
     Ax25Serial(String),
     Tor(String),
+    I2p(String),
+    Copyparty(String),
     Http(u16),
     Audio,
     Reticulum,
@@ -462,6 +464,8 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
                 Spec::Ax25Tcp(v.to_string())
             }),
             "tor" | "onion" if !v.is_empty() => Ok(Spec::Tor(v.to_string())),
+            "i2p" if !v.is_empty() => Ok(Spec::I2p(v.to_string())),
+            "copyparty" | "webdav" if !v.is_empty() => Ok(Spec::Copyparty(v.to_string())),
             "meshtastic-serial" | "mesh-serial" if !v.is_empty() => {
                 Ok(Spec::MeshtasticSerial(Some(v.to_string())))
             }
@@ -480,6 +484,8 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "reticulum" | "rns" => Ok(Spec::Reticulum),
             "ax25" | "kiss" => Err("`ax25` needs a TNC (ax25: HOST:PORT, or a /dev path)".into()),
             "tor" | "onion" => Err("`tor` needs an onion (tor: abc…xyz.onion[:port])".into()),
+            "i2p" => Err("`i2p` needs a destination (i2p: <b32>.b32.i2p)".into()),
+            "copyparty" | "webdav" => Err("`copyparty` needs a URL (copyparty: http://host/bag/)".into()),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
             "ssb" => Err("`ssb` needs a log directory (ssb: DIR)".into()),
             other => Err(format!("unknown bridge `{other}`")),
@@ -595,6 +601,23 @@ fn run_config(cfg: Config) {
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::tor::run(h, iface, rx, &target) {
                         eprintln!("  [tor] {e}");
+                    }
+                })
+            }
+            Spec::I2p(target) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::i2p::run(h, iface, rx, &target) {
+                        eprintln!("  [i2p] {e}");
+                    }
+                })
+            }
+            Spec::Copyparty(url) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    let every = std::time::Duration::from_secs(5);
+                    if let Err(e) = spore::bridge::copyparty::run(h, iface, rx, &url, every) {
+                        eprintln!("  [copyparty] {e}");
                     }
                 })
             }
