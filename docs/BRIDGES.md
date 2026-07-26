@@ -137,6 +137,52 @@ Consequences a deployer should know:
 - **`sos` still outranks policy** by convention — that is a routing preference,
   not a quota exemption, and is unaffected.
 
+## Bridge privacy — who sees what
+
+A bridge cannot forge and cannot read a *sealed* payload. It can always see that
+traffic happened, how big it was, and when — and on some media it can see rather
+more than that. This section is per-bridge because the honest answer differs a
+lot, and "SPORE is encrypted" is not a useful thing to tell an operator choosing
+between a folder in someone's cloud account and a serial cable.
+
+**The part people get wrong first: a public flood is not encrypted.** Sealing is
+something a *sender* does. An envelope to `ZERO_DEST` or to a plaintext topic
+carries its payload in the clear, by design — that is what makes it readable by
+every node that relays it. Signed does not mean secret. If a message must stay
+private on a medium anyone can watch, it has to be sealed to a recipient prekey or
+sent on an encrypted topic (§7); otherwise assume it is a postcard, because it is
+one.
+
+| Bridge | Who can observe | What they get beyond metadata |
+|---|---|---|
+| `serial`, `csma` | whoever holds the cable | everything on it; a wire is as private as the room |
+| `spool` (NNCP/UUCP/USB) | the courier or mailer host | the files at rest, for as long as they hold them |
+| `store` / `foldersync` | **everyone with access to that folder** — including a whole cloud account, and its provider | every envelope, plus filenames that are content ids, plus retention you do not control (versioned sync keeps deleted files) |
+| `copyparty` | the share's operator and its logs | every envelope you post or fetch, plus your access pattern |
+| `bag` (HTTP server) | anyone who can reach the port | whatever is in the store it serves; run it behind NAT, an onion, or auth |
+| `udp` broadcast / `run_group` | **every host on the segment** | all public floods in the clear; join a multicast group and you are an observer |
+| `audio` modem | anyone within earshot, and any recording | the same, and a recording replays later |
+| `ax25`, `meshtastic`, LoRa | anyone with a receiver, at radio range | the same, and in most jurisdictions ham traffic is *required* to be unencrypted |
+| `icmp` | every router on the path, and any IDS | payloads look like ping and are trivially logged wholesale |
+| `tcp` | the peer, plus anyone on the path without a tunnel | the traffic; see the TLS section below |
+| `reticulum` | the companion host and the RNS network | as much as its configured interfaces expose |
+| `ssb` | the SSB feed's followers | envelopes published into a gossip log are effectively public and hard to unpublish |
+| `tor`, `i2p` | the introduction points | the least of any bridge here; this is what to reach for when the observer matters |
+
+Three consequences worth stating outright:
+
+- **A gateway links identities across media.** A node bridging Wi-Fi and LoRa tells
+  anyone watching either side that those two populations are connected, and relays
+  timing between them. That is the job — but it means running a gateway is not a
+  neutral act, and `mix` mode exists for when it must not be inferable.
+- **"Works offline" is not "works privately".** The media that need no
+  infrastructure — broadcast, radio, sound — are the ones where observation is
+  cheapest. A blackout does not remove eavesdroppers.
+- **Mix mode is not Tor.** It nests sealed envelopes and pads to three size classes
+  (`mix::SIZE_CLASSES`), which frustrates casual correlation. Nobody has analysed
+  it against a global observer, and it has had no external review. Do not stake
+  anything on it that Tor would be the right tool for.
+
 ## TLS — deliberately not linked in
 
 Several media on this page speak only TLS: Matrix, XMPP, e-mail, `wss://` Nostr

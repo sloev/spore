@@ -27,7 +27,9 @@ const pages = [
   // The findings register belongs on the site — anyone evaluating whether to trust
   // this with their mail should be able to read what was found and fixed without
   // cloning the repo — but households do not need it in the top bar.
+  ['SECURITY.md', 'security-policy.html', null],
   ['docs/SECURITY_FINDINGS.md', 'security.html', null],
+  ['CHANGELOG.md', 'changelog.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['bindings/README.md', 'bindings.html', null],
   ['reference/README.md', 'reference.html', null],
