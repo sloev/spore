@@ -1,0 +1,43 @@
+name: MSRV
+
+# Cargo.toml declares `rust-version = "1.75"`, and CONTINUITY.md promises a rebuild
+# on whatever machine survives. Neither is worth anything unless something checks
+# it: the previous claim was a comment on a dependency pin, and it had been false
+# for a while in two independent ways — a `Cargo.lock` at version 4, which 1.75
+# cannot even parse, and `zeroize_derive` 1.5 moving to edition2024 behind a pin
+# that only constrained the `zeroize` facade.
+#
+# A separate workflow rather than a job in ci.yml, because ci.yml is inside the
+# freeze guard's regex and this does not need to be.
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          v="$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          test -n "$v" || { echo "::error::no rust-version in Cargo.toml"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      # Deliberately not `-D warnings`: a newer lint landing in a future release is
+      # not an MSRV break, and failing on it would make this job noisy rather than
+      # meaningful. The question here is only "does the oldest supported toolchain
+      # still build and pass".
+      - name: Build and test on the declared MSRV
+        run: cargo test --all-targets
+      - name: Lockfile must stay parseable by this toolchain
+        run: cargo metadata --format-version 1 --locked > /dev/null

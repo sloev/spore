@@ -52,6 +52,69 @@ const FRAG_OVERHEAD: usize = 36;
 /// for.
 pub const MAX_FOUNTAIN_CHUNKS: usize = 255;
 
+/// Most ids honoured from a single INV or WANT.
+///
+/// The payload length is a `u16`, so one packet can list ~4095 ids, and `on_want`
+/// answers each one with a *whole stored envelope*. That is reflection with gain:
+/// measured at **32x** with 400-byte payloads, and the ceiling is the largest
+/// envelope over 16 bytes — around 4000x. INV/WANT are also consumed before dedup
+/// and before the quota (§6: per-link, hops=0, never stored, never relayed), so an
+/// attacker can replay one identical request forever, and on a radio link every
+/// reply spends airtime that §10 caps at 10% by law.
+///
+/// Capping the ids honoured bounds the work one packet can buy. The requester
+/// loses nothing real: INV/WANT are gossip, so an id not served now is offered
+/// again on the next round.
+pub const MAX_IDS_PER_GOSSIP: usize = 64;
+
+/// Bytes per second of stored envelopes one interface may pull out of us with
+/// WANT.
+///
+/// The per-id cap above bounds a single packet; this bounds a *stream* of them,
+/// which is the other half of the same problem. Per-interface rather than
+/// per-source, because a WANT carries no identity worth having — it is unsigned
+/// per-link gossip — so the link it arrived on is the only thing we can attribute
+/// it to.
+pub const DEFAULT_GOSSIP_BUDGET: u32 = 32 * 1024;
+
+// --- Bounds on state a peer can grow ---------------------------------------
+//
+// Every table below is keyed or filled by something that arrives from outside,
+// and none of them were bounded: measured, 20,000 incomplete fountain sets and
+// 20,000 dedup entries from unsigned traffic the quota admits unconditionally,
+// plus 3,000 peer records from minted identities — none collected 10 million
+// seconds later. Signature checks are not a bound here, because an Ed25519
+// keypair is nearly free (the same lesson as `MAX_NEIGHBOURS`).
+//
+// The numbers are chosen to be generous for real meshes and finite for hostile
+// ones. Every one of them degrades a capability rather than breaking it: a
+// forgotten peer re-announces, a dropped partial object is re-fetched, an evicted
+// dedup entry costs one duplicate relay.
+
+/// Dedup entries retained (§5). Evicts nearest-to-expiry first, so the ids most
+/// likely to still be in flight are the ones kept.
+pub const MAX_SEEN: usize = 1 << 16;
+/// Incomplete fountain sets held at once. Each holds real chunk bytes, so this is
+/// the tightest of these bounds.
+pub const MAX_PARTIAL_OBJECTS: usize = 256;
+/// How long an incomplete fountain set is kept before it is collected. Fragments
+/// of a live object keep arriving; a set that has heard nothing for this long is
+/// either abandoned or was never real.
+pub const PARTIAL_TIMEOUT_SECS: u32 = 300;
+/// Peers we retain prekeys, names and busy bytes for.
+pub const MAX_PEERS: usize = 4096;
+/// File manifests retained.
+pub const MAX_MANIFESTS: usize = 1024;
+/// Receipt ids retained (§8).
+pub const MAX_ACKED: usize = 8192;
+/// Undrained inbound RPC requests / feed events. The application is expected to
+/// drain these; the cap is what happens when it does not, and dropping the oldest
+/// is better than growing until the process dies.
+pub const MAX_INBOX: usize = 1024;
+/// How often the time-based sweep runs. Hard caps apply on every ingest; this is
+/// only for expiry, which does not need to be immediate.
+const SWEEP_INTERVAL_SECS: u32 = 60;
+
 /// An object too large to carry as one fountain set — returned by
 /// [`Node::send`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,6 +383,36 @@ fn selection(orig_id: &Id, idx: u8, count: usize) -> BitVec {
     b
 }
 
+/// Drop arbitrary entries until `map` holds at most `max`.
+///
+/// The victims are whichever the iterator yields first. That is unordered, and
+/// deliberately not attacker-chosen: `std`'s hasher is seeded per map, so a peer
+/// cannot arrange to be the one who survives. For these tables — prekeys, names,
+/// busy bytes, manifests — any survivor set is equally correct, because a peer we
+/// forgot re-announces and a manifest we forgot is re-fetched.
+fn trim_map<K: Copy + Eq + std::hash::Hash, V>(map: &mut HashMap<K, V>, max: usize) {
+    if map.len() <= max {
+        return;
+    }
+    let excess = map.len() - max;
+    let victims: Vec<K> = map.keys().take(excess).copied().collect();
+    for k in victims {
+        map.remove(&k);
+    }
+}
+
+/// [`trim_map`] for a set.
+fn trim_set<K: Copy + Eq + std::hash::Hash>(set: &mut HashSet<K>, max: usize) {
+    if set.len() <= max {
+        return;
+    }
+    let excess = set.len() - max;
+    let victims: Vec<K> = set.iter().take(excess).copied().collect();
+    for k in victims {
+        set.remove(&k);
+    }
+}
+
 fn xor_into(dst: &mut [u8], src: &[u8]) {
     for (a, b) in dst.iter_mut().zip(src) {
         *a ^= *b;
@@ -380,6 +473,10 @@ pub fn fragment(
 /// Online reassembler: feed chunks in any order, at any loss rate. Decodes once
 /// `count` linearly-independent chunks have arrived (typically count+2).
 pub struct Fountain {
+    /// When the first chunk of this set arrived, so an incomplete set can be
+    /// collected. A sender who opens a set and never finishes it is otherwise a
+    /// permanent allocation.
+    started: u32,
     count: usize,
     chunk: usize,
     rows: Vec<Row>, // kept in reduced row-echelon form
@@ -392,7 +489,7 @@ struct Row {
 }
 impl Fountain {
     pub fn new() -> Self {
-        Fountain { count: 0, chunk: 0, rows: Vec::new(), done: None }
+        Fountain { started: 0, count: 0, chunk: 0, rows: Vec::new(), done: None }
     }
     /// Feed one fragment's `(orig_id, idx, count, chunk_bytes)`.
     /// Returns the reassembled original envelope bytes once solvable.
@@ -463,6 +560,13 @@ impl Fountain {
             }
             _ => None,
         }
+    }
+}
+impl Fountain {
+    /// A reassembler that records when it opened, so [`PARTIAL_TIMEOUT_SECS`] can
+    /// collect it if the sender never finishes the set.
+    pub fn started_at(now: u32) -> Self {
+        Fountain { started: now, ..Self::new() }
     }
 }
 impl Default for Fountain {
@@ -705,6 +809,9 @@ pub struct Node {
     feed_inbox: Vec<feed::Event>,              // feed events on subscribed topics (L5)
     quotas: congestion::Quotas,                // per-source flood quota (§10)
     pinned: HashSet<Id>,                       // magnets a seed-vault keeps forever
+    gossip: HashMap<Iface, congestion::TokenBucket>, // per-link WANT service budget
+    gossip_rate: u32,
+    last_sweep: u32, // when expiry-based pruning last ran
 }
 
 struct Pending {
@@ -772,7 +879,18 @@ impl Node {
             feed_inbox: Vec::new(),
             quotas: congestion::Quotas::new(DEFAULT_SOURCE_QUOTA),
             pinned: HashSet::new(),
+            gossip: HashMap::new(),
+            gossip_rate: DEFAULT_GOSSIP_BUDGET,
+            last_sweep: 0,
         }
+    }
+
+    /// Set how many bytes per second of stored envelopes each interface may pull
+    /// out of this node with WANT. Defaults to [`DEFAULT_GOSSIP_BUDGET`]; raise it
+    /// on a fast link, lower it on metered airtime.
+    pub fn set_gossip_budget(&mut self, bytes_per_sec: u32) {
+        self.gossip_rate = bytes_per_sec;
+        self.gossip.clear();
     }
 
     /// Set the per-source flood quota (§10): the sustained bytes/second any single
@@ -1251,10 +1369,73 @@ impl Node {
         // never deduped, never relayed (§6).
         match e.typ {
             ty::INV => return self.on_inv(&e, iface, nbr),
-            ty::WANT => return self.on_want(&e, iface, nbr),
+            ty::WANT => return self.on_want(&e, iface, nbr, now),
             _ => {}
         }
         self.ingest(&e, iface, nbr, now, true)
+    }
+
+    /// Keep every table a peer can grow inside its bound.
+    ///
+    /// Two mechanisms, because the tables differ in kind. Expiry is *time*-based
+    /// and does not need to be immediate, so it runs at most every
+    /// [`SWEEP_INTERVAL_SECS`]. Hard caps are checked on every ingest, since a
+    /// flood can cross a cap in far less than a minute — but they are only ever
+    /// *paid for* when a table is actually over, so the common case is a handful of
+    /// length comparisons.
+    ///
+    /// Eviction always degrades a capability rather than breaking one: a forgotten
+    /// peer re-announces, a dropped partial object is re-fetched, an evicted dedup
+    /// entry costs one duplicate relay. Nothing here can make the node *wrong*,
+    /// only forgetful.
+    fn enforce_bounds(&mut self, now: u32) {
+        if now.saturating_sub(self.last_sweep) >= SWEEP_INTERVAL_SECS {
+            self.last_sweep = now;
+            // Dedup entries carry their own retain-until (§5).
+            self.seen.retain(|_, until| *until > now);
+            // A set that has heard nothing for the timeout is abandoned or fake.
+            self.frags.retain(|_, f| now.saturating_sub(f.started) < PARTIAL_TIMEOUT_SECS);
+        }
+
+        // Dedup: prefer evicting whatever is nearest to expiring, so the ids most
+        // likely to still be in flight survive. Sorting is O(n log n) but only
+        // happens on the ingest that crosses the cap.
+        if self.seen.len() > MAX_SEEN {
+            let excess = self.seen.len() - MAX_SEEN;
+            let mut by_expiry: Vec<(Id, u32)> = self.seen.iter().map(|(k, v)| (*k, *v)).collect();
+            by_expiry.sort_unstable_by_key(|(_, until)| *until);
+            for (id, _) in by_expiry.into_iter().take(excess) {
+                self.seen.remove(&id);
+            }
+        }
+
+        // Partial objects: evict the oldest, which is the one least likely to still
+        // have chunks coming.
+        if self.frags.len() > MAX_PARTIAL_OBJECTS {
+            let excess = self.frags.len() - MAX_PARTIAL_OBJECTS;
+            let mut by_age: Vec<(Id, u32)> = self.frags.iter().map(|(k, f)| (*k, f.started)).collect();
+            by_age.sort_unstable_by_key(|(_, started)| *started);
+            for (id, _) in by_age.into_iter().take(excess) {
+                self.frags.remove(&id);
+            }
+        }
+
+        trim_map(&mut self.peer_prekeys, MAX_PEERS);
+        trim_map(&mut self.peer_busy, MAX_PEERS);
+        trim_map(&mut self.peer_names, MAX_PEERS);
+        trim_map(&mut self.manifests, MAX_MANIFESTS);
+        trim_set(&mut self.acked, MAX_ACKED);
+
+        // Inboxes are queues the application drains. If it has not, drop from the
+        // front: the oldest request or event is the one most likely to be stale.
+        if self.rpc_inbox.len() > MAX_INBOX {
+            let excess = self.rpc_inbox.len() - MAX_INBOX;
+            self.rpc_inbox.drain(..excess);
+        }
+        if self.feed_inbox.len() > MAX_INBOX {
+            let excess = self.feed_inbox.len() - MAX_INBOX;
+            self.feed_inbox.drain(..excess);
+        }
     }
 
     /// The router core (§5). `allow_forward` is true for envelopes off the wire
@@ -1266,6 +1447,7 @@ impl Node {
             return Rx::default(); // duplicate or expired -> drop
         }
         self.seen.insert(id, e.expiry.max(now + SEEN_MIN_SECS));
+        self.enforce_bounds(now);
 
         // Path learning: the first copy of a signed envelope raced every route
         // and won, so its src is reachable via the interface that delivered it.
@@ -1396,7 +1578,12 @@ impl Node {
             let idx = e.payload[16];
             let count = e.payload[17];
             let chunk = e.payload[18..].to_vec();
-            if let Some(orig) = self.frags.entry(oid).or_default().add(&oid, idx, count, chunk) {
+            if let Some(orig) = self
+                .frags
+                .entry(oid)
+                .or_insert_with(|| Fountain::started_at(now))
+                .add(&oid, idx, count, chunk)
+            {
                 if let Ok((oe, _)) = Envelope::decode(&orig) {
                     // Deliver the recombined original; do not re-forward it.
                     let mut inner = self.ingest(&oe, iface, nbr, now, false);
@@ -1456,7 +1643,10 @@ impl Node {
 
     fn on_inv(&self, e: &Envelope, iface: Iface, nbr: Option<Addr>) -> Rx {
         let mut want = Vec::new();
-        for chunk in e.payload.chunks(16) {
+        // Bounded for the same reason `on_want` is, and additionally because the
+        // reply is *our* traffic: an INV listing thousands of ids we lack would
+        // have us emit a WANT just as large.
+        for chunk in e.payload.chunks(16).take(MAX_IDS_PER_GOSSIP) {
             if chunk.len() == 16 {
                 let mut id = [0u8; 16];
                 id.copy_from_slice(chunk);
@@ -1476,16 +1666,23 @@ impl Node {
         rx
     }
 
-    fn on_want(&self, e: &Envelope, iface: Iface, nbr: Option<Addr>) -> Rx {
+    fn on_want(&mut self, e: &Envelope, iface: Iface, nbr: Option<Addr>, now: u32) -> Rx {
         let mut rx = Rx::default();
-        for chunk in e.payload.chunks(16) {
-            if chunk.len() == 16 {
-                let mut id = [0u8; 16];
-                id.copy_from_slice(chunk);
-                if let Some(wire) = self.store.wire(&id) {
-                    rx.forwards.push(Forward::Directed { iface, nbr, bytes: wire });
-                }
+        let rate = self.gossip_rate;
+        for chunk in e.payload.chunks(16).take(MAX_IDS_PER_GOSSIP) {
+            if chunk.len() != 16 {
+                continue;
             }
+            let mut id = [0u8; 16];
+            id.copy_from_slice(chunk);
+            // `store.wire` may read from the spill directory, so an unbounded WANT
+            // buys disk reads as well as bandwidth.
+            let Some(wire) = self.store.wire(&id) else { continue };
+            let bucket = self.gossip.entry(iface).or_insert_with(|| congestion::TokenBucket::new(rate));
+            if !bucket.allow(wire.len() as u32, now) {
+                break; // this link has spent its share; it can ask again later
+            }
+            rx.forwards.push(Forward::Directed { iface, nbr, bytes: wire });
         }
         rx
     }
@@ -2955,6 +3152,181 @@ mod tests {
         // exhausted bucket, which is what "priority is bought" means.
         assert!(q.admit(src, 100, congestion::STAMP_QUOTA_BYPASS_BITS, now), "real work still buys it");
         assert!(q.admit(src, 5000, 255, now), "and the highest class is never throttled");
+    }
+
+    #[test]
+    fn a_want_cannot_be_used_as_an_amplifier() {
+        // One unsigned WANT once pulled a full stored envelope for every id it
+        // listed — measured at 32x gain, and replayable forever because INV/WANT
+        // are consumed before dedup and before the quota (§6). On a radio link
+        // every reply also spends airtime that §10 caps at 10% by law.
+        let now = 1_700_000_000;
+        let mut victim = Node::new("victim", &[]);
+        let mut ids = Vec::new();
+        for i in 0..400u32 {
+            let f = victim.originate(ZERO_DEST, vec![(i % 251) as u8; 400], now);
+            if let Some(Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f.into_iter().next()
+            {
+                ids.push(Envelope::decode(&bytes).unwrap().0.id());
+            }
+        }
+        let mut payload = Vec::new();
+        for id in &ids {
+            payload.extend_from_slice(id);
+        }
+        let want = Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire();
+
+        let rx = victim.on_rx(&want, 1, None, now);
+        assert!(
+            rx.forwards.len() <= MAX_IDS_PER_GOSSIP,
+            "one packet must not buy more than {MAX_IDS_PER_GOSSIP} envelopes, got {}",
+            rx.forwards.len()
+        );
+
+        // The per-link budget is what bounds a *stream* of these. Replaying the
+        // same request must not keep paying out.
+        let mut served = 0;
+        for _ in 0..20 {
+            served += victim.on_rx(&want, 1, None, now).forwards.len();
+        }
+        assert_eq!(served, 0, "a spent link budget must not refill within the same second");
+
+        // ...while a different link still gets service, and time still refills.
+        assert!(!victim.on_rx(&want, 2, None, now).forwards.is_empty(), "per-link, not global");
+        assert!(!victim.on_rx(&want, 1, None, now + 60).forwards.is_empty(), "refills over time");
+    }
+
+    #[test]
+    fn ordinary_gossip_still_works() {
+        // The bound must not break the mechanism it protects: a modest WANT from a
+        // real peer is answered in full.
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut ids = Vec::new();
+        for i in 0..5u8 {
+            let f = a.originate(ZERO_DEST, vec![i; 100], now);
+            if let Some(Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f.into_iter().next()
+            {
+                ids.push(Envelope::decode(&bytes).unwrap().0.id());
+            }
+        }
+        let mut payload = Vec::new();
+        for id in &ids {
+            payload.extend_from_slice(id);
+        }
+        let want = Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire();
+        assert_eq!(a.on_rx(&want, 1, None, now).forwards.len(), 5, "every id we hold is served");
+
+        // An INV offering ids we lack still produces a WANT asking for them.
+        let mut inv_payload = Vec::new();
+        for i in 0..5u8 {
+            inv_payload.extend_from_slice(&[i; 16]);
+        }
+        let inv = Envelope::new(ty::INV, ZERO_DEST, 0, inv_payload).wire();
+        let rx = a.on_rx(&inv, 1, None, now);
+        assert_eq!(rx.forwards.len(), 1, "one WANT asking for what we lack");
+    }
+
+    #[test]
+    fn incomplete_fountain_sets_cannot_accumulate() {
+        // Measured before this bound: 20,000 incomplete sets held, each carrying
+        // real chunk bytes, and still held 10 million seconds later. Cheapest
+        // possible attack — unsigned fragments are Src::None, which the quota
+        // admits unconditionally, so this cost the sender nothing.
+        let now = 1_700_000_000;
+        let mut v = Node::new("victim", &[]);
+        for i in 0..3_000u32 {
+            let mut payload = vec![0u8; 18];
+            payload[..4].copy_from_slice(&i.to_be_bytes()); // a distinct orig_id each
+            payload[16] = 0; // idx
+            payload[17] = 4; // claims 4 chunks, sends 1 — never solvable
+            payload.extend_from_slice(&[0xAA; 200]);
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
+            e.flags |= fl::FRAGMENT | fl::FLOOD;
+            v.on_rx(&e.wire(), 1, None, now);
+        }
+        assert!(
+            v.frags.len() <= MAX_PARTIAL_OBJECTS + 1,
+            "held {} partial objects against a cap of {MAX_PARTIAL_OBJECTS}",
+            v.frags.len()
+        );
+
+        // And an abandoned set is collected on time, not kept forever.
+        let live = v.frags.len();
+        assert!(live > 0);
+        v.on_rx(
+            &Envelope::new(ty::DATA, ZERO_DEST, now + PARTIAL_TIMEOUT_SECS + 100, b"tick".to_vec()).wire(),
+            1,
+            None,
+            now + PARTIAL_TIMEOUT_SECS + 1,
+        );
+        assert_eq!(v.frags.len(), 0, "sets past PARTIAL_TIMEOUT_SECS are collected");
+    }
+
+    #[test]
+    fn every_peer_grown_table_has_a_ceiling() {
+        // The caps are large enough that driving each one through `on_rx` would be
+        // a slow test for no extra confidence — the interesting property is that
+        // `enforce_bounds` brings an over-full table back down, whatever filled it.
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+
+        for i in 0..(MAX_PEERS + 500) as u32 {
+            let mut a = [0u8; 8];
+            a[..4].copy_from_slice(&i.to_be_bytes());
+            n.peer_prekeys.insert(a, [0u8; 32]);
+            n.peer_busy.insert(a, 0);
+            n.peer_names.insert(a, "x".into());
+        }
+        for i in 0..(MAX_ACKED + 500) as u32 {
+            let mut id = [0u8; 16];
+            id[..4].copy_from_slice(&i.to_be_bytes());
+            n.acked.insert(id);
+        }
+        for i in 0..(MAX_SEEN + 500) as u32 {
+            let mut id = [0u8; 16];
+            id[..4].copy_from_slice(&i.to_be_bytes());
+            n.seen.insert(id, now + 3600);
+        }
+        for _ in 0..(MAX_INBOX + 500) {
+            n.feed_inbox.push(feed::Event { topic: ZERO_DEST, from: None, data: vec![1] });
+        }
+
+        n.enforce_bounds(now);
+
+        assert!(n.peer_prekeys.len() <= MAX_PEERS, "prekeys {}", n.peer_prekeys.len());
+        assert!(n.peer_busy.len() <= MAX_PEERS);
+        assert!(n.peer_names.len() <= MAX_PEERS);
+        assert!(n.acked.len() <= MAX_ACKED, "acked {}", n.acked.len());
+        assert!(n.seen.len() <= MAX_SEEN, "seen {}", n.seen.len());
+        assert_eq!(n.feed_inbox.len(), MAX_INBOX, "inbox trimmed to the cap");
+    }
+
+    #[test]
+    fn dedup_evicts_the_nearest_to_expiring_first() {
+        // Which entry is dropped matters: an id still in flight that we forget
+        // costs a duplicate relay, so the ones kept should be the ones with the
+        // most life left.
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        for i in 0..(MAX_SEEN + 100) as u32 {
+            let mut id = [0u8; 16];
+            id[..4].copy_from_slice(&i.to_be_bytes());
+            // The first 100 expire soonest.
+            let until = if i < 100 { now + 1 } else { now + 100_000 };
+            n.seen.insert(id, until);
+        }
+        n.enforce_bounds(now);
+        assert!(n.seen.len() <= MAX_SEEN);
+        let mut short_lived_kept = 0;
+        for i in 0..100u32 {
+            let mut id = [0u8; 16];
+            id[..4].copy_from_slice(&i.to_be_bytes());
+            if n.seen.contains_key(&id) {
+                short_lived_kept += 1;
+            }
+        }
+        assert!(short_lived_kept < 50, "should have dropped the soon-to-expire ones first");
     }
 
     #[test]

@@ -98,6 +98,13 @@ the network:
 ./scripts/make-offline-bundle.sh --tar  # ...and a tarball + sha256 to carry
 ```
 
+The toolchain floor is **Rust 1.75**, declared as `rust-version` in `Cargo.toml`
+and checked by CI on every push, because an offline rebuild is exactly the
+situation where you cannot go and fetch a newer Cargo. That floor had been claimed
+in a comment and was false in two ways at once — see S-014 in
+[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) — which is why it is now enforced by
+something that runs rather than something that reads well.
+
 Be precise about what a clone does and does not carry. `Cargo.lock` is committed,
 so the *versions* are pinned and a rebuild resolves identically — but a lockfile
 names crates, it does not contain them. Without `vendor/`, `cargo build` on a

@@ -141,7 +141,8 @@ mod tests {
         ks.push(&[0xC0, 0x00]);
         // Every byte an escape pair: 2 bytes on the wire, 1 byte buffered. Past
         // the cap it must drop — the wire length being double is not extra room.
-        let esc: Vec<u8> = std::iter::repeat_n([0xDB, 0xDC], MAX_FRAME + 8).flatten().collect();
+        // `repeat_n` is 1.82; MSRV is 1.75 (Cargo.toml `rust-version`).
+        let esc: Vec<u8> = std::iter::repeat([0xDB, 0xDC]).take(MAX_FRAME + 8).flatten().collect();
         ks.push(&esc);
         assert!(ks.dropped() >= 1, "escaped bytes must still hit the cap");
     }

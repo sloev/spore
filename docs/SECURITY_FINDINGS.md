@@ -36,6 +36,11 @@ than fixing a crash, it says so explicitly.
 | [S-009](#s-009) | Silent packet loss | Low | ✅ | ✅ | ✅ | no |
 | [S-010](#s-010) | False continuity claim | Low | ✅ | ✅ | n/a | no |
 | [S-011](#s-011) | Public API panic | Low | ✅ | ✅ | ✅ | yes (`send` returns `Result`) |
+| [S-012](#s-012) | Reflection / amplification | **High** | ✅ | ✅ | ✅ | yes (per-link WANT budget) |
+| [S-013](#s-013) | Resource exhaustion (10 tables) | **High** | ✅ | ✅ | ✅ | yes (eviction under pressure) |
+| [S-014](#s-014) | False continuity claim (MSRV) | Low | ✅ | ✅ | ✅ (CI) | no |
+| [S-015](#s-015) | Remote OOM (5 unbounded reads) | Medium | ✅ | ✅ | ✅ | no |
+| [S-016](#s-016) | Resource exhaustion (filename sets) | Low | ✅ | ✅ | ✅ | no |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -353,6 +358,190 @@ only to respect a constraint that turned out not to bind.
 
 ---
 
+## S-012
+
+**WANT was a 32x unauthenticated amplifier.** High. `src/lib.rs` — `on_want`,
+`on_inv`.
+
+**Root cause.** A WANT payload is a list of 16-byte ids and `on_want` answered each
+one with a whole stored envelope. The payload length is a `u16`, so one packet can
+list ~4095 ids. Per §6, INV/WANT are per-link, `hops=0`, consumed on receipt —
+which also means they return from `on_rx` *before* dedup and before the quota.
+
+**Exploit.** Send one small unsigned WANT listing ids the victim holds; receive
+their whole store back. Nothing is signed, so this needs no identity, and nothing
+dedups it, so the identical packet can be replayed forever. Three costs, not one:
+bandwidth, disk (`store.wire` reads from the spill directory on eviction), and — on
+a radio link — airtime that §10 caps at 10% by law. Worth noting the reflection
+angle: on a bridge where the source address is not verified (UDP, broadcast), the
+flood can be aimed at a third party.
+
+**Reproduced.** Measured before the fix: a 6,418-byte WANT returned 205,600 bytes
+across 400 envelopes — **32.0x** — and an identical replay served all 400 again.
+The ceiling is the largest envelope divided by 16, around 4000x.
+
+**Patch.** Two bounds, because they address different halves. `MAX_IDS_PER_GOSSIP`
+(64) caps what one packet can buy. A per-interface `TokenBucket`
+(`DEFAULT_GOSSIP_BUDGET`, 32 KiB/s) caps a *stream* of them. Per-interface rather
+than per-source because a WANT carries no identity worth having — the link it
+arrived on is the only attributable thing. `on_inv` takes the same id cap, since an
+INV listing thousands of ids we lack would have us emit an equally large WANT.
+
+**After.** The same measurement gives 5.0x for a single packet, and a replay serves
+**0**. Gossip still works: a modest WANT is answered in full, a different link has
+its own budget, and the bucket refills over time.
+
+**Behaviour change.** A link that asks for more than its share is served partially
+and must ask again. That is what gossip already tolerates — an id not served now is
+offered on the next round — so nothing is lost, only paced.
+
+**Tests.** `a_want_cannot_be_used_as_an_amplifier`, `ordinary_gossip_still_works`.
+
+---
+
+## S-013
+
+**Ten tables a peer can grow, none of them bounded.** High. `src/lib.rs` — `Node`.
+
+**Root cause.** `seen`, `frags`, `peer_prekeys`, `peer_busy`, `peer_names`,
+`manifests`, `acked`, `rpc_inbox`, `feed_inbox` had no cap, no timeout and no
+eviction of any kind — zero prune operations between them. One systemic omission
+rather than ten separate oversights.
+
+**Exploit.** `frags` is the cheapest and worst: one fragment per distinct
+`orig_id`, claiming a count it never satisfies, opens a `Fountain` holding real
+chunk bytes forever. Unsigned fragments are `Src::None`, which the quota admits
+*unconditionally*, so this costs the sender nothing at all. The peer tables need
+valid signatures, which is not a bound — an Ed25519 keypair is nearly free, the
+same lesson as S-006. `rpc_inbox` and `feed_inbox` are plain `Vec`s the
+application is expected to drain; if it does not, a peer decides how much memory
+the process uses.
+
+**Reproduced.** 20,000 incomplete fountain sets and 20,000 dedup entries from
+unsigned traffic; 3,000 peer records from minted identities; and **all of it still
+held 10 million seconds later** — nothing collected anything at any point.
+
+**Patch.** One routine, `enforce_bounds`, called once per ingest. Expiry is
+time-based and does not need to be immediate, so it runs at most every
+`SWEEP_INTERVAL_SECS` (60): dedup entries past their retain-until go, and fountain
+sets idle beyond `PARTIAL_TIMEOUT_SECS` (300) are collected. Hard caps are checked
+every ingest, since a flood crosses a cap in far less than a minute, but only cost
+anything when a table is actually over: `MAX_SEEN` (65536), `MAX_PARTIAL_OBJECTS`
+(256), `MAX_PEERS` (4096), `MAX_MANIFESTS` (1024), `MAX_ACKED` (8192), `MAX_INBOX`
+(1024).
+
+Victim choice is deliberate where it matters. Dedup evicts nearest-to-expiry
+first, so ids most likely still in flight survive. Partial objects evict oldest,
+least likely to still have chunks coming. Inboxes drop from the front. For the
+peer and manifest tables any survivor set is equally correct, so those trim
+arbitrarily — and not attacker-chosen, since `std`'s hasher is seeded per map.
+
+**Behaviour change.** Under pressure the node forgets rather than growing. Every
+eviction degrades a capability instead of breaking one: a forgotten peer
+re-announces, a dropped partial object is re-fetched, an evicted dedup entry costs
+one duplicate relay. Nothing here can make the node *wrong*, only forgetful.
+
+**Tests.** `incomplete_fountain_sets_cannot_accumulate`,
+`every_peer_grown_table_has_a_ceiling`,
+`dedup_evicts_the_nearest_to_expiring_first`.
+
+---
+
+## S-014
+
+**The declared MSRV was unbuildable, twice over.** Low, but the same shape as
+S-010. `Cargo.toml`, `Cargo.lock`.
+
+**Root cause.** A comment on the dependency pins read "compatible with Rust 1.75
+(no edition2024)", and there was no `rust-version` field for anything to check.
+Two independent breaks had accumulated behind that comment:
+
+1. `Cargo.lock` was at **version 4**, which Cargo 1.75 cannot *parse at all* — it
+   fails before resolution, so the pins never even get consulted.
+2. `zeroize` was pinned to `=1.7.0`, but `zeroize` is a facade and the derive macro
+   is a **separate crate**. `zeroize_derive` 1.5 moved to edition2024, which needs a
+   far newer Cargo. The pin constrained the thing that was safe and missed the thing
+   that broke.
+
+**Impact.** Not an attack. It is `CONTINUITY.md`'s promise again — "a repo clone
+plus a Rust toolchain rebuilds everything offline" — failing on exactly the machine
+that promise is for: an old one, offline, with no way to upgrade Cargo.
+
+**Reproduced.** `cargo +1.75 build` → `lock file version 4 was found, but this
+version of Cargo does not understand this lock file`. With the lock at v3 →
+`feature edition2024 is required`. Then three test-only uses of APIs newer than
+1.75 (`iter_repeat_n` ×2, `is_multiple_of`) and one `Option::is_none_or` in
+`bridge::udp`.
+
+**Patch.** Made 1.75 real rather than aspirational: `zeroize_derive` pinned to
+`=1.4.2`, lockfile regenerated at version 3, `is_none_or`/`repeat_n`/
+`is_multiple_of` replaced with equivalents available in 1.75, and
+`rust-version = "1.75"` declared so Cargo itself enforces it. **132 tests pass on
+`cargo +1.75`**, and stable is unaffected.
+
+**Regression test.** `.github/workflows/msrv.yml` reads `rust-version` from
+`Cargo.toml`, installs exactly that toolchain, runs the suite, and checks the
+lockfile is still parseable by it. A separate workflow rather than a job in
+`ci.yml`, which the freeze guard's regex covers. Without this the claim simply rots
+again — it had already rotted twice.
+
+---
+
+## S-015
+
+**The same unbounded read, in every file-backed bridge nobody had audited.**
+Medium. `src/store.rs` (core adoption), `src/bridge/store.rs` (×2),
+`src/bridge/foldersync.rs`, `src/bridge/ssb.rs`.
+
+**Root cause.** Five `fs::read` / `read_to_string` calls with no size limit, on
+directories that another program writes to *by design* — that is what a synced
+folder, an SSB log and a spill directory are. Two of them, including the core
+store's adoption path, had a `metadata` size check immediately before the read:
+the same stat-then-read gap as S-007, with the same comment explaining why the
+stat was enough. It is not; they are separate syscalls and the file can change
+between them.
+
+**Why the earlier audit missed it.** #15 fixed "spill adoption in `store.rs`" —
+and it did, in `src/store.rs`, with `MAX_ADOPT_BYTES`. But that fix only capped the
+*stat*, and there is a second `store.rs` one directory down (`src/bridge/store.rs`,
+the folder bridge) that was never looked at. Two files with the same name, one
+audited and one not. Worth recording as a lesson about how the gap happened rather
+than only what it was.
+
+**Exploit.** Drop one large file into any watched directory. Not remote in the
+network sense — it needs write access to the folder — but a synced folder is
+routinely shared with a whole cloud account or a whole LAN, which is the premise
+of those bridges.
+
+**Patch.** One shared `store::read_capped(path, max)` that bounds the **read**,
+used by all five sites plus the spool bridge, whose private near-duplicate was
+deleted. A stat may still fast-reject; it is no longer mistaken for the bound.
+
+**Tests.** `read_capped_bounds_the_read_not_a_preceding_stat`, plus the existing
+spool test now exercising the shared helper.
+
+---
+
+## S-016
+
+**Imported-filename sets grew forever.** Low. `src/bridge/store.rs`,
+`src/bridge/ssb.rs`, `src/bridge/copyparty.rs`.
+
+**Root cause.** Each folder-style bridge keeps `HashSet<String>` of filenames it
+has already imported, to avoid re-reading them. One entry per filename ever seen,
+never forgotten, in a directory whose contents someone else controls — including a
+rotating log, which grows it without any adversary at all.
+
+**Patch.** `store::bound_known` clears the set past `MAX_KNOWN_FILENAMES` (4096).
+Clearing wholesale rather than evicting one entry, because the set has no ordering
+worth preserving. Forgetting is cheap here in a way worth stating: the node's own
+dedup (`seen`) drops a re-imported envelope, so an overflow costs one wasted file
+read, not a duplicate delivery.
+
+**Test.** `known_filename_sets_stay_bounded`.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -368,18 +557,21 @@ because two external reviews asserted several of these as defects.
 | "wasm randomness unvalidated" | CI already asserts the wasm has exactly one import and that it is `spore_fill_random` — stricter than the proposed check. |
 | "No reproducible-build verification" | CI regenerates `reference/vectors.json` and fails on any diff, and runs `check_docs_sync.py`. Not bit-for-bit binary reproducibility, but determinism is verified. |
 | Fountain `count > 256` indexing past the digest | Not reachable: the wire field is a `u8` and the sender asserts `count <= 255`. Guarded anyway in S-001, because those are facts about callers. |
+| `tor` SOCKS5 reply allocates from a wire byte | Bounded: the length is a `u8`, so `vec![0u8; skip + 2]` is at most 257 bytes. |
+| `udp` reads `/proc/net/route` unbounded | A kernel file, not attacker-controlled. |
+| `meshtastic` / `ssb` base64 `with_capacity` | Sized from our own buffer's length, not from a wire-declared length. |
 
 ## Still open
 
 Carried deliberately, not overlooked.
 
-- **`Cargo.lock` is version 4** while the dependency pins claim Rust 1.75
-  compatibility. The MSRV story and the lockfile disagree, which matters most for
-  the offline path S-010 just fixed.
-- **`seen`, `frags`, ack and rpc/feed tables** need the S-006 treatment: bounds
-  and timeouts, not just TTLs.
-- **INV/WANT** admission is unbounded — a classic amplification surface.
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
-- **Bridges never audited**: `ssb`, `foldersync`, `csma`, `meshtastic`, `audio`,
-  `serial`, `tcp`, `hub`, `ax25`, `tor`, `udp`.
+- **`hub` holds `Mutex<Node>` behind 13 `lock().unwrap()` calls.** A panic anywhere
+  under the lock poisons it, and every later `unwrap` then panics too — one fault
+  becomes a dead node rather than a dropped operation. Deferred to the
+  ratchet/mix/lock-ordering review rather than patched piecemeal.
+- **`meshtastic` and `audio` codecs** are read but not yet fuzzed as thoroughly as
+  the core parsers; both are reachable from a hostile medium.
+- **Hardware-verified status** for every 🧪 bridge. No marketing claim until the
+  `HARDWARE.md` procedure has actually been run.

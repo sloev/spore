@@ -24,6 +24,10 @@ const pages = [
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
   // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
+  // The findings register belongs on the site — anyone evaluating whether to trust
+  // this with their mail should be able to read what was found and fixed without
+  // cloning the repo — but households do not need it in the top bar.
+  ['docs/SECURITY_FINDINGS.md', 'security.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['bindings/README.md', 'bindings.html', null],
   ['reference/README.md', 'reference.html', null],
@@ -75,10 +79,11 @@ function rewriteLinks(html, self) {
 // ---------------------------------------------------------------------------
 const SHARE = {
   url: 'https://sloev.github.io/spore/',
-  title: 'SPORE — messages that ride anything, with no servers',
+  title: 'SPORE — messages that still deliver, with no servers',
   text:
-    'SPORE: a signed postcard that travels over the internet, a walkie-talkie, ' +
-    'Bluetooth, LoRa, a USB stick, a QR code, or a person reading it aloud. ' +
+    'SPORE: a signed postcard that travels over the internet, a folder, a USB ' +
+    'stick, a QR code, or a person reading it aloud — with radio and Bluetooth ' +
+    'paths for operators who verify them against their own hardware. ' +
     'Same delivery rules on all of them. Public domain.',
 };
 

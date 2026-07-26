@@ -163,6 +163,9 @@ pub fn run(
                     if !known.insert(name.clone()) {
                         continue;
                     }
+                    // The share's file list is the server's to choose, so this set
+                    // is bounded like the folder bridges' — see `bound_known`.
+                    crate::store::bound_known(&mut known);
                     let target = format!("{}{}", share.path, name);
                     if let Ok((200, bytes)) = share.request("GET", &target, &[]) {
                         hub.on_rx(iface, &bytes, None);

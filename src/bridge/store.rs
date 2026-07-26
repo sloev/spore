@@ -15,8 +15,7 @@ pub fn run(
     rx: std::sync::mpsc::Receiver<Forward>,
     dir: std::path::PathBuf,
 ) -> io::Result<()> {
-    use std::collections::HashSet;
-    let mut known: HashSet<String> = HashSet::new();
+    let mut known: HashSet<String> = HashSet::new(); // HashSet comes from crate::*
     println!("  [folder] iface {iface} syncing {}", dir.display());
     loop {
         // Import new files (reading = receiving).
@@ -30,7 +29,10 @@ pub fn run(
                 if !known.insert(name) {
                     continue; // already imported / we wrote it
                 }
-                if let Ok(bytes) = fs::read(&path) {
+                crate::store::bound_known(&mut known);
+                // The folder is shared with whatever syncs it, so the read is
+                // capped — see `crate::store::read_capped`.
+                if let Ok(bytes) = crate::store::read_capped(&path, crate::store::MAX_FILE_BYTES) {
                     hub.on_rx(iface, &bytes, None);
                 }
             }
@@ -102,7 +104,9 @@ pub fn import(dir: &Path, node: &mut Node, iface: Iface, now: u32) -> io::Result
         if path.extension().and_then(|e| e.to_str()) != Some("spore") {
             continue;
         }
-        let bytes = fs::read(&path)?;
+        let Ok(bytes) = crate::store::read_capped(&path, crate::store::MAX_FILE_BYTES) else {
+            continue; // too big to be an envelope, or unreadable
+        };
         let mut r = node.on_rx(&bytes, iface, None, now);
         rx.delivered.append(&mut r.delivered);
         rx.forwards.append(&mut r.forwards);

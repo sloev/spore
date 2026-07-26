@@ -294,7 +294,8 @@ mod tests {
         let msg = b"the dam holds; meet at the north pier";
         let mut pcm = vec![0.0f32; 777]; // arbitrary (non-symbol-aligned) lead-in
         pcm.extend(modulate(msg));
-        pcm.extend(std::iter::repeat_n(0.0, 500));
+        // `repeat_n` would be tidier but is 1.82; MSRV is 1.75.
+        pcm.extend(std::iter::repeat(0.0).take(500));
         // Add low-level channel noise.
         let mut seed = 0xDEADBEEFu64;
         for s in pcm.iter_mut() {
