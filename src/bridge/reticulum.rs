@@ -175,7 +175,17 @@ pub fn run_udp(
             }
             let mut buf = [0u8; 2048];
             match self.sock.recv_from(&mut buf) {
-                Ok((n, _)) => {
+                Ok((n, from)) => {
+                    // Only the companion may feed this framer. Unlike
+                    // `udp::run_group`, where each datagram is a whole envelope
+                    // and a stranger's datagram is merely ignored, this framer
+                    // carries KISS state *across* datagrams — so bytes from any
+                    // other source interleave with the frame the companion is
+                    // halfway through sending and corrupt it. Single-sourcing it
+                    // is what makes that unreachable.
+                    if from != self.peer {
+                        return Ok(None);
+                    }
                     for f in self.framer.push(&buf[..n]) {
                         self.out.push_back(f);
                     }
@@ -218,5 +228,30 @@ mod tests {
         let mut out = framer.push(&framed[..3]);
         out.extend(framer.push(&framed[3..]));
         assert_eq!(out, vec![env.to_vec()]);
+    }
+
+    /// Why `run_udp` drops datagrams that are not from the companion.
+    ///
+    /// The UDP bridge keeps one `KissStream` across datagrams, so a frame may be
+    /// half-assembled when the next one arrives. If any host could feed it, this
+    /// is what they would get to do — so the source check is the fix, and this is
+    /// the damage it prevents.
+    #[test]
+    fn foreign_bytes_would_corrupt_a_half_assembled_frame() {
+        let env: &[u8] = b"the companion's envelope";
+        let framed = crate::kiss::encode(env);
+        let split = framed.len() / 2;
+
+        let mut framer = crate::bridge::kiss_stream::KissStream::new();
+        let mut out = framer.push(&framed[..split]); // companion, mid-frame
+        out.extend(framer.push(&[0xC0, 0x00, b'j', b'u', b'n', b'k', 0xC0])); // a stranger
+        out.extend(framer.push(&framed[split..])); // companion finishes
+        assert_ne!(out, vec![env.to_vec()], "interleaved bytes must be able to break the frame");
+
+        // Single-sourced — which is what the bridge now guarantees — it survives.
+        let mut clean = crate::bridge::kiss_stream::KissStream::new();
+        let mut ok = clean.push(&framed[..split]);
+        ok.extend(clean.push(&framed[split..]));
+        assert_eq!(ok, vec![env.to_vec()]);
     }
 }

@@ -68,8 +68,24 @@ The limits, and where they live:
 | `copyparty` response | 8 MiB body, 16 KiB/line, 100 headers | A share can be compromised or simply broken. |
 | `i2p` control line | 8 KiB | Anything on port 7656 that streams without a newline. |
 | store adoption | 1 MiB/file | A spill directory is on disk, where anything can drop a file. |
+| `spool::MAX_SPOOL_FILE` | 1 MiB/file | A spool is written by someone else by definition — that is what a spool *is*. |
 
-Two properties worth stating because they are easy to lose:
+Two of these bounds are on a **read**, not on a size the sender declared, and the
+distinction is the point:
+
+- **`spool` stats the file and then caps the read anyway.** The size check is a
+  fast reject; it is not the bound. Between the `stat` and the `read` the mover
+  can replace or extend the file, so a plain `fs::read` would buffer whatever is
+  there at the later moment. The cap lives on the read itself; an over-cap file is
+  left for the next sweep, whose `stat` now sees the real size and clears it.
+- **`reticulum::run_udp` accepts datagrams only from the companion.** It is the
+  one datagram bridge that carries framing state *across* datagrams, so a frame
+  may be half-assembled when the next arrives. Where `udp::run_group` can ignore a
+  stranger's datagram as one bad envelope, here a stranger's bytes would interleave
+  into a frame the companion is midway through — corrupting a good frame rather
+  than merely adding a bad one. Single-sourcing the framer is what removes it.
+
+Two further properties worth stating because they are easy to lose:
 
 - **An overrun resynchronises rather than disconnecting.** A KISS frame that
   exceeds the cap is abandoned and the next delimiter starts a clean one; a
@@ -929,6 +945,15 @@ including the odd-length and rejected-ordinary-ping cases; the **runner** needs 
 raw socket, which needs `CAP_NET_RAW` and Linux, and cannot be exercised in CI —
 so it is a template whose framing is tested and whose socket call is not. Grant it
 without root: `sudo setcap cap_net_raw+ep ./spore`.
+
+One detail the template gets right because it is easy to get wrong: a raw
+`IPPROTO_ICMP` socket hands back the **IP header**, and that header is 20 bytes
+only when it carries no options. `ipv4_payload_offset` reads the IHL field instead
+of assuming 20 — otherwise every packet carrying record-route or timestamp options
+(exactly what a "diagnostics only" network is prone to adding, which is the kind of
+network this bridge exists for) would decode from four bytes off and fail the
+checksum, invisibly. IHL is also a number chosen by whoever sent the packet, so it
+is range-checked against the datagram rather than trusted as an index.
 
 The same pattern extends to the rest of the family, each differing only in *which*
 field carries the bytes, and each a raw-socket (often L2, often root) runner over
