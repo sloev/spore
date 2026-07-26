@@ -128,6 +128,7 @@ bridges:
   - group: "[::]:7373 -> [ff02::7373]:7373"   # IPv6 overlay (Yggdrasil, cjdns)
   - group: "10.0.0.5:7373 -> 10.0.0.255:7373" # pin one interface (bat0, wpan0)
   - ssb: ./ssb-log         # a Secure Scuttlebutt append-only log folder
+  - spool: "./out -> ./in" # tx/rx dirs moved by NNCP, UUCP, rsync or a USB stick
 ```
 
 See [`spore.example.yaml`](spore.example.yaml). The demo (no argument) drives the

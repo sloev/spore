@@ -369,6 +369,7 @@ enum Spec {
     ReticulumTcp(String),
     ReticulumUdp(String, String),
     Icmp(String),
+    Spool(String, String),
     Http(u16),
     Audio,
     Reticulum,
@@ -475,6 +476,13 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
                 Ok(Spec::ReticulumUdp(b.trim().to_string(), p.trim().to_string()))
             }
             "icmp" | "ping" if !v.is_empty() => Ok(Spec::Icmp(v.to_string())),
+            // `spool: TX -> RX` — outbound and inbound directories, moved by
+            // NNCP, UUCP, rsync or a USB stick.
+            "spool" | "nncp" | "uucp" if v.contains("->") => {
+                let (t, r) = v.split_once("->").unwrap();
+                Ok(Spec::Spool(t.trim().to_string(), r.trim().to_string()))
+            }
+            "spool" | "nncp" | "uucp" => Err("needs TX -> RX (spool: ./out -> ./in)".into()),
             "i2p" if !v.is_empty() => Ok(Spec::I2p(v.to_string())),
             "i2p-accept" => Ok(Spec::I2pAccept(v.to_string())),
             "copyparty" | "webdav" if !v.is_empty() => Ok(Spec::Copyparty(v.to_string())),
@@ -662,6 +670,14 @@ fn run_config(cfg: Config) {
                     {
                         let _ = (h, iface, rx, peer);
                         eprintln!("  [icmp] raw ICMP is Linux-only");
+                    }
+                })
+            }
+            Spec::Spool(tx, rx) => {
+                let (iface, rxc) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::spool::run(h, iface, rxc, tx.into(), rx.into()) {
+                        eprintln!("  [spool] {e}");
                     }
                 })
             }

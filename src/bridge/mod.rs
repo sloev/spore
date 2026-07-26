@@ -37,6 +37,8 @@ pub mod foldersync;
 pub mod i2p;
 pub mod icmp;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod spool;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod store;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stream_link;

@@ -269,8 +269,8 @@ Systems that already store and pass on messages — the pattern SPORE *is*.
 | [Briar ⚪](#briar) | stream | contact | var | Tor + BLE friend-to-friend |
 | [Tox ⚪](#tox) | dgram | ToxID | ~1200 | P2P DHT messaging |
 | [DTN / Bundle Protocol v7 ⚪](#bpv7) | store | EID | var | RFC 9171 delay-tolerant bundles |
-| [NNCP ⚪](#nncp) | store | node id | var | encrypted node-to-node copy |
-| [UUCP ⚪](#uucp) | store | host | var | the original store-and-forward |
+| [NNCP 🧪](#nncp) | store | node id | var | `bridge::spool` moved by `nncp-xfer` / areas |
+| [UUCP 🧪](#uucp) | store | host | var | `bridge::spool` moved by `uucp` / `uucico` |
 | [Serval Rhizome ⚪](#rhizome) | store | SID | var | mesh store-and-forward |
 | [Hypercore / Hyperswarm ⚪](#hypercore) | stream | key | var | append-log replication |
 | [Earthstar / Willow ⚪](#willow) | store | share | var | offline-first sync protocol |
@@ -1985,7 +1985,7 @@ matrix — two store-carry-forward systems stacked.
 </details>
 
 <a id="nncp"></a>
-## NNCP ⚪
+## NNCP 🧪
 
 **Summary.** NNCP (Node-to-Node Copy) is a modern suite for secure, offline
 store-and-forward: encrypted packets moved by any transport (files, USB, email,
@@ -1993,24 +1993,37 @@ online) between named nodes. A clean, security-first carrier.
 
 | Field | Value |
 |---|---|
-| Driver form | `store` |
+| Driver form | `store` (spool) |
 | `U` | node id |
 | MTU | variable |
 | State | stateless |
-| Status | ⚪ planned |
-| Code | wrap envelopes as NNCP packets |
+| Status | 🧪 via `bridge::spool` — the SPORE side is tested; the NNCP wiring is config |
+| Code | `bridge::spool` |
 
 <details><summary>Deep dive</summary>
 
-**SPORE bridge mapping.** Hand envelopes to `nncp-file`/`nncp-exec` addressed to a
-node; NNCP encrypts and moves them by whatever transport, and the far side delivers
-into a spool the bridge polls. `U` is the NNCP node id.
+SPORE writes outbound envelopes into a `tx/` directory and consumes inbound ones
+from `rx/` ([`bridge::spool`](../src/bridge/spool.rs)); NNCP is what carries `tx`
+to the peer and fills `rx`. That split is exactly NNCP's own model, so the wiring
+is NNCP config, not code:
+
+```sh
+# outbound: package the tx directory to a node, on a schedule or when it fills
+nncp-file ./spool/tx/ node:spore-in
+# inbound: nncp-toss unpacks received packets into the peer's rx directory
+spore "spool: ./spool/tx -> ./spool/rx"
+```
+
+`nncp-xfer` (USB), `nncp-daemon`/`nncp-caller` (online) or `nncp-file` over any
+medium then move the packets. NNCP adds its own strong crypto on top of SPORE's,
+and the spool bridge validates every inbound file against its content id, so a
+tampered packet is dropped rather than trusted.
 
 **References.** [NNCP](http://www.nncpgo.org/).
 </details>
 
 <a id="uucp"></a>
-## UUCP ⚪
+## UUCP 🧪
 
 **Summary.** The original Unix-to-Unix Copy — the store-and-forward system that ran
 early e-mail and Usenet over dial-up. Still runnable, and a fittingly robust,
@@ -2018,18 +2031,26 @@ low-tech carrier.
 
 | Field | Value |
 |---|---|
-| Driver form | `store` |
+| Driver form | `store` (spool) |
 | `U` | host name |
 | MTU | variable |
 | State | stateless |
-| Status | ⚪ planned |
-| Code | `uux`/`uucp` spool |
+| Status | 🧪 via `bridge::spool` — the SPORE side is tested; the UUCP wiring is config |
+| Code | `bridge::spool` |
 
 <details><summary>Deep dive</summary>
 
-**SPORE bridge mapping.** Queue envelopes as UUCP jobs to a host; the far side's
-spool is polled for inbound. `U` is the UUCP host name. Works over serial, TCP, or
-sneakernet.
+The same [`bridge::spool`](../src/bridge/spool.rs) as NNCP, moved by UUCP instead:
+`uucp` the `tx/` files to the peer's `rx/`, over serial, TCP or sneakernet.
+
+```sh
+# outbound: copy tx to the peer (a cron, or uucico on a schedule)
+uucp ./spool/tx/* peer!~/spore-in/
+spore "spool: ./spool/tx -> ./spool/rx"
+```
+
+`U` is the UUCP host name. The spool bridge is medium-blind — it never learns
+whether UUCP moved the files over a modem or a fibre, which is the point.
 
 **References.** [Taylor UUCP](https://www.gnu.org/software/uucp/uucp.html).
 </details>
