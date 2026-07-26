@@ -18,6 +18,7 @@ fs.mkdirSync(out, { recursive: true });
 const pages = [
   ['README.md', 'index.html', 'Home'],
   ['docs/SPEC.md', 'spec.html', 'Spec'],
+  ['docs/APPS.md', 'apps.html', 'Apps'],
   ['docs/DESIGN.md', 'design.html', 'Design'],
   ['docs/BRIDGES.md', 'bridges.html', 'Bridges'],
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
@@ -73,6 +74,9 @@ function nav(self) {
 }
 
 function page(title, bodyHtml, self) {
+  // A per-page body class, so a page can carry its own rules — the spec needs
+  // print styling that would be wrong everywhere else.
+  const cls = self.replace(/\.html$/, '');
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -81,7 +85,7 @@ function page(title, bodyHtml, self) {
 <title>${title}</title>
 <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="page-${cls}">
 <header class="site">
   <a class="brand" href="index.html">SPORE</a>
   ${nav(self)}

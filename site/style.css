@@ -53,3 +53,45 @@ main.doc img { max-width: 100%; }
 
 footer.site { border-top: 1px solid var(--edge); color: var(--dim);
   font-size: 13px; text-align: center; padding: 22px; }
+
+/* --------------------------------------------------------------------------
+   Print. The spec is meant to end up on paper — two sides of one A4 sheet, to
+   be pinned on a wall or filed on a shelf where no network reaches it. Two
+   columns at a small size is what makes that fit; the rest of the site prints
+   as ordinary flowed text.
+   -------------------------------------------------------------------------- */
+@media print {
+  header.site, footer.site, nav { display: none !important; }
+  a { color: inherit; text-decoration: none; }
+  main.doc { max-width: none; margin: 0; padding: 0; }
+  main.doc details { border: 0; background: none; padding: 0; }
+  main.doc details[open] summary { font-weight: 700; }
+
+  body.page-spec {
+    font: 7.6pt/1.26 "DejaVu Sans", system-ui, sans-serif;
+  }
+  body.page-spec main.doc {
+    column-count: 2;
+    column-gap: 7mm;
+    column-fill: auto;
+  }
+  /* The one-page visual reference is a separate artifact — the text below it is
+     the normative version, and it is what has to fit. */
+  body.page-spec main.doc p:has(img) { display: none; }
+  body.page-spec h1 { font-size: 11pt; margin: 0 0 2pt; column-span: all; }
+  body.page-spec h2 { font-size: 8.6pt; margin: 4.5pt 0 1.5pt;
+    border-bottom: .4pt solid #999; break-after: avoid; }
+  body.page-spec h3 { font-size: 8pt; margin: 3.5pt 0 1pt; break-after: avoid; }
+  body.page-spec p, body.page-spec ul, body.page-spec ol { margin: 1.5pt 0; }
+  body.page-spec ul, body.page-spec ol { padding-left: 11pt; }
+  body.page-spec pre { background: #f4f4f4; border: 0; border-radius: 2pt;
+    padding: 2.5pt 3.5pt; margin: 2pt 0; white-space: pre-wrap;
+    font: 6.6pt/1.15 "DejaVu Sans Mono", monospace; break-inside: avoid; }
+  body.page-spec pre code, body.page-spec code { font-size: inherit;
+    font-family: "DejaVu Sans Mono", monospace; background: none; border: 0; padding: 0; }
+  body.page-spec table { font-size: 6.9pt; margin: 2pt 0; break-inside: avoid; }
+  body.page-spec th, body.page-spec td { padding: .8pt 2.5pt; border: .35pt solid #bbb; }
+  body.page-spec hr { break-before: column; border: 0; margin: 0; }
+}
+
+@page { size: A4; margin: 11mm 10mm; }

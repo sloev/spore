@@ -47,26 +47,8 @@ attachment and makes **zero network requests** (CI asserts this). Save it, copy 
 carry it — a copy is enough to rejoin or restart a mesh. The page can even
 re-serialize itself ("Download a copy"), so one seed makes the next.
 
-<details>
-<summary>Build the seeds</summary>
-
-```sh
-# Single-file browser node (needs the wasm first):
-cargo build --release --lib --target wasm32-unknown-unknown
-node web/build-standalone.mjs          # -> web/spore-standalone.html
-
-# Printable, fountain-coded Seed Sheet (any ~K of N QR codes rebuild it):
-cd site && npm install && node seed/build-seedsheet.mjs   # -> web/spore-seedsheet.html
-
-# The daemon and everything else:
-cargo build --release                  # -> target/release/spore
-
-# The language bindings (Python / Go / JS) live in bindings/.
-```
-
-The published site (GitHub Pages) also hosts `spore-standalone.html` and the live
-demo, so the seed is one download away as long as *any* mirror survives.
-</details>
+Every one of these is a download or a `cargo build` away —
+[**Apps & daemons**](APPS.md) has the links and the build commands.
 
 ## Cold-start playbooks
 
@@ -75,10 +57,10 @@ What to do when you have less than the usual everything.
 <details>
 <summary>Only a browser</summary>
 
-Open `spore-standalone.html`. You have a full node. To reach others: paste a
-WebSocket relay URL (any tab running a relay, any surviving `ws`/`wss` endpoint)
-into "Reach other copies". Two laptops with mics and speakers can pair with **no
-network and no cables** once the audio transport is wired to WebAudio — same wasm.
+Open `spore-standalone.html`. You have a full node. To reach others, add a bridge
+from the page: a WebSocket relay URL, WebRTC, Nostr, WebTorrent — or the **audio
+modem**, so two laptops with mics and speakers pair with no network and no cables
+at all. Where to get the file: [`APPS.md`](APPS.md).
 </details>
 
 <details>
@@ -96,8 +78,9 @@ AX.25 TNC all carry SPORE envelopes unchanged.
 Envelopes have a text **armor** form: `~S1.<base32>.<checksum>~`. It survives SMS,
 handwriting, a read-aloud phone call, or a photograph. Type an armored envelope
 into any node and it enters the mesh; the checksum catches transcription errors.
-For bulk (source, manuals), the roadmap adds fountain-coded QR so a *partial*
-printout still rebuilds the whole (SPORE's own erasure coding, turned on itself).
+For bulk (source, manuals) the **Seed Sheet** carries fountain-coded QR, so a
+*partial* printout still rebuilds the whole — SPORE's own erasure coding, turned
+on itself.
 </details>
 
 <details>
