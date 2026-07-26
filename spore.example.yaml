@@ -19,3 +19,6 @@ bridges:
   - audio                    # data-over-sound modem (f32 PCM on stdin/stdout)
   - reticulum                # RNS payload via tools/reticulum_companion.py (KISS on stdin/stdout)
   - ssb: ./ssb-log           # a Secure Scuttlebutt append-only log folder
+  # - ax25: localhost:8001        # KISS TNC over TCP (Direwolf KISSPORT)
+  # - ax25: /dev/ttyUSB0          # …or a hardware TNC on serial (stty first)
+  # - tor: abc…xyz.onion          # dial a peer's onion via Tor's SOCKS proxy

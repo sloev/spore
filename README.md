@@ -118,6 +118,8 @@ bridges:
   - http: 8088             # an HTTP bag: push / inv / want
   - audio                  # data-over-sound (f32 PCM on stdin/stdout)
   - reticulum              # RNS payload via tools/reticulum_companion.py
+  - ax25: localhost:8001   # a KISS TNC over TCP (Direwolf), or a /dev/tty path
+  - tor: abc…xyz.onion     # dial a peer's onion service through Tor's SOCKS proxy
   - ssb: ./ssb-log         # a Secure Scuttlebutt append-only log folder
 ```
 

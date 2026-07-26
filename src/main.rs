@@ -359,6 +359,9 @@ enum Spec {
     Folder(std::path::PathBuf),
     Meshtastic,
     MeshtasticSerial(Option<String>),
+    Ax25Tcp(String),
+    Ax25Serial(String),
+    Tor(String),
     Http(u16),
     Audio,
     Reticulum,
@@ -453,6 +456,12 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "http" => Ok(Spec::Http(v.parse().map_err(|_| format!("bad http port `{v}`"))?)),
             "ssb" if !v.is_empty() => Ok(Spec::Ssb(v.into())),
             "ssb" => Err("`ssb:` needs a log directory".into()),
+            "ax25" | "kiss" if !v.is_empty() => Ok(if v.starts_with('/') {
+                Spec::Ax25Serial(v.to_string())
+            } else {
+                Spec::Ax25Tcp(v.to_string())
+            }),
+            "tor" | "onion" if !v.is_empty() => Ok(Spec::Tor(v.to_string())),
             "meshtastic-serial" | "mesh-serial" if !v.is_empty() => {
                 Ok(Spec::MeshtasticSerial(Some(v.to_string())))
             }
@@ -469,6 +478,8 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "http" => Ok(Spec::Http(7373)),
             "audio" | "sound" => Ok(Spec::Audio),
             "reticulum" | "rns" => Ok(Spec::Reticulum),
+            "ax25" | "kiss" => Err("`ax25` needs a TNC (ax25: HOST:PORT, or a /dev path)".into()),
+            "tor" | "onion" => Err("`tor` needs an onion (tor: abc…xyz.onion[:port])".into()),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
             "ssb" => Err("`ssb` needs a log directory (ssb: DIR)".into()),
             other => Err(format!("unknown bridge `{other}`")),
@@ -560,6 +571,30 @@ fn run_config(cfg: Config) {
                     };
                     if let Err(e) = r {
                         eprintln!("  [meshtastic] {e}");
+                    }
+                })
+            }
+            Spec::Ax25Tcp(target) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::ax25::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::ax25::run_tcp(h, iface, rx, &target) {
+                        eprintln!("  [ax25] {e}");
+                    }
+                })
+            }
+            Spec::Ax25Serial(path) => {
+                let (iface, rx) = hub.register_limited(spore::bridge::ax25::BULK_BYTES_PER_SEC);
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::ax25::run_serial(h, iface, rx, &path) {
+                        eprintln!("  [ax25] {e}");
+                    }
+                })
+            }
+            Spec::Tor(target) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::tor::run(h, iface, rx, &target) {
+                        eprintln!("  [tor] {e}");
                     }
                 })
             }

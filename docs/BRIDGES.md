@@ -114,7 +114,7 @@ Status is the emoji on each name. Follow the link for the deep dive.
 | [Z-Wave ⚪](#z-wave) | dgram | `u8` | 54 | sub-GHz home-automation mesh |
 | [LoRaWAN ⚪](#lorawan) | dgram | `u32` | 51–222 | long-range via a network server |
 | [LoRa P2P ⚪](#lora-p2p) | dgram | `()` | 255 | raw LoRa, no network server |
-| [Ham AX.25 / KISS 🟡](#ax25) | dgram | `String` | 256 | packet radio over a TNC |
+| [Ham AX.25 / KISS 🧪](#ax25) | stream | `()` | 256 | packet radio over a TNC (TCP or serial) |
 | [APRS ⚪](#aprs) | dgram | call-ssid | ~200 | messages over AX.25 / APRS-IS |
 | [DMR ⚪](#dmr) | dgram | `u32` | var | IP-over-DMR data |
 | [goTenna ⚪](#gotenna) | dgram | `u32` | ~200 | consumer mesh radio |
@@ -157,7 +157,7 @@ unchanged** — point it at the right address on the overlay's interface.
 | [BATMAN-adv 🟡](#batman) | dgram | `[u8;6]` | 1500 | L2 mesh; UDP broadcast on `bat0` |
 | [Yggdrasil / cjdns 🟡](#yggdrasil) | dgram | `Ipv6Addr` | 1280 | end-to-end encrypted IPv6 overlay |
 | [Thread 🟡](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh for low-power IPv6 |
-| [Tor (onion service) ⚪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous |
+| [Tor (onion service) 🧪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous via SOCKS5 |
 | [I2P ⚪](#i2p) | dgram | b32 dest | ~1200 | garlic-routed datagrams (SAM) |
 | [Veilid ⚪](#veilid) | dgram | node id | var | private-routed DHT |
 | [libp2p (gossipsub) ⚪](#libp2p) | stream | PeerId | var | pub/sub overlay; IPFS swarm |
@@ -626,22 +626,24 @@ LoRa PHY is proprietary to Semtech.
 </details>
 
 <a id="ax25"></a>
-## Ham AX.25 / KISS 🟡
+## Ham AX.25 / KISS 🧪
 
 **Summary.** AX.25 is the amateur-radio packet protocol; KISS is the minimal framing
 between a host and a Terminal Node Controller (TNC). Together they move data over HF/
 VHF/UHF radio across regional distances with no infrastructure — the classic
-off-grid long-haul link. SPORE's KISS framer is implemented; the TNC runner is the
-remaining glue.
+off-grid long-haul link. A TNC speaks KISS, which is already SPORE's stream
+framing, so the bridge is only a matter of reaching one: over TCP (Direwolf's
+`KISSPORT`, most networked TNCs) or over a serial port (hardware TNCs on USB).
 
 | Field | Value |
 |---|---|
-| Driver form | `dgram` (UI frames) |
-| `U` | `String` (call-ssid) or `()` |
+| Driver form | `stream` (KISS) |
+| `U` | `()` — the TNC decides who hears it |
 | MTU | 256 (typical AX.25 paclen) |
-| State | stateless (UI/unconnected) |
-| Status | 🟡 partial — `KissStream` framer present, TNC runner TODO |
-| Code | `bridge::kiss_stream::KissStream` |
+| Bulk budget | **0 B/s** — 1200-baud packet is ~150 B/s shared; carries messages, not files |
+| State | stateful (the TNC link) |
+| Status | 🧪 implemented — `run_tcp` / `run_serial`, not hardware-verified here |
+| Code | `bridge::ax25` (+ `bridge::kiss_stream::KissStream`) |
 
 <details><summary>Deep dive</summary>
 
@@ -1133,7 +1135,7 @@ border router bridges to wider IP if present. 802.15.4's tiny frames mean heavy
 </details>
 
 <a id="tor"></a>
-## Tor (onion service) ⚪
+## Tor (onion service) 🧪
 
 **Summary.** Tor onion services give a location-hidden, end-to-end encrypted
 rendezvous reachable by a `.onion` address with no public IP. A bridge would run a
@@ -1146,8 +1148,8 @@ network location.
 | `U` | `.onion` address |
 | MTU | 64 K (stream) |
 | State | stateful |
-| Status | ⚪ planned |
-| Code | a TCP/WebSocket bridge dialled through the Tor SOCKS proxy |
+| Status | 🧪 implemented — dial-out via SOCKS5; inbound is a `torrc` onion service in front of `bridge::tcp` |
+| Code | `bridge::tor` |
 
 <details><summary>Deep dive</summary>
 

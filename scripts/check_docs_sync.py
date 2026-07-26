@@ -89,7 +89,8 @@ for f in sorted(glob.glob(os.path.join(root, "web", "transports", "*.mjs"))):
                       f"(add an index row + deep-dive section)")
 
 # 2. runnable Rust bridges must appear as bridge::<module> (rest of src/bridge is infra).
-bridge_infra = {"driver", "hub", "neighbors", "mod", "csma", "kiss_stream", "foldersync"}
+bridge_infra = {"driver", "hub", "neighbors", "mod", "csma", "kiss_stream", "foldersync",
+                "stream_link", "serial"}
 for f in sorted(glob.glob(os.path.join(root, "src", "bridge", "*.rs"))):
     mod = os.path.splitext(os.path.basename(f))[0]
     if mod in bridge_infra:

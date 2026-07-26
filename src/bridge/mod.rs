@@ -20,15 +20,21 @@ pub use neighbors::Neighbors;
 
 pub mod meshtastic;
 pub mod reticulum;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod serial;
 
 // Portable codecs (also compile to wasm for browser bridges).
 pub mod audio;
 pub mod ssb;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod ax25;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod foldersync;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod store;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stream_link;
 
 // Runner glue — one shared node, threads per bridge (native only).
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,5 +43,7 @@ pub mod driver;
 pub mod hub;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tcp;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tor;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod udp;

@@ -21,6 +21,8 @@ independent; run the ones you have hardware for and note the date + result.
 | 9 | **WebTorrent swarm** | Two devices (any mix of app/web node) join the same swarm name, default trackers reachable | peer count ≥ 1 on both; messages relay P2P; killing the tracker afterwards does not drop the link |
 | 10 | **Nostr relay** | Web node or app pointed at a public relay (kind-30078 accepted) | envelopes published from a signer-equipped web node arrive on an rx-only listener |
 | 11 | **RNS payload** | `mkfifo up down; python3 tools/reticulum_companion.py <up >down & spore reticulum <down >up` on two RNS-connected hosts (`pip install rns`) | envelopes cross the Reticulum network via the shared `spore.mesh` PLAIN destination |
+| 13 | **Ham AX.25 / KISS** | A licensed operator + a TNC. Direwolf: set `KISSPORT 8001`, then `spore ax25:localhost:8001`; or a hardware TNC on serial (`stty` first). Second SPORE node on the frequency | envelopes cross the RF link; **`ENCRYPTED` must stay 0 on ham bands** — signing identifies, ciphering is illegal |
+| 14 | **Tor onion** | `torrc` with `HiddenServiceDir` + `HiddenServicePort 7373 127.0.0.1:7373`, and `spore tcp` listening beside it; from another host `spore tor:<hostname>.onion` | circuit establishes (10–30 s is normal); envelopes flow with neither side exposing an IP |
 | 12 | **BLE generic (NUS)** | Chrome desktop web node → "Web Bluetooth", an nRF/ESP32 running Nordic UART | KISS frames cross; MTU chunking reassembles |
 
 **Recording results.** Append a dated line to the table's history below when a
