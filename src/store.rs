@@ -56,11 +56,15 @@ pub(crate) struct Store {
 
 /// Largest spilled file we will read back. One envelope, generously — anything
 /// bigger cannot be a valid entry, since its id would not match.
-/// Largest on-disk envelope file any bridge or the store will read into memory.
+/// Largest on-disk envelope file any bridge will read into memory.
+///
+/// Gated like the file-backed bridges that use it: there are no directories to
+/// sync on `wasm32`, and an unused constant is a hard error under `-D warnings`.
 ///
 /// Every directory SPORE reads from is, by design, written by something else — a
 /// spill dir, a synced folder, an SSB log, a spool. "Adopt whatever is here" must
 /// never mean "read a terabyte into memory".
+#[cfg(not(target_arch = "wasm32"))]
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 /// Read a file, refusing to buffer more than `max` bytes.
@@ -87,11 +91,13 @@ pub fn read_capped(path: &Path, max: u64) -> io::Result<Vec<u8>> {
 /// contents someone else controls. Forgetting is cheap: the node's own dedup
 /// (`seen`) drops a re-imported envelope, so an overflow costs one wasted read per
 /// file, not a duplicate delivery.
+#[cfg(not(target_arch = "wasm32"))]
 pub const MAX_KNOWN_FILENAMES: usize = 4096;
 
 /// Keep an imported-filenames set bounded. Clears wholesale on overflow rather
 /// than evicting one entry, because the set has no ordering worth preserving and a
 /// single clear is cheaper than repeated arbitrary eviction.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn bound_known(known: &mut HashSet<String>) {
     if known.len() > MAX_KNOWN_FILENAMES {
         known.clear();
@@ -305,6 +311,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn known_filename_sets_stay_bounded() {
         // Folder-style bridges remember what they imported: one entry per filename
         // ever seen, in a directory whose contents someone else controls.
