@@ -262,7 +262,7 @@ mod tests {
 
         // A message reaches both — a paced link is still a full member of the
         // mesh for everything that isn't bulk.
-        hub.send(ZERO_DEST, b"the dam holds".to_vec());
+        hub.send(ZERO_DEST, b"the dam holds".to_vec()).unwrap();
         assert_eq!(drained(&fast_rx), 1);
         assert_eq!(drained(&slow_rx), 1, "a slow link still carries messages");
 
