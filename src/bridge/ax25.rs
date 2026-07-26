@@ -38,10 +38,19 @@ pub const BULK_BYTES_PER_SEC: u32 = 0;
 /// `localhost:8001`).
 pub fn run_tcp(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> std::io::Result<()> {
     hub.with_node(|n| n.mtu = n.mtu.min(AX25_PACLEN));
-    let mut stream = std::net::TcpStream::connect(target)?;
-    stream.set_read_timeout(Some(Duration::from_millis(200)))?;
     println!("  [ax25] iface {iface} on {target} (KISS/TCP, {AX25_PACLEN}-byte paclen)");
-    super::stream_link::run(hub, iface, rx, &mut stream, "ax25")
+    let target = target.to_string();
+    super::stream_link::run_reconnecting(
+        hub,
+        iface,
+        rx,
+        move || {
+            let s = std::net::TcpStream::connect(&target)?;
+            s.set_read_timeout(Some(Duration::from_millis(200)))?;
+            Ok(s)
+        },
+        "ax25",
+    )
 }
 
 /// Bridge a TNC on a serial port, by path. Configure the line first, e.g.

@@ -1191,7 +1191,7 @@ network location.
 | `U` | `.onion` address |
 | MTU | 64 K (stream) |
 | State | stateful |
-| Status | 🧪 implemented — dial-out via SOCKS5; inbound is a `torrc` onion service in front of `bridge::tcp` |
+| Status | 🧪 implemented — dial-out via SOCKS5 (reconnecting); inbound is a `torrc` onion service in front of `bridge::tcp` |
 | Code | `bridge::tor` |
 
 <details><summary>Deep dive</summary>
@@ -1221,7 +1221,7 @@ anonymous network.
 | `U` | b32 destination |
 | MTU | 1200 |
 | State | stateful (SAM session + stream) |
-| Status | 🧪 implemented — `STREAM CONNECT` dial-out; `STREAM ACCEPT` still to come |
+| Status | 🧪 implemented — `STREAM CONNECT` out, `STREAM ACCEPT` in, reconnecting |
 | Code | `bridge::i2p` |
 
 <details><summary>Deep dive</summary>

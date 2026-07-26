@@ -10,8 +10,10 @@
 //! `STREAM CONNECT` and, once SAM answers OK, is the raw connection to the peer —
 //! at which point this is an ordinary KISS byte stream like any other.
 //!
-//! Accepting is the mirror image (`STREAM ACCEPT`) and is left to a future turn;
-//! for now a node dials out, and two nodes meet if either can dial.
+//! Both directions work. `STREAM CONNECT` dials a peer's destination;
+//! `STREAM ACCEPT` waits for one to dial us, and SAM announces the caller by
+//! sending its full destination on a line before any peer bytes — which must be
+//! consumed, or that line lands in the router as a malformed frame.
 //!
 //! As with Tor, nothing here trusts the link: envelopes are signed and sealed
 //! whether or not I2P is underneath. What the overlay adds is that neither end
@@ -19,6 +21,8 @@
 
 use super::hub::Shared;
 use crate::*;
+#[cfg(test)]
+use std::io::Read;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::Receiver;
@@ -131,6 +135,34 @@ pub fn stream_connect(sam: &str, nick: &str, dest: &str) -> std::io::Result<TcpS
     Ok(s)
 }
 
+/// Wait for a peer to dial us inside session `nick`. Blocks until one arrives.
+///
+/// SAM answers `STREAM STATUS` immediately, then — once a peer connects — sends
+/// the caller's destination on its own line. Everything after that line is peer
+/// data. Reading exactly one line here is what keeps the two apart.
+pub fn stream_accept(sam: &str, nick: &str) -> std::io::Result<(TcpStream, String)> {
+    let mut s = TcpStream::connect(sam)?;
+    // No read timeout: accepting means waiting, possibly for a long time.
+    hello(&mut s)?;
+    s.write_all(format!("STREAM ACCEPT ID={nick} SILENT=false\n").as_bytes())?;
+
+    let mut r = BufReader::new(s.try_clone()?);
+    check(&read_line(&mut r)?, "STREAM ACCEPT")?;
+    let peer = read_line(&mut r)?; // blocks until somebody dials in
+
+    // BufReader may have pulled peer bytes in with that line. Anything it holds
+    // belongs to the stream, so it has to be handed back rather than dropped.
+    let buffered = r.buffer().to_vec();
+    if !buffered.is_empty() {
+        return Err(bad(format!(
+            "SAM delivered {} bytes with the destination line; \
+             reconnect and let the peer resend",
+            buffered.len()
+        )));
+    }
+    Ok((s, peer))
+}
+
 /// Bridge to a peer's I2P destination.
 ///
 /// `target` is `<b32>.b32.i2p` or a full destination, optionally prefixed
@@ -148,12 +180,57 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
     let nick = format!("spore-{}", a.iter().map(|b| format!("{b:02x}")).collect::<String>());
 
     println!("  [i2p] iface {iface} opening SAM session on {sam}");
-    let _session = session_create(sam, &nick)?; // held open for the bridge's life
+    let session = session_create(sam, &nick)?; // must outlive every stream
     println!("  [i2p] iface {iface} dialling {dest}");
-    let mut s = stream_connect(sam, &nick, dest)?;
-    s.set_read_timeout(Some(Duration::from_millis(200)))?;
-    println!("  [i2p] iface {iface} stream up");
-    super::stream_link::run(hub, iface, rx, &mut s, "i2p")
+
+    let (sam, dest) = (sam.to_string(), dest.to_string());
+    super::stream_link::run_reconnecting(
+        hub,
+        iface,
+        rx,
+        move || {
+            let _keepalive = &session; // the session dies if this socket closes
+            let s = stream_connect(&sam, &nick, &dest)?;
+            s.set_read_timeout(Some(Duration::from_millis(200)))?;
+            println!("  [i2p] stream up");
+            Ok(s)
+        },
+        "i2p",
+    )
+}
+
+/// Accept inbound I2P streams: announce a destination and serve whoever dials.
+///
+/// Runs one peer at a time — SAM gives a fresh socket per caller, and this waits
+/// for the current one to finish before accepting the next. That is the right
+/// shape for a mesh link (a node needs *a* path, not many), and it keeps a single
+/// outbound queue rather than fanning writes across connections.
+pub fn run_accept(hub: Shared, iface: Iface, rx: Receiver<Forward>, sam_addr: &str) -> std::io::Result<()> {
+    let sam = if sam_addr.is_empty() { DEFAULT_SAM } else { sam_addr };
+    hub.with_node(|n| n.mtu = n.mtu.min(I2P_MTU));
+
+    let a = hub.addr();
+    let nick = format!("spore-{}", a.iter().map(|b| format!("{b:02x}")).collect::<String>());
+
+    println!("  [i2p] iface {iface} opening SAM session on {sam}");
+    let session = session_create(sam, &nick)?;
+    println!("  [i2p] iface {iface} accepting as session {nick}");
+
+    let sam = sam.to_string();
+    super::stream_link::run_reconnecting(
+        hub,
+        iface,
+        rx,
+        move || {
+            let _keepalive = &session;
+            let (s, peer) = stream_accept(&sam, &nick)?;
+            let short: String = peer.chars().take(16).collect();
+            println!("  [i2p] inbound from {short}…");
+            s.set_read_timeout(Some(Duration::from_millis(200)))?;
+            Ok(s)
+        },
+        "i2p",
+    )
 }
 
 #[cfg(test)]
@@ -215,6 +292,41 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("DUPLICATED_ID"), "got: {msg}");
         assert!(msg.contains("already in use"), "the MESSAGE field should survive: {msg}");
+    }
+
+    /// SAM announces the caller on a line of its own before any peer bytes.
+    /// Consuming exactly that line is the whole trick: one byte out and the
+    /// destination lands in the router as a malformed frame.
+    #[test]
+    fn accept_consumes_the_destination_line_and_nothing_else() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        let server = std::thread::spawn(move || {
+            let (c, _) = l.accept().unwrap();
+            let mut r = BufReader::new(c.try_clone().unwrap());
+            let mut w = c;
+            let mut line = String::new();
+            r.read_line(&mut line).unwrap();
+            w.write_all(b"HELLO REPLY RESULT=OK VERSION=3.1\n").unwrap();
+            let mut cmd = String::new();
+            r.read_line(&mut cmd).unwrap();
+            w.write_all(b"STREAM STATUS RESULT=OK\n").unwrap();
+            // A peer dials in: SAM sends its destination, then goes quiet.
+            w.write_all(b"PEERDESTINATIONBASE64==\n").unwrap();
+            std::thread::sleep(Duration::from_millis(150));
+            cmd.trim_end().to_string()
+        });
+
+        let (mut s, peer) = stream_accept(&addr, "spore-test").expect("accept");
+        let cmd = server.join().unwrap();
+        assert!(cmd.contains("STREAM ACCEPT"), "got {cmd}");
+        assert!(cmd.contains("ID=spore-test"), "the accept must join the session");
+        assert_eq!(peer, "PEERDESTINATIONBASE64==", "the caller is reported");
+
+        // Nothing of that line may remain: the next read is peer data or nothing.
+        s.set_read_timeout(Some(Duration::from_millis(120))).unwrap();
+        let mut spare = [0u8; 8];
+        assert_eq!(s.read(&mut spare).unwrap_or(0), 0, "destination line leaked into the stream");
     }
 
     #[test]

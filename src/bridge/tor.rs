@@ -121,10 +121,19 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
     };
 
     println!("  [tor] iface {iface} dialling {host}:{port} via {proxy}");
-    let mut s = socks5_connect(proxy, host, port)?;
-    s.set_read_timeout(Some(Duration::from_millis(200)))?;
-    println!("  [tor] iface {iface} circuit up");
-    super::stream_link::run(hub, iface, rx, &mut s, "tor")
+    let (proxy, host) = (proxy.to_string(), host.to_string());
+    super::stream_link::run_reconnecting(
+        hub,
+        iface,
+        rx,
+        move || {
+            let s = socks5_connect(&proxy, &host, port)?;
+            s.set_read_timeout(Some(Duration::from_millis(200)))?;
+            println!("  [tor] circuit up");
+            Ok(s)
+        },
+        "tor",
+    )
 }
 
 #[cfg(test)]

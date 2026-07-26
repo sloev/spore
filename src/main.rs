@@ -363,6 +363,7 @@ enum Spec {
     Ax25Serial(String),
     Tor(String),
     I2p(String),
+    I2pAccept(String),
     Copyparty(String),
     Http(u16),
     Audio,
@@ -465,6 +466,7 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             }),
             "tor" | "onion" if !v.is_empty() => Ok(Spec::Tor(v.to_string())),
             "i2p" if !v.is_empty() => Ok(Spec::I2p(v.to_string())),
+            "i2p-accept" => Ok(Spec::I2pAccept(v.to_string())),
             "copyparty" | "webdav" if !v.is_empty() => Ok(Spec::Copyparty(v.to_string())),
             "meshtastic-serial" | "mesh-serial" if !v.is_empty() => {
                 Ok(Spec::MeshtasticSerial(Some(v.to_string())))
@@ -485,6 +487,7 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "ax25" | "kiss" => Err("`ax25` needs a TNC (ax25: HOST:PORT, or a /dev path)".into()),
             "tor" | "onion" => Err("`tor` needs an onion (tor: abc…xyz.onion[:port])".into()),
             "i2p" => Err("`i2p` needs a destination (i2p: <b32>.b32.i2p)".into()),
+            "i2p-accept" => Ok(Spec::I2pAccept(String::new())),
             "copyparty" | "webdav" => Err("`copyparty` needs a URL (copyparty: http://host/bag/)".into()),
             "folder" => Err("`folder` needs a path (folder: DIR)".into()),
             "ssb" => Err("`ssb` needs a log directory (ssb: DIR)".into()),
@@ -608,6 +611,14 @@ fn run_config(cfg: Config) {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
                     if let Err(e) = spore::bridge::i2p::run(h, iface, rx, &target) {
+                        eprintln!("  [i2p] {e}");
+                    }
+                })
+            }
+            Spec::I2pAccept(sam) => {
+                let (iface, rx) = hub.register();
+                thread::spawn(move || {
+                    if let Err(e) = spore::bridge::i2p::run_accept(h, iface, rx, &sam) {
                         eprintln!("  [i2p] {e}");
                     }
                 })
