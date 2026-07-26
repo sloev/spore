@@ -1,5 +1,12 @@
 /target
 
+# Offline build inputs, produced by scripts/make-offline-bundle.sh. Machine
+# state, not repo content — see docs/CONTINUITY.md.
+/vendor/
+/.cargo/
+/spore-offline-*.tar.gz
+/spore-offline-*.tar.gz.sha256
+
 # Generated site + its build deps
 /_site/
 /site/node_modules/
