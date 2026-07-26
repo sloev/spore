@@ -51,6 +51,19 @@ hashes, and path learning binds only from *signed* frames. A hostile link can
 drop, delay, replay or reorder — all of which the router already survives — but
 it cannot forge, read a sealed payload, or make a node believe a false address.
 
+That last one is load-bearing and was, until recently, not actually enforced.
+Bridges learn `SPORE address → underlay address` by snooping, and both learning
+paths — `Neighbors::snoop` and the node's own path table — accepted the `SIGNED`
+**flag** as proof. A flag is one bit chosen by whoever wrote the frame. Copy a
+victim's *public* key into `src`, set the bit, attach 64 zero bytes, and the
+victim's address bound to your underlay address: every directed send for them
+unicast to you instead. Sealed payloads stayed unreadable, so this stole no
+content — it redirected delivery, which is the same guarantee by a different
+door. Both paths now verify the signature, and `Src::Short` (8 bytes of address,
+no key, nothing to verify *against*) teaches nothing at all. A bridge that
+declines to learn falls back to broadcast, which always reaches the peer; a
+bridge that learns a forged binding does not.
+
 What a bridge **can** do wrong is spend our resources. Every bridge parses input
 from something it does not control, and the failure mode is not a forged message
 but an out-of-memory. So the rule for every bridge in this repo is:
@@ -68,8 +81,24 @@ The limits, and where they live:
 | `copyparty` response | 8 MiB body, 16 KiB/line, 100 headers | A share can be compromised or simply broken. |
 | `i2p` control line | 8 KiB | Anything on port 7656 that streams without a newline. |
 | store adoption | 1 MiB/file | A spill directory is on disk, where anything can drop a file. |
+| `spool::MAX_SPOOL_FILE` | 1 MiB/file | A spool is written by someone else by definition — that is what a spool *is*. |
 
-Two properties worth stating because they are easy to lose:
+Two of these bounds are on a **read**, not on a size the sender declared, and the
+distinction is the point:
+
+- **`spool` stats the file and then caps the read anyway.** The size check is a
+  fast reject; it is not the bound. Between the `stat` and the `read` the mover
+  can replace or extend the file, so a plain `fs::read` would buffer whatever is
+  there at the later moment. The cap lives on the read itself; an over-cap file is
+  left for the next sweep, whose `stat` now sees the real size and clears it.
+- **`reticulum::run_udp` accepts datagrams only from the companion.** It is the
+  one datagram bridge that carries framing state *across* datagrams, so a frame
+  may be half-assembled when the next arrives. Where `udp::run_group` can ignore a
+  stranger's datagram as one bad envelope, here a stranger's bytes would interleave
+  into a frame the companion is midway through — corrupting a good frame rather
+  than merely adding a bad one. Single-sourcing the framer is what removes it.
+
+Two further properties worth stating because they are easy to lose:
 
 - **An overrun resynchronises rather than disconnecting.** A KISS frame that
   exceeds the cap is abandoned and the next delimiter starts a clean one; a
@@ -79,6 +108,34 @@ Two properties worth stating because they are easy to lose:
   double the memory cost by escaping everything.
 
 Each of these is covered by a test that fails if the bound is removed.
+
+### Deployer note: what a stamp has to cost
+
+`congestion::STAMP_QUOTA_BYPASS_BITS` is **16**. Mail stamped to at least that
+class skips the per-source quota (§10d) and a busy peer's backpressure (§10c);
+below it, mail still flows but is charged to its source's budget like anything
+else, and stamp still orders eviction and TX priority (§10.3).
+
+This was `stamp > 0`, which bounded nothing. A stamp is the leading zero bits of
+the envelope id, and the id is a hash, so class 1 costs about two tries and half
+of all envelopes have it by accident — measured, 12 of 20 arbitrary junk envelopes
+were exempt from the quota by luck alone. SPEC is explicit that "priority is
+bought, not claimed" (§2) and that a stamp is "proof of work" (§10); the exemption
+has to cost something for either sentence to be true.
+
+Consequences a deployer should know:
+
+- **A node running this is stricter than an older one.** It throttles low-class
+  stamped traffic that older relays pass. That is a local policy difference, not
+  a wire incompatibility — nothing about the envelope changed, and the two
+  interoperate.
+- **16 bits is ~65k tries**: milliseconds on a laptop, seconds on a
+  microcontroller. Affordable once for a genuinely urgent message, ruinous for a
+  flooder paying it per envelope. Raise it on fast networks; lower it (or set it
+  to 1) to restore the old permissive behaviour if you need bit-identical
+  admission against a 1.0 relay fleet.
+- **`sos` still outranks policy** by convention — that is a routing preference,
+  not a quota exemption, and is unaffected.
 
 ## TLS — deliberately not linked in
 
@@ -929,6 +986,15 @@ including the odd-length and rejected-ordinary-ping cases; the **runner** needs 
 raw socket, which needs `CAP_NET_RAW` and Linux, and cannot be exercised in CI —
 so it is a template whose framing is tested and whose socket call is not. Grant it
 without root: `sudo setcap cap_net_raw+ep ./spore`.
+
+One detail the template gets right because it is easy to get wrong: a raw
+`IPPROTO_ICMP` socket hands back the **IP header**, and that header is 20 bytes
+only when it carries no options. `ipv4_payload_offset` reads the IHL field instead
+of assuming 20 — otherwise every packet carrying record-route or timestamp options
+(exactly what a "diagnostics only" network is prone to adding, which is the kind of
+network this bridge exists for) would decode from four bytes off and fail the
+checksum, invisibly. IHL is also a number chosen by whoever sent the packet, so it
+is range-checked against the datagram rather than trusted as an index.
 
 The same pattern extends to the rest of the family, each differing only in *which*
 field carries the bytes, and each a raw-socket (often L2, often root) runner over

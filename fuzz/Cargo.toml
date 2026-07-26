@@ -1,0 +1,52 @@
+# Its own workspace, like android/jni, so the root build and `cargo test
+# --workspace` ignore it entirely: this crate needs nightly and libFuzzer, and
+# neither should become a requirement for building spore.
+[package]
+name = "spore-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.spore]
+path = ".."
+
+[profile.release]
+debug = true # keep symbols so a crash report names the frame
+
+[[bin]]
+name = "envelope_decode"
+path = "fuzz_targets/envelope_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "node_on_rx"
+path = "fuzz_targets/node_on_rx.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fragment_reassembly"
+path = "fuzz_targets/fragment_reassembly.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "armor_and_framing"
+path = "fuzz_targets/armor_and_framing.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "seal_open"
+path = "fuzz_targets/seal_open.rs"
+test = false
+doc = false

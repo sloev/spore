@@ -144,7 +144,7 @@ fn public_api_surface_is_frozen() {
 fn _frozen_node_api(n: &mut Node) {
     let _: Rx = n.on_rx(&[], 0 as Iface, None::<Addr>, 0u32);
     let _: Vec<Forward> = n.originate([0u8; 8], vec![], 0u32);
-    let _: Vec<Forward> = n.send([0u8; 8], vec![], 0u32);
+    let _: Result<Vec<Forward>, spore::TooLarge> = n.send([0u8; 8], vec![], 0u32);
     n.subscribe("t");
     n.set_source_quota(0u32);
     n.set_store_budget(0usize);

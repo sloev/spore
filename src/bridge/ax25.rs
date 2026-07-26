@@ -113,7 +113,7 @@ mod tests {
         }
         assert_eq!(hub.with_node(|n| n.mtu), AX25_PACLEN, "paclen must clamp the MTU");
 
-        hub.send(ZERO_DEST, b"cq cq de spore".to_vec());
+        hub.send(ZERO_DEST, b"cq cq de spore".to_vec()).unwrap();
         let frames = tnc.join().unwrap();
         assert!(!frames.is_empty(), "the TNC received nothing");
         let (e, _) = Envelope::decode(&frames[0]).expect("a real envelope arrived KISS-framed");

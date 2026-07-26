@@ -161,7 +161,9 @@ pub unsafe extern "C" fn spore_node_send(
     let mut d = [0u8; 8];
     d.copy_from_slice(std::slice::from_raw_parts(dest, 8));
     let pl = std::slice::from_raw_parts(payload, plen).to_vec();
-    let forwards = node.send(d, pl, now);
+    // An object past one fountain set returns 0, the same "nothing to send"
+    // signal the rest of this ABI uses; the JS side already treats 0 as empty.
+    let Ok(forwards) = node.send(d, pl, now) else { return 0 };
     pack(blob(forward_wires(forwards), Vec::new()))
 }
 

@@ -1,0 +1,52 @@
+name: fuzz
+
+# Fuzzing is slow and finds things on its own schedule, so it does not gate pull
+# requests — `tests/robustness.rs` is the fast, always-on version of this and
+# runs in the normal CI job. This is the deep pass: nightly, and on demand.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds to run each target"
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # one target crashing must not hide the others
+      matrix:
+        target:
+          - envelope_decode
+          - node_on_rx
+          - fragment_reassembly
+          - armor_and_framing
+          - seal_open
+    steps:
+      - uses: actions/checkout@v4
+      # libFuzzer needs nightly; this is the only place the project uses it.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+      - name: Fuzz ${{ matrix.target }}
+        working-directory: fuzz
+        run: |
+          secs="${{ github.event.inputs.seconds || 300 }}"
+          cargo fuzz run "${{ matrix.target }}" -- \
+            -max_total_time="$secs" -rss_limit_mb=2048
+      # A crash is the point of the job, so keep the input that caused it.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

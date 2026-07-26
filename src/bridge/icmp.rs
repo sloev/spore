@@ -102,6 +102,26 @@ pub fn decode_echo(pkt: &[u8]) -> Option<Vec<u8>> {
     Some(pkt[9..].to_vec())
 }
 
+/// Where the ICMP message starts in a raw IPv4 datagram, or `None` if this is not
+/// a well-formed IPv4 packet with something after the header.
+///
+/// A raw `IPPROTO_ICMP` socket hands us the IP header, whose length is the IHL
+/// field in 32-bit words — 20 bytes *only when there are no options*. Assuming 20
+/// silently loses every packet that carries options (record-route and timestamp
+/// are exactly what a "diagnostics only" network is prone to adding), because the
+/// misaligned bytes fail the checksum. IHL is also attacker-influenced, so it is
+/// range-checked against the datagram rather than trusted as an index.
+pub fn ipv4_payload_offset(pkt: &[u8]) -> Option<usize> {
+    let first = *pkt.first()?;
+    if first >> 4 != 4 {
+        return None; // not IPv4
+    }
+    let ihl = (first & 0x0f) as usize * 4;
+    // A header shorter than 20 is malformed; one at or past the end leaves no
+    // ICMP message to parse.
+    (20..pkt.len()).contains(&ihl).then_some(ihl)
+}
+
 /// Run SPORE over ICMP echo on a raw socket. **Linux, `CAP_NET_RAW` (or root).**
 ///
 /// A template, not a CI-tested runner: raw packets cannot be exercised in a
@@ -144,8 +164,8 @@ pub fn run(
         // Receive: strip the IP header the kernel prepends, then decode.
         let mut buf = [0u8; 2048];
         if let Ok((n, _)) = sock.recv_from(&mut buf) {
-            if n > 20 {
-                if let Some(env) = decode_echo(&buf[20..n]) {
+            if let Some(off) = ipv4_payload_offset(&buf[..n]) {
+                if let Some(env) = decode_echo(&buf[off..n]) {
                     hub.on_rx(iface, &env, None);
                 }
             }
@@ -197,6 +217,38 @@ mod tests {
         let mut pkt = encode_echo(b"burn the ledgers", false, 1, 1);
         pkt[10] ^= 0xff; // flip a payload byte, leave the checksum stale
         assert_eq!(decode_echo(&pkt), None, "a bad checksum must not decode");
+    }
+
+    #[test]
+    fn the_ip_header_length_is_read_not_assumed() {
+        let env = b"through the options";
+        let echo = encode_echo(env, true, 3, 4);
+
+        // No options: IHL 5 → a 20-byte header, the common case.
+        let mut plain = vec![0x45u8; 20];
+        plain.extend_from_slice(&echo);
+        assert_eq!(ipv4_payload_offset(&plain), Some(20));
+        assert_eq!(decode_echo(&plain[20..]).as_deref(), Some(&env[..]));
+
+        // With options: IHL 6 → a 24-byte header. Assuming 20 would hand
+        // decode_echo four bytes of IP option and lose the envelope.
+        let mut opts = vec![0x46u8; 24];
+        opts.extend_from_slice(&echo);
+        let off = ipv4_payload_offset(&opts).expect("a header with options is still IPv4");
+        assert_eq!(off, 24);
+        assert_eq!(decode_echo(&opts[off..]).as_deref(), Some(&env[..]), "options must not hide it");
+    }
+
+    #[test]
+    fn a_malformed_ip_header_cannot_steer_the_read() {
+        // IHL is attacker-influenced, so every value must be range-checked rather
+        // than used as an index.
+        assert_eq!(ipv4_payload_offset(&[]), None, "empty");
+        assert_eq!(ipv4_payload_offset(&[0x60; 40]), None, "not IPv4 (v6)");
+        assert_eq!(ipv4_payload_offset(&[0x40; 40]), None, "IHL 0 is below the minimum");
+        assert_eq!(ipv4_payload_offset(&[0x44; 40]), None, "IHL 4 is a 16-byte header");
+        assert_eq!(ipv4_payload_offset(&[0x4f; 40]), None, "IHL 15 runs past a 40-byte datagram");
+        assert_eq!(ipv4_payload_offset(&[0x45; 20]), None, "header fills it; no ICMP left");
     }
 
     #[test]

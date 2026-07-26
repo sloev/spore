@@ -97,12 +97,17 @@ impl Hub {
     /// Originate a signed app message to `dest` (all-zero = public) and flood it
     /// onto every interface. The convenience the daemon's `main` and the Android
     /// app both use to *send*.
-    pub fn send(&self, dest: Addr, data: Vec<u8>) {
+    ///
+    /// Forwards [`TooLarge`] from [`Node::send`] rather than hiding it: an object
+    /// past one fountain set is the caller's payload choice, and silently sending
+    /// nothing would be the worst of the available outcomes.
+    pub fn send(&self, dest: Addr, data: Vec<u8>) -> Result<(), crate::TooLarge> {
         let forwards = {
             let mut n = self.node.lock().unwrap();
-            n.send(dest, data, now())
+            n.send(dest, data, now())?
         };
         self.dispatch(forwards);
+        Ok(())
     }
 
     /// Register a sending interface: returns its iface id and the queue of
@@ -257,7 +262,7 @@ mod tests {
 
         // A message reaches both — a paced link is still a full member of the
         // mesh for everything that isn't bulk.
-        hub.send(ZERO_DEST, b"the dam holds".to_vec());
+        hub.send(ZERO_DEST, b"the dam holds".to_vec()).unwrap();
         assert_eq!(drained(&fast_rx), 1);
         assert_eq!(drained(&slow_rx), 1, "a slow link still carries messages");
 

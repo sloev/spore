@@ -44,6 +44,36 @@ pub const DEFAULT_SOURCE_QUOTA: u32 = 1024 * 1024;
 /// 16 orig_id + 1 index + 1 count. `chunk = mtu - FRAG_OVERHEAD`.
 const FRAG_OVERHEAD: usize = 36;
 
+/// Most chunks one fountain set can hold.
+///
+/// Structural, not policy: the fragment header carries `count` as a single wire
+/// byte (§1), so a set addresses at most 255 chunks of `mtu - FRAG_OVERHEAD`. An
+/// object past that needs the file/manifest layer, which is what that layer is
+/// for.
+pub const MAX_FOUNTAIN_CHUNKS: usize = 255;
+
+/// An object too large to carry as one fountain set — returned by
+/// [`Node::send`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooLarge {
+    /// Chunks the object would need at the MTU in force.
+    pub needed: usize,
+    /// Bytes per chunk at that MTU (`mtu - FRAG_OVERHEAD`).
+    pub chunk: usize,
+}
+
+impl core::fmt::Display for TooLarge {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "object needs {} chunks of {} B but one fountain set holds {}; \
+             use the file/manifest layer for objects this large",
+            self.needed, self.chunk, MAX_FOUNTAIN_CHUNKS
+        )
+    }
+}
+impl std::error::Error for TooLarge {}
+
 /// Datagrams are ephemeral: a short expiry keeps interactive session traffic
 /// out of anyone's long-term store.
 pub const SESSION_EXPIRY_SECS: u32 = 300;
@@ -263,7 +293,17 @@ impl Envelope {
 
 /// Selection bitmap for repair chunk `idx`: first `count` bits (MSB-first) of
 /// SHA-256(orig_id ‖ idx). Empty selection maps to data chunk (idx mod count).
+///
+/// `count` is caller-supplied and, on the receive path, comes off the wire. Zero
+/// is rejected here as well as at the caller: the fallback below is `idx % count`
+/// and a panic in a pure helper is a poor place to learn that. The digest holds
+/// 32 bytes, so `count` must also stay within the 256 bits it can index — the
+/// sender asserts `count <= 255` and the wire field is a `u8`, but the bound is
+/// checked rather than assumed, because both of those are facts about *callers*.
 fn selection(orig_id: &Id, idx: u8, count: usize) -> BitVec {
+    if count == 0 || count > 256 {
+        return BitVec::zeros(count.min(256));
+    }
     let mut h = Sha256::new();
     Digest::update(&mut h, orig_id);
     Digest::update(&mut h, [idx]);
@@ -361,6 +401,14 @@ impl Fountain {
             return self.done.clone();
         }
         let count = count as usize;
+        // `count` is one byte taken straight off the wire. A set of zero chunks
+        // cannot reassemble into anything, and believing it reaches
+        // `idx % count` below — a division by zero, which is a panic, which is
+        // the whole node. Any peer could send that: a public FRAGMENT with a
+        // zero count needs no key and no forgery.
+        if count == 0 {
+            return None;
+        }
         if self.count == 0 {
             self.count = count;
             self.chunk = chunk_bytes.len();
@@ -896,7 +944,16 @@ impl Node {
     ///
     /// One fountain set caps at ~`mtu`×255 (≈ 50 KB at defaults); larger objects
     /// belong to the manifest+swarm layer (files), not a single `send`.
-    pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Vec<Forward> {
+    /// Originate a signed DATA message, fountain-fragmenting it if it exceeds the
+    /// MTU.
+    ///
+    /// Returns [`TooLarge`] rather than panicking when the object needs more than
+    /// [`MAX_FOUNTAIN_CHUNKS`] chunks at the MTU in force. That ceiling is
+    /// structural, not policy — the fragment header carries `count` as one wire
+    /// byte — so exceeding it is a property of the payload the caller handed over:
+    /// an error to report, not a bug to abort on. For objects that large, use the
+    /// file/manifest layer, which exists for exactly this.
+    pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Result<Vec<Forward>, TooLarge> {
         let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, data);
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
@@ -912,19 +969,18 @@ impl Node {
         if wire.len() <= self.mtu {
             self.mark_seen(&e);
             self.store_put(&e);
-            return self.forward_intents(&e, NO_IFACE, now);
+            return Ok(self.forward_intents(&e, NO_IFACE, now));
         }
 
         // Too big for one envelope: fountain-fragment the signed wire form.
         let chunk = self.mtu.saturating_sub(FRAG_OVERHEAD).max(1);
         let count = wire.len().div_ceil(chunk);
-        assert!(
-            count <= 255,
-            "object too large for one fountain set (~mtu×255); use the file/manifest layer"
-        );
+        if count > MAX_FOUNTAIN_CHUNKS {
+            return Err(TooLarge { needed: count, chunk });
+        }
         let orig_id = e.id();
         // Data chunks 0..count, then a few repair chunks for loss resilience.
-        let repair = (count / 8 + 2).min(255 - count);
+        let repair = (count / 8 + 2).min(MAX_FOUNTAIN_CHUNKS - count);
         let indices: Vec<u8> = (0..(count + repair)).map(|i| i as u8).collect();
         let frags = fragment(&wire, chunk, e.hops, e.expiry, dest, orig_id, &indices);
 
@@ -934,7 +990,7 @@ impl Node {
             self.store_put(fr);
             forwards.append(&mut self.forward_intents(fr, NO_IFACE, now));
         }
-        forwards
+        Ok(forwards)
     }
 
     /// Originate a unicast message that asks the recipient for a delivery
@@ -1213,18 +1269,35 @@ impl Node {
 
         // Path learning: the first copy of a signed envelope raced every route
         // and won, so its src is reachable via the interface that delivered it.
-        if e.flags & fl::SIGNED != 0 {
-            if let Src::Full(pk) = &e.src {
-                self.paths.learn(addr_of(pk), iface, nbr, now);
-            }
+        //
+        // The signature is verified rather than believed from the flag, for the
+        // same reason `Neighbors::snoop` does it: the flag is attacker-chosen, so
+        // a forgery carrying a victim's public key would bind that victim's
+        // address to whatever interface the forgery arrived on. The cheap checks
+        // (dedup, expiry) have already run above, so a verify only happens for a
+        // frame that is new and still live — and it happens once, here, for both
+        // the path table and the quota attribution below.
+        let verified_src = match &e.src {
+            Src::Full(pk) if e.flags & fl::SIGNED != 0 && e.verify() => Some(addr_of(pk)),
+            _ => None,
+        };
+        if let Some(a) = verified_src {
+            self.paths.learn(a, iface, nbr, now);
         }
 
         // Per-source flood quota (§10): charge this envelope against its origin's
         // byte budget. Over budget, we still deliver it locally if it's for us,
         // but we do not amplify it — no reassembly hoarding, no store, no relay.
+        // Attribution has to be *earned*, not read off the frame. An address in
+        // `src` is a claim: `Src::Short` is 8 bytes with no key attached, and a
+        // `Src::Full` whose signature does not check out is no better. Charging
+        // either to the address it names lets anyone drain a chosen victim's
+        // budget until that victim's own mail stops being stored or relayed —
+        // a denial of service against a third party, bought with junk. So only a
+        // verified signature spends a named budget; everything else shares one
+        // bucket, which is still bounded but cannot be aimed.
         let src_addr = match &e.src {
-            Src::Full(pk) => Some(addr_of(pk)),
-            Src::Short(a) => Some(*a),
+            Src::Full(_) | Src::Short(_) => Some(verified_src.unwrap_or(congestion::UNATTRIBUTED)),
             Src::None => None,
         };
         let within_quota = match src_addr {
@@ -2189,6 +2262,12 @@ pub mod kiss;
 
 pub mod armor;
 
+/// Malformed-input robustness: every parser reachable from a stranger, fed
+/// arbitrary and near-miss bytes. Test-only, and in `src/` rather than `tests/`
+/// because the freeze guard treats all of `tests/` as frozen contract.
+#[cfg(test)]
+mod robustness;
+
 // ---------------------------------------------------------------------------
 // L4 Request/response — RPC as a convention (tags 0x02 request, 0x03 response).
 // A request is a signed DATA to a service (address or topic); the reply is a
@@ -2374,7 +2453,7 @@ mod tests {
     fn send_small_is_a_single_envelope() {
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
-        let f = a.send(topic_of("news"), b"hi".to_vec(), now);
+        let f = a.send(topic_of("news"), b"hi".to_vec(), now).unwrap();
         assert_eq!(f.len(), 1, "a small payload must not fragment");
     }
 
@@ -2385,7 +2464,7 @@ mod tests {
         let mut b = Node::new("b", &["news"]);
 
         let payload = vec![0x5Au8; 5000]; // well over one MTU
-        let forwards = a.send(topic_of("news"), payload.clone(), now);
+        let forwards = a.send(topic_of("news"), payload.clone(), now).unwrap();
         assert!(forwards.len() > 1, "a large payload must fragment into many sends");
 
         // Flood every fragment across the A—B link.
@@ -2410,7 +2489,7 @@ mod tests {
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
         let mut c = Node::new("c", &[]); // relay: no matching topic
-        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now);
+        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now).unwrap();
 
         let mut relayed = 0;
         for f in &forwards {
@@ -2766,6 +2845,119 @@ mod tests {
     }
 
     #[test]
+    fn a_forged_signature_cannot_bind_a_victims_address() {
+        // The attack the signature check exists to stop. Nothing secret is
+        // needed: a public key is public, and the SIGNED flag is one bit.
+        let now = 1_700_000_000;
+        let mut nbrs: bridge::Neighbors<u32> = bridge::Neighbors::new(3600);
+        let victim = Node::new("victim", &[]);
+
+        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec());
+        forged.src = Src::Full(victim.sk.verifying_key().to_bytes());
+        forged.flags |= fl::SIGNED;
+        forged.sig = Some([0u8; 64]);
+        assert!(!forged.verify(), "the forgery is not actually signed");
+
+        assert_eq!(nbrs.snoop(&forged.wire(), 666u32, now), None, "must teach nothing");
+        assert_eq!(
+            nbrs.resolve(&victim.addr, now),
+            None,
+            "a directed send must not be unicast to the forger"
+        );
+    }
+
+    #[test]
+    fn a_short_source_is_a_claim_not_evidence() {
+        // SRC8 carries an 8-byte address and no key, so there is nothing to
+        // verify against — anyone can name anyone. It must not bind.
+        let now = 1_700_000_000;
+        let mut nbrs: bridge::Neighbors<u32> = bridge::Neighbors::new(3600);
+        let victim = Node::new("victim", &[]);
+
+        let mut short = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"y".to_vec());
+        short.src = Src::Short(victim.addr);
+        short.flags |= fl::SIGNED | fl::SRC8;
+        short.sig = Some([0u8; 64]);
+
+        assert_eq!(nbrs.snoop(&short.wire(), 777u32, now), None);
+        assert_eq!(nbrs.resolve(&victim.addr, now), None);
+    }
+
+    #[test]
+    fn path_learning_also_refuses_a_forged_signature() {
+        // The same forgery aimed at the node's own path table: it would bind the
+        // victim to whichever interface the forgery arrived on.
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+        let victim = Node::new("victim", &[]);
+
+        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"z".to_vec());
+        forged.src = Src::Full(victim.sk.verifying_key().to_bytes());
+        forged.flags |= fl::SIGNED;
+        forged.sig = Some([0u8; 64]);
+
+        n.on_rx(&forged.wire(), 7, None, now);
+        assert!(n.paths.fresh(&victim.addr, now).is_none(), "no path learned from a forgery");
+
+        // ...while a genuinely signed envelope from the same node still teaches.
+        let mut real = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"z".to_vec());
+        real.sign(&victim.sk);
+        n.on_rx(&real.wire(), 7, None, now);
+        assert!(n.paths.fresh(&victim.addr, now).is_some(), "a real signature still learns");
+    }
+
+    #[test]
+    fn a_forged_source_cannot_spend_a_victims_quota() {
+        // Attacker sprays unstamped junk that merely *names* the victim. If that
+        // charged the victim's bucket, the victim's own mail would stop being
+        // relayed — a denial of service against a third party, bought with junk.
+        let now = 1_700_000_000;
+        let mut relay = Node::new("relay", &[]);
+        relay.set_source_quota(300);
+        let mut victim = Node::new("victim", &[]);
+
+        for i in 0..40u8 {
+            let mut junk = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, vec![i; 60]);
+            junk.src = Src::Short(victim.addr);
+            junk.flags |= fl::SIGNED | fl::SRC8; // src is only parsed when SIGNED
+            junk.sig = Some([0u8; 64]);
+            relay.on_rx(&junk.wire(), 1, None, now);
+        }
+
+        // The victim's genuinely signed mail must still be relayed.
+        let fwds = victim.originate(ZERO_DEST, b"let me through".to_vec(), now);
+        let wire = fwd_bytes(&fwds[0]);
+        let rx = relay.on_rx(&wire, 2, None, now);
+        assert!(!rx.forwards.is_empty(), "a forgery must not consume the victim's budget");
+    }
+
+    #[test]
+    fn a_free_stamp_does_not_buy_a_quota_exemption() {
+        // A stamp is leading zero bits of a hash, so class 1 costs ~2 tries and
+        // half of all envelopes have it by accident. If `stamp > 0` exempted mail
+        // from the quota, §10 would bound nothing at all.
+        let now = 1_700_000_000;
+        let mut q = congestion::Quotas::new(100);
+        let src = [7u8; 8];
+
+        // Spend past the bucket's burst with class-1 mail. If class 1 were exempt
+        // every one of these would pass, however many were sent.
+        let mut admitted = 0;
+        for _ in 0..100 {
+            if q.admit(src, 100, 1, now) {
+                admitted += 1;
+            }
+        }
+        assert!(admitted < 100, "class 1 is not proof of work and must be charged");
+        assert!(!q.admit(src, 100, 1, now), "and once the budget is spent it is refused");
+
+        // ...while a genuinely mined stamp still passes freely, on the same
+        // exhausted bucket, which is what "priority is bought" means.
+        assert!(q.admit(src, 100, congestion::STAMP_QUOTA_BYPASS_BITS, now), "real work still buys it");
+        assert!(q.admit(src, 5000, 255, now), "and the highest class is never throttled");
+    }
+
+    #[test]
     fn neighbors_snoop_resolve_and_expire() {
         let now = 1_700_000_000;
         // U here is a stand-in underlay address (e.g. a Meshtastic node number).
@@ -2780,6 +2972,16 @@ mod tests {
         // Unsigned frames must not populate the table (can't verify the source).
         let unsigned = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec()).wire();
         assert_eq!(nbrs.snoop(&unsigned, 99u32, now), None);
+
+        // Nor may a frame that merely *claims* to be signed. Setting the flag is
+        // free, so the signature itself has to be checked — see the two forgery
+        // tests below, which is where that is proven.
+        let mut liar = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec());
+        liar.src = Src::Full(a.sk.verifying_key().to_bytes());
+        liar.flags |= fl::SIGNED;
+        liar.sig = Some([0u8; 64]);
+        assert_eq!(nbrs.snoop(&liar.wire(), 98u32, now), None);
+        assert_eq!(nbrs.resolve(&a.addr, now), Some(42), "the real binding is untouched");
 
         // Unknown address -> None -> the bridge would broadcast.
         assert_eq!(nbrs.resolve(&[9u8; 8], now), None);
@@ -3291,10 +3493,13 @@ mod tests {
         assert!(!tb.allow(80, 0), "same second: out of budget");
         assert!(tb.allow(80, 5), "refilled after 5 s");
 
-        // (c) Backpressure: idle admits all; busy drops unstamped; stamped rides.
+        // (c) Backpressure: idle admits all; busy drops unstamped; *mined* mail
+        // rides. A low class is not mined — class 3 is eight hashes' work — so it
+        // is throttled like anything else; only STAMP_QUOTA_BYPASS_BITS buys the pass.
         assert!(admit(0, 0, 200));
         assert!(!admit(255, 0, 100));
-        assert!(admit(255, 3, 100), "stamped mail is always admitted");
+        assert!(!admit(255, 3, 100), "a nearly-free stamp must not dodge backpressure");
+        assert!(admit(255, congestion::STAMP_QUOTA_BYPASS_BITS, 100), "real work rides");
     }
 
     #[test]

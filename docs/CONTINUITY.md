@@ -6,7 +6,10 @@ survivor. This document is about making the *software* behave the same way: so
 that any one copy — a repository clone, a single HTML file, a printed booklet, a
 scanned code, a message typed off paper — carries enough to understand the
 system, prove it's authentic, rebuild a running node, and reproduce the other
-copies. No step here needs a server, a package registry, or a working internet.
+copies. No step here needs a server or a working internet — with one honest
+exception, called out where it applies: building the Rust daemon needs its
+dependencies vendored first, which is one command run while you still have a
+registry (see "Only one laptop, no internet").
 
 Three properties we design for:
 
@@ -36,7 +39,7 @@ Concrete artifacts that already carry the node, ranked by how little they assume
 |---|---|---|
 | **Single-file HTML node** (`web/spore-standalone.html`) | a browser | a full node, offline, from one file — no install, no network |
 | **Seed Sheet** (`web/spore-seedsheet.html`, printed) | a camera + patience | scan any ~K of N QR codes to recover the reimplementation guide; a torn sheet still works |
-| **Repo clone** | a Rust toolchain | build the daemon + all bridges + bindings, offline |
+| **Repo clone** | a Rust toolchain + `vendor/` (one command, while online) | build the daemon + all bridges + bindings, offline |
 | **The spec** (`docs/SPEC.md`) + by-hand examples | pen, paper, patience | reimplement a compatible node in any language |
 | **Pure-Python T0 node** (`reference/spore_t0.py`) | Python 3 | receive + verify public messages, no packages, no toolchain |
 | **An armored envelope** (`~S1.…~`) | a human who can type | inject one message into a node from paper or voice |
@@ -86,9 +89,29 @@ on itself.
 <details>
 <summary>Only one laptop, no internet</summary>
 
-A repo clone plus a Rust toolchain rebuilds everything offline — the build vendors
-its dependencies and needs no registry. Verify what you rebuilt against the printed
-/ signed hashes (below). One machine can then seed others by folder sync (a USB
+A repo clone plus a Rust toolchain rebuilds everything offline — **once you have
+vendored the dependencies**, which is one command you must run *before* you lose
+the network:
+
+```sh
+./scripts/make-offline-bundle.sh        # writes vendor/ + .cargo/config.toml
+./scripts/make-offline-bundle.sh --tar  # ...and a tarball + sha256 to carry
+```
+
+Be precise about what a clone does and does not carry. `Cargo.lock` is committed,
+so the *versions* are pinned and a rebuild resolves identically — but a lockfile
+names crates, it does not contain them. Without `vendor/`, `cargo build` on a
+machine that has never fetched these crates fails at the first dependency, and it
+fails at resolution, before anything compiles. The vendor directory is ~10 MB of
+third-party source and is deliberately **not** committed, so the repo stays small
+enough for the media described above; the script is how you convert a clone into
+an offline-buildable one while you still can. After it, `cargo build --offline`
+succeeds with an empty `CARGO_HOME`.
+
+The other three artefacts in the table have no such step: the single-file HTML
+node, the printed spec and the Seed Sheet are self-contained as they stand.
+
+Verify what you rebuilt against the printed / signed hashes (below). One machine can then seed others by folder sync (a USB
 stick is a bridge), by sound, or by handing over the single-file node.
 </details>
 
