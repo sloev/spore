@@ -32,6 +32,7 @@ Nothing here changes the frozen 1.0 wire format. Where a fix changes *behaviour*
 | [S-008](#s-008) | Frame corruption / injection | Medium | ✅ | ✅ | ✅ | no |
 | [S-009](#s-009) | Silent packet loss | Low | ✅ | ✅ | ✅ | no |
 | [S-010](#s-010) | False continuity claim | Low | ✅ | ✅ | n/a | no |
+| [S-011](#s-011) | Public API panic | Low | ✅ | ✅ | ✅ | yes (`send` returns `Result`) |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -316,6 +317,39 @@ third-party source would contradict the size argument the same document makes.
 
 ---
 
+## S-011
+
+**`send` aborted the process on an oversized object.** Low (local input, not
+remote). `src/lib.rs` — `Node::send`.
+
+**Root cause.** `assert!(count <= 255, ...)`. The fountain header carries `count`
+as one wire byte, so a set addresses at most 255 chunks; past that, `send`
+panicked.
+
+**Impact.** Not remotely triggerable — `send` is called by the local application
+with its own data — so this is API quality rather than an attack. But a library
+that aborts the host process because a payload was big is a poor contract, and the
+size often is not the caller's to choose (a file picker, a received blob, a user
+paste).
+
+**Patch.** `send` now returns `Result<Vec<Forward>, TooLarge>`, and `TooLarge`
+reports the chunks needed, the chunk size in force, and a `Display` that names the
+file/manifest layer. `Hub::send` forwards the error rather than swallowing it —
+silently sending nothing would be the worst available outcome. The wasm and JNI
+entry points return their existing "nothing sent" signal (0).
+
+**Frozen interface.** **Yes** — `tests/api_freeze.rs` pinned `send` at
+`-> Vec<Forward>`, and that assertion is updated. The wire format is untouched:
+`gen_vectors` output is byte-identical, so this is a Rust API break with no
+protocol consequence. Landed under `allow-frozen-change` as a deliberate decision
+now that the project has no downstream users; the first attempt at this was an
+additive `try_send` alongside a still-panicking `send`, which was a worse API kept
+only to respect a constraint that turned out not to bind.
+
+**Test.** `an_oversized_object_is_an_error_not_a_panic`.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -336,8 +370,6 @@ because two external reviews asserted several of these as defects.
 
 Carried deliberately, not overlooked.
 
-- **`send` panics** on objects needing more than 255 fountain chunks — a public
-  API that aborts on input size. Backlog item; may need API evolution.
 - **`Cargo.lock` is version 4** while the dependency pins claim Rust 1.75
   compatibility. The MSRV story and the lockfile disagree, which matters most for
   the offline path S-010 just fixed.

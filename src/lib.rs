@@ -44,6 +44,36 @@ pub const DEFAULT_SOURCE_QUOTA: u32 = 1024 * 1024;
 /// 16 orig_id + 1 index + 1 count. `chunk = mtu - FRAG_OVERHEAD`.
 const FRAG_OVERHEAD: usize = 36;
 
+/// Most chunks one fountain set can hold.
+///
+/// Structural, not policy: the fragment header carries `count` as a single wire
+/// byte (§1), so a set addresses at most 255 chunks of `mtu - FRAG_OVERHEAD`. An
+/// object past that needs the file/manifest layer, which is what that layer is
+/// for.
+pub const MAX_FOUNTAIN_CHUNKS: usize = 255;
+
+/// An object too large to carry as one fountain set — returned by
+/// [`Node::send`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooLarge {
+    /// Chunks the object would need at the MTU in force.
+    pub needed: usize,
+    /// Bytes per chunk at that MTU (`mtu - FRAG_OVERHEAD`).
+    pub chunk: usize,
+}
+
+impl core::fmt::Display for TooLarge {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "object needs {} chunks of {} B but one fountain set holds {}; \
+             use the file/manifest layer for objects this large",
+            self.needed, self.chunk, MAX_FOUNTAIN_CHUNKS
+        )
+    }
+}
+impl std::error::Error for TooLarge {}
+
 /// Datagrams are ephemeral: a short expiry keeps interactive session traffic
 /// out of anyone's long-term store.
 pub const SESSION_EXPIRY_SECS: u32 = 300;
@@ -914,7 +944,16 @@ impl Node {
     ///
     /// One fountain set caps at ~`mtu`×255 (≈ 50 KB at defaults); larger objects
     /// belong to the manifest+swarm layer (files), not a single `send`.
-    pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Vec<Forward> {
+    /// Originate a signed DATA message, fountain-fragmenting it if it exceeds the
+    /// MTU.
+    ///
+    /// Returns [`TooLarge`] rather than panicking when the object needs more than
+    /// [`MAX_FOUNTAIN_CHUNKS`] chunks at the MTU in force. That ceiling is
+    /// structural, not policy — the fragment header carries `count` as one wire
+    /// byte — so exceeding it is a property of the payload the caller handed over:
+    /// an error to report, not a bug to abort on. For objects that large, use the
+    /// file/manifest layer, which exists for exactly this.
+    pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Result<Vec<Forward>, TooLarge> {
         let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, data);
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
@@ -930,19 +969,18 @@ impl Node {
         if wire.len() <= self.mtu {
             self.mark_seen(&e);
             self.store_put(&e);
-            return self.forward_intents(&e, NO_IFACE, now);
+            return Ok(self.forward_intents(&e, NO_IFACE, now));
         }
 
         // Too big for one envelope: fountain-fragment the signed wire form.
         let chunk = self.mtu.saturating_sub(FRAG_OVERHEAD).max(1);
         let count = wire.len().div_ceil(chunk);
-        assert!(
-            count <= 255,
-            "object too large for one fountain set (~mtu×255); use the file/manifest layer"
-        );
+        if count > MAX_FOUNTAIN_CHUNKS {
+            return Err(TooLarge { needed: count, chunk });
+        }
         let orig_id = e.id();
         // Data chunks 0..count, then a few repair chunks for loss resilience.
-        let repair = (count / 8 + 2).min(255 - count);
+        let repair = (count / 8 + 2).min(MAX_FOUNTAIN_CHUNKS - count);
         let indices: Vec<u8> = (0..(count + repair)).map(|i| i as u8).collect();
         let frags = fragment(&wire, chunk, e.hops, e.expiry, dest, orig_id, &indices);
 
@@ -952,7 +990,7 @@ impl Node {
             self.store_put(fr);
             forwards.append(&mut self.forward_intents(fr, NO_IFACE, now));
         }
-        forwards
+        Ok(forwards)
     }
 
     /// Originate a unicast message that asks the recipient for a delivery
@@ -2415,7 +2453,7 @@ mod tests {
     fn send_small_is_a_single_envelope() {
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
-        let f = a.send(topic_of("news"), b"hi".to_vec(), now);
+        let f = a.send(topic_of("news"), b"hi".to_vec(), now).unwrap();
         assert_eq!(f.len(), 1, "a small payload must not fragment");
     }
 
@@ -2426,7 +2464,7 @@ mod tests {
         let mut b = Node::new("b", &["news"]);
 
         let payload = vec![0x5Au8; 5000]; // well over one MTU
-        let forwards = a.send(topic_of("news"), payload.clone(), now);
+        let forwards = a.send(topic_of("news"), payload.clone(), now).unwrap();
         assert!(forwards.len() > 1, "a large payload must fragment into many sends");
 
         // Flood every fragment across the A—B link.
@@ -2451,7 +2489,7 @@ mod tests {
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
         let mut c = Node::new("c", &[]); // relay: no matching topic
-        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now);
+        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now).unwrap();
 
         let mut relayed = 0;
         for f in &forwards {

@@ -195,7 +195,7 @@ fn fragment_reassembly_survives_hostile_chunks() {
     let now = 1_700_000_000;
     let mut sender = Node::new("sender", &[]);
     sender.mtu = 128;
-    let fwds = sender.send(ZERO_DEST, vec![0xA5; 4000], now);
+    let fwds = sender.send(ZERO_DEST, vec![0xA5; 4000], now).expect("4 kB fits one set at mtu 128");
     let frags: Vec<Vec<u8>> = fwds
         .into_iter()
         .map(|f| {
@@ -256,4 +256,27 @@ fn a_zero_count_fragment_does_not_kill_the_node() {
             let _ = node.on_rx(&e.wire(), 1, None, now);
         }
     }
+}
+
+#[test]
+fn an_oversized_object_is_an_error_not_a_panic() {
+    // `send` used to assert here. The ceiling is structural — the fragment
+    // header's `count` is one wire byte — so exceeding it is a fact about the
+    // payload the caller passed, which is an error to report rather than a bug
+    // to abort on.
+    let now = 1_700_000_000;
+    let mut n = Node::new("sender", &[]);
+    n.mtu = 128;
+    let chunk = 128 - 36;
+
+    // Comfortably past 255 chunks at this MTU.
+    let huge = vec![0u8; chunk * 300];
+    let err = n.send(ZERO_DEST, huge, now).expect_err("must not be sent as one set");
+    assert!(err.needed > MAX_FOUNTAIN_CHUNKS, "reports what it would have needed");
+    assert_eq!(err.chunk, chunk, "and the chunk size in force");
+    assert!(err.to_string().contains("file/manifest"), "and points at the layer that handles it: {err}");
+
+    // Just under the ceiling still goes out.
+    let ok = vec![0u8; chunk * 200];
+    assert!(n.send(ZERO_DEST, ok, now).is_ok(), "an object inside one set still sends");
 }

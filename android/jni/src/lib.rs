@@ -169,7 +169,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSend(
     }
     let mut addr = [0u8; 8];
     addr.copy_from_slice(&d);
-    r.hub.send(addr, p);
+    let _ = r.hub.send(addr, p); // oversized payloads are the caller's to avoid
 }
 
 /// Start the primary-subnet UDP broadcast bridge on a background thread. `port`
@@ -428,7 +428,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSendCounted(
     }
     let mut addr = [0u8; 8];
     addr.copy_from_slice(&d);
-    let forwards = r.hub.with_node(|n| n.send(addr, p, spore::bridge::hub::now()));
+    let Ok(forwards) = r.hub.with_node(|n| n.send(addr, p, spore::bridge::hub::now())) else {
+        return 0; // too large for one fountain set
+    };
     let count = forwards.len() as jint;
     r.hub.originate(forwards);
     count
