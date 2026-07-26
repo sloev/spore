@@ -37,6 +37,7 @@ than fixing a crash, it says so explicitly.
 | [S-010](#s-010) | False continuity claim | Low | ✅ | ✅ | n/a | no |
 | [S-011](#s-011) | Public API panic | Low | ✅ | ✅ | ✅ | yes (`send` returns `Result`) |
 | [S-012](#s-012) | Reflection / amplification | **High** | ✅ | ✅ | ✅ | yes (per-link WANT budget) |
+| [S-013](#s-013) | Resource exhaustion (10 tables) | **High** | ✅ | ✅ | ✅ | yes (eviction under pressure) |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -395,6 +396,54 @@ offered on the next round — so nothing is lost, only paced.
 
 ---
 
+## S-013
+
+**Ten tables a peer can grow, none of them bounded.** High. `src/lib.rs` — `Node`.
+
+**Root cause.** `seen`, `frags`, `peer_prekeys`, `peer_busy`, `peer_names`,
+`manifests`, `acked`, `rpc_inbox`, `feed_inbox` had no cap, no timeout and no
+eviction of any kind — zero prune operations between them. One systemic omission
+rather than ten separate oversights.
+
+**Exploit.** `frags` is the cheapest and worst: one fragment per distinct
+`orig_id`, claiming a count it never satisfies, opens a `Fountain` holding real
+chunk bytes forever. Unsigned fragments are `Src::None`, which the quota admits
+*unconditionally*, so this costs the sender nothing at all. The peer tables need
+valid signatures, which is not a bound — an Ed25519 keypair is nearly free, the
+same lesson as S-006. `rpc_inbox` and `feed_inbox` are plain `Vec`s the
+application is expected to drain; if it does not, a peer decides how much memory
+the process uses.
+
+**Reproduced.** 20,000 incomplete fountain sets and 20,000 dedup entries from
+unsigned traffic; 3,000 peer records from minted identities; and **all of it still
+held 10 million seconds later** — nothing collected anything at any point.
+
+**Patch.** One routine, `enforce_bounds`, called once per ingest. Expiry is
+time-based and does not need to be immediate, so it runs at most every
+`SWEEP_INTERVAL_SECS` (60): dedup entries past their retain-until go, and fountain
+sets idle beyond `PARTIAL_TIMEOUT_SECS` (300) are collected. Hard caps are checked
+every ingest, since a flood crosses a cap in far less than a minute, but only cost
+anything when a table is actually over: `MAX_SEEN` (65536), `MAX_PARTIAL_OBJECTS`
+(256), `MAX_PEERS` (4096), `MAX_MANIFESTS` (1024), `MAX_ACKED` (8192), `MAX_INBOX`
+(1024).
+
+Victim choice is deliberate where it matters. Dedup evicts nearest-to-expiry
+first, so ids most likely still in flight survive. Partial objects evict oldest,
+least likely to still have chunks coming. Inboxes drop from the front. For the
+peer and manifest tables any survivor set is equally correct, so those trim
+arbitrarily — and not attacker-chosen, since `std`'s hasher is seeded per map.
+
+**Behaviour change.** Under pressure the node forgets rather than growing. Every
+eviction degrades a capability instead of breaking one: a forgotten peer
+re-announces, a dropped partial object is re-fetched, an evicted dedup entry costs
+one duplicate relay. Nothing here can make the node *wrong*, only forgetful.
+
+**Tests.** `incomplete_fountain_sets_cannot_accumulate`,
+`every_peer_grown_table_has_a_ceiling`,
+`dedup_evicts_the_nearest_to_expiring_first`.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -418,8 +467,6 @@ Carried deliberately, not overlooked.
 - **`Cargo.lock` is version 4** while the dependency pins claim Rust 1.75
   compatibility. The MSRV story and the lockfile disagree, which matters most for
   the offline path S-010 just fixed.
-- **`seen`, `frags`, ack and rpc/feed tables** need the S-006 treatment: bounds
-  and timeouts, not just TTLs.
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
 - **Bridges never audited**: `ssb`, `foldersync`, `csma`, `meshtastic`, `audio`,

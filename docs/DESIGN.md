@@ -495,9 +495,11 @@ All four live in `congestion` as plain primitives:
   while nothing new is heard and snaps back to the minimum on novelty, so a quiet
   mesh goes quiet. The TCP bridge paces its beacon with one.
 - **(c) Backpressure** (`admit`) — a peer advertises a `busy` byte (store fill) in
-  its ANNOUNCE; neighbours admit sends with probability (255−busy)/255 and always
-  let stamped (proof-of-work) mail through. `Node::busy` produces it, `peer_busy`
-  reads a neighbour's.
+  its ANNOUNCE; neighbours admit sends with probability (255−busy)/255 and let
+  *mined* mail through regardless — at least `STAMP_QUOTA_BYPASS_BITS` (16) leading
+  zero bits, not merely a non-zero stamp, since class 1 is about two hashes' work
+  and would let anyone ignore a busy peer for free. `Node::busy` produces the byte,
+  `peer_busy` reads a neighbour's.
 - **(d) Exponential backoff** (`Backoff`) — FLOOD retries at 30 s, doubling, capped
   at 1 h, at most 5 attempts; powers receipt resend above.
 
