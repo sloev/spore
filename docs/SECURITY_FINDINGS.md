@@ -322,7 +322,7 @@ resolution on the first dependency: `error: no matching package named blake2 fou
 `scripts/make-offline-bundle.sh` vendors the dependencies, writes the config that
 actually activates `vendor/`, and verifies itself with `cargo build --offline`.
 Confirmed with an empty `CARGO_HOME` and a fresh target directory: a cold compile
-of every dependency, no registry. `vendor/` stays gitignored, because ~10 MB of
+of every dependency, no registry. `vendor/` stays gitignored, because ~30 MB of
 third-party source would contradict the size argument the same document makes.
 
 ---

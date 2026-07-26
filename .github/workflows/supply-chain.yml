@@ -1,0 +1,91 @@
+name: supply chain
+
+# The checks that guard what SPORE *depends on* rather than what it does.
+#
+# A separate workflow rather than jobs inside ci.yml, which the freeze guard's
+# regex covers — these are additive and should not need a major-version label to
+# adjust.
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+  schedule:
+    # Advisories land on their own schedule, not on ours. A dependency that was
+    # clean when merged can stop being clean without anybody touching the repo,
+    # so this runs daily as well as per-PR.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-audit
+      - name: Known vulnerabilities in the dependency tree
+        run: cargo audit --deny warnings
+
+  policy:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-deny
+      # Licences, banned crates, wildcard versions and source registries — see
+      # deny.toml for why each matters to a project that promises an offline
+      # rebuild from a vendored bundle.
+      - name: Licence and source policy
+        run: cargo deny check
+
+  bindings:
+    name: bindings in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `bindings/generate.py` produces spore.h and the Python/Go/JS wrappers from
+      # spec.json. Nothing checked that the committed output still matched, so
+      # spec.json or src/ffi.rs could drift from the wrappers silently — and
+      # spore.h is a frozen file, which makes a silent drift worse than a loud one.
+      - name: Regenerate and diff
+        run: |
+          python3 bindings/generate.py
+          if ! git diff --exit-code -- bindings/; then
+            echo "::error::bindings/ is stale — run: python3 bindings/generate.py"
+            exit 1
+          fi
+          echo "bindings match spec.json"
+
+  offline:
+    name: offline bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # `CONTINUITY.md` promises a rebuild with no registry, and S-010 was that
+      # promise being false. `make-offline-bundle.sh` made it true, but a script
+      # that only ever ran once on one machine is a claim again — so run it here,
+      # and let the build prove itself the way the document says it should.
+      - name: Vendor dependencies and prove the build needs no registry
+        run: ./scripts/make-offline-bundle.sh --tar
+      - name: Cold build with an empty CARGO_HOME
+        # The real test: not "offline works here", but "offline works somewhere
+        # that has never fetched these crates".
+        env:
+          CARGO_HOME: ${{ runner.temp }}/empty-cargo-home
+        run: cargo build --offline --quiet
+      - name: Publish the bundle and its checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: spore-offline-bundle
+          path: |
+            spore-offline-*.tar.gz
+            spore-offline-*.tar.gz.sha256
+          if-no-files-found: error

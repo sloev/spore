@@ -109,7 +109,7 @@ Be precise about what a clone does and does not carry. `Cargo.lock` is committed
 so the *versions* are pinned and a rebuild resolves identically — but a lockfile
 names crates, it does not contain them. Without `vendor/`, `cargo build` on a
 machine that has never fetched these crates fails at the first dependency, and it
-fails at resolution, before anything compiles. The vendor directory is ~10 MB of
+fails at resolution, before anything compiles. The vendor directory is ~30 MB of
 third-party source and is deliberately **not** committed, so the repo stays small
 enough for the media described above; the script is how you convert a clone into
 an offline-buildable one while you still can. After it, `cargo build --offline`

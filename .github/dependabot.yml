@@ -1,0 +1,31 @@
+# Dependabot: propose dependency updates so they arrive as reviewable PRs rather
+# than as a surprise the next time someone regenerates the lockfile.
+#
+# Two things here are specific to this project. Updates are grouped, because a
+# dependency-light tree produces few enough PRs that one batch is easier to reason
+# about than six. And the MSRV job (msrv.yml) plus cargo-deny run on every
+# Dependabot PR, so an update that breaks the Rust 1.75 floor or introduces a new
+# licence fails before it can be merged — which is the actual protection, since
+# S-014 was exactly a transitive dependency quietly outgrowing that floor.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        patterns: ["*"]
+    # The fuzz crate is its own workspace and nightly-only; it does not gate
+    # anything, so it does not need its own PR stream.
+    ignore:
+      - dependency-name: libfuzzer-sys
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
