@@ -1219,21 +1219,29 @@ impl Node {
         // a forgery carrying a victim's public key would bind that victim's
         // address to whatever interface the forgery arrived on. The cheap checks
         // (dedup, expiry) have already run above, so a verify only happens for a
-        // frame that is new and still live.
-        if e.flags & fl::SIGNED != 0 {
-            if let Src::Full(pk) = &e.src {
-                if e.verify() {
-                    self.paths.learn(addr_of(pk), iface, nbr, now);
-                }
-            }
+        // frame that is new and still live — and it happens once, here, for both
+        // the path table and the quota attribution below.
+        let verified_src = match &e.src {
+            Src::Full(pk) if e.flags & fl::SIGNED != 0 && e.verify() => Some(addr_of(pk)),
+            _ => None,
+        };
+        if let Some(a) = verified_src {
+            self.paths.learn(a, iface, nbr, now);
         }
 
         // Per-source flood quota (§10): charge this envelope against its origin's
         // byte budget. Over budget, we still deliver it locally if it's for us,
         // but we do not amplify it — no reassembly hoarding, no store, no relay.
+        // Attribution has to be *earned*, not read off the frame. An address in
+        // `src` is a claim: `Src::Short` is 8 bytes with no key attached, and a
+        // `Src::Full` whose signature does not check out is no better. Charging
+        // either to the address it names lets anyone drain a chosen victim's
+        // budget until that victim's own mail stops being stored or relayed —
+        // a denial of service against a third party, bought with junk. So only a
+        // verified signature spends a named budget; everything else shares one
+        // bucket, which is still bounded but cannot be aimed.
         let src_addr = match &e.src {
-            Src::Full(pk) => Some(addr_of(pk)),
-            Src::Short(a) => Some(*a),
+            Src::Full(_) | Src::Short(_) => Some(verified_src.unwrap_or(congestion::UNATTRIBUTED)),
             Src::None => None,
         };
         let within_quota = match src_addr {
@@ -2837,6 +2845,57 @@ mod tests {
     }
 
     #[test]
+    fn a_forged_source_cannot_spend_a_victims_quota() {
+        // Attacker sprays unstamped junk that merely *names* the victim. If that
+        // charged the victim's bucket, the victim's own mail would stop being
+        // relayed — a denial of service against a third party, bought with junk.
+        let now = 1_700_000_000;
+        let mut relay = Node::new("relay", &[]);
+        relay.set_source_quota(300);
+        let mut victim = Node::new("victim", &[]);
+
+        for i in 0..40u8 {
+            let mut junk = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, vec![i; 60]);
+            junk.src = Src::Short(victim.addr);
+            junk.flags |= fl::SIGNED | fl::SRC8; // src is only parsed when SIGNED
+            junk.sig = Some([0u8; 64]);
+            relay.on_rx(&junk.wire(), 1, None, now);
+        }
+
+        // The victim's genuinely signed mail must still be relayed.
+        let fwds = victim.originate(ZERO_DEST, b"let me through".to_vec(), now);
+        let wire = fwd_bytes(&fwds[0]);
+        let rx = relay.on_rx(&wire, 2, None, now);
+        assert!(!rx.forwards.is_empty(), "a forgery must not consume the victim's budget");
+    }
+
+    #[test]
+    fn a_free_stamp_does_not_buy_a_quota_exemption() {
+        // A stamp is leading zero bits of a hash, so class 1 costs ~2 tries and
+        // half of all envelopes have it by accident. If `stamp > 0` exempted mail
+        // from the quota, §10 would bound nothing at all.
+        let now = 1_700_000_000;
+        let mut q = congestion::Quotas::new(100);
+        let src = [7u8; 8];
+
+        // Spend past the bucket's burst with class-1 mail. If class 1 were exempt
+        // every one of these would pass, however many were sent.
+        let mut admitted = 0;
+        for _ in 0..100 {
+            if q.admit(src, 100, 1, now) {
+                admitted += 1;
+            }
+        }
+        assert!(admitted < 100, "class 1 is not proof of work and must be charged");
+        assert!(!q.admit(src, 100, 1, now), "and once the budget is spent it is refused");
+
+        // ...while a genuinely mined stamp still passes freely, on the same
+        // exhausted bucket, which is what "priority is bought" means.
+        assert!(q.admit(src, 100, congestion::STAMP_EXEMPT_CLASS, now), "real work still buys it");
+        assert!(q.admit(src, 5000, 255, now), "and the highest class is never throttled");
+    }
+
+    #[test]
     fn neighbors_snoop_resolve_and_expire() {
         let now = 1_700_000_000;
         // U here is a stand-in underlay address (e.g. a Meshtastic node number).
@@ -3372,10 +3431,13 @@ mod tests {
         assert!(!tb.allow(80, 0), "same second: out of budget");
         assert!(tb.allow(80, 5), "refilled after 5 s");
 
-        // (c) Backpressure: idle admits all; busy drops unstamped; stamped rides.
+        // (c) Backpressure: idle admits all; busy drops unstamped; *mined* mail
+        // rides. A low class is not mined — class 3 is eight hashes' work — so it
+        // is throttled like anything else; only STAMP_EXEMPT_CLASS buys the pass.
         assert!(admit(0, 0, 200));
         assert!(!admit(255, 0, 100));
-        assert!(admit(255, 3, 100), "stamped mail is always admitted");
+        assert!(!admit(255, 3, 100), "a nearly-free stamp must not dodge backpressure");
+        assert!(admit(255, congestion::STAMP_EXEMPT_CLASS, 100), "real work rides");
     }
 
     #[test]
