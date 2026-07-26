@@ -95,7 +95,7 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test              # 31 tests
+cargo test              # 78 tests
 cargo run               # in-memory mesh demo (A — B — C — D)
 cargo run -- node.yaml  # run a real node with the bridges named in a config file
 ```
@@ -133,19 +133,11 @@ loopback), with a self-contained [web node](web/README.md#one-file-node) and gui
 fragmentation stay in the shared lib. See the full [bridge reference](docs/BRIDGES.md)
 — an index plus a per-protocol deep dive (wire format, mapping, security, specs).
 
-**📱 SPORE Communicator (Android).** A full node in your pocket — a real SPORE
-node running in a background service, with instant messaging (petnames), a
-microblog feed, and file sharing, over every bridge at once: UDP/Wi-Fi Direct,
-audio modem, Bluetooth Meshtastic and Reticulum radios, and WebSocket/Nostr/
-WebTorrent. Built for Meshtastic users: simple by default, advanced options a tap
-away, a little kawaii. See [`android/`](android/README.md).
-
-- **Latest rolling build** (freshest, from `master`): [releases/tag/rolling](https://github.com/sloev/spore/releases/tag/rolling)
-- **Latest stable release** (tagged): [releases/latest](https://github.com/sloev/spore/releases/latest)
-
-Grab the `.apk` from either release page and install it (you may need to allow
-installing from your browser/files app). Rolling updates on every merge; tagged
-releases are the stable points.
+**📱 SPORE Communicator (Android)** puts a full node in your pocket — a real node
+in a background service, with instant messaging (petnames), a microblog feed, and
+file sharing over every bridge at once. Download links for it, the single-file
+browser node, the daemon and the printable Seed Sheet are on one page:
+**[Apps & daemons](docs/APPS.md)**.
 
 ```
 SPORE demo — line topology  A — B — C — D
@@ -251,7 +243,7 @@ hasn't learned one yet, it simply broadcasts, which always works. Write the reso
 once, reuse it on every transport.
 
 <details>
-<summary>Deep dive: the shared loop, and what <code>U</code> is per medium</summary>
+<summary>Deep dive: the shared loop</summary>
 
 The whole per-bridge loop is identical on every medium — only `U` and the two send
 primitives change:
@@ -270,37 +262,9 @@ for f in rx.forwards {
 }
 ```
 
-The router speaks only SPORE addresses; the bridge owns the `SPORE ↔ U` mapping, so
-`U` can be anything a medium uses to name a peer:
-
-| Medium | `U` (underlay address) | Example | Kind |
-|---|---|---|---|
-| UDP, Thread, Yggdrasil, cjdns | `SocketAddr` / `Ipv6Addr` | `192.168.1.7:7373` | stateless datagram |
-| Ethernet, Wi-Fi, ESP-NOW, BATMAN | `[u8; 6]` (MAC) | `00:1A:2B:3C:4D:5E` | stateless datagram |
-| Meshtastic, LoRaWAN, IrDA | `u32` | `!1234abcd` | mesh / net routed |
-| Zigbee | `u64` | `0x00158D0001234567` | stateful mesh |
-| BLE GATT, WebSocket, WebRTC | connection handle (`u32` / `String`) | `Conn_42` | **stateful stream** |
-| raw LoRa, ggwave (audio), QR stream | `()` — broadcast only | — | shared, no target |
-
-Only three behaviours follow from that last column, and the resolver handles all of
-them:
-
-- **Stateless** (UDP, LoRa, Ethernet): the bridge just blasts bytes at `U`. A
-  neighbour is only "gone" when its signed heartbeats (ANNOUNCE/HELLO) stop arriving
-  and its binding ages out — `Neighbors::expire` does that.
-- **Stateful** (WebSocket, BLE GATT): `U` is a live connection object. When it
-  drops, the bridge calls `Neighbors::forget` so the router stops routing into a
-  dead socket.
-- **Null address** `U = ()` (audio, raw LoRa, QR): the hardware has no target field —
-  everyone hears everything. Every SPORE address maps to `()`, `resolve` always
-  "succeeds" trivially, and the *envelope's own `dest`* filters out mail meant for
-  someone else. Broadcast is the only mode, and that's fine.
-
-Bindings are learned only from signed frames (you can't verify — or safely bind — an
-unsigned source), a few freshest are kept per address, and a nonce/timestamp in the
-beacon bounds replay. If a stale binding points at a dead unicast address, SPORE's
-flood-fallback (§5.6) routes around it. Implemented as `bridge::Neighbors<U>` and
-wired into the UDP bridge (`U = SocketAddr`) in `src/main.rs`.
+What `U` is per medium, the three driver forms, and how stateless / stateful /
+null-address links differ are tabulated once in
+[BRIDGES.md § Bridge architecture](docs/BRIDGES.md#bridge-architecture).
 </details>
 
 ## Riding a Meshtastic mesh
@@ -321,24 +285,10 @@ spore meshtastic-serial:/dev/ttyUSB0
 socat /dev/ttyUSB0,b115200,raw - | spore meshtastic-serial
 ```
 
-<details>
-<summary>Deep dive: how the bridge works, and what to check before trusting it</summary>
-
-A SPORE envelope is wrapped as a Meshtastic packet on **portnum 256** (`PRIVATE_APP`,
-broadcast) and sent to the WiFi-UDP multicast group `224.0.0.69:4403`; incoming
-packets on that portnum are unwrapped back into `node.on_rx`. Node numbers are the
-bridge's `U` in `Neighbors<u32>` — learned by snooping each packet's `from` — so a
-directed send can unicast to one node instead of flooding the whole mesh. `mtu` is
-set to 200 so SPORE's fragmentation keeps every piece inside Meshtastic's ~230-byte
-budget, and the entire LoRa mesh counts as a single SPORE hop.
-
-It's a **template** — the frame codec is unit-tested and the runner binds, joins the
-group, and beacons, but there's no Meshtastic hardware here to close the loop. Before
-production, confirm three things against your firmware: the protobuf field numbers
-(all centralised in `bridge::meshtastic`), the multicast group/port, and encryption —
-only Meshtastic's *unencrypted* payload variant is handled, so use an unencrypted
-channel or add the channel key.
-</details>
+A SPORE envelope rides **portnum 256** (`PRIVATE_APP`) and the whole LoRa mesh
+counts as a single SPORE hop. Wire format, the four pipes (Wi-Fi UDP, USB serial,
+Web Serial, BLE), the bulk budget, and what to confirm against your firmware
+before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 
 ## Layout
 
@@ -351,7 +301,8 @@ channel or add the channel key.
 | `src/ffi.rs` / `src/wasm.rs` | a C ABI for the bindings, and the browser (wasm) node ABI |
 | `bindings/`     | autogenerated Python / Go / JS wrappers (`generate.py` from `spec.json`) — see [bindings/README.md](bindings/README.md) |
 | `web/`          | the browser stack: wasm node, JS hub + transports, and a self-contained [web node](web/build-standalone.mjs) |
-| `docs/SPEC.md`  | the one-page SPORE v1 specification                 |
+| `docs/APPS.md`  | apps & daemons: what to install, with download links |
+| `docs/SPEC.md`  | the SPORE v1 specification — two sides of one sheet |
 | `docs/REBUILD.md` | reimplement SPORE in any language: the wire format with real worked examples |
 | `reference/`    | dependency-free Tier-0 decoders (pure-Python parse + verify) + cross-language test vectors |
 | `docs/BRIDGES.md` | bridge reference — status index + a deep dive per protocol (wire format, SPORE mapping, security, specs) |

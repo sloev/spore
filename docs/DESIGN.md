@@ -100,7 +100,7 @@ fits `Node::mtu` it ships as-is; otherwise it's fountain-fragmented (§3):
   ID. A relay forwards fragments but never buffers or reassembles an object that
   isn't addressed to it — only the destination reassembles.
 - **Cap:** one fountain set is ≤ ~`mtu`×255 (≈ 50 KB at defaults). Larger data is
-  the file layer's job (below), which stitches many objects under one manifest.
+  the file layer's job (below), where a tree of manifests carries any size.
 
 Implemented in `src/lib.rs` (`Node::send`, `Fountain`, the `ingest` reassembly
 path) and covered by tests for single-envelope sends, large-object
@@ -513,42 +513,34 @@ shape — the router never changes. HTTP, a serial cable, a folder on a USB stic
 all bridges, none more special than another.
 
 <details>
-<summary>Deep dive: the five shapes and what's implemented</summary>
+<summary>Deep dive: the five shapes, and where the detail lives</summary>
 
-| Shape | Examples | Binding | Status |
-|---|---|---|---|
-| 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message | ✅ UDP + Meshtastic WiFi-UDP |
-| 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::KissStream`) | ✅ framer + TCP runner |
-| 3. Text channel | SMS, email, Usenet, paper, voice | `~S1.…~` armor (`armor::wrap`) | ✅ codec |
-| 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA + CRC tail | ✅ `Csma` damping + `crc_*` (AFSK runner needs a sound card) |
-| 5. Shared store | folder/USB/Syncthing, HTTP bag, BBS | `bridge::store`, `bridge::bag` | ✅ folder + HTTP bag |
+| Shape | Examples | Binding |
+|---|---|---|
+| 1. Message pipe | UDP, WebRTC, LoRa, Meshtastic | one envelope per message |
+| 2. Byte stream | TCP, serial, RFCOMM, KISS TNCs | KISS framing (`bridge::kiss_stream`) |
+| 3. Text channel | SMS, email, Usenet, paper, voice | `~S1.…~` armor (`armor::wrap`) |
+| 4. Shared bus | walkie-talkie, CB, ham FM | KISS + CSMA + CRC tail |
+| 5. Shared store | folder/USB/Syncthing, HTTP bag, BBS | `bridge::store`, `bridge::bag` |
 
-- **HTTP bag** (`bridge::bag`, `cargo run -- http`): `POST /spore/push`,
-  `GET /spore/inv`, `POST /spore/want`, MIME `application/x-spore`. HTTP is one bag
-  transport; a folder or a pastebin serves the same three ops.
-- **Folder** (`bridge::store`, `cargo run -- folder DIR`): envelopes are files named
-  `<hexid>.spore`; the folder *is* a persistent INV. Drop it in Syncthing or on a
-  USB stick and two folders become one link.
-- **KISS stream** (`bridge::KissStream`): a stateful de-framer for byte streams, so
-  a frame split across reads still reassembles. The `tcp` runner frames envelopes
-  over a TCP stream and shows congestion control live — Trickle-paced beacons and
-  token-bucket-gated relays.
-- **Armor** (`armor::wrap` / `unwrap`): Base32 text you can paste, print, or read
-  aloud.
-- **`Neighbors<U>`** (`bridge::Neighbors`): the shared address resolver every bridge
-  uses — SPORE's ARP/NDP. `U` is the medium's own peer name (`SocketAddr`, MAC,
-  Meshtastic `u32`, connection handle, or `()`). Learned by snooping signed frames;
-  `resolve` turns a directed send into an underlay unicast, else the bridge
-  broadcasts. Wired into the UDP bridge; the README has the full per-medium table.
-- **`Csma` + `crc_append`/`crc_check`** (`bridge`): shared-bus damped flooding
-  (listen-before-talk, cancel on overhearing) and the SHA-256[0:4] CRC tail buses
-  need. Drop-in for a walkie-talkie/AFSK runner.
-- **`foldersync`** (`bridge::foldersync`): publish a directory as manifests and
-  materialise fetched files — Syncthing over SPORE.
-- **`meshtastic`** (`bridge::meshtastic` + the `meshtastic` runner): wrap envelopes
-  as Meshtastic packets (portnum 256) over the WiFi-UDP broadcast group so a LoRa
-  mesh carries SPORE. Portable hand-rolled protobuf codec; a template pending
-  hardware validation (field numbers, multicast values, and channel encryption).
+In this implementation those five collapse to **three driver forms** — `dgram`,
+`stream`, `store` — because a message pipe and a shared bus differ only in whether
+you listen before talking, and a text channel is a byte stream with an armor codec.
+
+Which media are implemented, at what status, with wire formats, security notes and
+the underlying specs, is the bridge reference: [`BRIDGES.md`](BRIDGES.md). It is
+generated against the code — CI fails if a runnable bridge is undocumented or a
+documented one stops existing — so it is the one place worth trusting on this.
+
+Two properties are worth stating here because they are *design*, not reference:
+
+- **`Neighbors<U>`** is the shared address resolver every bridge uses — SPORE's
+  ARP. `U` is whatever the medium calls a peer; bindings are learned by snooping
+  *signed* frames, since a signed envelope proves its own sender and no handshake
+  is needed. A stale binding is harmless: flood-fallback routes around it.
+- **A bulk budget** lets a link say what it will relay of other people's file
+  chunks. Messages, announces and manifests always pass, so a slow link stays a
+  full member of the mesh and declines only to be the pipe for a large transfer.
 
 Underlays with their own routing (an IP network, Reticulum, a VPN) count as *one*
 interface: decrement hops once and let them handle their own delivery.
@@ -574,7 +566,7 @@ the rest is designed and slots into the same tag/endpoint model.
 | §8 receipts — ACKREQ + signed receipt + backoff resend | ✅ implemented |
 | §9 anonymity — mix-mode onion + batch timing | ✅ implemented (Poisson/decoys = runner policy) |
 | §5.4 congestion — backoff, Trickle, token bucket, busy-byte | ✅ implemented |
-| Bridges — UDP, TCP/KISS, HTTP bag, folder+sync, CSMA/CRC, `Neighbors` | ✅ implemented (radio runners need hardware) |
+| Bridges — see [`BRIDGES.md`](BRIDGES.md) for the per-medium status index | ✅ implemented (radio runners need hardware) |
 
 Every layer is additive and endpoint-only. The transport underneath never learns
 they exist — which is exactly why a 200-byte LoRa link, a QR code, or a human
