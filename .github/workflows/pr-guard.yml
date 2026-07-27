@@ -10,9 +10,18 @@ name: PR guard (API freeze)
 #
 # To change a frozen file on purpose — a deliberate, major-version decision — add
 # the `allow-frozen-change` label to the PR.
+#
+# `labeled`/`unlabeled` are in the trigger list because the check reads the label
+# from `github.event.pull_request.labels`, which is a snapshot of the payload that
+# started the run. Without them, adding the label did nothing: the default types
+# are opened/synchronize/reopened, so the only way to get a payload carrying the
+# label was to push another commit — and re-running the failed job replays the
+# original, label-free payload, so that did not work either. The instruction two
+# lines above was therefore false unless you already knew to push again.
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   frozen-files:
