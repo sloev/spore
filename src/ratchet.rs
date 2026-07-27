@@ -6,6 +6,24 @@ use x25519_dalek::{PublicKey, StaticSecret};
 const HEADER: usize = 36; // dh_pub(32) + n(2) + pn(2)
 const MAX_SKIP: u16 = 512; // cap out-of-order gap we'll pre-compute keys for
 
+/// Most skipped message keys held at once, across all receiving chains.
+///
+/// [`MAX_SKIP`] bounds a single gap; this bounds the *total*, which is a different
+/// quantity. Skipped keys are stored under `(dh_pub, n)`, and a DH ratchet step
+/// installs a new `dh_pub` and resets `nr` to zero — so every step opens a fresh
+/// 512-key window, and nothing consumed the old ones except a message that
+/// actually arrived to claim them. A peer that keeps ratcheting while leaving its
+/// gaps unclaimed therefore grew this map without limit.
+///
+/// It takes an established session to do, so this is a peer you have already
+/// agreed to talk to rather than anyone on the medium. Bounded anyway: a session
+/// partner should not be able to decide how much memory you spend.
+///
+/// Losing a skipped key costs exactly what packet loss costs — an out-of-order
+/// message that no longer opens — and the protocol already tolerates that, since
+/// the ratchet's whole purpose is to survive gaps.
+const MAX_SKIPPED_KEYS: usize = 4 * MAX_SKIP as usize;
+
 /// A fresh X25519 keypair as `(secret, public)` raw bytes.
 pub fn keypair() -> ([u8; 32], [u8; 32]) {
     let s = StaticSecret::random_from_rng(OsRng);
@@ -182,9 +200,27 @@ impl Ratchet {
                 ckr = nck;
                 self.nr += 1;
             }
+            self.bound_skipped();
             self.ckr = Some(ckr);
         }
         Some(())
+    }
+
+    /// Keep the skipped-key cache inside [`MAX_SKIPPED_KEYS`].
+    ///
+    /// Drops arbitrary entries rather than oldest-first: the map is keyed by
+    /// `(dh_pub, n)` with no recoverable ordering across chains, and every entry is
+    /// equally a key for a message that may never arrive. `std`'s hasher is seeded
+    /// per map, so a peer cannot steer which of its own gaps survive.
+    fn bound_skipped(&mut self) {
+        if self.skipped.len() <= MAX_SKIPPED_KEYS {
+            return;
+        }
+        let excess = self.skipped.len() - MAX_SKIPPED_KEYS;
+        let victims: Vec<([u8; 32], u16)> = self.skipped.keys().take(excess).copied().collect();
+        for k in victims {
+            self.skipped.remove(&k);
+        }
     }
 
     fn dh_ratchet(&mut self, dh_pub: &[u8; 32]) {
@@ -201,5 +237,51 @@ impl Ratchet {
         let (rk2, cks) = kdf_rk(&self.rk, &dh(&self.dhs_sec, dh_pub));
         self.rk = rk2;
         self.cks = Some(cks);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_skipped_key_cache_cannot_grow_without_bound() {
+        // MAX_SKIP bounds one gap; this is about the total. Skipped keys are held
+        // under `(dh_pub, n)`, and a DH ratchet step installs a new `dh_pub` and
+        // resets `nr`, so every step opens a fresh window. A peer that keeps
+        // ratcheting while leaving its gaps unclaimed grew this map forever.
+        //
+        // It takes an established session to reach, so this is a partner you
+        // already agreed to talk to — but a partner should not get to decide how
+        // much memory you spend.
+        let (a_sec, a_pub) = keypair();
+        let (b_sec, b_pub) = keypair();
+        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let _ = a_sec;
+
+        // Drive many receiving chains, each leaving a large unclaimed gap.
+        for step in 0..40u16 {
+            let (_, fresh_pub) = keypair();
+            bob.dh_ratchet(&fresh_pub);
+            // Ask for keys up to a wide gap without ever claiming them.
+            let _ = bob.skip(MAX_SKIP.min(400));
+            assert!(
+                bob.skipped.len() <= MAX_SKIPPED_KEYS,
+                "step {step}: held {} skipped keys against a cap of {MAX_SKIPPED_KEYS}",
+                bob.skipped.len()
+            );
+        }
+    }
+
+    #[test]
+    fn an_absurd_gap_is_still_refused_outright() {
+        // The per-gap bound is the cheaper guard and must keep working: a single
+        // request for an enormous jump is refused rather than pre-computed.
+        let (_a_sec, a_pub) = keypair();
+        let (b_sec, b_pub) = keypair();
+        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let (_, fresh) = keypair();
+        bob.dh_ratchet(&fresh);
+        assert!(bob.skip(MAX_SKIP + 1).is_none(), "a gap past MAX_SKIP must be refused");
     }
 }

@@ -10,7 +10,7 @@
 #   ./scripts/make-offline-bundle.sh          # vendor in place
 #   ./scripts/make-offline-bundle.sh --tar    # ...and a signed-able tarball
 #
-# vendor/ is deliberately not committed: it is ~10 MB of third-party source, and
+# vendor/ is deliberately not committed: it is ~30 MB of third-party source, and
 # the repo stays small enough to carry on the media CONTINUITY.md describes. This
 # script is how you turn a clone into an offline-buildable one on demand.
 set -eu
@@ -35,8 +35,23 @@ if [ "${1:-}" = "--tar" ]; then
 	version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 	out="spore-offline-${version}.tar.gz"
 	# Everything a cold machine needs: the source, the pins, the sources the
-	# pins name, and the config that points Cargo at them.
-	tar --exclude=./target --exclude=./.git -czf "../$out" .
+	# pins name, and the config that points Cargo at them — and nothing that a
+	# build produces. Excluding only ./target is not enough: fuzz/target and the
+	# Android/Gradle outputs are each larger than the entire useful bundle, and a
+	# re-run would otherwise pack the previous tarball inside the new one.
+	tar -czf "../$out" \
+		--exclude=./.git \
+		--exclude=./target \
+		--exclude='*/target' \
+		--exclude=./_site \
+		--exclude='*/node_modules' \
+		--exclude='*/.gradle' \
+		--exclude='./android/app/build' \
+		--exclude='./android/*/build' \
+		--exclude='./android/app/src/main/jniLibs' \
+		--exclude='spore-offline-*.tar.gz*' \
+		--exclude='__pycache__' \
+		.
 	mv "../$out" .
 	if command -v sha256sum >/dev/null 2>&1; then
 		sha256sum "$out" >"$out.sha256"

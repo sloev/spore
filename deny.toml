@@ -1,0 +1,51 @@
+# cargo-deny: supply-chain policy.
+#
+# SPORE is public domain (Unlicense) and its whole continuity story rests on being
+# rebuildable from a clone decades from now. Two things follow, and this file is
+# both of them:
+#
+#   * a known-vulnerable dependency in a crypto-carrying mesh node is not an
+#     acceptable state to be in quietly, and
+#   * a dependency whose licence forbids redistribution would break the "carry a
+#     copy on a USB stick" premise as surely as a compile error would.
+#
+# The allowlist below is the licences actually present in the tree, enumerated
+# with `cargo deny list` rather than guessed. Adding a crate that needs a new one
+# should be a deliberate edit here, not a silent inheritance.
+
+[advisories]
+# Fail on anything the RustSec database knows about. `unmaintained` is a warning
+# rather than an error: a frozen, dependency-light crypto crate that has stopped
+# changing is often exactly what this project wants, and "no commits lately" is
+# not a vulnerability.
+yanked = "deny"
+unmaintained = "workspace"
+
+[licenses]
+# Every license below is permissive and redistributable, which is the property
+# that matters here — not any particular one of them.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate major versions of one crate are worth knowing about — they inflate the
+# vendored bundle CONTINUITY.md asks operators to carry — but they are not a
+# defect, so warn rather than fail.
+multiple-versions = "warn"
+wildcards = "deny" # a `*` version makes an offline rebuild non-reproducible
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# crates.io only. A git dependency cannot be vendored reproducibly by tag alone,
+# and the offline bundle is only as trustworthy as its sources.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

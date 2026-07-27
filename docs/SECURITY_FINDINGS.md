@@ -41,6 +41,8 @@ than fixing a crash, it says so explicitly.
 | [S-014](#s-014) | False continuity claim (MSRV) | Low | ✅ | ✅ | ✅ (CI) | no |
 | [S-015](#s-015) | Remote OOM (5 unbounded reads) | Medium | ✅ | ✅ | ✅ | no |
 | [S-016](#s-016) | Resource exhaustion (filename sets) | Low | ✅ | ✅ | ✅ | no |
+| [S-017](#s-017) | Resource exhaustion (ratchet keys) | Medium | ✅ | ✅ | ✅ | no |
+| [S-018](#s-018) | Availability (mutex poisoning) | Medium | ✅ | ✅ | ✅ | yes (recover, not die) |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -320,7 +322,7 @@ resolution on the first dependency: `error: no matching package named blake2 fou
 `scripts/make-offline-bundle.sh` vendors the dependencies, writes the config that
 actually activates `vendor/`, and verifies itself with `cargo build --offline`.
 Confirmed with an empty `CARGO_HOME` and a fresh target directory: a cold compile
-of every dependency, no registry. `vendor/` stays gitignored, because ~10 MB of
+of every dependency, no registry. `vendor/` stays gitignored, because ~30 MB of
 third-party source would contradict the size argument the same document makes.
 
 ---
@@ -542,6 +544,72 @@ read, not a duplicate delivery.
 
 ---
 
+## S-017
+
+**The ratchet's skipped-key cache had no total bound.** Medium (needs an
+established session). `src/ratchet.rs` — `skip`.
+
+**Root cause.** `MAX_SKIP` (512) bounds a *single* out-of-order gap, and that is
+the bound everyone sees. But skipped message keys are stored under `(dh_pub, n)`,
+and a DH ratchet step installs a new `dh_pub` **and resets `nr` to zero** — so each
+step opens a fresh 512-key window in a different part of the keyspace. Nothing
+consumed the old windows except a message that actually arrived to claim them, and
+nothing pruned them. Two different quantities, one bound.
+
+**Exploit.** A session partner ratchets repeatedly, each time declaring a wide gap
+it never fills. Every step leaves up to 512 unclaimed 32-byte keys resident. It
+takes an established session to reach — this is a peer you already agreed to talk
+to, not anyone on the medium — which is why it is Medium rather than High. A
+partner still should not get to decide how much memory you spend.
+
+**Reproduced.** 40 ratchet steps each leaving a 400-key gap, with the cache
+measured after every step.
+
+**Patch.** `MAX_SKIPPED_KEYS` (4 × `MAX_SKIP`) caps the total; `bound_skipped`
+trims past it. Victims are arbitrary rather than oldest-first, because the map is
+keyed by `(dh_pub, n)` with no recoverable ordering across chains and every entry is
+equally a key for a message that may never come — and `std`'s per-map hasher seed
+means a peer cannot steer which of its own gaps survive.
+
+Losing a skipped key costs exactly what packet loss costs: an out-of-order message
+that no longer opens. The ratchet exists to survive gaps, so the protocol already
+tolerates this.
+
+**Tests.** `the_skipped_key_cache_cannot_grow_without_bound`,
+`an_absurd_gap_is_still_refused_outright` (the per-gap guard must keep working too).
+
+---
+
+## S-018
+
+**One panic under the hub mutex killed every bridge thread, permanently.** Medium.
+`src/bridge/hub.rs`.
+
+**Root cause.** Thirteen `lock().unwrap()` calls across `node`, `out` and
+`deliver`. A panic while any of them is held poisons the mutex, and `unwrap` then
+panics in *every* thread that touches it afterwards. One fault anywhere under the
+lock therefore took the whole node down and kept it down — the same denial of
+service this register spent its length removing, arriving through a different door.
+The panic need not even be ours: `with_node` runs arbitrary embedder code under
+that lock.
+
+**Reproduced.** Poisoned `node` from a helper thread, then confirmed
+`Mutex::is_poisoned` and that every subsequent hub call panicked.
+
+**Patch.** One `lock()` helper recovering with `PoisonError::into_inner`. That is
+the right trade *for what this protects*: `Node` is a router state machine whose
+every table is independently bounded and self-healing — dedup expires, quotas
+refill, partial objects time out — so the worst a half-applied `on_rx` leaves is
+one duplicate relay or one dropped envelope. Continuing degraded beats dying. The
+reasoning is deliberately not generalised in the doc comment: a lock guarding an
+invariant other code *depends* on should still poison.
+
+**Behaviour change.** A poisoned lock is now used rather than fatal.
+
+**Test.** `a_poisoned_lock_does_not_kill_every_other_thread`.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -560,6 +628,9 @@ because two external reviews asserted several of these as defects.
 | `tor` SOCKS5 reply allocates from a wire byte | Bounded: the length is a `u8`, so `vec![0u8; skip + 2]` is at most 257 bytes. |
 | `udp` reads `/proc/net/route` unbounded | A kernel file, not attacker-controlled. |
 | `meshtastic` / `ssb` base64 `with_capacity` | Sized from our own buffer's length, not from a wire-declared length. |
+| Hub lock **ordering** (`node` vs `out`) | No deadlock. Every method needing both scopes the `node` guard in a block and releases it before `dispatch` takes `out`, and `dispatch` never takes `node`. The ordering is deliberate; `with_node`'s doc now records that it is load-bearing. |
+| `mix::pad_to_class` on oversized payloads | Bounded and panic-free: rounds up to a whole multiple of the top size class. |
+| Ratchet per-gap skip limit | `MAX_SKIP` works as intended and still refuses an absurd jump; the gap it missed was the *total* across chains (S-017). |
 
 ## Still open
 
@@ -567,11 +638,10 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
-- **`hub` holds `Mutex<Node>` behind 13 `lock().unwrap()` calls.** A panic anywhere
-  under the lock poisons it, and every later `unwrap` then panics too — one fault
-  becomes a dead node rather than a dropped operation. Deferred to the
-  ratchet/mix/lock-ordering review rather than patched piecemeal.
 - **`meshtastic` and `audio` codecs** are read but not yet fuzzed as thoroughly as
   the core parsers; both are reachable from a hostile medium.
+- **`with_node` reentrancy** is documented but not enforced. An embedder whose
+  closure calls back into the hub self-deadlocks; a re-entrant guard or a `&Node`
+  variant would make that unrepresentable.
 - **Hardware-verified status** for every 🧪 bridge. No marketing claim until the
   `HARDWARE.md` procedure has actually been run.

@@ -110,10 +110,25 @@ jobs:
           cp "$src" "$out"
           echo "path=android/$out" >> "$GITHUB_OUTPUT"
 
+      # A release asset nobody can verify is a release asset nobody should trust.
+      # CONTINUITY.md already asks operators to check a rebuild against a printed
+      # hash; publishing the hash is the other half of that bargain.
+      - name: Checksum the APK
+        id: sums
+        working-directory: android
+        run: |
+          apk="$(basename '${{ steps.apk.outputs.path }}')"
+          sha256sum "$apk" > "$apk.sha256"
+          echo "sha=$(cut -d' ' -f1 "$apk.sha256")" >> "$GITHUB_OUTPUT"
+          echo "sums=android/$apk.sha256" >> "$GITHUB_OUTPUT"
+          cat "$apk.sha256"
+
       - uses: actions/upload-artifact@v4
         with:
           name: spore-apk
-          path: ${{ steps.apk.outputs.path }}
+          path: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.sums.outputs.sums }}
 
       - name: Rolling release (master)
         if: steps.ver.outputs.kind == 'rolling'
@@ -123,18 +138,26 @@ jobs:
           name: SPORE rolling ${{ steps.ver.outputs.name }}
           prerelease: true
           make_latest: false
-          files: ${{ steps.apk.outputs.path }}
+          files: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.sums.outputs.sums }}
           body: >
             Rolling SPORE Android node — ${{ steps.ver.outputs.name }} (built from
             master). Tracks the current version (latest tag) plus the build date;
             updated on every merge. For a stable build see the latest tagged release.
+            SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
+            `sha256sum -c spore-*.apk.sha256`.
 
       - name: Tagged release (v*)
         if: steps.ver.outputs.kind == 'tagged'
         uses: softprops/action-gh-release@v2
         with:
           name: SPORE ${{ github.ref_name }}
-          files: ${{ steps.apk.outputs.path }}
+          files: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.sums.outputs.sums }}
           body: >
             SPORE Android node — ${{ github.ref_name }}. The current version;
             rolling master builds are versioned from it until the next tag.
+            SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
+            `sha256sum -c spore-*.apk.sha256`.

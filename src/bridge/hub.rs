@@ -8,7 +8,7 @@
 
 use crate::*;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Convenience handle shared across bridge threads.
@@ -82,6 +82,25 @@ pub struct Hub {
     deliver: Mutex<Option<Sender<Vec<u8>>>>, // optional app inbox: delivered envelope wires
 }
 
+/// Lock a mutex, recovering from poisoning instead of propagating it.
+///
+/// A panic while a lock is held poisons it, and `lock().unwrap()` then panics in
+/// every thread that touches it afterwards. One fault anywhere under the lock
+/// would take every bridge thread with it, permanently — which is precisely the
+/// remote denial of service this audit has spent its time removing, arriving
+/// through a different door. The panic need not even be ours: `with_node` runs
+/// arbitrary embedder code under this lock.
+///
+/// Recovering is the right trade for *what is protected here*. `Node` is a router
+/// state machine whose every table is independently bounded and self-healing —
+/// dedup expires, quotas refill, partial objects time out — so the worst a
+/// half-applied `on_rx` leaves behind is one duplicate relay or one dropped
+/// envelope. Continuing degraded beats dying. This reasoning does not generalise:
+/// a lock guarding an invariant that other code *depends* on should still poison.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 impl Hub {
     pub fn new(node: Node) -> Shared {
         Arc::new(Hub { node: Mutex::new(node), out: Mutex::new(Vec::new()), deliver: Mutex::new(None) })
@@ -91,7 +110,7 @@ impl Hub {
     /// to this node (addressed to us, or on a topic we follow). Embedders — the
     /// Android app, bindings — drain the paired `Receiver`. Replaces any prior sink.
     pub fn set_delivery_sink(&self, tx: Sender<Vec<u8>>) {
-        *self.deliver.lock().unwrap() = Some(tx);
+        *lock(&self.deliver) = Some(tx);
     }
 
     /// Originate a signed app message to `dest` (all-zero = public) and flood it
@@ -103,7 +122,7 @@ impl Hub {
     /// nothing would be the worst of the available outcomes.
     pub fn send(&self, dest: Addr, data: Vec<u8>) -> Result<(), crate::TooLarge> {
         let forwards = {
-            let mut n = self.node.lock().unwrap();
+            let mut n = lock(&self.node);
             n.send(dest, data, now())?
         };
         self.dispatch(forwards);
@@ -114,7 +133,7 @@ impl Hub {
     /// forwards it must transmit.
     pub fn register(&self) -> (Iface, Receiver<Forward>) {
         let (tx, rx) = channel();
-        let mut o = self.out.lock().unwrap();
+        let mut o = lock(&self.out);
         let iface = o.len() as Iface;
         o.push(Slot { tx: Some(tx), bulk: None });
         (iface, rx)
@@ -133,7 +152,7 @@ impl Hub {
     /// whoever wants them asks again and any other path answers.
     pub fn register_limited(&self, bulk_bytes_per_sec: u32) -> (Iface, Receiver<Forward>) {
         let (tx, rx) = channel();
-        let mut o = self.out.lock().unwrap();
+        let mut o = lock(&self.out);
         let iface = o.len() as Iface;
         o.push(Slot {
             tx: Some(tx),
@@ -145,7 +164,7 @@ impl Hub {
     /// Change what an interface will carry after the fact. `None` lifts the
     /// limit entirely.
     pub fn set_bulk_budget(&self, iface: Iface, bytes_per_sec: Option<u32>) {
-        let mut o = self.out.lock().unwrap();
+        let mut o = lock(&self.out);
         if let Some(slot) = o.get_mut(iface as usize) {
             slot.bulk = bytes_per_sec.map(|per_sec| Budget { per_sec, allowance: 0, last: now() });
         }
@@ -154,7 +173,7 @@ impl Hub {
     /// Register a pull-only interface (an HTTP bag / server that answers requests
     /// from the shared store and never has anything pushed to it).
     pub fn register_pull(&self) -> Iface {
-        let mut o = self.out.lock().unwrap();
+        let mut o = lock(&self.out);
         let iface = o.len() as Iface;
         o.push(Slot { tx: None, bulk: None });
         iface
@@ -164,11 +183,11 @@ impl Hub {
     /// interfaces. Returns the envelopes delivered locally (for logging).
     pub fn on_rx(&self, iface: Iface, bytes: &[u8], nbr: Option<Addr>) -> Vec<Envelope> {
         let rx = {
-            let mut n = self.node.lock().unwrap();
+            let mut n = lock(&self.node);
             n.on_rx(bytes, iface, nbr, now())
         };
         self.dispatch(rx.forwards);
-        if let Some(tx) = self.deliver.lock().unwrap().as_ref() {
+        if let Some(tx) = lock(&self.deliver).as_ref() {
             for e in &rx.delivered {
                 let _ = tx.send(e.wire());
             }
@@ -185,19 +204,29 @@ impl Hub {
     /// Flood the node's ANNOUNCE beacon on every interface.
     pub fn beacon(&self) {
         let forwards = {
-            let mut n = self.node.lock().unwrap();
+            let mut n = lock(&self.node);
             n.build_announce(now())
         };
         self.dispatch(forwards);
     }
 
     /// Run a closure with exclusive access to the node.
+    ///
+    /// The closure runs **while the node lock is held**, so it must not call back
+    /// into any other `Hub` method that touches the node — `send`, `on_rx`,
+    /// `beacon`, `addr`, or `with_node` again. A `std::sync::Mutex` is not
+    /// reentrant, so that self-deadlocks the calling thread rather than returning
+    /// an error. Use the `&mut Node` you were handed; it can do everything those
+    /// methods can, minus the dispatch. `dispatch` itself is safe to reach after
+    /// the closure returns, which is why every hub method that needs both scopes
+    /// the node guard and releases it first — that ordering is deliberate and is
+    /// what keeps `node` and `out` deadlock-free.
     pub fn with_node<R>(&self, f: impl FnOnce(&mut Node) -> R) -> R {
-        f(&mut self.node.lock().unwrap())
+        f(&mut lock(&self.node))
     }
 
     pub fn addr(&self) -> Addr {
-        self.node.lock().unwrap().addr
+        lock(&self.node).addr
     }
 
     // Flood -> every interface except the source; Directed -> the path's iface.
@@ -206,7 +235,7 @@ impl Hub {
             return;
         }
         let t = now();
-        let mut o = self.out.lock().unwrap();
+        let mut o = lock(&self.out);
         for f in forwards {
             // Classify once per forward, not once per interface — decoding is
             // the expensive part and the answer is the same for all of them.
@@ -306,5 +335,30 @@ mod tests {
         let mut c = Budget { per_sec: 100, allowance: 0, last: t };
         assert!(c.admit(800, t + 3600), "an hour idle buys a burst");
         assert!(!c.admit(1, t + 3600), "but not an unbounded one");
+    }
+
+    #[test]
+    fn a_poisoned_lock_does_not_kill_every_other_thread() {
+        // A panic under the lock poisons it. With `lock().unwrap()` every later
+        // caller panicked too, so one fault anywhere became a permanently dead
+        // node — the same denial of service this audit exists to remove, reached
+        // through a different door.
+        let hub = Hub::new(Node::new("gateway", &[]));
+        let (_iface, rx) = hub.register();
+
+        // Poison `node` deliberately, from another thread so this one survives.
+        let h = hub.clone();
+        let poisoned = std::thread::spawn(move || {
+            let _guard = lock(&h.node);
+            panic!("something under the lock went wrong");
+        });
+        assert!(poisoned.join().is_err(), "the helper thread really did panic");
+        assert!(hub.node.is_poisoned(), "and the mutex really is poisoned");
+
+        // The hub must still work.
+        hub.send(ZERO_DEST, b"the dam holds".to_vec()).unwrap();
+        assert_eq!(drained(&rx), 1, "a poisoned lock still serves traffic");
+        let _ = hub.addr();
+        hub.with_node(|n| n.store_len());
     }
 }
