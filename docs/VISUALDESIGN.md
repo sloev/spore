@@ -14,6 +14,21 @@ tactical web-gear and an eye-patch, holding an oversized LoRa antenna, throwing 
 peace sign. Baud appears at empty states and completions, never in the way of
 work.</em></p>
 
+## Implementation status
+
+This document is normative, and it is only worth anything where code follows it.
+Which surfaces actually consume these tokens, so nobody has to guess:
+
+| Surface | Tokens | Chrome (scanlines, crate shadows, reduced-motion) |
+|---|---|---|
+| `site/style.css` — the Pages site | ✅ | ✅ |
+| `web/spore-standalone.html` — the browser node | ✅ inherits the stylesheet | ✅ |
+| Android — `MainActivity.kt`, `SporeDark/LightColors` | ✅ | partial — colour only; the crate/switch chrome is Compose work not yet done |
+
+Keep this table honest. A design language whose spec is ahead of its
+implementation is a document describing an appearance nothing has, and this
+repository has enough findings about claims with no code behind them.
+
 ## 0. Three constraints that outrank taste
 
 These are not preferences. Break them and CI fails, or someone cannot use the app.

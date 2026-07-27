@@ -15,7 +15,25 @@ Two conventions specific to this project:
 
 ## Unreleased
 
-Nothing yet.
+<!-- Entries accumulate here as work merges, as `- ` bullets. `release.yml`
+     retitles this heading to the new version when you bump, and refuses to
+     release if there is no bullet under it. This note is an HTML comment
+     precisely so it cannot be swept into published release notes — v0.4.0's
+     notes ended with the prose version of it, which is not a changelog entry. -->
+
+- **S-031** Any sound in the room could saturate a CPU core indefinitely.
+  `Demod::push` rescanned its whole retained buffer every call, so work grew with
+  the buffer rather than with the new samples — 13 ms per 100 ms push at 1 s
+  buffered, 94 ms at 6 s, and the buffer caps at 175 s, about 27x real time. No key
+  or protocol participation needed; on Android it runs in a foreground service off
+  the mic. A scan cursor makes it flat at 1.5 ms. Found by the discovery audit and
+  measured before and after.
+- **The visual design language is implemented, not just written.** `VISUALDESIGN.md`
+  described an appearance no surface had: `site/style.css` still carried the old
+  green-and-blue palette and Android an inline Compose scheme. Both now consume the
+  same tokens, with `prefers-reduced-motion` honoured and no webfont anywhere (the
+  standalone must make zero network requests). The spec gains an
+  implementation-status table so it can never again claim more than the code does.
 
 ## 0.4.0 — 2026-07-27
 
@@ -34,12 +52,6 @@ Nothing yet.
   "latest" and `releases/latest/download/spore-android.apk` returns 206 for the first
   time — a correct outcome from a broken mechanism, which is the most misleading
   state a release pipeline can be in.
-
-Entries accumulate here as work merges. `release.yml` retitles this heading to the
-new version when you bump, and refuses to release if it is empty — a release nobody
-can read about is the failure this guards against.
-
-Nothing yet.
 
 ## 0.3.0 — 2026-07-27
 
