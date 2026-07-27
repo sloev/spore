@@ -34,15 +34,20 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +55,27 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * The app's one snackbar host, reachable from any screen.
+ *
+ * Both Save buttons live several composables below the [Scaffold] that owns the
+ * host, and neither had any way to say "done". The buttons were never broken —
+ * they persisted on the first click all along — they just looked broken, which
+ * is the same bug as far as anyone using the app is concerned.
+ */
+private val LocalSnackbar = staticCompositionLocalOf<SnackbarHostState> {
+    error("no SnackbarHostState in scope — App() provides it")
+}
+
+/** Confirm an action that otherwise leaves no trace on screen. */
+@Composable
+private fun rememberConfirm(): (String) -> Unit {
+    val host = LocalSnackbar.current
+    val scope = rememberCoroutineScope()
+    return { msg -> scope.launch { host.showSnackbar(msg) } }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -153,8 +179,10 @@ fun App() {
         var screen by remember { mutableStateOf<Screen>(Chats) }
         val addr by NodeController.address.collectAsState()
         val m = mascot()
+        val snackbar = remember { SnackbarHostState() }
 
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
                 TopAppBar(title = {
                     when (val s = screen) {
@@ -186,16 +214,20 @@ fun App() {
                 }
             }
         ) { pad ->
-            Column(Modifier.padding(pad).fillMaxSize()) {
-                ReceivingBar()
-                TransfersBar()
-                when (val s = screen) {
-                    Chats -> ChatsList(addr) { screen = Chat(it) }
-                    is Chat -> ChatDetail(s.peer)
-                    Feed -> FeedScreen()
-                    BridgesScreen -> BridgesList()
-                    Advanced -> AdvancedScreen(addr)
-                    Connect -> ConnectScreen()
+            // Provided around the content rather than the whole Scaffold: the
+            // screens are the only consumers, and the host itself is wired above.
+            CompositionLocalProvider(LocalSnackbar provides snackbar) {
+                Column(Modifier.padding(pad).fillMaxSize()) {
+                    ReceivingBar()
+                    TransfersBar()
+                    when (val s = screen) {
+                        Chats -> ChatsList(addr) { screen = Chat(it) }
+                        is Chat -> ChatDetail(s.peer)
+                        Feed -> FeedScreen()
+                        BridgesScreen -> BridgesList()
+                        Advanced -> AdvancedScreen(addr)
+                        Connect -> ConnectScreen()
+                    }
                 }
             }
         }
@@ -351,15 +383,30 @@ private fun ChatDetail(peer: String) {
         }
     }
 
+    val confirm = rememberConfirm()
+
     Column(Modifier.padding(16.dp).fillMaxSize()) {
         if (peer != Petnames.PUBLIC) {
+            val saved = names[peer] ?: ""
+            // What `Petnames.set` will actually store. Compared rather than the
+            // raw field, or trailing whitespace leaves the button lit forever
+            // against a value that is already saved.
+            val pending = editingName.trim()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = editingName, onValueChange = { editingName = it },
                     label = { Text("petname") }, modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { Petnames.set(peer, editingName) }) { Text("Save") }
+                OutlinedButton(
+                    // Dimmed once the field matches what is stored, so the button
+                    // carries state before it is pressed as well as after.
+                    enabled = pending != saved,
+                    onClick = {
+                        Petnames.set(peer, editingName)
+                        confirm(if (pending.isEmpty()) "Petname cleared" else "Saved as “$pending”")
+                    }
+                ) { Text("Save") }
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -613,6 +660,7 @@ private fun AdvancedScreen(addr: String) {
     val ctx = LocalContext.current
     val topics by NodeController.topics.collectAsState()
     var showSeed by remember { mutableStateOf(false) }
+    val confirm = rememberConfirm()
     Column(Modifier.padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val myName by NodeController.myName.collectAsState()
         var editName by remember(myName) { mutableStateOf(myName) }
@@ -630,7 +678,22 @@ private fun AdvancedScreen(addr: String) {
                         label = { Text("name") }, modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { NodeController.setMyName(editName) }) { Text("Save") }
+                    // `setMyName` trims and caps at 32; compare what it will store,
+                    // not what is typed, or an over-long name never settles.
+                    val pending = editName.trim().take(32)
+                    OutlinedButton(
+                        enabled = pending != myName,
+                        onClick = {
+                            val saved = NodeController.setMyName(editName)
+                            confirm(
+                                when {
+                                    !saved -> "Node not started yet — not saved"
+                                    pending.isEmpty() -> "Name cleared"
+                                    else -> "Announcing as “$pending”"
+                                }
+                            )
+                        }
+                    ) { Text("Save") }
                 }
             }
         }

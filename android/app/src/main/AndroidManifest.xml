@@ -24,8 +24,19 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />
 
+    <!-- The node seed and the prekey ring live in this app's storage. Auto Backup
+         would upload them to the user's Google Drive, and `adb backup` would pull
+         them off an unlocked device — which defeats the seven-day prekey window
+         entirely (docs/ANDROID_AUDIT.md §0, S-022). Backing up an identity is a
+         deliberate, encrypted, user-initiated export, never an OS default.
+
+         This comment sits above the tag, not inside it: a comment between a start
+         tag's name and its attributes is not well-formed XML, and the manifest
+         merger fails with a bare "Error parsing AndroidManifest.xml". -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:icon="@drawable/ic_spore"
         android:label="@string/app_name"
         android:supportsRtl="true"

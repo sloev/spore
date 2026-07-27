@@ -103,11 +103,77 @@ object NodeController {
         }
     }
 
+    /**
+     * The seed and the prekey ring, encrypted at rest under an Android Keystore key.
+     *
+     * `MODE_PRIVATE` only keeps *other apps* out. It leaves both secrets in plain
+     * base64 on the filesystem, readable from a rooted device, a filesystem image,
+     * or — until `allowBackup="false"` landed beside this — the user's Google Drive.
+     * That last one silently defeated the seven-day prekey window the ring exists to
+     * provide (docs/ANDROID_AUDIT.md §0, S-022).
+     *
+     * No user authentication is required to unwrap: the foreground service has to
+     * keep relaying while the screen is locked, and a node that stops carrying mail
+     * at lock is not a mesh node. The threat this closes is offline extraction, not
+     * a thief holding an unlocked phone.
+     */
+    private fun secretPrefs(ctx: Context): android.content.SharedPreferences {
+        cachedPrefs?.let { return it }
+        val prefs = try {
+            val key = androidx.security.crypto.MasterKey.Builder(ctx)
+                .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            androidx.security.crypto.EncryptedSharedPreferences.create(
+                ctx,
+                "spore_secret",
+                key,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        } catch (e: Exception) {
+            // A wiped or rotated Keystore makes the encrypted store unopenable. Losing
+            // the identity is worse than storing it as before, so fall back rather
+            // than crash — and say so loudly enough to be noticed in a bug report.
+            android.util.Log.e("spore", "encrypted prefs unavailable, falling back to plain", e)
+            ctx.getSharedPreferences("spore", Context.MODE_PRIVATE)
+        }
+        migrateSecrets(ctx, prefs)
+        cachedPrefs = prefs
+        return prefs
+    }
+
+    /**
+     * Move an existing install's secrets out of the plaintext store, once.
+     *
+     * Without this an upgrade looks like a factory reset: a new identity, a new
+     * address, and an inbox nobody can reach. The old file is cleared after the
+     * copy, so the plaintext copy does not linger.
+     */
+    private fun migrateSecrets(ctx: Context, into: android.content.SharedPreferences) {
+        val old = ctx.getSharedPreferences("spore", Context.MODE_PRIVATE)
+        if (old === into || old.all.isEmpty()) return
+        val edit = into.edit()
+        for ((k, v) in old.all) {
+            when (v) {
+                is String -> edit.putString(k, v)
+                is Int -> edit.putInt(k, v)
+                is Long -> edit.putLong(k, v)
+                is Boolean -> edit.putBoolean(k, v)
+                is Float -> edit.putFloat(k, v)
+            }
+        }
+        edit.apply()
+        old.edit().clear().apply()
+        android.util.Log.i("spore", "migrated ${old.all.size} secrets to the encrypted store")
+    }
+
+    private var cachedPrefs: android.content.SharedPreferences? = null
+
     fun start(ctx: Context) {
         if (ptr != 0L) return
         appCtx = ctx.applicationContext
         Petnames.init(ctx)
-        val prefs = ctx.getSharedPreferences("spore", Context.MODE_PRIVATE)
+        val prefs = secretPrefs(ctx)
         val seedB64 = prefs.getString("seed", null)
         val seed = seedB64?.let { Base64.decode(it, Base64.NO_WRAP) }
 
@@ -210,7 +276,7 @@ object NodeController {
                 // Prekey rotation is driven by the router's sweep, so any tick can
                 // have changed the ring. Persisting it here is what makes the
                 // seven-day window survive an app restart.
-                if (tick % 20 == 0) saveRing(ctx.getSharedPreferences("spore", Context.MODE_PRIVATE))
+                if (tick % 20 == 0) saveRing(secretPrefs(ctx))
                 delay(if (fetching) 2_000L else if (tick++ < 6) 5_000L else 30_000L)
             }
         }
@@ -369,7 +435,7 @@ object NodeController {
         SporeNative.nativeTopicAddr(t)?.let { topicAddrToName[it.toHex()] = t }
         topics.value = topics.value + t
         if (persist) {
-            val prefs = appCtx.getSharedPreferences("spore", Context.MODE_PRIVATE)
+            val prefs = secretPrefs(appCtx)
             prefs.edit().putStringSet("topics", topics.value.toSet()).apply()
         }
     }
@@ -485,14 +551,20 @@ object NodeController {
 
     // -- your name, and invites -------------------------------------------------
 
-    /** The name we announce to the mesh (others see it as a suggested petname). */
-    fun setMyName(name: String) {
-        if (ptr == 0L) return
+    /**
+     * The name we announce to the mesh (others see it as a suggested petname).
+     *
+     * Returns false when the node is not up yet, so the caller can say so instead
+     * of showing a confirmation for a save that did not happen.
+     */
+    fun setMyName(name: String): Boolean {
+        if (ptr == 0L) return false
         val n = name.trim().take(32)
         myName.value = n
         SporeNative.nativeSetName(ptr, n)
-        appCtx.getSharedPreferences("spore", Context.MODE_PRIVATE).edit().putString("myname", n).apply()
+        secretPrefs(appCtx).edit().putString("myname", n).apply()
         SporeNative.nativeBeacon(ptr) // let peers see the new name right away
+        return true
     }
 
     /**

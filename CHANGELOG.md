@@ -25,6 +25,21 @@ Nothing yet.
      precisely so it cannot be swept into published release notes — v0.4.0's
      notes ended with the prose version of it, which is not a changelog entry. -->
 
+- **The Android identity seed and every live prekey secret were being uploaded to
+  Google Drive.** `allowBackup="true"` plus plaintext `SharedPreferences` meant Auto
+  Backup carried both off the device by default, which specifically destroys the
+  seven-day forward-secrecy window S-022 added — `CONTINUITY.md` says a backup of
+  the ring defeats it, and Android was performing exactly that backup on a schedule
+  nobody chose. Now `allowBackup="false"` with extraction rules covering
+  device-to-device transfer as well, and `EncryptedSharedPreferences` over a
+  Keystore master key, with a migration so an upgrade is not a factory reset.
+- **Both Save buttons in the Android app looked broken and were not.** Petname and
+  own-name saves persisted on the first click with no snackbar and no visible state
+  change. They now confirm, and stay disabled until the field differs from what is
+  stored — compared against the value the setter will *actually* write, since both
+  trim and one caps at 32. `setMyName` also silently did nothing before the node
+  was up; it returns `Boolean` now and the UI says so rather than confirming a save
+  that did not happen.
 - **S-031** Any sound in the room could saturate a CPU core indefinitely.
   `Demod::push` rescanned its whole retained buffer every call, so work grew with
   the buffer rather than with the new samples — 13 ms per 100 ms push at 1 s
