@@ -67,17 +67,59 @@ private data object BridgesScreen : Screen
 private data object Advanced : Screen
 private data object Connect : Screen
 
-// Kawaii-but-serious: Meshtastic-adjacent greens with a soft pastel accent.
+// Neo-Tokyo Tactical Wasteland — docs/VISUALDESIGN.md is normative, and these are
+// the same tokens site/style.css carries. When one moves they both move; a hex code
+// that lives in two places and agrees by luck is how a design language rots.
+//
+// Contrast was measured, not eyeballed (§1). The one forbidden pairing is pink on
+// kevlar olive at 2.32:1, which is why olive appears here only as `outline` and
+// never behind text.
+private object Palette {
+    // Raw
+    val Void = androidx.compose.ui.graphics.Color(0xFF0A0A0C) // CRT Black
+    val Asphalt = androidx.compose.ui.graphics.Color(0xFF1A1C20) // Worn Asphalt
+    val Amber = androidx.compose.ui.graphics.Color(0xFFFFB000) // 10.80:1 on Void
+    val Phosphor = androidx.compose.ui.graphics.Color(0xFF39FF14) // 14.59:1
+    val Pink = androidx.compose.ui.graphics.Color(0xFFFF2A85) // 5.58:1
+    val Cyan = androidx.compose.ui.graphics.Color(0xFF00FFFF) // 15.78:1
+    val Edge = androidx.compose.ui.graphics.Color(0xFF2A2F1C) // machined metal
+    // Field Notes (light) — each re-checked to clear 4.5:1 on paper
+    val Paper = androidx.compose.ui.graphics.Color(0xFFF4F1E8)
+    val PaperInk = androidx.compose.ui.graphics.Color(0xFF1A1C20)
+    val AmberDark = androidx.compose.ui.graphics.Color(0xFF8A5F00) // 5.00:1
+    val PhosphorDark = androidx.compose.ui.graphics.Color(0xFF1F7A0C) // 4.83:1
+    val PinkDark = androidx.compose.ui.graphics.Color(0xFFC2185B) // 5.20:1
+    val CyanDark = androidx.compose.ui.graphics.Color(0xFF00707A) // 5.17:1
+}
+
+// The bunker is dark, so dark is the real theme; Field Notes is the printed-manual
+// voice rather than a wash of the same one.
 private val SporeLightColors = androidx.compose.material3.lightColorScheme(
-    primary = androidx.compose.ui.graphics.Color(0xFF2E7D4F),
-    secondary = androidx.compose.ui.graphics.Color(0xFF57C785),
-    tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
-    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE8F4EC),
+    primary = Palette.PinkDark,
+    secondary = Palette.CyanDark,
+    tertiary = Palette.PhosphorDark,
+    background = Palette.Paper,
+    surface = Palette.Paper,
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+    onBackground = Palette.PaperInk,
+    onSurface = Palette.PaperInk,
+    outline = androidx.compose.ui.graphics.Color(0xFFD8D2C0),
+    error = Palette.PinkDark,
 )
 private val SporeDarkColors = androidx.compose.material3.darkColorScheme(
-    primary = androidx.compose.ui.graphics.Color(0xFF57C785),
-    secondary = androidx.compose.ui.graphics.Color(0xFF7ADBA2),
-    tertiary = androidx.compose.ui.graphics.Color(0xFFF2A6C9),
+    primary = Palette.Pink,
+    secondary = Palette.Cyan,
+    tertiary = Palette.Phosphor,
+    background = Palette.Void,
+    surface = Palette.Void,
+    surfaceVariant = Palette.Asphalt,
+    onBackground = Palette.Amber,
+    onSurface = Palette.Amber,
+    onPrimary = Palette.Void,
+    outline = Palette.Edge,
+    // The palette has no red, so error shares the accent hue. Never signal a
+    // failure by colour alone here — pair it with an icon and words (§1).
+    error = Palette.Pink,
 )
 
 /** Wall-clock HH:mm for a message stamp. */

@@ -1,10 +1,40 @@
+/* Neo-Tokyo Tactical Wasteland — see docs/VISUALDESIGN.md, which is normative.
+   Raw palette first, then the semantic names the rest of this file uses. Changing
+   a colour here is the only place it should ever be changed. */
 :root {
-  --bg: #0e1116; --panel: #171b22; --edge: #262c36; --ink: #e6edf3;
-  --dim: #8b98a9; --accent: #57c785; --accent2: #4aa3ff;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Raw palette */
+  --void: #0a0a0c;      /* CRT Black */
+  --asphalt: #1a1c20;   /* Worn Asphalt */
+  --kevlar: #4b5320;    /* Kevlar Olive */
+  --amber: #ffb000;     /* Tactical Amber   10.80:1 on void */
+  --phosphor: #39ff14;  /* Phosphor Green   14.59:1 */
+  --pink: #ff2a85;      /* Radioactive Pink  5.58:1 — NEVER on kevlar (2.32:1) */
+  --cyan: #00ffff;      /* Pastel Cyan      15.78:1 */
+
+  /* Semantic roles */
+  --bg: var(--void);
+  --panel: var(--asphalt);
+  --edge: #2a2f1c;      /* olive shifted dark — machined metal */
+  --ink: var(--amber);
+  --dim: #8a7a4a;       /* amber desaturated, 4.68:1 on void */
+  --accent: var(--pink);
+  --accent2: var(--cyan);
+  --ok: var(--phosphor);
+
+  --mono: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, Consolas, monospace;
+  /* No webfont: the standalone node must make zero network requests, and CI
+     asserts it. A display face is a system stack or it is nothing. */
+  --display: Impact, Haettenschweiler, "Arial Narrow Bold", system-ui, sans-serif;
 }
+/* Field Notes — the printed-manual voice. There is no light variant of a CRT in a
+   ruined basement, so light mode is a different artefact rather than a wash of the
+   same one. Every colour re-checked to clear 4.5:1 on paper. */
 @media (prefers-color-scheme: light) {
-  :root { --bg:#f6f8fa; --panel:#fff; --edge:#d8dee4; --ink:#1f2328; --dim:#5b6670; }
+  :root {
+    --bg: #f4f1e8; --panel: #fff; --edge: #d8d2c0; --ink: #1a1c20; --dim: #5b5647;
+    --amber: #8a5f00; --phosphor: #1f7a0c; --pink: #c2185b; --cyan: #00707a;
+    --accent: var(--pink); --accent2: var(--cyan); --ok: var(--phosphor);
+  }
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -137,3 +167,66 @@ main.doc .cta a.cta-secondary { color: var(--ink); background: var(--panel); }
 main.doc .cta a:hover { filter: brightness(1.08); }
 main.doc .cta a.cta-secondary:hover { border-color: var(--ink); }
 .cta-note { color: var(--dim); font-size: 14px; margin: 0 0 24px; max-width: 40em; }
+
+
+/* ---------------------------------------------------------------------------
+   Ambient VFX and component chrome (docs/VISUALDESIGN.md §3, §4).
+
+   Everything here is decoration and every bit of it is disabled under
+   prefers-reduced-motion. A CRT flicker is a photosensitivity trigger, not a
+   flourish, so `reduce` must render the page completely static — including the
+   text-shadow bloom, which reads as blur rather than glow when it cannot move.
+   --------------------------------------------------------------------------- */
+
+/* Headers: heavy, dystopian, uppercase. */
+main.doc h1, main.doc h2, main.doc h3 {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+}
+
+/* CRT bloom, amber and phosphor only, 2px. More turns body copy to mush. */
+main.doc h1, main.doc h2 { text-shadow: 0 0 2px currentColor; }
+
+/* Ammo crate: hard offset shadow, no blur, barely any rounding. */
+main.doc pre, main.doc table, .share {
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  border-radius: 2px;
+}
+
+/* Scanlines + vignette, fixed over everything, never intercepting clicks. */
+body::before, body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+}
+body::before {
+  background: repeating-linear-gradient(
+    to bottom, rgba(0,0,0,.06) 0 1px, transparent 1px 2px);
+}
+body::after {
+  background: radial-gradient(ellipse at center,
+    transparent 55%, rgba(0,0,0,.55) 100%);
+}
+
+/* Focus is never removed, only thickened. */
+main.doc a:focus-visible, .share-btn:focus-visible, header.site nav a:focus-visible {
+  outline: 2px solid var(--accent2);
+  outline-offset: 2px;
+}
+
+/* Radio-switch throw: the button moves into its own shadow. */
+.share-btn { box-shadow: 3px 3px 0 rgba(0,0,0,.55); transition: transform .06s, box-shadow .06s; }
+.share-btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 rgba(0,0,0,0); }
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after { display: none; }
+  main.doc h1, main.doc h2 { text-shadow: none; }
+  * { animation: none !important; transition: none !important; }
+  .share-btn:active { transform: none; }
+}
+
+/* Print: none of this survives paper, and the spec is meant to be printed. */
+@media print {
+  body::before, body::after { display: none; }
+  main.doc h1, main.doc h2 { text-shadow: none; }
+  main.doc pre, main.doc table { box-shadow: none; }
+}
