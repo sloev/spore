@@ -15,6 +15,10 @@ Two conventions specific to this project:
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.4.0 — 2026-07-27
+
 - **The release-bump workflow's first run failed on its last line.** Three separate
   defects, all mine: GitHub Actions cannot open pull requests unless the repository
   enables it (off by default, and I did not check), a re-run would have died on the
