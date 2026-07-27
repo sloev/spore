@@ -840,6 +840,103 @@ not mistaken for a fix.
 
 ---
 
+## S-023
+
+**The daemon beaconed a mesh-wide flood every 5 seconds instead of a link-local
+HELLO every 5 minutes.** High (availability / regulatory).
+`src/main.rs` beacon loop, `src/lib.rs` `build_announce`.
+
+**Root cause.** Two mistakes stacked, and each hid the other.
+
+1. **Wrong unit.** `Trickle::new(now(), 5, 80)`, where `now()` is
+   `SystemTime::now()… .as_secs()` — wall-clock **seconds**. The spec says the
+   HELLO interval doubles **5 → 80 minutes**. Someone wrote the spec's numbers
+   into a timer whose base is seconds, so the interval was 5 → 80 s: **60× too
+   fast**.
+2. **Wrong frame.** §4 has said from the start that there are two forms —
+   *"Link HELLO = hops 0; flooded = hops 16."* Only the flooded one was ever
+   built. `build_announce` unconditionally set `hops = 16` and `fl::FLOOD`, and
+   `Hub::beacon` was the only beacon call, so the frequent beacon was the
+   mesh-wide one.
+
+Net effect: roughly **45 mesh-wide ANNOUNCE floods per hour per node** at the
+steady-state 80 s interval — and ~720/h during the 5 s phase, which `Trickle::reset`
+returns to on any novelty, so a busy mesh sits near the fast end. The documented
+ceiling in the same spec line is **≤ 1/h**. Every flood is relayed by every node
+that hears it, and each one was also `store_put`, so the store churned too.
+
+**Exploit.** No attacker needed; the node does it to itself and to everyone in
+range. It matters most on exactly the media SPORE is *for*:
+
+| Medium | Consequence |
+|---|---|
+| LoRa (EU868) | A ~130-byte signed ANNOUNCE flooded every 5–80 s will exceed the **1 % legal duty cycle**. This is a compliance problem, not a tuning one. |
+| AX.25 / packet | Continuous beacon traffic on a shared channel; antisocial at best. |
+| Meshtastic | Each SPORE flood becomes N mesh hops in the underlay (§: "one SPORE hop, N invisible mesh hops"). |
+| LAN | Harmless. Which is why nobody noticed. |
+
+The §5.4a token bucket does **not** save you: it caps *relayed bulk* traffic, and
+announces are deliberately exempt so a slow link stays a full mesh member.
+
+**Reproduced.** By reading, then pinned as a test. `now()` at `src/bridge/hub.rs:18`
+is seconds; `Trickle::fired` sets `fire_at = now + cur`; the beacon loop polled every
+500 ms. The 60× and the 45/h both follow arithmetically.
+
+**Patch.** `Node::build_hello` builds §4's link-local form — same signed payload,
+`hops = 0`, so §5 rule 5 stops it at the first hop. `Hub::hello` sends it. The
+daemon now runs two cadences: HELLO on Trickle between `HELLO_MIN_SECS` (300) and
+`HELLO_MAX_SECS` (4800), and the flooded ANNOUNCE no more often than
+`ANNOUNCE_FLOOD_MIN_SECS` (3600). The constants are named and carry their unit,
+because the bug was a bare number in the wrong unit. A HELLO is no longer stored: it
+is link-local and superseded by the next one.
+
+**Behaviour change?** Yes — local policy, not wire. Both frames are ordinary v1
+ANNOUNCEs; a hops-0 ANNOUNCE is what §4 always specified and what §5 already handles.
+Peers need no change. Neighbour discovery on a LAN is slower to *first* contact (up
+to 5 minutes rather than 5 seconds) — that is the spec's chosen trade, and INV/WANT
+on first contact still backfills immediately.
+
+**Freeze impact?** None. `build_announce` keeps its signature; `build_hello` and the
+three constants are additive.
+
+**Tests.** `hello_is_link_local_and_the_beacon_cadence_is_in_seconds` — the constants
+are the spec's minutes expressed in seconds; a HELLO decodes with `hops == 0`, still
+verifies, teaches a neighbour our prekey, and produces **no** forwards from that
+neighbour; the flooded form has `hops == 16` and *is* relayed.
+
+---
+
+## S-024
+
+**Two smaller divergences found in the same sweep**, recorded rather than fixed,
+because both are documentation-versus-code mismatches with no exploit and fixing
+them properly is a design choice rather than a repair. Low.
+
+**(a) The ratchet's skipped-key cache has no age bound.** `docs/SPEC.md` §7 said
+*"cache skipped mks ≤ 7 d"*. `src/ratchet.rs` contains no notion of time at all —
+no timestamps, no `now` parameter. The cache is bounded by **count**
+(`MAX_SKIPPED_KEYS`, from S-017), which is the right defence against the DoS but a
+different property: a skipped message key can be held indefinitely, so the
+forward-secrecy window for out-of-order messages does not decay after a week as the
+spec claimed. Nothing is zeroised on drop either — `zeroize` is a direct dependency
+but, as its own `Cargo.toml` comment says, only to pin a transitive version; no code
+uses it. §7 now states what the implementation does. Giving it the 7-day property
+means threading time into `Ratchet`, which touches its whole API.
+
+**(b) `mark_seen` ignores the 30-day dedup floor.** The spec's defaults line
+promises *"seen-set ≥ 30 d"*. `ingest` honours it —
+`e.expiry.max(now + SEEN_MIN_SECS)`. Its twin `mark_seen`, used by all fifteen
+*origination* paths, computes `e.expiry.max(0u32.wrapping_add(SEEN_MIN_SECS))` — no
+`now`, because the method does not take one. Since `SEEN_MIN_SECS` is 2 592 000 and
+any real expiry is a Unix timestamp far larger, the `max` is a **no-op** and the
+`// >= expiry` comment describes nothing. Not exploitable: the id is retained until
+the envelope expires, and `ingest` independently drops anything with
+`e.expiry < now`, so a forgotten id cannot be re-accepted. It is the same
+fixed-in-one-twin-not-the-other shape as S-015 and S-019, and it is a misleading
+expression sitting in the dedup path, which is worth knowing about.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -868,6 +965,15 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
+- **The ratchet's skipped-key cache is count-bounded, not age-bounded** (S-024a).
+  Threading time into `Ratchet` would give it the 7-day window §7 originally
+  claimed. Nothing is zeroised on drop anywhere in the crate.
+- **`mark_seen` vs `ingest`** disagree about the 30-day dedup floor (S-024b). Not
+  exploitable, but one of them is doing nothing and says otherwise.
+- **Beacon cadence is fixed but unmeasured on radio.** S-023 makes the daemon obey
+  the spec's numbers; whether 5→80 min HELLO plus hourly flood actually fits a LoRa
+  duty cycle in practice is a question for the first hardware run, not for a
+  calculation.
 - **Prekey rotation does not exist** (S-022 documents the gap; closing it is open).
   One prekey per identity, derived from the seed, forever. So the one-shot seal has
   no forward secrecy, and S-020's healing does not survive a stolen prekey secret —

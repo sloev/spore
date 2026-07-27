@@ -31,6 +31,20 @@ pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
 pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
 pub const PATH_FRESH_SECS: u32 = 3 * 3600;
 
+/// Trickle bounds for the link-local HELLO beacon (§5.4b), **in seconds**.
+///
+/// The spec says the interval doubles 5 → 80 *minutes*. The daemon used to pass
+/// the bare numbers 5 and 80 into a timer whose base is `now()` in seconds, so it
+/// beaconed 60× too fast — and beaconed the mesh-wide flood rather than the
+/// link-local HELLO, giving ~45 floods an hour against a documented ceiling of one
+/// (S-023). Named constants in the timer's own unit, so the mistake cannot recur
+/// silently.
+pub const HELLO_MIN_SECS: u32 = 5 * 60;
+pub const HELLO_MAX_SECS: u32 = 80 * 60;
+
+/// Floor between mesh-wide flooded ANNOUNCEs — the spec's "ANNOUNCE flood ≤ 1/h".
+pub const ANNOUNCE_FLOOD_MIN_SECS: u32 = 3600;
+
 /// Default per-envelope wire budget used by `Node::send` to decide when to
 /// fragment. Transports over tighter media (LoRa ~200 B, ESP-NOW 250 B) lower
 /// `Node::mtu`; the router itself is MTU-agnostic.
@@ -755,7 +769,28 @@ impl Node {
     }
 
     /// Build+sign this node's ANNOUNCE (prekey + busy + topics), ready to flood (§4).
+    ///
+    /// Mesh-wide: `hops = 16`, so every node that hears it relays it. §5.4b caps
+    /// this at roughly one per hour per node — see [`ANNOUNCE_FLOOD_MIN_SECS`] and
+    /// [`Node::build_hello`], which is the cheap link-local form meant for the
+    /// frequent beacon.
     pub fn build_announce(&mut self, now: u32) -> Vec<Forward> {
+        self.build_announce_at_hops(now, 16)
+    }
+
+    /// The **link HELLO** of §4: the same ANNOUNCE payload at `hops = 0`.
+    ///
+    /// §5 stops forwarding at `hops == 0`, so this reaches direct neighbours on
+    /// every interface and goes no further. That is what makes it affordable to
+    /// send often — it teaches neighbours our prekey, topics and `busy` byte, and
+    /// carries the §5.4c backpressure signal, without costing the whole mesh a
+    /// flood. §4 specified this form from the start; nothing built it until
+    /// S-023, so the daemon was beaconing the *flooded* variant every few seconds.
+    pub fn build_hello(&mut self, now: u32) -> Vec<Forward> {
+        self.build_announce_at_hops(now, 0)
+    }
+
+    fn build_announce_at_hops(&mut self, now: u32, hops: u8) -> Vec<Forward> {
         let mut p = Vec::new();
         p.extend_from_slice(&self.prekey_pub);
         p.push(self.busy()); // §5.4c backpressure
@@ -767,9 +802,14 @@ impl Node {
         p.extend_from_slice(self.petname.as_bytes());
         let mut e = Envelope::new(ty::ANNOUNCE, ZERO_DEST, now + 3600, p);
         e.flags |= fl::FLOOD;
+        e.hops = hops;
         e.sign(&self.sk);
         self.mark_seen(&e);
-        self.store_put(&e);
+        // A HELLO is link-local and immediately superseded by the next one, so it
+        // is not worth a store slot or an INV entry; a flooded ANNOUNCE is.
+        if hops > 0 {
+            self.store_put(&e);
+        }
         self.forward_intents(&e, NO_IFACE, now)
     }
 
@@ -3300,6 +3340,44 @@ mod tests {
         let c = Node::new("c", &[]);
         let (_, _, enc2) = a.send_direct(c.addr, b"hello stranger", now);
         assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
+    }
+
+    /// S-023. Two properties the daemon got wrong for as long as it existed: the
+    /// beacon's Trickle interval was in the wrong unit, and the frame it beaconed
+    /// was the mesh-wide flood rather than §4's link-local HELLO.
+    #[test]
+    fn hello_is_link_local_and_the_beacon_cadence_is_in_seconds() {
+        // The spec says the HELLO interval doubles 5 -> 80 *minutes*. These are
+        // seconds, because that is the timer's base — the bug was passing 5 and 80.
+        assert_eq!(HELLO_MIN_SECS, 300, "5 minutes, in the timer's own unit");
+        assert_eq!(HELLO_MAX_SECS, 4800, "80 minutes");
+        assert_eq!(ANNOUNCE_FLOOD_MIN_SECS, 3600, "the spec's 'ANNOUNCE flood <= 1/h'");
+
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+
+        // A HELLO stops at the first hop: hops == 0, so §5 rule 5 drops it there.
+        let hello = a.build_hello(now);
+        assert!(!hello.is_empty(), "a HELLO goes out on every interface");
+        let Forward::Flood { bytes, .. } = &hello[0] else { panic!("HELLO floods locally") };
+        let (he, _) = Envelope::decode(bytes).expect("decode HELLO");
+        assert_eq!(he.hops, 0, "a HELLO must not be relayed");
+        assert_eq!(he.typ, ty::ANNOUNCE);
+        assert!(he.verify(), "still signed — it teaches our prekey");
+
+        // A neighbour learns from it and does not pass it on.
+        let mut b = Node::new("b", &[]);
+        let rx = b.on_rx(bytes, 0, Some(a.addr), now);
+        assert!(b.peer_prekey(&a.addr).is_some(), "the neighbour learned our prekey");
+        assert!(rx.forwards.is_empty(), "hops == 0 => the mesh never sees it");
+
+        // The flooded form is the expensive one, and is the one worth storing.
+        let flood = a.build_announce(now);
+        let Forward::Flood { bytes: fb, .. } = &flood[0] else { panic!("ANNOUNCE floods") };
+        let (fe, _) = Envelope::decode(fb).expect("decode ANNOUNCE");
+        assert_eq!(fe.hops, 16, "mesh-wide");
+        let mut c = Node::new("c", &[]);
+        assert!(!c.on_rx(fb, 0, Some(a.addr), now).forwards.is_empty(), "and it is relayed");
     }
 
     #[test]

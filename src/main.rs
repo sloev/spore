@@ -746,11 +746,22 @@ fn run_config(cfg: Config) {
     {
         let h = hub.clone();
         thread::spawn(move || {
-            let mut trickle = Trickle::new(now(), 5, 80);
+            // Two cadences, because §4 defines two frames and they cost very
+            // different amounts. The HELLO is link-local (hops 0) and rides the
+            // Trickle schedule in the timer's own unit — seconds; passing the
+            // spec's "5 → 80 min" as the bare numbers 5 and 80 is what made this
+            // beacon 60× too chatty (S-023). The flooded ANNOUNCE is mesh-wide and
+            // is held to the documented ceiling of one an hour.
+            let mut trickle = Trickle::new(now(), HELLO_MIN_SECS, HELLO_MAX_SECS);
+            let mut last_flood = 0u32; // 0 => flood once at startup
             loop {
                 let t = now();
                 if trickle.due(t) {
                     trickle.fired(t);
+                    h.hello();
+                }
+                if t.saturating_sub(last_flood) >= ANNOUNCE_FLOOD_MIN_SECS {
+                    last_flood = t;
                     h.beacon();
                 }
                 thread::sleep(std::time::Duration::from_millis(500));

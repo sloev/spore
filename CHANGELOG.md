@@ -92,6 +92,19 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   is a pure function of the seed a node persists, deleting it would achieve nothing.
   The claims are removed rather than softened. No behaviour change; sessions
   (`ratchet`) do have forward secrecy and the docs now distinguish the two.
+- **S-023** The daemon beaconed a **mesh-wide ANNOUNCE flood every 5 seconds**
+  instead of a link-local HELLO every 5 minutes. Two stacked mistakes: the Trickle
+  interval was the spec's "5 → 80 min" written as the bare numbers 5 and 80 into a
+  timer whose base is seconds (60× too fast), and §4's `hops = 0` HELLO had never
+  been implemented, so the frequent beacon was the expensive form. ~45 floods an
+  hour against a documented ceiling of one — which on LoRa in EU868 will exceed the
+  1 % legal duty cycle. `Node::build_hello` adds the link-local form and the daemon
+  runs the two cadences separately.
+- **S-024** Two documentation-versus-code mismatches recorded without fixing: the
+  ratchet's skipped-key cache is bounded by count, not by the 7 days §7 claimed
+  (and nothing is zeroised on drop), and `mark_seen` computes the 30-day dedup floor
+  without a `now`, making its `max` a no-op — harmless, since `ingest` drops expired
+  envelopes independently, but it reads as if it does something.
 - **S-021** The Android release advertised a dead "stable release" link, showed a
   three-day-old publication date while building on every merge, accumulated one
   APK per day with no indication which was current, and named itself from its own

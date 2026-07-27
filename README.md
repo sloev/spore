@@ -88,8 +88,9 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
   directed unicast, dedup, store with eviction, the full `on_rx` router.
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
-- **Crypto** (§7) — anonymous sealed boxes to a recipient prekey; forward
-  secrecy by rotating and deleting prekeys.
+- **Crypto** (§7) — anonymous sealed boxes to a recipient prekey. **No forward
+  secrecy on this path**: one prekey per identity, derived from the seed, never
+  rotated (S-022). Sessions (Double Ratchet) do have it.
 - **Bridges** (Page 2) — a bridge only moves envelope bytes in and out of a node;
   the router never changes. Implemented: UDP, an HTTP `/spore/{push,inv,want}` bag,
   a `<hexid>.spore` folder store, a streaming KISS framer, and `~S1.…~` armor for
