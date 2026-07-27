@@ -50,3 +50,9 @@ name = "seal_open"
 path = "fuzz_targets/seal_open.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "radio_codecs"
+path = "fuzz_targets/radio_codecs.rs"
+test = false
+doc = false

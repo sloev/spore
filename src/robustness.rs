@@ -78,6 +78,18 @@ fn feed_every_parser(data: &[u8]) {
     // Covert-channel codec.
     let _ = crate::bridge::icmp::decode_echo(data);
 
+    // Radio codecs. Both are reachable from a hostile medium — anyone with a
+    // transmitter in range — and neither had been hammered like the core parsers.
+    let _ = crate::bridge::meshtastic::decode(data);
+    let _ = crate::bridge::meshtastic::from_radio_packet(data);
+    let mut mesh = crate::bridge::meshtastic::StreamFramer::new();
+    let _ = mesh.push(data);
+
+    // The audio modem demodulates whatever the microphone heard, which is
+    // whatever anyone nearby chose to play.
+    let samples: Vec<f32> = data.iter().map(|b| (*b as f32 - 128.0) / 128.0).collect();
+    let _ = crate::bridge::audio::demodulate(&samples);
+
     // Crypto open paths, with a key the caller does not hold.
     let _ = topic_open(data, &[7u8; 32]);
     let _ = open_sealed(data, &[9u8; 32]);
@@ -279,4 +291,126 @@ fn an_oversized_object_is_an_error_not_a_panic() {
     // Just under the ceiling still goes out.
     let ok = vec![0u8; chunk * 200];
     assert!(n.send(ZERO_DEST, ok, now).is_ok(), "an object inside one set still sends");
+}
+
+#[test]
+fn radio_codecs_survive_corrupted_real_frames() {
+    // Random bytes rarely get past a length or magic check, so the states worth
+    // reaching live just off a *valid* frame. Both of these codecs are fed by
+    // anyone with a transmitter in range.
+    use crate::bridge::meshtastic;
+
+    let mut r = Rng(0xD1A9_5E37);
+    let env = Envelope::new(ty::DATA, ZERO_DEST, 1_700_003_600, vec![0x5Au8; 60]).wire();
+
+    let real: Vec<Vec<u8>> = vec![
+        meshtastic::encode(&env, 0x1234_5678, 0xFFFF_FFFF, 42),
+        meshtastic::stream_encode(&meshtastic::encode(&env, 1, 2, 3)),
+    ];
+
+    for base in &real {
+        for _ in 0..600 {
+            let mut m = base.clone();
+            match r.below(4) {
+                0 => {
+                    let i = r.below(m.len());
+                    m[i] ^= 1 << (r.below(8) as u32);
+                }
+                1 => {
+                    let k = r.below(m.len() + 1);
+                    m.truncate(k);
+                }
+                2 => {
+                    let extra = r.some_bytes(48);
+                    m.extend_from_slice(&extra);
+                }
+                _ => {
+                    // Overwrite a run — hits declared lengths and tag bytes.
+                    let i = r.below(m.len());
+                    for j in 0..r.below(6) + 1 {
+                        if i + j < m.len() {
+                            m[i + j] = r.byte();
+                        }
+                    }
+                }
+            }
+            let _ = meshtastic::decode(&m);
+            let _ = meshtastic::from_radio_packet(&m);
+            let mut f = meshtastic::StreamFramer::new();
+            // Fed in pieces, the way a serial line actually delivers it.
+            for piece in m.chunks(5) {
+                let _ = f.push(piece);
+            }
+        }
+    }
+
+    // The audio modem, fed a real signal with noise and clipping applied.
+    let clean = crate::bridge::audio::modulate(b"the dam holds");
+    for _ in 0..40 {
+        let mut pcm = clean.clone();
+        for s in pcm.iter_mut() {
+            match r.below(3) {
+                0 => *s += (r.byte() as f32 - 128.0) / 64.0, // noise
+                1 => *s = s.clamp(-0.2, 0.2),                // clipping
+                _ => {}
+            }
+        }
+        let cut = r.below(pcm.len() + 1);
+        pcm.truncate(cut);
+        let _ = crate::bridge::audio::demodulate(&pcm);
+    }
+}
+
+#[test]
+fn a_meshtastic_length_varint_cannot_overflow_the_offset() {
+    // Found by the `radio_codecs` fuzz target within 90 seconds of it existing.
+    // `decode` computed `no + len as usize` where `len` is a varint off the air,
+    // so it reaches u64::MAX: overflow. That panics wherever overflow checks are
+    // on — which is every `cargo build` and `cargo run` *without* `--release`,
+    // including the daemon demo in the README — and in release wraps to a bogus
+    // slice range instead. Anyone with a transmitter in range could send it.
+    //
+    // The sibling parser `from_radio_packet` already used `checked_add`
+    // throughout; `decode` did not. Same shape as S-015: the fix present in one
+    // place and absent in its twin.
+    let crash = [
+        0x0a, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0x0a, 0x29,
+    ];
+    assert!(crate::bridge::meshtastic::decode(&crash).is_none(), "must reject, not overflow");
+
+    // The general shape, not just the one input the fuzzer happened to find:
+    // every wire type carrying an attacker-chosen length or skip.
+    for tag in [0x0au8, 0x12, 0x22, 0x2a] {
+        for pad in 0..4usize {
+            let mut f = vec![tag];
+            f.extend_from_slice(&[0xff; 9]); // a varint at the u64 ceiling
+            f.push(0x01);
+            f.extend(std::iter::repeat(0xAB).take(pad));
+            let _ = crate::bridge::meshtastic::decode(&f);
+        }
+    }
+    // Fixed-width skips (wire types 5 and 1) must not run off the end either.
+    for tag in [0x0du8, 0x09] {
+        let _ = crate::bridge::meshtastic::decode(&[tag]);
+        let _ = crate::bridge::meshtastic::decode(&[tag, 0x00]);
+    }
+
+    // `decode` runs *two* protobuf loops — the frame, then the decoded
+    // sub-message — and the second had the identical defect. Reaching it needs a
+    // well-formed field 4 wrapping a hostile inner message, which is why the
+    // fuzzer found the outer one first and the inner one only after a fix.
+    for inner_tag in [0x12u8, 0x0d, 0x09] {
+        let mut inner = vec![inner_tag];
+        inner.extend_from_slice(&[0xff; 9]); // length varint at the u64 ceiling
+        inner.push(0x01);
+
+        let mut frame = vec![0x22]; // field 4, wire type 2 — the decoded payload
+        frame.push(inner.len() as u8);
+        frame.extend_from_slice(&inner);
+        assert!(
+            crate::bridge::meshtastic::decode(&frame).is_none(),
+            "inner sub-message lengths must be checked too (tag {inner_tag:#04x})"
+        );
+    }
 }

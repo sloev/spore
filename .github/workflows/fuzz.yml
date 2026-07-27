@@ -27,6 +27,7 @@ jobs:
           - fragment_reassembly
           - armor_and_framing
           - seal_open
+          - radio_codecs
     steps:
       - uses: actions/checkout@v4
       # libFuzzer needs nightly; this is the only place the project uses it.

@@ -117,7 +117,13 @@ pub fn decode(frame: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
             }
             2 => {
                 let (len, no) = get_varint(frame, o)?;
-                let end = no + len as usize;
+                // `len` is a varint off the air, so it reaches u64::MAX. Plain
+                // addition overflows — a panic wherever overflow checks are on,
+                // which includes every `cargo build`/`cargo run` without
+                // `--release`, and in release wraps to a bogus range instead.
+                // `from_radio_packet` below already does this correctly; `decode`
+                // did not.
+                let end = no.checked_add(len as usize)?;
                 if end > frame.len() {
                     return None;
                 }
@@ -126,8 +132,8 @@ pub fn decode(frame: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
                 }
                 o = end;
             }
-            5 => o += 4,
-            1 => o += 8,
+            5 => o = o.checked_add(4)?,
+            1 => o = o.checked_add(8)?,
             _ => return None,
         }
         if o > frame.len() {
@@ -151,7 +157,10 @@ pub fn decode(frame: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
             }
             2 => {
                 let (len, no) = get_varint(d, o)?;
-                let end = no + len as usize;
+                // Same checked arithmetic as the outer loop above: this is a
+                // second protobuf parse, over a sub-message whose lengths are just
+                // as attacker-chosen as the frame's.
+                let end = no.checked_add(len as usize)?;
                 if end > d.len() {
                     return None;
                 }
@@ -160,8 +169,8 @@ pub fn decode(frame: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
                 }
                 o = end;
             }
-            5 => o += 4,
-            1 => o += 8,
+            5 => o = o.checked_add(4)?,
+            1 => o = o.checked_add(8)?,
             _ => return None,
         }
     }
