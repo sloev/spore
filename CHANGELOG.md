@@ -13,10 +13,39 @@ Two conventions specific to this project:
   [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md), which carries the
   reproduction, root cause and regression test for each one.
 
+## 0.3.0 — 2026-07-27
+
+Tagged `V0.3.0` at `27bea16`. Release plumbing only — no Rust behaviour changed, wire
+untouched. Both entries are the same finding recurring: a fix verified on the artefact
+it was written for and assumed on its neighbour.
+
+### Fixed
+
+- **Nightly releases accumulated assets** — the fix for `rolling` (S-021) was not
+  applied to the dated nightly beside it, and the versioned filename now embeds a
+  minute and a commit sha, so a second merge the same day added a pair rather than
+  replacing one. 2026-07-27 ended up holding four assets with nothing marking the
+  current one, and its `published_at` sat an hour behind its contents. Today's
+  nightly is now replaced per build, like `rolling` (**S-026**).
+- **The tag glob was case-sensitive.** `tags: ['v*']` silently ignored `V0.1.0` and
+  `V0.2.0`: GitHub created releases for both and no build ever ran, leaving a
+  non-prerelease "latest" holding **zero assets** — so
+  `releases/latest/download/spore-android.apk`, the link `docs/APPS.md` promises,
+  404s from a page that looks like a real release. Worse than having no release at
+  all. Now `['v*', 'V*']`, and the tagged path fails loudly if the tag's
+  `major.minor` disagrees with `Cargo.toml` — `V0.2.0` was cut while `Cargo.toml`
+  still said `0.1.0`, and nothing complained.
+
+Cutting this release also exercised the guard added in it. `V0.3.0` was tagged while
+`Cargo.toml` still said `0.2.0`, and the build refused: *"tag V0.3.0 is 0.3.x but
+Cargo.toml says 0.2.0"*. That is the drift S-025 was about, caught before it produced
+another release nobody could download — bump first, then tag.
+
 ## 0.2.0 — 2026-07-27
 
-Tagged `V0.2.0` at `7b2a185`. Wire unchanged; `Cargo.toml` moves to `0.2.0` to
-match the tag, which is the only part of a version a human sets.
+Tagged `V0.2.0` at `7b2a185`. Wire unchanged. `Cargo.toml`'s `major.minor` is the
+only part of a version a human sets, and it must be bumped *before* the tag — the
+tagged build now verifies the two agree.
 
 ### Security
 
@@ -56,21 +85,6 @@ match the tag, which is the only part of a version a human sets.
   labelling a PR never re-ran the guard, and re-running the failed job replayed the
   original label-free payload. The only way through was to push another commit
   after labelling, which nothing said. `labeled`/`unlabeled` added to the triggers.
-- **Nightly releases accumulated assets** — the fix for `rolling` (S-021) was not
-  applied to the dated nightly beside it, and the versioned filename now embeds a
-  minute and a commit sha, so a second merge the same day added a pair rather than
-  replacing one. 2026-07-27 ended up holding four assets with nothing marking the
-  current one, and its `published_at` sat an hour behind its contents. Today's
-  nightly is now replaced per build, like `rolling` (**S-026**).
-- **The tag glob was case-sensitive.** `tags: ['v*']` silently ignored `V0.1.0` and
-  `V0.2.0`: GitHub created releases for both and no build ever ran, leaving a
-  non-prerelease "latest" holding **zero assets** — so
-  `releases/latest/download/spore-android.apk`, the link `docs/APPS.md` promises,
-  404s from a page that looks like a real release. Worse than having no release at
-  all. Now `['v*', 'V*']`, and the tagged path fails loudly if the tag's
-  `major.minor` disagrees with `Cargo.toml` — `V0.2.0` was cut while `Cargo.toml`
-  still said `0.1.0`, and nothing complained.
-
 ### Changed
 
 - **Version scheme.** `major.minor` lives in `Cargo.toml` and is the only
