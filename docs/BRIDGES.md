@@ -1619,6 +1619,27 @@ automatically via trackers.
 **Security.** DTLS-SRTP encrypts the channel; the DTLS fingerprint is exchanged in
 the SDP. SPORE's signature authenticates the application payload regardless.
 
+**Browser only, deliberately — there is no daemon WebRTC bridge.** This is the
+most-asked-for missing bridge, so the answer is recorded here rather than
+rediscovered. A native Rust WebRTC stack means ICE, DTLS and SCTP; none of those
+are small, and the lightest credible option (a sans-IO crate such as `str0m`) is
+still the largest dependency this project would have taken. That is the same
+budget that keeps TLS out of the tree and put [NFC](#nfc) in the browser, and it is
+the rule that selected every bridge on this page. Spending it here was considered
+and declined.
+
+What you lose is NAT traversal between two daemons with no reachable address. What
+you have instead: [Tor](#tor) and [I2P](#i2p) both traverse NAT and do it with
+better metadata properties, and either is a `torrc`/SAM config away.
+
+The browser and the Android WebView keep WebRTC because there it costs nothing —
+the platform ships the stack. Note that the Android app does not currently *load*
+this transport (its WebView is given `websocket`, `nostr` and `webtorrent`), though
+WebRTC demonstrably works there, since `webtorrent` negotiates data channels
+itself. What is missing on Android is not the runtime but signaling: this transport
+takes an already-open `RTCDataChannel`, and there is no human present to paste an
+offer into a headless WebView.
+
 **References.** [RFC 8831](https://www.rfc-editor.org/rfc/rfc8831) (data channels);
 [RFC 8832](https://www.rfc-editor.org/rfc/rfc8832) (DCEP);
 [RFC 8829](https://www.rfc-editor.org/rfc/rfc8829) (JSEP);
