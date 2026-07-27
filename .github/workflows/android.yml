@@ -95,6 +95,7 @@ jobs:
           echo "code=$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
           echo "date=${date}" >> "$GITHUB_OUTPUT"
           echo "base=${mm}" >> "$GITHUB_OUTPUT"
+          echo "pkg=${pkg}" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -174,23 +175,31 @@ jobs:
             ${{ steps.apk.outputs.path }}
             ${{ steps.sums.outputs.sums }}
 
-      # Delete the rolling release before recreating it, for two reasons that both
-      # bit us:
+      # Clear the release's assets rather than deleting the release.
       #
-      #   * GitHub shows a release's `published_at`, and updating a release in
-      #     place never changes it. Three days of merges all published fine and the
-      #     releases page still read "25 Jul", so the freshest build looked
-      #     abandoned. Recreating stamps it with the build's own date.
-      #   * Assets accumulated. Uploading `spore-<version>.apk` each run left every
-      #     past day's APK sitting in the release, and nothing on the page said
-      #     which of the four was current.
+      # This used to be `gh release delete rolling --cleanup-tag` followed by a
+      # recreate. That works most of the time and is racy: deleting a tag and
+      # recreating it a second later leaves GitHub reconciling two operations on
+      # the same ref, and on its first run the nightly came out of it with a live
+      # tag and no release at all (S-029). Deleting only the assets keeps the tag
+      # and the release identity untouched, which removes the race and still leaves
+      # exactly one APK behind.
       #
-      # The tag goes with it and is recreated at this commit by the step below.
-      - name: Replace the rolling release
+      # The cost is `published_at` stops tracking the build, since an in-place
+      # update never moves it. The release *name* carries the version and the body
+      # carries the commit, so the build time is still legible — it is the sidebar
+      # date that lags, and that is a smaller lie than a release that vanishes.
+      - name: Clear the rolling release's assets
         if: steps.ver.outputs.kind == 'rolling'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete rolling --yes --cleanup-tag || true
+        run: |
+          gh release view rolling --json assets --jq '.assets[].name' 2>/dev/null \
+            | while read -r a; do
+                [ -n "$a" ] || continue
+                echo "removing stale asset $a"
+                gh release delete-asset rolling "$a" --yes || true
+              done
 
       - name: Rolling release (master)
         if: steps.ver.outputs.kind == 'rolling'
@@ -223,21 +232,24 @@ jobs:
       # and deliberately holds only the current APK — which is no help when a build
       # breaks something and you want yesterday's. One release per day (a second
       # merge the same day updates that day's), pruned below.
-      # Replace today's nightly, for the same two reasons the rolling release is
-      # replaced — and this step exists because fixing it there and not here was a
-      # self-inflicted repeat of S-021 (see S-026).
+      # Same treatment for today's nightly: clear its assets, keep the release.
       #
       # The versioned filename embeds a minute-level stamp and the commit sha, so a
-      # second merge on the same day uploads a *new* name rather than overwriting:
-      # after two merges 2026-07-27 held four assets, `spore-v0.0+2026.07.27.apk`
-      # sitting next to `spore-0.1.202607270951+7b2a185.apk` with nothing saying
-      # which was current. And `published_at` never moves on an in-place update, so
-      # the release read 08:44 while its contents were from 09:53.
-      - name: Replace today's nightly
+      # second merge the same day uploads a *new* name rather than overwriting one —
+      # 2026-07-27 held four assets after two merges (S-026). Clearing first leaves
+      # one build per day, which is what "nightly" is supposed to mean.
+      - name: Clear today's nightly assets
         if: steps.ver.outputs.kind == 'rolling'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete "nightly-${{ steps.ver.outputs.date }}" --yes --cleanup-tag || true
+        run: |
+          tag="nightly-${{ steps.ver.outputs.date }}"
+          gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null \
+            | while read -r a; do
+                [ -n "$a" ] || continue
+                echo "removing stale asset $a"
+                gh release delete-asset "$tag" "$a" --yes || true
+              done
 
       - name: Nightly release (master) — dated
         if: steps.ver.outputs.kind == 'rolling'
@@ -281,6 +293,67 @@ jobs:
             echo "pruning $tag"
             gh release delete "$tag" --yes --cleanup-tag
           done
+
+      # Cut the tagged release when Cargo.toml names a version with no tag.
+      #
+      # This is the other half of `release.yml`. That workflow opens a PR bumping
+      # `Cargo.toml`; merging it lands here, and *this* step creates the tag and
+      # publishes the release — in the job that is already running.
+      #
+      # It deliberately does not push a tag and wait for the `tags:` trigger to fire
+      # a second build. A tag pushed by `GITHUB_TOKEN` does not trigger workflows, so
+      # that would be a green job that produced nothing: the exact shape of S-025,
+      # S-026 and S-029. `gh release create` makes the tag and the release together.
+      - name: Cut the tagged release if Cargo.toml names a new version
+        if: steps.ver.outputs.kind == 'rolling'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: android
+        run: |
+          set -euo pipefail
+          ver='${{ steps.ver.outputs.pkg }}'
+          tag="v${ver}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released — nothing to cut."
+            exit 0
+          fi
+          # The archive copy carries the version; the constant name is what
+          # /releases/latest/download can point at.
+          cp spore-android.apk "spore-${tag}.apk"
+          sha256sum "spore-${tag}.apk" > "spore-${tag}.apk.sha256"
+          # Release notes: this version's CHANGELOG section, then the standing
+          # caveats. Written to a file so newlines survive.
+          awk -v v="$ver" '
+            $0 ~ ("^## " v " ") { f = 1; next }
+            /^## / { if (f) exit }
+            f
+          ' ../CHANGELOG.md > notes.md
+          cat >> notes.md <<'NOTE'
+
+          ---
+
+          **[⬇ spore-android.apk](https://github.com/sloev/spore/releases/latest/download/spore-android.apk)**
+          — a permanent link that always serves the newest stable release.
+
+          This number versions the **distribution**, not the protocol. The SPORE v1
+          wire format and the crate's API shape are frozen and unaffected by it.
+
+          Before you rely on it: no radio bridge has been verified against real
+          hardware (every 🧪 in
+          [BRIDGES.md](https://github.com/sloev/spore/blob/master/docs/BRIDGES.md)),
+          and the **Still open** section of
+          [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
+          what is known and unfixed. Builds are debug-signed until a release keystore
+          is configured, so Android will warn about an unknown developer.
+          NOTE
+          echo "SHA-256 \`$(cut -d' ' -f1 "spore-${tag}.apk.sha256")\`" >> notes.md
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "SPORE $tag" \
+            --notes-file notes.md \
+            "spore-${tag}.apk" "spore-${tag}.apk.sha256" \
+            spore-android.apk spore-android.apk.sha256
+          echo "cut $tag"
 
       # A tagged release keeps both names: the versioned one is the archive copy
       # (each tag is its own release, so nothing accumulates), and the constant one

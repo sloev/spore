@@ -1,0 +1,131 @@
+name: release bump
+
+# The one human action in versioning: pick major or minor and press the button.
+#
+# Everything else is derived. This workflow computes the next version from
+# `Cargo.toml`, retitles the CHANGELOG's `## Unreleased` section, and opens a PR.
+# Merging that PR is what cuts the release — `android.yml` sees a `Cargo.toml`
+# version with no tag behind it and creates the tag *and* publishes the release in
+# the same job it is already running.
+#
+# Two GitHub behaviours shape this, and ignoring either produces a green job that
+# does nothing:
+#
+#   * `master` is a protected branch, so `GITHUB_TOKEN` cannot push a commit to it.
+#     Hence a PR rather than a direct push — which is also a reviewable diff, which
+#     is what "a human bumps the version" ought to mean.
+#   * **A tag pushed by `GITHUB_TOKEN` does not trigger workflows.** GitHub blocks
+#     that to prevent recursion. So nothing here relies on a tag firing the release
+#     build; the build that is already running does the publishing. Four release
+#     findings in this repo (S-021, S-025, S-026, S-029) were all mechanisms assumed
+#     to fire and verified only by the artefacts they failed to produce.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Which part of the version to increase'
+        required: true
+        type: choice
+        options:
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Two bumps at once would race on the same branch name and the same CHANGELOG
+# heading. Queue them.
+concurrency:
+  group: release-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Compute the next version
+        id: v
+        run: |
+          set -euo pipefail
+          cur=$(awk '/^\[package\]/{p=1} p && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.toml)
+          if [ -z "$cur" ]; then echo "::error::could not read version from Cargo.toml"; exit 1; fi
+          ma=${cur%%.*}; rest=${cur#*.}; mi=${rest%%.*}
+          case "${{ inputs.bump }}" in
+            major) ma=$((ma + 1)); mi=0 ;;
+            minor) mi=$((mi + 1)) ;;
+            *) echo "::error::unknown bump '${{ inputs.bump }}'"; exit 1 ;;
+          esac
+          # Patch is always 0 on a tagged release; rolling builds generate their own
+          # patch from the merge time, so a human never picks one.
+          next="${ma}.${mi}.0"
+          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
+            echo "::error::tag v${next} already exists"; exit 1
+          fi
+          echo "cur=$cur" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "Bumping $cur -> $next (${{ inputs.bump }})"
+
+      # A release with no changelog entry is a release nobody can read. This is the
+      # check CONTRIBUTING previously asked a human to remember.
+      - name: Refuse a release with nothing written about it
+        run: |
+          set -euo pipefail
+          if ! grep -q '^## Unreleased' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## Unreleased' section to release."
+            echo "Add one and describe what changed, then bump again."
+            exit 1
+          fi
+          body=$(awk '/^## Unreleased/{f=1; next} /^## /{f=0} f' CHANGELOG.md | grep -v '^\s*$' || true)
+          if [ -z "$body" ]; then
+            echo "::error::'## Unreleased' is empty — write what changed before releasing."
+            exit 1
+          fi
+
+      - name: Bump Cargo.toml, Cargo.lock and the CHANGELOG heading
+        run: |
+          set -euo pipefail
+          next='${{ steps.v.outputs.next }}'
+          # Only the [package] version: the first `version =` after that header.
+          awk -v v="$next" '
+            /^\[package\]/ { p = 1 }
+            p && /^version = / && !done { print "version = \"" v "\""; done = 1; next }
+            { print }
+          ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
+          # Keep the lockfile in step without touching dependency versions.
+          cargo update -p spore --offline 2>/dev/null || cargo update -p spore
+          sed -i "0,/^## Unreleased$/s//## ${next} — $(date -u +'%Y-%m-%d')/" CHANGELOG.md
+          # Leave a fresh Unreleased for the next cycle.
+          sed -i "0,/^## ${next} —/s//## Unreleased\n\nNothing yet.\n\n## ${next} —/" CHANGELOG.md
+          grep -n '^version = ' Cargo.toml | head -1
+          grep -n '^## ' CHANGELOG.md | head -3
+
+      - name: Open the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          next='${{ steps.v.outputs.next }}'
+          branch="release/v${next}"
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$branch"
+          git add Cargo.toml Cargo.lock CHANGELOG.md
+          git commit -m "Release ${next}"
+          git push -u origin "$branch"
+          gh pr create --base master --head "$branch" \
+            --title "Release ${next}" \
+            --body "$(printf '%s\n' \
+              "Bumps \`Cargo.toml\` ${{ steps.v.outputs.cur }} → **${next}** (\`${{ inputs.bump }}\`) and retitles the CHANGELOG's \`## Unreleased\` section." \
+              "" \
+              "**Merging this cuts the release.** \`android.yml\` runs on every push to \`master\`; it will see that \`Cargo.toml\` names a version with no tag behind it, create \`v${next}\`, and publish the release with the APK in the same job." \
+              "" \
+              "Nothing here relies on a tag push triggering a build — a tag pushed by \`GITHUB_TOKEN\` does not trigger workflows, so that would silently do nothing." \
+              "" \
+              "---" \
+              "_Generated by [Claude Code](https://claude.ai/code)_")"

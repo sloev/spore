@@ -51,6 +51,9 @@ than fixing a crash, it says so explicitly.
 | [S-024](#s-024) | Doc-vs-code mismatch | Low | ✅ | ✗ recorded | n/a | no |
 | [S-025](#s-025) | Release integrity (empty "latest") | Low | ✅ | ✅ | ✗ manual | release plumbing |
 | [S-026](#s-026) | Release integrity (nightly accumulation) | Low | ✅ | ✅ | ✗ manual | release plumbing |
+| [S-027](#s-027) | Persistent DoS (folder sync) | Medium | ✅ | ✅ | ✅ | no |
+| [S-028](#s-028) | Memory amplification (materialize) | Low | reasoned | ✅ | ✗ | no |
+| [S-029](#s-029) | Release integrity (my own fix, racy) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
@@ -1081,6 +1084,149 @@ produces.
 observable by releasing, and the `curl -fsI` step in `CONTRIBUTING.md` is the only
 guard. It would not have caught this one, because the link it checks kept working —
 what broke was which of four files the link's neighbours were.
+
+---
+
+## S-027
+
+**One hostile filename stopped a whole folder from syncing, permanently.** Medium.
+`src/bridge/foldersync.rs` — `materialize`.
+
+**Root cause.** A file manifest's name is `String::from_utf8_lossy` of bytes chosen
+by whoever published it (`src/file.rs:183`). **NUL is valid UTF-8**, so it survives
+decoding untouched. The traversal guard is sound —
+
+```rust
+let safe = Path::new(&name).file_name().map(|s| s.to_owned());
+```
+
+— `file_name()` strips every directory component, so `"../../etc/passwd"` becomes
+`"passwd"` *inside* `out_dir` and `"."`/`".."` are dropped. That part was right. The
+bug was the next line:
+
+```rust
+fs::write(out_dir.join(fname), bytes)?;   // <-- `?`
+```
+
+`file_name()` happily returns `"a\0b"`, the OS refuses it, and `?` propagates the
+error out of the loop.
+
+**Exploit.** Publish one file manifest whose name contains a NUL onto a topic the
+victim follows. Manifests are ordinary flooded envelopes — no key, no session, no
+forgery. From then on every call to `materialize` returns `Err` and **not one file
+is written**, including files that were already complete and perfectly writable.
+It persists until the poisoned manifest expires out of the store, and can be
+renewed indefinitely for the cost of one small envelope. The folder-sync bridge is
+silently dead while looking merely idle.
+
+**Reproduced.** First against `std` directly, to establish the primitive: of
+`"../../etc/passwd"`, `".."`, `"/etc/passwd"`, `""`, `"."`, `"a\0b"`, `"x/../../y"`,
+only `"a\0b"` survives `file_name()` and fails to write. Then end to end: a `Node`
+with two NUL-named manifests and one honest `good.txt`, and `materialize` returning
+`Err` with an empty output directory.
+
+**Patch.** Skip what will not write instead of aborting the run. The same applies to
+a permission error or a full disk on one path — none of those are reasons to stop
+writing the other files.
+
+**Behaviour change?** `materialize` now returns `Ok(n)` where it previously returned
+`Err` for an unwritable name, and `n` counts what was actually written. A caller
+that treated `Err` as "nothing happened" still sees a correct count.
+
+**Freeze impact?** None.
+
+**Tests.** `a_hostile_filename_cannot_stop_the_other_files_being_written` — two
+poisoned names either side of an honest one, asserting the honest file lands and the
+directory holds exactly one entry. `a_name_cannot_escape_the_output_directory` pins
+the traversal property that *was* correct, so a future refactor of the guard cannot
+quietly lose it.
+
+---
+
+## S-028
+
+**`materialize` pulled the entire store into RAM.** Low.
+`src/bridge/foldersync.rs` — `materialize`; `src/lib.rs` — `complete_files`.
+
+**Root cause.** `complete_files()` returns `Vec<(String, Vec<u8>)>` — it assembles
+*every* complete file into memory before a single one is written. The store is
+deliberately disk-backed for exactly the opposite reason: the Android node is
+configured for `STORE_BUDGET_BYTES = 256 MB` on disk with `MEM_BUDGET_BYTES = 8 MB`
+resident, and this path defeats that split in one call.
+
+**Exploit.** Weak, which is why this is Low: `materialize` is called by the operator
+or their sync loop, not by the receive path, so a peer cannot trigger the allocation
+directly. What a peer controls is the *size* — filling a follower's store with
+complete files is ordinary use of the file layer.
+
+**Reproduced.** By reading, not measuring — the allocation is plain in the type. Said
+plainly because this register's rule is that findings are reproduced, and this one is
+reasoned. It is listed because the fix is small and the disk-backed store's whole
+purpose is undermined without it, not because it was demonstrated.
+
+**Patch.** `Node::complete_file_names()` returns `(name, magnet)` pairs, and
+`materialize` streams each file straight to its `File` handle with the existing
+`write_file_to`, which is already generic over `io::Write`. One file is in flight at
+a time. `complete_files()` is kept — it is public API and useful for small stores —
+with its doc now pointing at the streaming path for anything going to disk.
+
+**Behaviour change?** None observable; same files, same contents.
+
+**Freeze impact?** None. `complete_files` is not in `api_freeze.rs` or the C ABI, and
+is unchanged regardless.
+
+**Tests.** Covered incidentally by the two S-027 tests, which now exercise the
+streaming path. No test asserts the memory profile — a peak-RSS assertion would be
+flaky, and pretending otherwise would be the kind of claim this register exists to
+prevent.
+
+---
+
+## S-029
+
+**My fix for S-026 destroyed the release it was meant to repair.** Low (release
+integrity). `.github/workflows/android.yml`. **Self-inflicted, second time.**
+
+**Root cause.** S-026's fix was `gh release delete <tag> --yes --cleanup-tag`
+followed immediately by recreating the release and tag. On its first live run
+(`27bea16`) every step reported success — the job is green, steps 18, 19 and 20 all
+`success` — and the end state was `nightly-2026.07.27` **existing as a git tag with
+no release attached to it**.
+
+Deleting a tag and recreating it a second later asks GitHub to reconcile two
+operations on the same ref, and tag deletion is not synchronous. I could not
+attribute the exact interleaving from the job logs, and say so rather than invent
+one: what is established is the end state, that it was not there before this change,
+and that the pattern is racy by construction.
+
+**Exploit.** None. The damage is that the rollback window S-026 existed to provide
+was empty, and the job that emptied it reported success — the worst combination for
+something nobody watches.
+
+**Reproduced.** Observed, not constructed: `git ls-remote --tags` lists
+`nightly-2026.07.27`, and `GET /releases/tags/nightly-2026.07.27` returns 404.
+
+**Patch.** Stop deleting releases. Clear their **assets** instead —
+`gh release delete-asset` over what `gh release view --json assets` lists — then
+upload. The tag and the release identity are never touched, so there is no ref to
+race on, and the accumulation S-026 was about is still prevented because the old
+assets go before the new ones arrive. Applied to both `rolling` and the nightly.
+
+The cost, which is the honest trade: an in-place update never moves `published_at`,
+so the sidebar date lags again — the thing S-021 was originally about. The release
+*name* carries the full version and the body carries the commit, so the build is
+still identifiable. A stale sidebar date is a smaller lie than a release that
+disappears, and unlike the delete/recreate approach it cannot lose the artefact.
+
+**Behaviour change?** Release plumbing only.
+
+**Freeze impact?** None.
+
+**Tests.** None automated, and this is now the fourth release-plumbing finding with
+no test (S-021, S-025, S-026, S-029). That is the pattern worth naming: this
+subsystem is only observable by running it against GitHub, every fix here has been
+verified by inspecting the artefacts afterwards, and twice that inspection found the
+fix had broken something else. Nothing in CI will catch the fifth one either.
 
 ---
 

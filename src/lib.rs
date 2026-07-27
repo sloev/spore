@@ -1728,8 +1728,41 @@ impl Node {
         out
     }
 
+    /// Every complete file we hold, as `(name, magnet)`, newest manifest per name
+    /// winning (by envelope expiry).
+    ///
+    /// Names, not bytes. [`Node::complete_files`] assembles every file at once,
+    /// which on a disk-backed store means pulling the whole store into RAM — an
+    /// Android node is configured for 256 MB on disk and 8 MB resident, and
+    /// assembling all of it defeats exactly that split. Callers that write files
+    /// out should walk these and stream each one with [`Node::write_file_to`],
+    /// which is what `foldersync::materialize` now does (S-028).
+    pub fn complete_file_names(&self) -> Vec<(String, Id)> {
+        let mut best: HashMap<String, (Id, u32)> = HashMap::new();
+        for (magnet, m) in &self.manifests {
+            if !self.has_file(magnet) {
+                continue;
+            }
+            let exp = self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0);
+            best.entry(m.name.clone())
+                .and_modify(|(id, e)| {
+                    if exp > *e {
+                        *id = *magnet;
+                        *e = exp;
+                    }
+                })
+                .or_insert((*magnet, exp));
+        }
+        best.into_iter().map(|(name, (magnet, _))| (name, magnet)).collect()
+    }
+
     /// Every complete file we hold, as `(name, bytes)`, newest manifest per name
-    /// winning (by envelope expiry). Drives materialising a synced folder.
+    /// winning (by envelope expiry).
+    ///
+    /// Assembles every file into memory at once. Prefer
+    /// [`Node::complete_file_names`] plus [`Node::write_file_to`] when the result
+    /// is going to disk; this is kept for small stores and for callers that
+    /// genuinely want the bytes.
     pub fn complete_files(&self) -> Vec<(String, Vec<u8>)> {
         let mut best: HashMap<String, (Id, u32)> = HashMap::new();
         for (magnet, m) in &self.manifests {

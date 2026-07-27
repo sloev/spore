@@ -1,8 +1,8 @@
 # Contributing
 
 The **SPORE v1 wire format** and the crate's **public API shape** are frozen. The
-crate and the shipped distribution are versioned separately and are at `0.1.x` —
-early, and honest about it. Freezing the wire at v1 while the software is at 0.1 is
+crate and the shipped distribution are versioned separately and are still `0.x` —
+early, and honest about it. Freezing the wire at v1 while the software is at 0.x is
 not a contradiction: the protocol is what peers and reimplementations depend on, and
 it does not move. The rules below exist so that stays true — no release can silently
 break a peer or a downstream build.
@@ -72,43 +72,54 @@ cargo build --release --lib --target wasm32-unknown-unknown && node web/test.mjs
 
 ## Cutting a release
 
-**Rolling releases are automatic and need nothing from you.** Every merge to
-`master` publishes `<major>.<minor>.<YYYYMMDDHHMM>+<short sha>` — patch is the merge
-time, build metadata is the commit — replacing the `rolling` release and writing a
-dated `nightly-<date>`, of which the last five are kept. `major.minor` is read from
-`Cargo.toml`, and no part of a version is ever derived from a git tag; that mistake
+**Actions → "release bump" → Run workflow → `minor` or `major`.** That is the whole
+procedure. The workflow reads `Cargo.toml`, computes the next version (major resets
+minor to zero; the patch is always `0`, because rolling builds generate their own
+from the merge time), retitles the CHANGELOG's `## Unreleased` heading, and opens a
+PR. Merge it and the release publishes itself.
+
+Two things it refuses to do, both deliberately:
+
+- **Release with an empty `## Unreleased`.** A release nobody can read about is worse
+  than no release. Write entries as work merges — that is what the section is for.
+- **Reuse an existing tag.** It fails rather than clobbering.
+
+Before pressing it, make sure "Running everything locally" passes on `master`, and
+check the register's **Still open** section: anything there a user would reasonably
+assume is closed belongs in the CHANGELOG, not only in the register. Shipping a
+release that oversells is the failure mode this project cares about.
+
+Afterwards, confirm the release actually serves bytes —
+`curl -fsI https://github.com/sloev/spore/releases/latest/download/spore-android.apk`.
+
+<details>
+<summary>Why it is a PR and a merge rather than one button</summary>
+
+Two GitHub behaviours make the obvious version silently useless, and ignoring either
+produces a green job that did nothing:
+
+- `master` is protected, so `GITHUB_TOKEN` cannot push the bump commit to it. Hence a
+  PR — which is also a reviewable diff, which is what "a human bumps the version"
+  ought to mean.
+- **A tag pushed by `GITHUB_TOKEN` does not trigger workflows.** GitHub blocks that
+  to prevent recursion. So "create the tag and let the `tags:` trigger build it"
+  would publish nothing. Instead `android.yml` — which already runs on every push to
+  `master` — notices that `Cargo.toml` names a version with no tag behind it and
+  calls `gh release create`, which makes the tag and the release together, in the job
+  that is already running.
+
+A single-button version needs a PAT or GitHub App token that can push to a protected
+branch *and* trigger workflows: a long-lived credential with write access to
+`master`. The two-click flow avoids it.
+
+Manual tagging still works — `v*` and `V*` both match, and the build checks the tag
+against `Cargo.toml` — but it is the path that produced S-025: three hand-cut tags,
+none of which built anything.
+</details>
+
+**Rolling and nightly builds need none of this.** Every merge to `master` publishes
+`<major>.<minor>.<YYYYMMDDHHMM>+<short sha>` — patch is the merge time, build
+metadata is the commit — replacing the `rolling` release and writing a dated
+`nightly-<date>`, of which the last five are kept. `major.minor` is read from
+`Cargo.toml`, and no part of a version is derived from a git tag; that mistake
 produced a build called "SPORE rolling rolling+2026.07.27".
-
-### Bumping major or minor
-
-The only version edit a human makes. One commit changing `version` in `Cargo.toml`
-(and the matching line in `Cargo.lock`), reviewed like any other. Rolling builds pick
-the new `major.minor` up on the next merge. Bump **minor** for new capability, **major**
-when the *wire format* changes — which also means a new `VER` byte and a new frozen
-contract, so it is not a thing that happens quietly.
-
-### Cutting a tagged release
-
-1. Everything in "Running everything locally" passes on `master`.
-2. `CHANGELOG.md`: retitle `## Unreleased` to `## <version> — <YYYY-MM-DD>`. Every
-   entry states its wire status, and security entries name their `S-0nn`.
-3. Check the register's **Still open** section. Anything there that a user would
-   reasonably assume is closed belongs in the release notes, not just the register.
-   Shipping a release that oversells is the failure mode this project cares about.
-4. **Bump `Cargo.toml`'s `major.minor` first, in its own commit**, to the version
-   you are about to tag. The tagged build verifies the two agree and fails if they
-   do not — `V0.2.0` was cut while `Cargo.toml` still said `0.1.0`, which left
-   rolling builds versioned `0.1.x` and the newest release `0.2.0`, drifting apart
-   with nothing complaining. The patch component stays `0`; it is generated.
-5. Tag and push: `git tag v<version> && git push origin v<version>`. Either case
-   works (`v*` and `V*` are both matched — they were not, and two tags silently
-   built nothing), but prefer lowercase for consistency.
-6. `.github/workflows/android.yml` does the rest on the tag — builds the APK,
-   publishes a release with both the versioned filename and the constant
-   `spore-android.apk`, and prints the SHA-256. Watch it; a red release job leaves a
-   tag with no artifacts.
-7. **Confirm the release actually has assets** —
-   `curl -fsI https://github.com/sloev/spore/releases/latest/download/spore-android.apk`.
-   A tag whose build never ran still produces a release page, and if it is not a
-   pre-release it becomes "latest" while serving nothing. Do not announce a release
-   you have not fetched from.
