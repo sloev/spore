@@ -23,6 +23,12 @@ name: release bump
 #     default, and I missed it — the first run did every step, pushed the branch, and
 #     failed on the last line. The PR is therefore best-effort: the branch is what
 #     matters, and a link is printed if the API refuses.
+#   * **A PR opened by a bot needs one click before its checks run.** GitHub holds
+#     the run in "Action required — awaiting approval from a maintainer". This is a
+#     click, not a wall: press *Approve and run* on the release PR and CI proceeds
+#     normally. If that click ever becomes tiresome, delete the `gh pr create` call
+#     and open the PR from the printed link instead — a human-opened PR needs no
+#     approval.
 on:
   workflow_dispatch:
     inputs:
