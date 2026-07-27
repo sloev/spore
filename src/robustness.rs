@@ -83,7 +83,16 @@ fn feed_every_parser(data: &[u8]) {
     let _ = crate::bridge::meshtastic::decode(data);
     let _ = crate::bridge::meshtastic::from_radio_packet(data);
     let mut mesh = crate::bridge::meshtastic::StreamFramer::new();
-    let _ = mesh.push(data);
+    for frame in mesh.push(data) {
+        // Not just "did not panic": a framer that silently retains everything is
+        // a resource bug a panic-only check cannot see.
+        assert!(frame.len() <= crate::bridge::meshtastic::STREAM_MAX_LEN);
+    }
+    assert!(
+        mesh.buffered() <= crate::bridge::meshtastic::STREAM_MAX_LEN + 8,
+        "framer retained {} bytes; it must resync rather than accumulate",
+        mesh.buffered()
+    );
 
     // The audio modem demodulates whatever the microphone heard, which is
     // whatever anyone nearby chose to play.

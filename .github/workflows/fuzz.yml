@@ -41,7 +41,12 @@ jobs:
         working-directory: fuzz
         run: |
           secs="${{ github.event.inputs.seconds || 300 }}"
-          cargo fuzz run "${{ matrix.target }}" -- \
+          # Start from the committed seeds when a target has them, so the run
+          # explores past a valid frame instead of spending its budget
+          # rediscovering the format. libFuzzer merges them into its own corpus.
+          seeds="seeds/${{ matrix.target }}"
+          [ -d "$seeds" ] || seeds=""
+          cargo fuzz run "${{ matrix.target }}" $seeds -- \
             -max_total_time="$secs" -rss_limit_mb=2048
       # A crash is the point of the job, so keep the input that caused it.
       - name: Upload crash artifacts
