@@ -95,11 +95,20 @@ contract, so it is not a thing that happens quietly.
 3. Check the register's **Still open** section. Anything there that a user would
    reasonably assume is closed belongs in the release notes, not just the register.
    Shipping a release that oversells is the failure mode this project cares about.
-4. Tag and push: `git tag v<version> && git push origin v<version>`.
-5. `.github/workflows/android.yml` does the rest on the tag — builds the APK,
+4. **Bump `Cargo.toml`'s `major.minor` first, in its own commit**, to the version
+   you are about to tag. The tagged build verifies the two agree and fails if they
+   do not — `V0.2.0` was cut while `Cargo.toml` still said `0.1.0`, which left
+   rolling builds versioned `0.1.x` and the newest release `0.2.0`, drifting apart
+   with nothing complaining. The patch component stays `0`; it is generated.
+5. Tag and push: `git tag v<version> && git push origin v<version>`. Either case
+   works (`v*` and `V*` are both matched — they were not, and two tags silently
+   built nothing), but prefer lowercase for consistency.
+6. `.github/workflows/android.yml` does the rest on the tag — builds the APK,
    publishes a release with both the versioned filename and the constant
    `spore-android.apk`, and prints the SHA-256. Watch it; a red release job leaves a
    tag with no artifacts.
-6. Confirm `https://github.com/sloev/spore/releases/latest/download/spore-android.apk`
-   resolves. It only works once a non-prerelease exists, which is exactly what the
-   tag creates — and it is the link `docs/APPS.md` promises.
+7. **Confirm the release actually has assets** —
+   `curl -fsI https://github.com/sloev/spore/releases/latest/download/spore-android.apk`.
+   A tag whose build never ran still produces a release page, and if it is not a
+   pre-release it becomes "latest" while serving nothing. Do not announce a release
+   you have not fetched from.

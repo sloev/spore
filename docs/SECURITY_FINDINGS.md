@@ -44,6 +44,18 @@ than fixing a crash, it says so explicitly.
 | [S-017](#s-017) | Resource exhaustion (ratchet keys) | Medium | ✅ | ✅ | ✅ | no |
 | [S-018](#s-018) | Availability (mutex poisoning) | Medium | ✅ | ✅ | ✅ | yes (recover, not die) |
 | [S-019](#s-019) | Remote DoS (integer overflow) | Medium | ✅ | ✅ | ✅ | no |
+| [S-020](#s-020) | No post-compromise security (topics) | Medium | ✅ | ✅ | ✅ | no |
+| [S-021](#s-021) | Release integrity (stale/dead release) | Low | ✅ | ✅ | ✗ manual | release layout |
+| [S-022](#s-022) | False security claim → no seal FS | Medium | ✅ | ✅ | ✅ | **yes — `seed()` is no longer a whole backup** |
+| [S-023](#s-023) | Spec violation / duty cycle (beacon) | Medium | ✅ | ✅ | ✅ | yes (hourly flood, not 5 s) |
+| [S-024](#s-024) | Doc-vs-code mismatch | Low | ✅ | ✗ recorded | n/a | no |
+| [S-025](#s-025) | Release integrity (empty "latest") | Low | ✅ | ✅ | ✗ manual | release plumbing |
+| [S-026](#s-026) | Release integrity (nightly accumulation) | Low | ✅ | ✅ | ✗ manual | release plumbing |
+
+Two entries above are deliberately not "fixed": S-024 records mismatches whose
+resolution is a design choice rather than a repair. And two have no automated test,
+both release plumbing — the checklist step in `CONTRIBUTING.md` is the only guard,
+which is precisely how S-025 shipped.
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -967,6 +979,108 @@ the envelope expires, and `ingest` independently drops anything with
 `e.expiry < now`, so a forgotten id cannot be re-accepted. It is the same
 fixed-in-one-twin-not-the-other shape as S-015 and S-019, and it is a misleading
 expression sitting in the dedup path, which is worth knowing about.
+
+---
+
+## S-025
+
+**A capital letter published a release that served nothing.** Low (release
+integrity). `.github/workflows/android.yml`.
+
+**Root cause.** The workflow triggered on `tags: ['v*']`. GitHub Actions glob
+matching is **case-sensitive**, so `V0.1.0` and `V0.2.0` did not match it. Both tags
+were created, GitHub created a release for each, and no build ever ran.
+
+`V0.2.0` is not a pre-release, so it became **"latest" while holding zero assets**.
+That makes `releases/latest/download/spore-android.apk` — the permanent stable link
+`docs/APPS.md` advertises, added in S-021 — return 404 from a page that looks like a
+finished release. Strictly worse than the state S-021 fixed, where the link 404'd
+because no non-prerelease existed at all: a missing release reads as "not out yet",
+an empty one reads as "broken download".
+
+A second mismatch rode along. The tag said `0.2.0` while `Cargo.toml` said `0.1.0`,
+so rolling builds would have been named `0.1.<stamp>` while the newest release was
+`0.2.0`, drifting apart with nothing checking.
+
+**Exploit.** None; availability and trust again. But note the shape, because it is
+the third of its kind in this register: the mechanism was verified once, by hand,
+against a case that happened to work (`rolling` builds, which are branch-triggered),
+and the untested neighbouring path was assumed to work. S-015, S-019 and S-023 were
+all "fixed in one twin, missed in the other". This is the same error with `v` and `V`
+as the twins.
+
+**Reproduced.** `git ls-remote --tags` shows `V0.1.0` and `V0.2.0`; the release API
+reports `"assets": []` for `V0.2.0` with `prerelease: false`; and
+`curl -o /dev/null -w '%{http_code}'` on the stable link returns **404** while the
+rolling link returns 206.
+
+**Patch.** `tags: ['v*', 'V*']`. The tagged path now also derives the tag's
+`major.minor` and **fails the build** if it disagrees with `Cargo.toml`, so the two
+cannot drift silently. `Cargo.toml` bumped to `0.2.0` to match the tag that exists.
+The tagged release step gained `append_body: true`, so re-running a release build
+adds its caveats under GitHub's generated notes instead of overwriting them.
+
+`CONTRIBUTING.md` gains the step this needed: bump `Cargo.toml` before tagging, and
+**confirm the release has assets** with `curl -fsI` before announcing it. A tag whose
+build never ran still produces a release page.
+
+**Behaviour change?** Release plumbing only.
+
+**Freeze impact?** None.
+
+**Tests.** None automated — this is workflow-trigger behaviour, only observable by
+tagging. The `curl -fsI` step in the release checklist is the manual check that would
+have caught it, and its absence is why this shipped.
+
+---
+
+## S-026
+
+**The accumulation bug I fixed for `rolling` I reintroduced for nightlies.** Low
+(release integrity). `.github/workflows/android.yml`. **Self-inflicted, in the same
+change that fixed S-021.**
+
+**Root cause.** S-021's accumulation fix was to delete and recreate the `rolling`
+release each build. The dated `nightly-<date>` release added at the same time was
+left to update in place, and it carries the *versioned* filename — which now embeds a
+minute-level stamp and the commit sha. So a second merge on the same day uploads a
+new name instead of overwriting one, and the day's release grows.
+
+Both halves of S-021 came straight back, one level up:
+
+- **Assets accumulate.** After two merges on 2026-07-27 the nightly held four:
+  `spore-v0.0+2026.07.27.apk` next to `spore-0.1.202607270951+7b2a185.apk`, plus both
+  checksums, with nothing indicating which was current.
+- **The date lies.** `published_at` was `08:44:28` while `updated_at` was `09:53:07`
+  and the contents were the 09:53 build — the same in-place-update trap S-021 was
+  about.
+
+**Exploit.** None; availability and trust. What it cost was a claim: the release body
+said "kept as one of the last five nightlies so a bad build can be rolled back from",
+and rolling back needs to know which file is which.
+
+**Reproduced.** The release API for `nightly-2026.07.27`: four assets, two timestamps
+an hour apart, `published_at` an hour behind `updated_at`.
+
+**Patch.** Delete today's nightly before recreating it, exactly as `rolling` is
+handled. One day, one build — the day's *last* master — with a `published_at` that is
+the build's own time. The five-day retention window is unaffected.
+
+**Why it is worth a register entry.** Because the failure was not the bug, it was the
+reasoning: the fix was verified on the artefact it was written for and assumed on its
+neighbour. That is S-015, S-019, S-023 and S-025 as well — four earlier entries with
+the same shape, and it still happened while writing the entry that described it.
+Verifying the mechanism is not the same as verifying every artefact the mechanism
+produces.
+
+**Behaviour change?** Release layout only.
+
+**Freeze impact?** None.
+
+**Tests.** None automated. Same weakness as S-021 and S-025: release plumbing is only
+observable by releasing, and the `curl -fsI` step in `CONTRIBUTING.md` is the only
+guard. It would not have caught this one, because the link it checks kept working —
+what broke was which of four files the link's neighbours were.
 
 ---
 

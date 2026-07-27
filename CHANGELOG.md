@@ -13,9 +13,77 @@ Two conventions specific to this project:
   [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md), which carries the
   reproduction, root cause and regression test for each one.
 
+## 0.2.0 — 2026-07-27
+
+Tagged `V0.2.0` at `7b2a185`. Wire unchanged; `Cargo.toml` moves to `0.2.0` to
+match the tag, which is the only part of a version a human sets.
+
+### Security
+
+- **S-022 closed: the prekey ring.** The one-shot seal now has real forward
+  secrecy. A node holds up to 16 prekeys, mints a **random** one daily, deletes any
+  secret after seven days, and tries every live one when opening — so a sender on a
+  stale ANNOUNCE still reaches you until that secret expires. Rotation runs from the
+  router's sweep, not from each embedder remembering to ask.
+  **This changes what a backup is:** `Node::seed()` no longer restores a node's full
+  ability to read its mail, because prekey secrets are random rather than derived
+  from the seed — which is the only reason deleting them means anything. Persist
+  `Node::prekey_ring()` beside the seed; the browser node and the Android app now
+  do. Mail sealed to an expired prekey is unreadable by everyone including the
+  recipient, and a backup of the ring defeats the seven-day window. Wire unchanged:
+  ANNOUNCE always carried one prekey, it is just a different one each day.
+- **S-023** The daemon beaconed a **mesh-wide ANNOUNCE flood every 5 seconds**
+  instead of a link-local HELLO every 5 minutes. Two stacked mistakes: the Trickle
+  interval was the spec's "5 → 80 min" written as the bare numbers 5 and 80 into a
+  timer whose base is seconds (60× too fast), and §4's `hops = 0` HELLO had never
+  been implemented, so the frequent beacon was the expensive form. ~45 floods an
+  hour against a documented ceiling of one — which on LoRa in EU868 will exceed the
+  1 % legal duty cycle. `Node::build_hello` adds the link-local form and the daemon
+  runs the two cadences separately. **The Android app had the same bug** — its
+  housekeeping loop called `nativeBeacon` every 2-30 s — and is fixed the same way.
+- **S-024** Two documentation-versus-code mismatches recorded without fixing: the
+  ratchet's skipped-key cache is bounded by count, not by the 7 days §7 claimed
+  (and nothing is zeroised on drop), and `mark_seen` computes the 30-day dedup floor
+  without a `now`, making its `max` a no-op — harmless, since `ingest` drops expired
+  envelopes independently, but it reads as if it does something.
+
+### Fixed
+
+- The freeze guard's own escape hatch did not work. `pr-guard.yml` says "add the
+  `allow-frozen-change` label to proceed", but it reads the label from
+  `github.event.pull_request.labels` — a snapshot of the payload that started the
+  run — and `on: pull_request` defaults to opened/synchronize/reopened. So
+  labelling a PR never re-ran the guard, and re-running the failed job replayed the
+  original label-free payload. The only way through was to push another commit
+  after labelling, which nothing said. `labeled`/`unlabeled` added to the triggers.
+- **Nightly releases accumulated assets** — the fix for `rolling` (S-021) was not
+  applied to the dated nightly beside it, and the versioned filename now embeds a
+  minute and a commit sha, so a second merge the same day added a pair rather than
+  replacing one. 2026-07-27 ended up holding four assets with nothing marking the
+  current one, and its `published_at` sat an hour behind its contents. Today's
+  nightly is now replaced per build, like `rolling` (**S-026**).
+- **The tag glob was case-sensitive.** `tags: ['v*']` silently ignored `V0.1.0` and
+  `V0.2.0`: GitHub created releases for both and no build ever ran, leaving a
+  non-prerelease "latest" holding **zero assets** — so
+  `releases/latest/download/spore-android.apk`, the link `docs/APPS.md` promises,
+  404s from a page that looks like a real release. Worse than having no release at
+  all. Now `['v*', 'V*']`, and the tagged path fails loudly if the tag's
+  `major.minor` disagrees with `Cargo.toml` — `V0.2.0` was cut while `Cargo.toml`
+  still said `0.1.0`, and nothing complained.
+
+### Changed
+
+- **Version scheme.** `major.minor` lives in `Cargo.toml` and is the only
+  human-touched part; every merge publishes
+  `<major>.<minor>.<YYYYMMDDHHMM>+<short sha>`. No version is derived from a git
+  tag again — the previous scheme found the `rolling` tag this workflow creates
+  itself and produced "SPORE rolling rolling+2026.07.27".
+- "Frozen 1.0 contract" reworded to "frozen **v1** contract" throughout. It was
+  always the wire format and API shape that were frozen, never a crate version.
+
 ## 0.1.0 — 2026-07-27
 
-**First tagged release.** Three numbers meet here and they version different
+Tagged `V0.1.0` at `e41c59a`. **First tagged release.** Three numbers meet here and they version different
 things, so rather than let anyone infer it wrongly:
 
 | Number | Versions | Frozen? | Lives in |
@@ -27,9 +95,9 @@ Freezing the wire at v1 while the software is at 0.1 is not a contradiction. The
 protocol is what peers and reimplementations depend on, and it does not move. The
 software is early and says so: no radio bridge has been verified against real
 hardware — every 🧪 in [`BRIDGES.md`](docs/BRIDGES.md) — and
-[`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md) carries open items, including
-that the one-shot seal has no forward secrecy (S-022). A 1.0 badge would have said
-otherwise.
+[`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md) carried open items, including
+that the one-shot seal had no forward secrecy (S-022, closed in 0.2.0). A 1.0 badge
+would have said otherwise.
 
 **How the numbers are produced from here.** `major.minor` lives in `Cargo.toml` and
 is the only part a human touches — bumping it is a deliberate, reviewable commit.
@@ -92,32 +160,6 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   is a pure function of the seed a node persists, deleting it would achieve nothing.
   The claims are removed rather than softened. No behaviour change; sessions
   (`ratchet`) do have forward secrecy and the docs now distinguish the two.
-- **S-022 closed: the prekey ring.** The one-shot seal now has real forward
-  secrecy. A node holds up to 16 prekeys, mints a **random** one daily, deletes any
-  secret after seven days, and tries every live one when opening — so a sender on a
-  stale ANNOUNCE still reaches you until that secret expires. Rotation runs from the
-  router's sweep, not from each embedder remembering to ask.
-  **This changes what a backup is:** `Node::seed()` no longer restores a node's full
-  ability to read its mail, because prekey secrets are random rather than derived
-  from the seed — which is the only reason deleting them means anything. Persist
-  `Node::prekey_ring()` beside the seed; the browser node and the Android app now
-  do. Mail sealed to an expired prekey is unreadable by everyone including the
-  recipient, and a backup of the ring defeats the seven-day window. Wire unchanged:
-  ANNOUNCE always carried one prekey, it is just a different one each day.
-- **S-023** The daemon beaconed a **mesh-wide ANNOUNCE flood every 5 seconds**
-  instead of a link-local HELLO every 5 minutes. Two stacked mistakes: the Trickle
-  interval was the spec's "5 → 80 min" written as the bare numbers 5 and 80 into a
-  timer whose base is seconds (60× too fast), and §4's `hops = 0` HELLO had never
-  been implemented, so the frequent beacon was the expensive form. ~45 floods an
-  hour against a documented ceiling of one — which on LoRa in EU868 will exceed the
-  1 % legal duty cycle. `Node::build_hello` adds the link-local form and the daemon
-  runs the two cadences separately. **The Android app had the same bug** — its
-  housekeeping loop called `nativeBeacon` every 2-30 s — and is fixed the same way.
-- **S-024** Two documentation-versus-code mismatches recorded without fixing: the
-  ratchet's skipped-key cache is bounded by count, not by the 7 days §7 claimed
-  (and nothing is zeroised on drop), and `mark_seen` computes the 30-day dedup floor
-  without a `now`, making its `max` a no-op — harmless, since `ingest` drops expired
-  envelopes independently, but it reads as if it does something.
 - **S-021** The Android release advertised a dead "stable release" link, showed a
   three-day-old publication date while building on every merge, accumulated one
   APK per day with no indication which was current, and named itself from its own
