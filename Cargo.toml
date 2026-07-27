@@ -1,6 +1,6 @@
 [package]
 name = "spore"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 # The oldest toolchain that builds this, verified rather than asserted: `cargo
 # +1.75 test` passes. It matters because CONTINUITY.md promises a rebuild on
