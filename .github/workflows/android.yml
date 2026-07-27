@@ -313,10 +313,17 @@ jobs:
           set -euo pipefail
           ver='${{ steps.ver.outputs.pkg }}'
           tag="v${ver}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "$tag is already released — nothing to cut."
-            exit 0
-          fi
+          # Check BOTH cases before creating. Git tags are case-sensitive and so is
+          # `gh release view`, so looking up only "v0.3.0" missed an existing
+          # "V0.3.0" and published a second release for the same version (S-030).
+          # That is the S-025 trap — a v/V mismatch — reproduced inside the fix for
+          # S-025, which is why this loop exists rather than a single lookup.
+          for existing in "v${ver}" "V${ver}"; do
+            if gh release view "$existing" >/dev/null 2>&1; then
+              echo "${ver} is already released as ${existing} — nothing to cut."
+              exit 0
+            fi
+          done
           # The archive copy carries the version; the constant name is what
           # /releases/latest/download can point at.
           cp spore-android.apk "spore-${tag}.apk"
