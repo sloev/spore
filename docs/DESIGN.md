@@ -453,7 +453,7 @@ pre-shared key and a random 24-byte nonce prefixed to the ciphertext (spec §7).
 envelope rides a normal topic with `ENCRYPTED` set; relays are oblivious, endpoints
 with the key decrypt.
 
-`topic.rs` implements the two reasons a key has to change:
+`topic.rs` implements the three reasons a key has to change:
 
 - **Time.** `rotate(key)` advances one epoch, `next = SHA-256(key ‖ domain)`. Keep
   only the current key and a leak of it cannot open past traffic, because hashing
@@ -463,24 +463,66 @@ with the key decrypt.
   *remaining* member with `rekey_seal` — a sealed box to their prekey. The departed
   member holds no prekey that opens any of those boxes and never learns the new
   key. This is exactly the pairwise distribution step Signal's sender keys use.
+- **Compromise.** `contribute`/`absorb` — below.
 
-Tested: rotation is deterministic and one-way, an epoch-tagged message opens only
-under its own epoch's key, and a rekey box opens for the member and not an outsider.
+### Healing: why `rotate` alone is not enough
 
-**What is deliberately not solved here.** Two things separate this from a
-messenger's group chat, and neither is a cryptography problem:
+Rotation gives forward secrecy and *only* forward secrecy. It is a hash chain:
+whoever copies the current key computes every key after it, so rotating faster does
+not help — the attacker rotates too. A group in that state stays compromised until
+a human notices, which is precisely what cannot be relied on.
+
+`contribute` draws 32 fresh random bytes, seals a copy to every member's prekey,
+and everyone folds it into the key with `mix`:
+
+```text
+new = SHA-256("spore-topic-mix-v1" ‖ current ‖ contribution)
+```
+
+An attacker holding the entire chain cannot compute that, because the contribution
+never travels in a form it can open. The group **heals by operating** — no
+detection, no intervention. That is post-compromise security, and it is the
+property a plain hash ratchet does not have.
+
+Three details that are load-bearing:
+
+- **Mix, never replace.** The result depends on the old key *and* the new entropy.
+  So a contribution can only add entropy, and an attacker able to sign as a member
+  cannot cancel an honest contribution by following it with one of its own — it
+  appends steps it knows to a chain that one step it cannot read has already made
+  unknowable. (`rekey_seal` replaces outright; that is right for eviction, where you
+  *want* the old key to stop mattering, and wrong for healing.)
+- **No recipient hints.** Every box is 80 bytes and unlabelled; a member
+  trial-decrypts until one opens. That keeps the message from enumerating the group
+  to an interceptor, at the cost of one X25519 per box — hence the 256 cap, so a
+  forged message cannot become a CPU sink.
+- **`key_id`** = `SHA-256(domain ‖ key)[..4]`, carried in the clear, so a receiver
+  holding several candidate keys knows which one a message used.
+
+Tested: rotation is deterministic and one-way; an epoch-tagged message opens only
+under its own epoch's key; a rekey box opens for the member and not an outsider; an
+attacker who has followed the chain for ten rotations is locked out by one
+contribution it cannot absorb; an injected contribution does not undo an honest
+one; and `absorb` rejects every truncation and bit-flip of a contribution message
+without panicking.
+
+**What is still not solved.** Two things separate this from a messenger's group
+chat, and neither is a cryptography problem:
 
 1. **There is no roster and no arbiter of one.** Signal has a server that gives
    every member the same view of who is in the group. A partitioned mesh does not:
    two halves can disagree about membership, and a rekey that reaches only one half
-   splits the conversation into two that can no longer read each other. Key
-   management here is the application's, and `Node::subscribe`/`publish` cover
-   plaintext topics only — an encrypted group composes `topic::seal` with `publish`.
-2. **Forward secrecy, but not post-compromise security.** A hash chain protects the
-   past: steal today's key and yesterday's traffic stays shut. It does not heal —
-   an attacker holding the current key reads forward until a membership rekey
-   replaces it with fresh randomness. A Double Ratchet locks an intruder out on its
-   own once a new DH lands; this does not. Rekey on suspicion, not on schedule.
+   splits the conversation into two that can no longer read each other. `key_id`
+   makes that divergence *visible* instead of a silent decryption failure, but
+   visible is not solved. Key management is the application's, and
+   `Node::subscribe`/`publish` cover plaintext topics only — an encrypted group
+   composes `topic::seal` with `publish`.
+2. **A stolen prekey secret still follows along.** Contributions are sealed to
+   members' prekeys, so someone holding a member's prekey secret opens every
+   contribution addressed to it. Healing against *that* needs the prekey to move,
+   which is the daily prekey rotation in §7, not this module. What `contribute`
+   recovers from is a stolen **group key** — the copy that gets backed up, synced
+   between devices, and left behind on old ones.
 </details>
 
 ## Delivery receipts (§8)  ✅ implemented

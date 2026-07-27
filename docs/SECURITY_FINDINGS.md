@@ -656,6 +656,122 @@ inner loop.
 
 ---
 
+## S-020
+
+**The encrypted-topic ratchet had no post-compromise security.** Medium (design).
+`src/topic.rs` — `rotate`, and everything built on it.
+
+**Root cause.** `rotate(k) = SHA-256(k ‖ domain)` is a symmetric hash chain. It was
+documented as the forward-secrecy mechanism, which it is, and *used* as though it
+were the whole key schedule, which it is not. Anyone who obtains one group key
+computes every subsequent key with a hash, so rotating faster does not help — the
+attacker rotates alongside. Recovery required a human to notice the compromise and
+run `rekey_seal` to every member. Security that depends on detecting a silent theft
+is not security you can plan around.
+
+**Exploit.** Not remote and not a protocol break: it needs the group key. That key
+is the one piece of a SPORE group that gets copied — backed up, synced between a
+phone and a laptop, left on a device that was retired, handed to a member who later
+leaves. The realistic case is a key that leaked at some point in the past and a
+group that has no way to recover without knowing that happened.
+
+**Reproduced.** As a test rather than a run: `a_contribution_locks_out_an_attacker_holding_the_key`
+walks the chain ten rotations with the attacker in lockstep and asserts it still
+reads the traffic — the property, stated as an assertion, before the fix changes it.
+
+**Patch.** Contributory rotation. `contribute` draws 32 random bytes, seals a copy
+to each member's prekey, and `absorb` folds it in with
+`mix(k, c) = SHA-256("spore-topic-mix-v1" ‖ k ‖ c)`. The attacker holds the chain
+but not the contribution, so the group heals through ordinary use with nobody
+detecting anything. Three choices in that sentence are load-bearing:
+
+- **Mixing rather than replacing.** The new key depends on the old one *and* the new
+  entropy, so a contribution can only add. An attacker who can sign as a member
+  cannot cancel an honest contribution by following it with one of its own.
+- **No recipient hints.** Boxes are a uniform 80 bytes and unlabelled, so the
+  message does not enumerate the group to an interceptor. The cost is trial
+  decryption, hence `MAX_MEMBERS = 256`, so a forged message cannot become a CPU
+  sink — the `absorb` count field is attacker-chosen.
+- **`key_id`.** Four bytes of `SHA-256(domain ‖ key)` carried in the clear, so a
+  receiver holding several candidate keys picks the right one. This does not give
+  the group agreement; it makes disagreement readable instead of a silent failure.
+
+**Behaviour change?** No. Additive: `rotate`, `epoch_key`, `seal`, `open`,
+`rekey_seal`, `rekey_open` are byte-for-byte unchanged, and nothing in the frozen
+wire format is touched — a contribution is application payload inside an ordinary
+signed envelope.
+
+**Freeze impact?** `tests/api_freeze.rs` gains pins for the four new functions and
+golden hex for the `mix` and `key_id` derivations, so the schedule cannot drift and
+leave two releases unable to converge on a key. Under `allow-frozen-change`.
+
+**Tests.** Five in `src/topic.rs`: the lock-out above; that an injected contribution
+cannot undo an honest one; that `mix` needs both halves and is not symmetric; that
+`absorb` rejects every truncation, an absurd count, a count/body mismatch and every
+single-byte corruption without panicking; and that `contribute` caps the member
+count. `absorb`, `topic::open`, `peek_epoch` and `rekey_open` added to
+`src/robustness.rs` and to the `seal_open` fuzz target — 61,737 executions, no
+crashes, and libFuzzer's discovered dictionary contains the `\001\000` contribution
+header, which is how we know it reached the parser rather than bouncing off it.
+
+**Still not healed.** A stolen *prekey secret* opens every contribution addressed to
+that member, forever. Fixing that needs the prekey to rotate, which is §7's daily
+rotation and a separate piece of work. Recorded in "Still open".
+
+---
+
+## S-021
+
+**The Android release looked abandoned, advertised a dead download, and named
+itself after its own tag.** Low (release integrity / availability).
+`.github/workflows/android.yml`, `docs/APPS.md`.
+
+**Root cause.** Three independent defects that compounded into "there is no recent
+build", when in fact every merge had built and published one:
+
+1. **`published_at` never moves.** The workflow reuses the moving `rolling` tag and
+   updates the release in place. GitHub's release list shows `published_at`, which
+   is fixed at first publish, so three days of successful builds still displayed
+   *25 Jul*. `updated_at` was current; nothing a visitor sees uses it.
+2. **Assets accumulated.** Each run uploaded `spore-<version>.apk`, so the release
+   held four APKs from four days plus a stray `spore-v0.0+…apk`, with nothing
+   indicating which was current — and no stable filename, so no page could offer a
+   direct download link at all.
+3. **The version string was self-referential.** `git describe --tags --abbrev=0`
+   found the `rolling` tag *this workflow creates*, so after the first run the
+   "current version" became the literal string `rolling`, producing releases titled
+   `SPORE rolling rolling+2026.07.27`.
+
+Separately, `docs/APPS.md` advertised a "stable release" linking to
+`/releases/latest`. No `v*` tag has ever been cut and the only release is a
+pre-release, so that link resolved to nothing.
+
+**Exploit.** No attacker required; this is availability and trust. A visitor
+concludes the project is dormant, or downloads a three-day-old APK believing it is
+current. The documented `sha256sum -c` verification also could not be followed for
+the newest build, because only one day's checksum file survived.
+
+**Reproduced.** `GET /repos/sloev/spore/releases/tags/rolling`: `published_at`
+`2026-07-25T14:11:20Z`, `updated_at` `2026-07-27T07:30:38Z`, five assets dated
+across three days, name `SPORE rolling rolling+2026.07.27`. Zero tags in the repo.
+
+**Patch.** `--match 'v*'` on `git describe`, so the workflow cannot mistake its own
+tag for a version. The rolling release is deleted and recreated each build, so its
+date is the build's date and it holds exactly one APK. Both releases publish a
+constant `spore-android.apk` (plus `.sha256`) alongside the versioned archive copy,
+which is what makes a permanent download URL possible. `docs/APPS.md` now leads with
+that direct link and states plainly that there is no stable release yet, instead of
+linking to one that does not exist.
+
+**Behaviour change?** Release layout only. No code, no wire format.
+
+**Freeze impact?** None — `android.yml` is not in the freeze set.
+
+**Tests.** None automated; this is release plumbing, verified against the API after
+the next merge builds. Worth noting as the weakest verification in this register.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -684,6 +800,16 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
+- **Prekey rotation is not enforced.** S-020 heals a stolen group key but not a
+  stolen prekey secret, because contributions are sealed to prekeys. §7 describes
+  rotating prekeys daily and deleting the private half after seven days; nothing in
+  the library makes a node do it, so an application that never rotates keeps a
+  permanent decryption oracle for every contribution addressed to it.
+- **Encrypted groups have no roster.** Membership, and therefore who a contribution
+  is sealed to, is entirely the application's problem. In a partition two halves can
+  diverge onto different keys; `topic::key_id` makes that legible but does not
+  resolve it. Solving it properly is distributed agreement, not cryptography, and it
+  is the largest honest gap between a SPORE group and a messenger's.
 - **`with_node` reentrancy** is documented but not enforced. An embedder whose
   closure calls back into the hub self-deadlocks; a re-entrant guard or a `&Node`
   variant would make that unrepresentable.

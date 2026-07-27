@@ -52,8 +52,14 @@ jobs:
             echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "kind=tagged" >> "$GITHUB_OUTPUT"
           else
-            # Rolling: current version (latest tag, or v0.0) + build date.
-            cur=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0)
+            # Rolling: current version (latest v* tag, or v0.0) + build date.
+            #
+            # `--match 'v*'` matters: this workflow creates and moves a tag called
+            # `rolling`, so a bare `git describe --tags` finds *its own* tag from
+            # the previous run. That is how builds ended up named
+            # "SPORE rolling rolling+2026.07.27" — the version was literally the
+            # word "rolling". Only v* tags are versions.
+            cur=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0)
             echo "name=${cur}+${date}" >> "$GITHUB_OUTPUT"
             echo "kind=$([ "${{ github.event_name }}" = "push" ] && echo rolling || echo none)" >> "$GITHUB_OUTPUT"
           fi
@@ -101,6 +107,11 @@ jobs:
             gradle :app:assembleRelease
           fi
 
+      # Two names for one file. The versioned name is the archive copy on a tagged
+      # release; the constant name is what a download link can point at, because a
+      # URL cannot contain tomorrow's date. `spore-android.apk` is the only reason
+      # docs/APPS.md can offer a real download button instead of "go to the
+      # releases page and figure out which file is newest".
       - name: Locate + name the APK
         id: apk
         working-directory: android
@@ -108,6 +119,7 @@ jobs:
           src=$(find app/build/outputs/apk -name '*.apk' | head -1)
           out="spore-${{ steps.ver.outputs.name }}.apk"
           cp "$src" "$out"
+          cp "$src" spore-android.apk
           echo "path=android/$out" >> "$GITHUB_OUTPUT"
 
       # A release asset nobody can verify is a release asset nobody should trust.
@@ -119,6 +131,7 @@ jobs:
         run: |
           apk="$(basename '${{ steps.apk.outputs.path }}')"
           sha256sum "$apk" > "$apk.sha256"
+          sha256sum spore-android.apk > spore-android.apk.sha256
           echo "sha=$(cut -d' ' -f1 "$apk.sha256")" >> "$GITHUB_OUTPUT"
           echo "sums=android/$apk.sha256" >> "$GITHUB_OUTPUT"
           cat "$apk.sha256"
@@ -130,6 +143,24 @@ jobs:
             ${{ steps.apk.outputs.path }}
             ${{ steps.sums.outputs.sums }}
 
+      # Delete the rolling release before recreating it, for two reasons that both
+      # bit us:
+      #
+      #   * GitHub shows a release's `published_at`, and updating a release in
+      #     place never changes it. Three days of merges all published fine and the
+      #     releases page still read "25 Jul", so the freshest build looked
+      #     abandoned. Recreating stamps it with the build's own date.
+      #   * Assets accumulated. Uploading `spore-<version>.apk` each run left every
+      #     past day's APK sitting in the release, and nothing on the page said
+      #     which of the four was current.
+      #
+      # The tag goes with it and is recreated at this commit by the step below.
+      - name: Replace the rolling release
+        if: steps.ver.outputs.kind == 'rolling'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete rolling --yes --cleanup-tag || true
+
       - name: Rolling release (master)
         if: steps.ver.outputs.kind == 'rolling'
         uses: softprops/action-gh-release@v2
@@ -138,16 +169,26 @@ jobs:
           name: SPORE rolling ${{ steps.ver.outputs.name }}
           prerelease: true
           make_latest: false
+          # Constant filenames only: this release is replaced every merge, and the
+          # download links in docs/APPS.md point straight at these names.
           files: |
-            ${{ steps.apk.outputs.path }}
-            ${{ steps.sums.outputs.sums }}
-          body: >
-            Rolling SPORE Android node — ${{ steps.ver.outputs.name }} (built from
-            master). Tracks the current version (latest tag) plus the build date;
-            updated on every merge. For a stable build see the latest tagged release.
-            SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
-            `sha256sum -c spore-*.apk.sha256`.
+            android/spore-android.apk
+            android/spore-android.apk.sha256
+          body: |
+            Rolling SPORE Android node — **${{ steps.ver.outputs.name }}**, built from
+            `master` at ${{ github.sha }}. Replaced on every merge, so this page always
+            holds exactly one APK: the current one.
 
+            **[⬇ spore-android.apk](https://github.com/sloev/spore/releases/download/rolling/spore-android.apk)**
+            — a permanent link that always serves the newest rolling build.
+
+            SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
+            `sha256sum -c spore-android.apk.sha256`.
+
+      # A tagged release keeps both names: the versioned one is the archive copy
+      # (each tag is its own release, so nothing accumulates), and the constant one
+      # makes `/releases/latest/download/spore-android.apk` resolve — the stable
+      # counterpart of the rolling link.
       - name: Tagged release (v*)
         if: steps.ver.outputs.kind == 'tagged'
         uses: softprops/action-gh-release@v2
@@ -156,8 +197,14 @@ jobs:
           files: |
             ${{ steps.apk.outputs.path }}
             ${{ steps.sums.outputs.sums }}
-          body: >
-            SPORE Android node — ${{ github.ref_name }}. The current version;
-            rolling master builds are versioned from it until the next tag.
+            android/spore-android.apk
+            android/spore-android.apk.sha256
+          body: |
+            SPORE Android node — **${{ github.ref_name }}**. The current version;
+            rolling `master` builds are versioned from it until the next tag.
+
+            **[⬇ spore-android.apk](https://github.com/sloev/spore/releases/latest/download/spore-android.apk)**
+            — a permanent link that always serves the newest *stable* release.
+
             SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
-            `sha256sum -c spore-*.apk.sha256`.
+            `sha256sum -c spore-${{ github.ref_name }}.apk.sha256`.

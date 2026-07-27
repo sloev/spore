@@ -92,6 +92,19 @@ fn crypto_primitives_are_frozen() {
     let (msec, mpub) = prekey_keypair();
     let boxed = topic::rekey_seal(&[1u8; 32], &mpub);
     assert_eq!(topic::rekey_open(&boxed, &msec), Some([1u8; 32]));
+
+    // Contributory rotation: the derivation must not drift, or two nodes on
+    // different releases stop converging on the same key.
+    assert_eq!(
+        hex(&topic::mix(&[3u8; 32], &[4u8; 32])),
+        "d4a41fb52e20bdb893d009df4930d2e32cf1d94fa8b739ab696e3445ae0e50e0",
+        "topic::mix derivation changed"
+    );
+    assert_eq!(hex(&topic::key_id(&[3u8; 32])), "a1cb46c1", "topic::key_id derivation changed");
+    // And a contribution must survive the round trip it exists for.
+    let (healed, msg) = topic::contribute(&[7u8; 32], &[mpub]);
+    assert_eq!(topic::absorb(&[7u8; 32], &msg, &msec), Some(healed));
+    assert!(topic::absorb(&[7u8; 32], &msg, &[0u8; 32]).is_none(), "a non-member cannot absorb");
 }
 
 #[test]
@@ -113,6 +126,11 @@ fn constants_are_frozen() {
 // rejects any change to these names or signatures. Coerce free functions to
 // typed fn pointers, and pin method signatures by taking them as values.
 // ---------------------------------------------------------------------------
+// Named so the coercions below read as contracts rather than as type puzzles. The
+// signatures, not the names, are what is frozen.
+type Contribute = fn(&[u8; 32], &[[u8; 32]]) -> ([u8; 32], Vec<u8>);
+type Absorb = fn(&[u8; 32], &[u8], &[u8; 32]) -> Option<[u8; 32]>;
+
 #[test]
 fn public_api_surface_is_frozen() {
     // Free functions (exact signatures).
@@ -126,6 +144,10 @@ fn public_api_surface_is_frozen() {
     let _: fn(&[u8]) -> String = armor::wrap;
     let _: fn(&str) -> Option<Vec<u8>> = armor::unwrap;
     let _: fn(&[u8; 32]) -> [u8; 32] = topic::rotate;
+    let _: fn(&[u8; 32], &[u8; 32]) -> [u8; 32] = topic::mix;
+    let _: fn(&[u8; 32]) -> [u8; 4] = topic::key_id;
+    let _: Contribute = topic::contribute;
+    let _: Absorb = topic::absorb;
 
     // Envelope methods.
     let _: fn(u8, Addr, u32, Vec<u8>) -> Envelope = Envelope::new;

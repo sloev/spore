@@ -16,4 +16,13 @@ fuzz_target!(|data: &[u8]| {
     }
     let _ = topic_open(data, &key);
     let _ = open_sealed(data, &key);
+
+    // The topic key schedule's parsers. `absorb` is the interesting one: a
+    // 16-bit count field the attacker picks drives a loop of trial decryptions,
+    // so a mismatch between the count and the body length must be rejected
+    // rather than read past the buffer.
+    let _ = topic::absorb(&key, data, &key);
+    let _ = topic::open(data, &key);
+    let _ = topic::peek_epoch(data);
+    let _ = topic::rekey_open(data, &key);
 });

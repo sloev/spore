@@ -5,13 +5,13 @@ one router. Pick by what the machine in front of you has.
 
 | | Needs | Get it |
 |---|---|---|
-| **📱 SPORE Communicator** (Android) | a phone | [rolling build][apk-rolling] · [stable release][apk-stable] |
+| **📱 SPORE Communicator** (Android) | a phone | [**⬇ spore-android.apk**][apk] — direct download ([release notes][apk-rolling]) |
 | **🌐 Single-file web node** | a browser | [`spore-standalone.html`][standalone] — one file, works offline |
 | **🖥 Desktop daemon** | Rust toolchain | `cargo build --release` → `target/release/spore` |
 | **🖨 Seed Sheet** | a printer | [`spore-seedsheet.html`][seedsheet] — print it; QR codes rebuild the guide |
 
+[apk]: https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
 [apk-rolling]: https://github.com/sloev/spore/releases/tag/rolling
-[apk-stable]: https://github.com/sloev/spore/releases/latest
 [standalone]: https://sloev.github.io/spore/demo/spore-standalone.html
 [seedsheet]: https://sloev.github.io/spore/demo/spore-seedsheet.html
 
@@ -29,13 +29,26 @@ radios, and WebSocket / Nostr / WebTorrent through a headless WebView.
 Built to feel familiar to Meshtastic users: simple by default, advanced options
 one tap away, a little kawaii.
 
-- **[Latest rolling build][apk-rolling]** — freshest, rebuilt on every merge to
-  `master`, versioned `<tag>+<date>`.
-- **[Latest stable release][apk-stable]** — the tagged points.
+**[⬇ Download spore-android.apk][apk]** — a permanent link that always serves the
+newest build. Rebuilt on every merge to `master` and versioned `<tag>+<date>`; the
+[release notes][apk-rolling] name the version and carry its SHA-256. Verify before
+installing if you care to:
 
-Grab the `.apk` and install it; you may need to allow installs from your browser
+```sh
+curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
+curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk.sha256
+sha256sum -c spore-android.apk.sha256
+```
+
+Install it as you would any APK; you may need to allow installs from your browser
 or files app. Builds are debug-signed until a release keystore is configured, so
 Android will warn about an unknown developer.
+
+**There is no stable release yet** — no `v*` tag has been cut, so every build is a
+rolling one off `master`. This page used to advertise a "latest stable release"
+link; it pointed at `/releases/latest`, which resolves to nothing while the only
+release is a pre-release. When the first tag lands, the stable download will live
+at `/releases/latest/download/spore-android.apk` and this section will say so.
 
 <details>
 <summary>What it does, and what still needs your hardware</summary>

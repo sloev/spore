@@ -56,6 +56,16 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   `decode`'s protobuf loops — a remote panic on any build with overflow checks on,
   which is every `cargo build` without `--release`. Found by the new `radio_codecs`
   fuzz target within 90 seconds. The sibling parser already did this correctly.
+- **S-020** The encrypted-topic ratchet had forward secrecy but no
+  post-compromise security: `rotate` is a hash chain, so anyone who obtained one
+  group key derived every later one and the group stayed compromised until a human
+  noticed. `topic::contribute`/`absorb` now fold sealed fresh entropy into the key,
+  so a group heals through ordinary use against an attacker holding the chain.
+  Additive — every existing function is byte-for-byte unchanged.
+- **S-021** The Android release advertised a dead "stable release" link, showed a
+  three-day-old publication date while building on every merge, accumulated one
+  APK per day with no indication which was current, and named itself from its own
+  moving tag (`SPORE rolling rolling+2026.07.27`).
 
 ### Changed — local policy, not wire
 
@@ -120,6 +130,14 @@ does and does not mean.
   bridge exists for (**S-009**).
 - The offline bundle was 290 MB of build output; excluding artifacts properly brings
   it to 6.6 MB, verified to still build cold from a clean extraction.
+- The Android APK now has a permanent download URL —
+  `releases/download/rolling/spore-android.apk` — instead of a versioned filename
+  nothing could link to, and `docs/APPS.md` leads with it (**S-021**).
+- Every in-page anchor on the docs site was dead: 116 of them, including the whole
+  bridge index. `marked` emits no heading ids, and the docs are written for GitHub,
+  which adds them silently. Headings now carry GitHub's own slugs, and the site
+  build fails on any internal link or anchor that does not resolve — which is now a
+  CI check, not just a deploy-time one.
 - Rust 1.75 compatibility restored in earnest: `zeroize_derive` pinned, lockfile
   regenerated at version 3, and four uses of post-1.75 APIs replaced.
 
