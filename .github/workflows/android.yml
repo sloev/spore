@@ -174,23 +174,31 @@ jobs:
             ${{ steps.apk.outputs.path }}
             ${{ steps.sums.outputs.sums }}
 
-      # Delete the rolling release before recreating it, for two reasons that both
-      # bit us:
+      # Clear the release's assets rather than deleting the release.
       #
-      #   * GitHub shows a release's `published_at`, and updating a release in
-      #     place never changes it. Three days of merges all published fine and the
-      #     releases page still read "25 Jul", so the freshest build looked
-      #     abandoned. Recreating stamps it with the build's own date.
-      #   * Assets accumulated. Uploading `spore-<version>.apk` each run left every
-      #     past day's APK sitting in the release, and nothing on the page said
-      #     which of the four was current.
+      # This used to be `gh release delete rolling --cleanup-tag` followed by a
+      # recreate. That works most of the time and is racy: deleting a tag and
+      # recreating it a second later leaves GitHub reconciling two operations on
+      # the same ref, and on its first run the nightly came out of it with a live
+      # tag and no release at all (S-029). Deleting only the assets keeps the tag
+      # and the release identity untouched, which removes the race and still leaves
+      # exactly one APK behind.
       #
-      # The tag goes with it and is recreated at this commit by the step below.
-      - name: Replace the rolling release
+      # The cost is `published_at` stops tracking the build, since an in-place
+      # update never moves it. The release *name* carries the version and the body
+      # carries the commit, so the build time is still legible — it is the sidebar
+      # date that lags, and that is a smaller lie than a release that vanishes.
+      - name: Clear the rolling release's assets
         if: steps.ver.outputs.kind == 'rolling'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete rolling --yes --cleanup-tag || true
+        run: |
+          gh release view rolling --json assets --jq '.assets[].name' 2>/dev/null \
+            | while read -r a; do
+                [ -n "$a" ] || continue
+                echo "removing stale asset $a"
+                gh release delete-asset rolling "$a" --yes || true
+              done
 
       - name: Rolling release (master)
         if: steps.ver.outputs.kind == 'rolling'
@@ -223,21 +231,24 @@ jobs:
       # and deliberately holds only the current APK — which is no help when a build
       # breaks something and you want yesterday's. One release per day (a second
       # merge the same day updates that day's), pruned below.
-      # Replace today's nightly, for the same two reasons the rolling release is
-      # replaced — and this step exists because fixing it there and not here was a
-      # self-inflicted repeat of S-021 (see S-026).
+      # Same treatment for today's nightly: clear its assets, keep the release.
       #
       # The versioned filename embeds a minute-level stamp and the commit sha, so a
-      # second merge on the same day uploads a *new* name rather than overwriting:
-      # after two merges 2026-07-27 held four assets, `spore-v0.0+2026.07.27.apk`
-      # sitting next to `spore-0.1.202607270951+7b2a185.apk` with nothing saying
-      # which was current. And `published_at` never moves on an in-place update, so
-      # the release read 08:44 while its contents were from 09:53.
-      - name: Replace today's nightly
+      # second merge the same day uploads a *new* name rather than overwriting one —
+      # 2026-07-27 held four assets after two merges (S-026). Clearing first leaves
+      # one build per day, which is what "nightly" is supposed to mean.
+      - name: Clear today's nightly assets
         if: steps.ver.outputs.kind == 'rolling'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete "nightly-${{ steps.ver.outputs.date }}" --yes --cleanup-tag || true
+        run: |
+          tag="nightly-${{ steps.ver.outputs.date }}"
+          gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null \
+            | while read -r a; do
+                [ -n "$a" ] || continue
+                echo "removing stale asset $a"
+                gh release delete-asset "$tag" "$a" --yes || true
+              done
 
       - name: Nightly release (master) — dated
         if: steps.ver.outputs.kind == 'rolling'

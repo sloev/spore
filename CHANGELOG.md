@@ -21,6 +21,13 @@ it was written for and assumed on its neighbour.
 
 ### Fixed
 
+- **S-029** The S-026 fix was racy and destroyed the release it repaired. Deleting a
+  tag with `--cleanup-tag` and recreating it a second later left
+  `nightly-2026.07.27` as a live tag with **no release attached**, on a job that
+  reported success at every step. Both release steps now clear the existing
+  *assets* and upload over them, never touching the tag or the release. Accumulation
+  is still prevented; the cost is that `published_at` lags again, which the release
+  name and body make up for.
 - **Nightly releases accumulated assets** — the fix for `rolling` (S-021) was not
   applied to the dated nightly beside it, and the versioned filename now embeds a
   minute and a commit sha, so a second merge the same day added a pair rather than

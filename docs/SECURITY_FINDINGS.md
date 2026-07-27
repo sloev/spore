@@ -53,6 +53,7 @@ than fixing a crash, it says so explicitly.
 | [S-026](#s-026) | Release integrity (nightly accumulation) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 | [S-027](#s-027) | Persistent DoS (folder sync) | Medium | ✅ | ✅ | ✅ | no |
 | [S-028](#s-028) | Memory amplification (materialize) | Low | reasoned | ✅ | ✗ | no |
+| [S-029](#s-029) | Release integrity (my own fix, racy) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
@@ -1178,6 +1179,54 @@ is unchanged regardless.
 streaming path. No test asserts the memory profile — a peak-RSS assertion would be
 flaky, and pretending otherwise would be the kind of claim this register exists to
 prevent.
+
+---
+
+## S-029
+
+**My fix for S-026 destroyed the release it was meant to repair.** Low (release
+integrity). `.github/workflows/android.yml`. **Self-inflicted, second time.**
+
+**Root cause.** S-026's fix was `gh release delete <tag> --yes --cleanup-tag`
+followed immediately by recreating the release and tag. On its first live run
+(`27bea16`) every step reported success — the job is green, steps 18, 19 and 20 all
+`success` — and the end state was `nightly-2026.07.27` **existing as a git tag with
+no release attached to it**.
+
+Deleting a tag and recreating it a second later asks GitHub to reconcile two
+operations on the same ref, and tag deletion is not synchronous. I could not
+attribute the exact interleaving from the job logs, and say so rather than invent
+one: what is established is the end state, that it was not there before this change,
+and that the pattern is racy by construction.
+
+**Exploit.** None. The damage is that the rollback window S-026 existed to provide
+was empty, and the job that emptied it reported success — the worst combination for
+something nobody watches.
+
+**Reproduced.** Observed, not constructed: `git ls-remote --tags` lists
+`nightly-2026.07.27`, and `GET /releases/tags/nightly-2026.07.27` returns 404.
+
+**Patch.** Stop deleting releases. Clear their **assets** instead —
+`gh release delete-asset` over what `gh release view --json assets` lists — then
+upload. The tag and the release identity are never touched, so there is no ref to
+race on, and the accumulation S-026 was about is still prevented because the old
+assets go before the new ones arrive. Applied to both `rolling` and the nightly.
+
+The cost, which is the honest trade: an in-place update never moves `published_at`,
+so the sidebar date lags again — the thing S-021 was originally about. The release
+*name* carries the full version and the body carries the commit, so the build is
+still identifiable. A stale sidebar date is a smaller lie than a release that
+disappears, and unlike the delete/recreate approach it cannot lose the artefact.
+
+**Behaviour change?** Release plumbing only.
+
+**Freeze impact?** None.
+
+**Tests.** None automated, and this is now the fourth release-plumbing finding with
+no test (S-021, S-025, S-026, S-029). That is the pattern worth naming: this
+subsystem is only observable by running it against GitHub, every fix here has been
+verified by inspecting the artefacts afterwards, and twice that inspection found the
+fix had broken something else. Nothing in CI will catch the fifth one either.
 
 ---
 
