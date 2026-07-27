@@ -115,8 +115,16 @@ jobs:
           # Keep the lockfile in step without touching dependency versions.
           cargo update -p spore --offline 2>/dev/null || cargo update -p spore
           sed -i "0,/^## Unreleased$/s//## ${next} — $(date -u +'%Y-%m-%d')/" CHANGELOG.md
-          # Leave a fresh Unreleased for the next cycle.
-          sed -i "0,/^## ${next} —/s//## Unreleased\n\nNothing yet.\n\n## ${next} —/" CHANGELOG.md
+          # Leave a fresh Unreleased for the next cycle. The note is an HTML
+          # comment, not prose: anything readable sitting beside the bullets gets
+          # swept into the published release notes by the retitle above. v0.4.0
+          # shipped with "Entries accumulate here as work merges... Nothing yet."
+          # in its notes for exactly that reason, and reinserting a prose
+          # placeholder here would reproduce it on the very next bump.
+          # `&` is the matched heading, re-emitted below the new one. An anchor of
+          # `^` would match the start of *every* line and prepend the block to all
+          # of them — which it did, until this was dry-run against the real file.
+          sed -i "0,/^## ${next} —/s//## Unreleased\n\n<!-- Add \`- \` bullets here as work merges. This note is a comment so it\n     cannot reach a release page; the bump refuses if there are no bullets. -->\n\n&/" CHANGELOG.md
           grep -n '^version = ' Cargo.toml | head -1
           grep -n '^## ' CHANGELOG.md | head -3
 
