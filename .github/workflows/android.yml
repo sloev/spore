@@ -223,6 +223,22 @@ jobs:
       # and deliberately holds only the current APK — which is no help when a build
       # breaks something and you want yesterday's. One release per day (a second
       # merge the same day updates that day's), pruned below.
+      # Replace today's nightly, for the same two reasons the rolling release is
+      # replaced — and this step exists because fixing it there and not here was a
+      # self-inflicted repeat of S-021 (see S-026).
+      #
+      # The versioned filename embeds a minute-level stamp and the commit sha, so a
+      # second merge on the same day uploads a *new* name rather than overwriting:
+      # after two merges 2026-07-27 held four assets, `spore-v0.0+2026.07.27.apk`
+      # sitting next to `spore-0.1.202607270951+7b2a185.apk` with nothing saying
+      # which was current. And `published_at` never moves on an in-place update, so
+      # the release read 08:44 while its contents were from 09:53.
+      - name: Replace today's nightly
+        if: steps.ver.outputs.kind == 'rolling'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "nightly-${{ steps.ver.outputs.date }}" --yes --cleanup-tag || true
+
       - name: Nightly release (master) — dated
         if: steps.ver.outputs.kind == 'rolling'
         uses: softprops/action-gh-release@v2
@@ -239,6 +255,9 @@ jobs:
             ${{ github.sha }}. Kept as one of the last five nightlies so a bad build
             can be rolled back from; for the current build use
             [`rolling`](https://github.com/sloev/spore/releases/tag/rolling).
+
+            One day, one build: a later merge the same day replaces this, so what is
+            here is that day's *last* master. Use an earlier date to go further back.
 
             SHA-256 `${{ steps.sums.outputs.sha }}`.
 

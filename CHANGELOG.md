@@ -56,6 +56,12 @@ match the tag, which is the only part of a version a human sets.
   labelling a PR never re-ran the guard, and re-running the failed job replayed the
   original label-free payload. The only way through was to push another commit
   after labelling, which nothing said. `labeled`/`unlabeled` added to the triggers.
+- **Nightly releases accumulated assets** — the fix for `rolling` (S-021) was not
+  applied to the dated nightly beside it, and the versioned filename now embeds a
+  minute and a commit sha, so a second merge the same day added a pair rather than
+  replacing one. 2026-07-27 ended up holding four assets with nothing marking the
+  current one, and its `published_at` sat an hour behind its contents. Today's
+  nightly is now replaced per build, like `rolling` (**S-026**).
 - **The tag glob was case-sensitive.** `tags: ['v*']` silently ignored `V0.1.0` and
   `V0.2.0`: GitHub created releases for both and no build ever ran, leaving a
   non-prerelease "latest" holding **zero assets** — so

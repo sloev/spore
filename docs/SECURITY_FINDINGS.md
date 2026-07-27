@@ -50,6 +50,7 @@ than fixing a crash, it says so explicitly.
 | [S-023](#s-023) | Spec violation / duty cycle (beacon) | Medium | ✅ | ✅ | ✅ | yes (hourly flood, not 5 s) |
 | [S-024](#s-024) | Doc-vs-code mismatch | Low | ✅ | ✗ recorded | n/a | no |
 | [S-025](#s-025) | Release integrity (empty "latest") | Low | ✅ | ✅ | ✗ manual | release plumbing |
+| [S-026](#s-026) | Release integrity (nightly accumulation) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
@@ -1030,6 +1031,56 @@ build never ran still produces a release page.
 **Tests.** None automated — this is workflow-trigger behaviour, only observable by
 tagging. The `curl -fsI` step in the release checklist is the manual check that would
 have caught it, and its absence is why this shipped.
+
+---
+
+## S-026
+
+**The accumulation bug I fixed for `rolling` I reintroduced for nightlies.** Low
+(release integrity). `.github/workflows/android.yml`. **Self-inflicted, in the same
+change that fixed S-021.**
+
+**Root cause.** S-021's accumulation fix was to delete and recreate the `rolling`
+release each build. The dated `nightly-<date>` release added at the same time was
+left to update in place, and it carries the *versioned* filename — which now embeds a
+minute-level stamp and the commit sha. So a second merge on the same day uploads a
+new name instead of overwriting one, and the day's release grows.
+
+Both halves of S-021 came straight back, one level up:
+
+- **Assets accumulate.** After two merges on 2026-07-27 the nightly held four:
+  `spore-v0.0+2026.07.27.apk` next to `spore-0.1.202607270951+7b2a185.apk`, plus both
+  checksums, with nothing indicating which was current.
+- **The date lies.** `published_at` was `08:44:28` while `updated_at` was `09:53:07`
+  and the contents were the 09:53 build — the same in-place-update trap S-021 was
+  about.
+
+**Exploit.** None; availability and trust. What it cost was a claim: the release body
+said "kept as one of the last five nightlies so a bad build can be rolled back from",
+and rolling back needs to know which file is which.
+
+**Reproduced.** The release API for `nightly-2026.07.27`: four assets, two timestamps
+an hour apart, `published_at` an hour behind `updated_at`.
+
+**Patch.** Delete today's nightly before recreating it, exactly as `rolling` is
+handled. One day, one build — the day's *last* master — with a `published_at` that is
+the build's own time. The five-day retention window is unaffected.
+
+**Why it is worth a register entry.** Because the failure was not the bug, it was the
+reasoning: the fix was verified on the artefact it was written for and assumed on its
+neighbour. That is S-015, S-019, S-023 and S-025 as well — four earlier entries with
+the same shape, and it still happened while writing the entry that described it.
+Verifying the mechanism is not the same as verifying every artefact the mechanism
+produces.
+
+**Behaviour change?** Release layout only.
+
+**Freeze impact?** None.
+
+**Tests.** None automated. Same weakness as S-021 and S-025: release plumbing is only
+observable by releasing, and the `curl -fsI` step in `CONTRIBUTING.md` is the only
+guard. It would not have caught this one, because the link it checks kept working —
+what broke was which of four files the link's neighbours were.
 
 ---
 
