@@ -1,0 +1,217 @@
+# Android production audit
+
+SPORE Communicator, reviewed for the move from prototype (M0–M5) to a release
+somebody else's phone runs all day.
+
+**How to read this.** Every claim is tagged. **Verified** means I read the code and
+cite the line. **Reasoned** means the architecture implies it and I have not
+measured it. The distinction is the point: this repository has a register of
+findings that existed only in prose, and an audit that blurs the two just adds to it.
+
+---
+
+## 0. Ship this first: the seed and prekey ring are world-readable to a backup
+
+**Verified.** Severity: **High**.
+
+```
+NodeController.kt:110    getSharedPreferences("spore", MODE_PRIVATE)   ← seed, base64
+NodeController.kt:213    saveRing(...)                                 ← prekey ring, base64
+AndroidManifest.xml:28   android:allowBackup="true"
+```
+
+`MODE_PRIVATE` keeps other *apps* out. It does nothing about Android Auto Backup,
+which uploads the app's `shared_prefs` to the user's Google Drive, or about
+`adb backup` on an unlocked device.
+
+So the identity seed **and every live prekey secret** leave the device
+automatically, to a third party, by default.
+
+This is not a generic hardening item. It specifically destroys the property added
+in S-022: [`CONTINUITY.md`](CONTINUITY.md) states that *"a backup of the ring
+defeats the seven-day window"*, and Android is performing exactly that backup on a
+schedule nobody chose. **The seizure-resistance story is currently false on this
+platform** — take the device or the Google account and you get the identity plus
+every prekey that has not yet expired.
+
+**Fix, in order.** Each step is shippable alone.
+
+1. `android:allowBackup="false"`, plus `android:dataExtractionRules` excluding the
+   `spore` preferences. One line; closes the exfiltration path today.
+2. `EncryptedSharedPreferences` over a Keystore `MasterKey` (AES256-GCM,
+   `setUserAuthenticationRequired(false)` — the service must run while the device is
+   locked).
+3. Longer term: prekey secrets should not cross the JNI boundary in the clear at
+   all. Export them wrapped under a Keystore key so Kotlin never holds plaintext.
+
+Steps 1 and 2 are worth a findings-register entry when they land.
+
+---
+
+## 1. Architecture
+
+### Foreground service
+
+**Verified:** `foregroundServiceType="dataSync"` is declared, and the housekeeping
+loop is a single coroutine on `Dispatchers.IO` — so the "heavy work on the main
+thread" risk a generic review would flag does not apply here.
+
+**Verified:** the loop recomputes `peers`, `storeLen`, delivery and file state on
+every tick regardless of whether any UI is observing. Gate it on lifecycle; a
+backgrounded app does not need `peers.value` recomputed every 30 s.
+
+**Verified and fixed (S-023):** the mesh-wide ANNOUNCE flood is closed — `nativeHello`
+carries the frequent link-local beacon and the flood runs hourly. Any review still
+listing this as open is working from stale information.
+
+**Reasoned:** `MulticastLock` should be released when Wi-Fi drops or it pins the
+radio out of power-save.
+
+### JNI boundary
+
+**Verified:** the `Runtime` behind the `jlong` handle is never freed — the app holds
+one for its lifetime and `nativeFree` is never called. Defensible, but a path that
+calls `nativeNew` twice leaks an entire node. Worth an explicit guard.
+
+**Reasoned, and the most likely real defect:** local-reference accumulation.
+`env.byte_array_from_slice(...).into_raw()` runs inside `nativePollForward` and
+`nativePollDelivery`, which are poll loops by construction. JNI local refs are
+released when the native frame returns, so a single call is fine — but any loop
+*inside* a native call that allocates per iteration needs `DeleteLocalRef` or an
+explicit frame. A leak here aborts under load rather than degrading, so it will not
+show up in light testing.
+
+**Reasoned:** large payloads currently copy across the boundary. `DirectByteBuffer`
+would avoid it. Worth doing only after measurement — at mesh message sizes the copy
+is probably noise, and this is exactly the kind of optimisation that gets done
+because it sounds right.
+
+### Headless WebViews
+
+**Reasoned, unmeasured, and my prime suspect for battery.** Each WebView is a full
+renderer process that does not suspend cleanly under Doze. Two or three of those
+plus a partial WakeLock is a phone that gets warm in a pocket.
+
+A generic recommendation here is "move them to `android:process`". **That does not
+work as stated for this app:** the node lives behind a `jlong` handle in the app's
+own address space, so a WebView in a separate process cannot reach it without an
+IPC layer that does not exist. Isolating them is a real option, but it is an
+architecture change, not a manifest attribute.
+
+The cheaper wins: cap concurrent instances, pool and reuse, call `destroy()`
+explicitly, and offer a **Lite mode** that disables WebView-backed bridges entirely
+for low-power installs.
+
+**Measure before optimising.** Battery Historian on a 12-hour run with all bridges
+up. The hypothesis above is a hypothesis.
+
+---
+
+## 2. UX
+
+### Confirmed bugs
+
+| Report | What the code actually does |
+|---|---|
+| "No reaction on clicking save on settings.petname" | `MainActivity.kt:362` — `onClick = { Petnames.set(peer, editingName) }`. **It does save.** There is no snackbar, no dismiss, no visible state change, so it reads as broken. The fix is feedback, not persistence — a review guessing "missing onClick handler" would fix the wrong thing. |
+| "Can't delete/edit/disable/enable bridges" | Only `addBridgeState` exists (`NodeController.kt:565`). The list is append-only by construction, and there is **no JNI call to stop a bridge** — that is the harder half of the fix. |
+| "Can't open attached files" | Only `ACTION_SEND` (share out) at `MainActivity.kt:258` and `:505`. No `FileProvider`, no `ACTION_VIEW`. |
+
+### Chat view
+
+The weakest screen, and the one people judge the app by. Target shape:
+
+```kotlin
+LazyColumn(reverseLayout = true, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    items(messages, key = { it.id }) { m ->
+        Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
+            Surface(
+                shape = bubbleShape(m.mine, m.groupedWithPrevious),
+                color = if (m.mine) colorScheme.primaryContainer else colorScheme.surfaceVariant,
+                modifier = Modifier.widthIn(max = 280.dp),
+            ) { MessageContent(m) }   // text | image | audio | video | file | link
+        }
+    }
+}
+```
+
+- `reverseLayout = true` is what puts new messages at the bottom without scroll
+  gymnastics, and it keeps position across insertions for free.
+- **Asymmetric corner radii on the grouped edge** are what make it read as Signal
+  rather than as a list of cards. Same-sender runs share a tighter corner.
+- Reactions: a `FlowRow` overlapping the bubble's bottom edge by ~8 dp, opened by
+  long-press.
+- Inline previews need the `FileProvider` work above as a prerequisite — images via
+  Coil, audio/video via ExoPlayer with a thumbnail and play affordance.
+
+### Text density
+
+The reported "too much text" is real and partly self-inflicted:
+[`VISUALDESIGN.md`](VISUALDESIGN.md) §2 assigns the Android app "full flavour"
+voice, which pushes toward *more* words, on top of existing explanatory copy.
+
+The rule that actually holds the line: **a settings row gets a label and nothing
+else.** Explanation lives behind an ⓘ that opens a bottom sheet. If a row needs a
+paragraph to be usable, the control is wrong — fix the control.
+
+"Learn more" links are a reasonable pattern but degrade into a second body of prose
+nobody reads. Prefer deleting the sentence.
+
+---
+
+## 3. Security and permissions
+
+**Verified:** 15 `uses-permission` entries. That is a lot to justify at install
+time, and the app currently has no per-feature rationale flow.
+
+- Request Bluetooth, audio and location **at the moment a bridge is enabled**, never
+  at launch, each with one sentence of rationale before the system dialog.
+- On API 31+, `BLUETOOTH_SCAN` with `android:usesPermissionFlags="neverForLocation"`
+  avoids the location grant entirely. Take it — "this messaging app wants your
+  location" is an install-killer, and the mesh does not need coordinates.
+- `RECORD_AUDIO` only when the audio modem is actually started.
+
+**On Doze:** do not fight it. A generic review will suggest
+`setExactAndAllowWhileIdle` and asking users to disable battery optimisation. For
+this protocol both are the wrong instinct — SPORE is *store-and-forward*, and
+missing a fifteen-minute window is normal operation, not failure. Catching up is the
+design. Say so in the UI rather than burning battery to pretend otherwise.
+
+**Backup and recovery UX.** Since a lost prekey ring means a permanently unreadable
+inbox, the app should show ring health — count, oldest entry, next expiry — and
+prompt for an encrypted export. Note the tension honestly in that flow: an export
+is a copy, and a copy is precisely what defeats forward secrecy. Users should
+understand they are choosing recoverability over the seven-day window, because they
+are.
+
+---
+
+## 4. Launch roadmap
+
+1. **`allowBackup="false"` + `EncryptedSharedPreferences`.** Everything else is
+   cosmetic next to shipping identity keys to Google Drive.
+2. **Bridge lifecycle** — a `nativeStopBridge` on the JNI side, a real
+   `data class Bridge(id, kind, detail, enabled)` model, `SwipeToDismissBox` and a
+   trailing `Switch` in the UI. Without it the app accumulates dead bridges until
+   reinstall.
+3. **`FileProvider` + `ACTION_VIEW` + inline previews.** Received files that cannot
+   be opened make file sharing a demo.
+4. **The chat rewrite.** Split into three PRs: layout and alignment, then inline
+   attachments, then reactions.
+5. **Battery instrumentation.** Battery Historian, 12 hours, all bridges up, before
+   any optimisation. Then a soak run for the JNI reference question, since that
+   failure mode is an abort under sustained load rather than a slow leak.
+
+---
+
+## 5. What this audit did not cover
+
+Listed so it is not mistaken for a clean bill:
+
+- No soak test was run. Memory and reference-leak claims are structural readings.
+- No battery measurement. The WebView hypothesis is untested.
+- `BleBridges.kt`, `WifiDirectBridge.kt` and `AudioBridge.kt` were not read
+  line-by-line; bridge event-loop races remain open (task #26).
+- No review of Compose recomposition cost in the message list, which matters once
+  the chat rewrite lands.
