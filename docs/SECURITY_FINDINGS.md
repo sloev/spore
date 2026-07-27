@@ -43,6 +43,7 @@ than fixing a crash, it says so explicitly.
 | [S-016](#s-016) | Resource exhaustion (filename sets) | Low | ✅ | ✅ | ✅ | no |
 | [S-017](#s-017) | Resource exhaustion (ratchet keys) | Medium | ✅ | ✅ | ✅ | no |
 | [S-018](#s-018) | Availability (mutex poisoning) | Medium | ✅ | ✅ | ✅ | yes (recover, not die) |
+| [S-019](#s-019) | Remote DoS (integer overflow) | Medium | ✅ | ✅ | ✅ | no |
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -610,6 +611,51 @@ invariant other code *depends* on should still poison.
 
 ---
 
+## S-019
+
+**Meshtastic length varints overflowed the offset, twice.** Medium.
+`src/bridge/meshtastic.rs` — `decode`.
+
+**Root cause.** `let end = no + len as usize`, where `len` is a varint read off the
+air and so reaches `u64::MAX`. Plain addition overflows. `decode` runs **two**
+protobuf loops — the frame, then the decoded sub-message — and both had it, along
+with the `o += 4` / `o += 8` fixed-width skips in each.
+
+The sibling parser `from_radio_packet`, 180 lines below, already used
+`checked_add` throughout. The same author had already met this hazard and fixed it
+in one function; `decode` was simply never revisited. Same shape as S-015, where
+the cap existed in `src/store.rs` and not in `src/bridge/store.rs`.
+
+**Exploit.** Anyone with a transmitter in range, one frame, no key. Severity turns
+on the build profile, and the honest answer is worth stating precisely rather than
+rounding up:
+
+| Profile | Behaviour |
+|---|---|
+| overflow checks **on** — every `cargo build` / `cargo run` without `--release` | **panic**, node dies |
+| overflow checks **off** — this repo's release profile | wraps to a bogus range; here it happened to fail the following bound check and return `None` |
+
+So it is not a remote panic against a release daemon, which is why this is Medium
+rather than High. It *is* a remote panic against anything built the default way —
+and the daemon demo in the README is `cargo run`. The release behaviour is also
+luck rather than design: wrapping arithmetic feeding a slice range is a latent
+correctness hazard, not a safe outcome.
+
+**Reproduced.** Found by the new `radio_codecs` fuzz target within 90 seconds of it
+existing. The second instance surfaced only after the first was fixed, because
+reaching the inner loop requires a well-formed field 4 wrapping a hostile inner
+message.
+
+**Patch.** `checked_add` in both loops and on both fixed-width skips, matching
+`from_radio_packet`. Verified afterwards with **10.3 million fuzz executions, no
+crashes**, and the JS codec parity test still passes.
+
+**Tests.** `a_meshtastic_length_varint_cannot_overflow_the_offset` — the exact
+fuzzer input, the general shape across wire types, and a nested sub-message for the
+inner loop.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -638,8 +684,6 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
-- **`meshtastic` and `audio` codecs** are read but not yet fuzzed as thoroughly as
-  the core parsers; both are reachable from a hostile medium.
 - **`with_node` reentrancy** is documented but not enforced. An embedder whose
   closure calls back into the hub self-deadlocks; a re-entrant guard or a `&Node`
   variant would make that unrepresentable.

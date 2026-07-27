@@ -49,6 +49,10 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
 - **S-012** `WANT` answered every id it was handed with a whole stored envelope:
   32x amplification measured, replayable forever because INV/WANT bypass dedup and
   the quota. Now bounded per packet and per link.
+- **S-019** Meshtastic length varints overflowed the parse offset in both of
+  `decode`'s protobuf loops — a remote panic on any build with overflow checks on,
+  which is every `cargo build` without `--release`. Found by the new `radio_codecs`
+  fuzz target within 90 seconds. The sibling parser already did this correctly.
 - **S-018** A panic under the hub mutex poisoned it, and every later
   `lock().unwrap()` panicked too — one fault killed every bridge thread
   permanently. Poisoning is now recovered from.
