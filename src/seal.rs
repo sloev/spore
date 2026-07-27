@@ -3,16 +3,19 @@
 //! Anonymous sealed boxes in the libsodium `crypto_box_seal` shape: an ephemeral
 //! keypair per message, so the ciphertext names no sender.
 //!
-//! **This path has no forward secrecy today, and this comment used to claim it
-//! did.** §7 describes rotating prekeys daily and deleting the private half after
-//! seven days, concluding that "a seized device cannot read week-old mail". No such
-//! rotation exists: [`Node::from_seed`] derives one prekey for the life of the
-//! identity, `SHA-256(seed ‖ "spore/prekey/v1")`, and ANNOUNCE carries that same
-//! key forever. Worse, deleting it would achieve nothing — it is a pure function of
-//! the identity seed that [`Node::seed`] persists, so anyone holding the seed
-//! re-derives it and opens every message ever sealed to that node. See S-022 in
-//! `docs/SECURITY_FINDINGS.md`. Sessions ([`crate::ratchet`]) do have forward
-//! secrecy; the one-shot seal does not.
+//! **Forward secrecy on this path comes from the prekey ring, not from these
+//! functions.** They are stateless: you hand `open_sealed` a secret and it tries
+//! it. Whether an old secret still exists to be handed over is [`crate::Node`]'s
+//! business — [`Node::rotate_prekey`] mints random prekeys and
+//! [`Node::sweep_prekeys`] deletes them after [`crate::PREKEY_LIFETIME_SECS`].
+//!
+//! The history is worth keeping, because this comment used to assert the property
+//! while nothing implemented it (S-022). §7 described rotating daily and deleting
+//! after seven days; in fact one prekey was derived from the identity seed and kept
+//! forever, and deleting it would have achieved nothing because anyone holding the
+//! seed re-derives it. The ring's secrets are **random**, which is the only reason
+//! deletion means anything now — and it is why [`Node::seed`] alone no longer
+//! restores a node's full ability to read its mail.
 //!
 //! Extracted from `lib.rs` unchanged: same primitives, same bytes on the wire,
 //! re-exported so `spore::seal`, `spore::open_sealed`, `spore::topic_seal`,
@@ -26,8 +29,8 @@ use crate::*;
 
 // ---------------------------------------------------------------------------
 // §7 Crypto — seal to a recipient prekey (libsodium crypto_box_seal shape).
-// No forward secrecy: one prekey per identity, derived from the seed. See the
-// module docs and S-022.
+// Stateless; the forward-secrecy story lives in Node's prekey ring. See the module
+// docs and S-022.
 // ---------------------------------------------------------------------------
 
 pub(crate) fn seal_nonce(eph_pub: &[u8; 32], recip_pub: &[u8; 32]) -> [u8; 24] {

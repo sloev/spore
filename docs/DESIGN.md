@@ -436,6 +436,58 @@ elapsed, breaking the arrival/re-send timing link. The remaining timing policy
 cleanly through two mixes, and the batch queue holds until full-and-due.
 </details>
 
+## Prekey ring (§7)  ✅ implemented
+
+Sealing a one-shot message needs the recipient's X25519 **prekey**. If that prekey
+never changes, seizing a device reads every message ever sent to it. The ring is
+what bounds that: a node mints a fresh prekey every 24 h, advertises the newest in
+its ANNOUNCE, and deletes any secret older than 7 days.
+
+<details>
+<summary>Deep dive: why the seed and the prekey secrets must be different things</summary>
+
+The first version of this derived the prekey from the identity seed —
+`SHA-256(seed ‖ "spore/prekey/v1")` — which is elegant and completely defeats the
+purpose. `Node::seed` is persisted so an identity can be restored; anything derived
+from it is therefore permanent, and "deleting the private prekey" deletes nothing.
+The docs claimed the seven-day property anyway. That was S-022, and it is the
+sharpest example in this repo of a security property existing only in prose.
+
+So the ring's secrets are **random**, and that asymmetry is the whole design:
+
+| Asset | What a restore recovers |
+|---|---|
+| identity seed | address, signing key, the ability to mint *new* prekeys |
+| prekey ring | the ability to open mail sealed to prekeys that still exist |
+| a deleted prekey secret | **nothing — by construction** |
+
+Consequences, stated plainly because each one is a cost:
+
+- **`Node::seed()` is no longer sufficient to restore a node.** Persist
+  `Node::prekey_ring()` beside it. A node restored from the seed alone keeps its
+  address and gets one bootstrap prekey; it has no forward secrecy and cannot read
+  mail sealed to anything it had rotated to. The browser node and the Android app
+  both persist the ring for this reason.
+- **Mail sealed to an expired prekey is unreadable by everyone, including you.**
+  That is not data loss to be fixed; it is the feature.
+- **A backup of the ring defeats the seven-day window**, exactly as it would for
+  any forward-secret keystore. Cloud-syncing it would quietly undo the property.
+- Opening tries every live entry newest-first, so a sender working from a stale
+  ANNOUNCE still reaches you until that secret expires. The nonce mixes the
+  *recipient's* public key, so each entry stores both halves — a secret can only be
+  tried against the public key it belongs to.
+
+The bootstrap prekey is the one seed-derived entry, kept so an existing node
+upgrades without becoming unreachable. It has `born = 0` because its true age is
+unknowable; the first rotation stamps it, and it ages out normally from there.
+
+What this does **not** give you: sessions already had forward secrecy from the
+Double Ratchet, and this does not change them. It also does not protect a message
+whose recipient never rotates — a node that never runs its sweep never deletes
+anything, which is why rotation is driven from the router rather than left to the
+embedder to remember.
+</details>
+
 ## Encrypted topics (§7)  ✅ implemented
 
 A public topic is readable by anyone who follows it. An *encrypted* topic adds a

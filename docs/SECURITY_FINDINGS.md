@@ -774,8 +774,8 @@ the next merge builds. Worth noting as the weakest verification in this register
 
 ## S-022
 
-**The one-shot seal has no forward secrecy, and three places said it did.** Medium
-(false security claim). `docs/SPEC.md` §7, `src/seal.rs` module docs and its §7
+**The one-shot seal had no forward secrecy, and four places said it did.** Medium
+(false security claim). Fixed: the prekey ring below. `docs/SPEC.md` §7, `src/seal.rs` module docs and its §7
 banner, versus `src/lib.rs` `Node::from_seed`.
 
 **Root cause.** §7 read: *"seal to the recipient's **newest** prekey … Rotate
@@ -817,26 +817,59 @@ unreadable.
 being asked to justify the phrase "which §7 describes and nothing enforces" — which
 was itself too generous, and is corrected here.
 
-**Patch (this commit).** The claims are removed, not softened. §7 now marks rotation
-`SHOULD` and adds §7.2 stating what this implementation does; `src/seal.rs` says
-plainly that the path has no forward secrecy and that its own comment used to claim
-otherwise. Sessions (`ratchet`) do have it, and the docs now distinguish the two
-instead of letting one borrow the other's reputation.
+**Patch, in two steps.** First the claims were removed rather than softened, because
+a false property is worse than an absent one. Then the property was built.
 
-**Patch (not done).** Real rotation needs prekey secrets held and deleted
-independently of the identity seed — a ring of recent prekeys with timestamps,
-ANNOUNCE advertising the newest, opening trying all live ones, and expiry dropping
-the secret. That changes what restoring from a seed recovers: mail sealed to an
-expired prekey becomes permanently unreadable, which is the *point* and is also a
-change to a documented guarantee. Left for a decision rather than assumed.
+**The prekey ring.** `Node` holds up to `MAX_PREKEY_RING` (16) entries of
+`{public, secret, born}`, oldest first, and advertises the newest.
+`rotate_prekey` mints a **random** X25519 pair every `PREKEY_PERIOD_SECS` (24 h);
+`sweep_prekeys` deletes any secret older than `PREKEY_LIFETIME_SECS` (7 d), never
+the newest, so a node is always sealable. `Node::open` tries every live entry
+newest-first, so a sender working from a stale ANNOUNCE still reaches us until that
+secret expires. Rotation is driven from the router's periodic sweep
+(`enforce_bounds`) rather than left to each embedder, because a forward-secrecy
+property that every platform must remember to switch on is one most platforms will
+not have.
 
-**Behaviour change?** None. Documentation only.
+Three things are load-bearing:
 
-**Freeze impact?** None.
+- **Random, not derived.** This is the entire fix. A seed-derived secret is
+  permanent, so deleting it deletes nothing. `Node::seed()` still restores identity
+  and the ability to mint *new* prekeys; it cannot resurrect a swept secret.
+- **The nonce mixes the recipient's public key**, so a secret can only be tried
+  against its own public half — hence entries store both, and
+  `restore_prekey_ring` recomputes the public half rather than trusting the blob.
+  A hostile blob must not make a node advertise a key it cannot open.
+- **Persistence replaces, never merges.** The stored ring is the authority on which
+  secrets exist, so a bootstrap key that has already aged out of it does not come
+  back to life just because `from_seed` can still derive it.
 
-**Tests.** None — nothing changed behaviourally. The absence of a test here is
-honest: there is no property to assert until rotation exists. Noted so this entry is
-not mistaken for a fix.
+**Behaviour change?** Yes, and it has a price worth stating: **`Node::seed()` is no
+longer a complete backup.** A node restored from the seed alone keeps its address,
+gets one bootstrap prekey, and cannot read mail sealed to anything it had rotated
+to. `Node::prekey_ring()` / `restore_prekey_ring()` persist it; the browser node
+(localStorage) and the Android app (SharedPreferences) both now do. Mail sealed to
+an expired prekey is unreadable by everyone including the recipient — the feature,
+not a defect. And a *backup* of the ring defeats the seven-day window exactly as it
+would for any forward-secret keystore; `CONTINUITY.md` says so, because continuity
+of identity and forward secrecy of content genuinely pull against each other here.
+
+**Freeze impact?** None. The wire is untouched — ANNOUNCE carries one prekey and
+always did; it is simply a different one each day. `prekey_pub` keeps its type and
+meaning. Everything added is additive.
+
+**Tests.** Six in `src/lib.rs`, and the one that matters is
+`a_rotation_keeps_old_mail_readable_until_the_secret_expires`: seal, rotate, confirm
+the old mail still opens, sweep past the lifetime, confirm it never opens again.
+`a_seed_restore_does_not_resurrect_a_swept_prekey` is the old design's failure stated
+as an assertion — restore from seed + ring and the mail reads; sweep, persist that,
+restore again, and it stays dark; seed alone yields one bootstrap key and no access.
+Plus: an ANNOUNCE moves a peer's seal target to the newest prekey; the ring is
+bounded and sweeping is idempotent and never empties it; rotation happens from
+ordinary traffic rather than being asked for; and `restore_prekey_ring` rejects every
+truncation, an absurd count, a public/secret mismatch and every single-byte
+corruption without panicking. `web/test.mjs` covers the same round-trip and rejection
+across the wasm boundary, where a silent failure would cost a page reload's inbox.
 
 ---
 
@@ -974,12 +1007,14 @@ Carried deliberately, not overlooked.
   the spec's numbers; whether 5→80 min HELLO plus hourly flood actually fits a LoRa
   duty cycle in practice is a question for the first hardware run, not for a
   calculation.
-- **Prekey rotation does not exist** (S-022 documents the gap; closing it is open).
-  One prekey per identity, derived from the seed, forever. So the one-shot seal has
-  no forward secrecy, and S-020's healing does not survive a stolen prekey secret —
-  that secret is a permanent decryption oracle for every contribution addressed to
-  the member. Fixing it means prekey secrets held and expired independently of the
-  identity seed, which trades away part of what restoring from a seed recovers.
+- **S-020's healing now survives a stolen prekey secret for at most seven days**,
+  since contributions are sealed to prekeys and those expire (S-022). Within the
+  window a stolen prekey secret is still a decryption oracle for every contribution
+  addressed to that member. Shortening the window is a knob, not a fix.
+- **No platform has verified the seven-day window end to end.** The unit tests prove
+  the ring deletes and that a restore cannot resurrect; nobody has yet run a phone
+  for eight days, seized it, and confirmed week-old mail is unreadable. Until
+  someone has, this is "implemented and tested", not "field-verified".
 - **Encrypted groups have no roster.** Membership, and therefore who a contribution
   is sealed to, is entirely the application's problem. In a partition two halves can
   diverge onto different keys; `topic::key_id` makes that legible but does not

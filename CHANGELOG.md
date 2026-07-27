@@ -92,6 +92,18 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   is a pure function of the seed a node persists, deleting it would achieve nothing.
   The claims are removed rather than softened. No behaviour change; sessions
   (`ratchet`) do have forward secrecy and the docs now distinguish the two.
+- **S-022 closed: the prekey ring.** The one-shot seal now has real forward
+  secrecy. A node holds up to 16 prekeys, mints a **random** one daily, deletes any
+  secret after seven days, and tries every live one when opening — so a sender on a
+  stale ANNOUNCE still reaches you until that secret expires. Rotation runs from the
+  router's sweep, not from each embedder remembering to ask.
+  **This changes what a backup is:** `Node::seed()` no longer restores a node's full
+  ability to read its mail, because prekey secrets are random rather than derived
+  from the seed — which is the only reason deleting them means anything. Persist
+  `Node::prekey_ring()` beside the seed; the browser node and the Android app now
+  do. Mail sealed to an expired prekey is unreadable by everyone including the
+  recipient, and a backup of the ring defeats the seven-day window. Wire unchanged:
+  ANNOUNCE always carried one prekey, it is just a different one each day.
 - **S-023** The daemon beaconed a **mesh-wide ANNOUNCE flood every 5 seconds**
   instead of a link-local HELLO every 5 minutes. Two stacked mistakes: the Trickle
   interval was the spec's "5 → 80 min" written as the bare numbers 5 and 80 into a
@@ -99,7 +111,8 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   been implemented, so the frequent beacon was the expensive form. ~45 floods an
   hour against a documented ceiling of one — which on LoRa in EU868 will exceed the
   1 % legal duty cycle. `Node::build_hello` adds the link-local form and the daemon
-  runs the two cadences separately.
+  runs the two cadences separately. **The Android app had the same bug** — its
+  housekeeping loop called `nativeBeacon` every 2-30 s — and is fixed the same way.
 - **S-024** Two documentation-versus-code mismatches recorded without fixing: the
   ratchet's skipped-key cache is bounded by count, not by the 7 days §7 claimed
   (and nothing is zeroised on drop), and `mark_seen` computes the 30-day dedup floor
