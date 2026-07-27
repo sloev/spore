@@ -15,6 +15,10 @@ Two conventions specific to this project:
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.4.0 — 2026-07-27
+
 Entries accumulate here as work merges. `release.yml` retitles this heading to the
 new version when you bump, and refuses to release if it is empty — a release nobody
 can read about is the failure this guards against.
