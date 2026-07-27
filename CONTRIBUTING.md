@@ -1,7 +1,10 @@
 # Contributing
 
-SPORE is at **1.0**: the API and the on-the-wire format are frozen for the whole
-`1.x` series. The rules below exist so that stays true — no release can silently
+The **SPORE v1 wire format** and the crate's **public API shape** are frozen. The
+crate and the shipped distribution are versioned separately and are at `0.1.x` —
+early, and honest about it. Freezing the wire at v1 while the software is at 0.1 is
+not a contradiction: the protocol is what peers and reimplementations depend on, and
+it does not move. The rules below exist so that stays true — no release can silently
 break a peer or a downstream build.
 
 ## Branches
@@ -23,9 +26,10 @@ break a peer or a downstream build.
 
 Branch protection requires both, plus a Code Owners review, before merge.
 
-## The frozen 1.0 contract
+## The frozen v1 contract
 
-These files define the compatibility surface and may not change within `1.x`:
+These files define the compatibility surface and may not change while the wire
+format is v1 — regardless of what the crate's own version number says:
 
 | File | Freezes |
 |---|---|
@@ -68,12 +72,22 @@ cargo build --release --lib --target wasm32-unknown-unknown && node web/test.mjs
 
 ## Cutting a release
 
-Three numbers version different things and only one of them moves when you cut a
-release. `CHANGELOG.md`'s top entry has the table; the short version is that **SPORE
-v1** (the wire format) and **`spore` 1.0.0** (the crate API) are frozen and stay put,
-while the **release** number versions the shipped distribution — the APK, the
-single-file browser node, the Seed Sheet, the daemon. Do not bump `Cargo.toml` for a
-distribution release; it is not what is being released.
+**Rolling releases are automatic and need nothing from you.** Every merge to
+`master` publishes `<major>.<minor>.<YYYYMMDDHHMM>+<short sha>` — patch is the merge
+time, build metadata is the commit — replacing the `rolling` release and writing a
+dated `nightly-<date>`, of which the last five are kept. `major.minor` is read from
+`Cargo.toml`, and no part of a version is ever derived from a git tag; that mistake
+produced a build called "SPORE rolling rolling+2026.07.27".
+
+### Bumping major or minor
+
+The only version edit a human makes. One commit changing `version` in `Cargo.toml`
+(and the matching line in `Cargo.lock`), reviewed like any other. Rolling builds pick
+the new `major.minor` up on the next merge. Bump **minor** for new capability, **major**
+when the *wire format* changes — which also means a new `VER` byte and a new frozen
+contract, so it is not a thing that happens quietly.
+
+### Cutting a tagged release
 
 1. Everything in "Running everything locally" passes on `master`.
 2. `CHANGELOG.md`: retitle `## Unreleased` to `## <version> — <YYYY-MM-DD>`. Every
@@ -89,7 +103,3 @@ distribution release; it is not what is being released.
 6. Confirm `https://github.com/sloev/spore/releases/latest/download/spore-android.apk`
    resolves. It only works once a non-prerelease exists, which is exactly what the
    tag creates — and it is the link `docs/APPS.md` promises.
-
-Rolling and nightly builds need none of this: every merge to `master` replaces the
-`rolling` release and writes a dated `nightly-<date>`, of which the last five are
-kept.

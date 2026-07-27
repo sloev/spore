@@ -31,6 +31,58 @@ pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
 pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
 pub const PATH_FRESH_SECS: u32 = 3 * 3600;
 
+/// How often a node mints a fresh prekey (§7). One day.
+pub const PREKEY_PERIOD_SECS: u32 = 24 * 3600;
+
+/// How long a prekey *secret* is kept after it was minted (§7). Seven days.
+///
+/// This is the seizure window, and it is only real because the secret is random
+/// rather than derived from the identity seed: once swept it cannot be recomputed
+/// from anything a restore has. Mail sealed to a prekey older than this is
+/// permanently unreadable — deliberately. See S-022.
+pub const PREKEY_LIFETIME_SECS: u32 = 7 * 24 * 3600;
+
+/// Hard ceiling on ring entries, so a clock jump cannot grow it without bound.
+pub const MAX_PREKEY_RING: usize = 16;
+
+/// One entry in the prekey ring: an X25519 keypair and when it was minted.
+///
+/// Both halves are stored because [`seal_nonce`] mixes the *recipient's* public
+/// key, so a secret can only be tried against the public half it belongs to.
+struct Prekey {
+    public: [u8; 32],
+    secret: [u8; 32],
+    /// Unix seconds when minted; `0` means "seed-derived bootstrap, age unknown".
+    born: u32,
+}
+
+impl Prekey {
+    fn from_secret(secret: [u8; 32], born: u32) -> Self {
+        let public = *crypto_box::SecretKey::from(secret).public_key().as_bytes();
+        Prekey { public, secret, born }
+    }
+
+    fn fresh(born: u32) -> Self {
+        let mut s = [0u8; 32];
+        OsRng.fill_bytes(&mut s);
+        Prekey::from_secret(s, born)
+    }
+}
+
+/// Trickle bounds for the link-local HELLO beacon (§5.4b), **in seconds**.
+///
+/// The spec says the interval doubles 5 → 80 *minutes*. The daemon used to pass
+/// the bare numbers 5 and 80 into a timer whose base is `now()` in seconds, so it
+/// beaconed 60× too fast — and beaconed the mesh-wide flood rather than the
+/// link-local HELLO, giving ~45 floods an hour against a documented ceiling of one
+/// (S-023). Named constants in the timer's own unit, so the mistake cannot recur
+/// silently.
+pub const HELLO_MIN_SECS: u32 = 5 * 60;
+pub const HELLO_MAX_SECS: u32 = 80 * 60;
+
+/// Floor between mesh-wide flooded ANNOUNCEs — the spec's "ANNOUNCE flood ≤ 1/h".
+pub const ANNOUNCE_FLOOD_MIN_SECS: u32 = 3600;
+
 /// Default per-envelope wire budget used by `Node::send` to decide when to
 /// fragment. Transports over tighter media (LoRa ~200 B, ESP-NOW 250 B) lower
 /// `Node::mtu`; the router itself is MTU-agnostic.
@@ -234,7 +286,10 @@ pub struct Rx {
 pub struct Node {
     pub sk: SigningKey,
     pub addr: Addr,
-    prekey_sec: crypto_box::SecretKey,
+    /// Prekey ring, oldest first. See [`Node::rotate_prekey`]. Never empty.
+    ring: Vec<Prekey>,
+    /// The prekey we currently advertise — the newest entry's public half. Kept
+    /// as a field because it is public API and callers seal to it.
     pub prekey_pub: [u8; 32],
     pub petname: String,
 
@@ -286,9 +341,18 @@ impl Node {
         self.sk.to_bytes()
     }
 
-    /// Build a node with a fixed 32-byte signing seed. The encryption prekey is
-    /// derived deterministically from the same seed, so the seed alone fully
-    /// restores the identity. Pair with [`Node::seed`] to persist and reload.
+    /// Build a node with a fixed 32-byte signing seed.
+    ///
+    /// The seed restores the **identity** — address, signing key, and the ability
+    /// to mint new prekeys. It does **not** restore the prekey ring: those secrets
+    /// are random, which is what makes their deletion mean anything (§7, S-022).
+    /// Persist [`Node::prekey_ring`] alongside [`Node::seed`] and restore both, or
+    /// the node comes back able to sign but unable to open mail sealed to any
+    /// prekey it had rotated to.
+    ///
+    /// A node that restores from the seed alone gets a single bootstrap prekey
+    /// derived from that seed, which is exactly the pre-ring behaviour: it
+    /// interoperates, and it has no forward secrecy.
     pub fn from_seed(petname: &str, topics: &[&str], seed: &[u8; 32]) -> Self {
         let sk = SigningKey::from_bytes(seed);
         let addr = addr_of(&sk.verifying_key().to_bytes());
@@ -299,15 +363,18 @@ impl Node {
         let mut buf = seed.to_vec();
         buf.extend_from_slice(b"spore/prekey/v1");
         let pb: [u8; 32] = Sha256::digest(&buf).into();
-        let prekey_sec = crypto_box::SecretKey::from(pb);
-        let prekey_pub = *prekey_sec.public_key().as_bytes();
+        // `born: 0` marks this as the bootstrap entry: derived from the seed, so
+        // its true age is unknowable and it cannot expire on a clock it never had.
+        // The first `rotate_prekey` stamps it, and it ages out normally from there.
+        let boot = Prekey::from_secret(pb, 0);
+        let prekey_pub = boot.public;
 
         let mut addrs = HashSet::new();
         addrs.insert(addr);
         Node {
             sk,
             addr,
-            prekey_sec,
+            ring: vec![boot],
             prekey_pub,
             petname: petname.to_string(),
             topics: topics.iter().map(|t| topic_of(t)).collect(),
@@ -410,6 +477,141 @@ impl Node {
     pub fn peer_prekey(&self, a: &Addr) -> Option<[u8; 32]> {
         self.peer_prekeys.get(a).copied()
     }
+    // ---- prekey ring (§7) -------------------------------------------------
+
+    /// Mint a fresh prekey, advertise it, and drop any secret past its lifetime.
+    ///
+    /// This is what gives the one-shot seal forward secrecy, and the reason it
+    /// works is that the new secret is **random** — not derived from the identity
+    /// seed. Restoring from a seed can re-create the identity and mint new
+    /// prekeys; it cannot resurrect a secret that has been swept. That asymmetry
+    /// is the whole feature (S-022), and it has a price: mail sealed to an expired
+    /// prekey is unreadable by anyone, including you.
+    ///
+    /// Persist the ring with [`Node::prekey_ring`] or the property is theatre — a
+    /// node that reloads from its seed alone comes back with only the bootstrap
+    /// key and has rotated nothing.
+    pub fn rotate_prekey(&mut self, now: u32) {
+        // The bootstrap entry has no birthday until the first rotation gives it
+        // one; from here it ages like every other entry.
+        for pk in &mut self.ring {
+            if pk.born == 0 {
+                pk.born = now;
+            }
+        }
+        self.ring.push(Prekey::fresh(now));
+        self.prekey_pub = self.ring[self.ring.len() - 1].public;
+        self.sweep_prekeys(now);
+    }
+
+    /// Rotate only if the newest prekey is older than [`PREKEY_PERIOD_SECS`].
+    ///
+    /// Called from the router's periodic sweep, so rotation happens by operating
+    /// rather than by an embedder remembering to ask.
+    pub fn maybe_rotate_prekey(&mut self, now: u32) {
+        let newest = self.ring.last().map(|p| p.born).unwrap_or(0);
+        // A bootstrap-only ring (born 0) rotates on the first sweep that sees a
+        // clock, which is what upgrades an existing node onto the ring.
+        if newest == 0 || now.saturating_sub(newest) >= PREKEY_PERIOD_SECS {
+            self.rotate_prekey(now);
+        }
+    }
+
+    /// Delete prekey secrets past [`PREKEY_LIFETIME_SECS`], and cap the ring.
+    ///
+    /// The newest entry always survives, so the ring is never empty and a node can
+    /// always be sealed to. A bootstrap entry (`born == 0`) is exempt until a
+    /// rotation stamps it: its real age is unknown, and guessing would either
+    /// discard a live key or claim an expiry it cannot honour.
+    pub fn sweep_prekeys(&mut self, now: u32) {
+        let newest = self.ring.len().saturating_sub(1);
+        let mut i = 0;
+        self.ring.retain(|pk| {
+            let keep = i == newest || pk.born == 0 || now.saturating_sub(pk.born) < PREKEY_LIFETIME_SECS;
+            i += 1;
+            keep
+        });
+        // Oldest-first order means excess comes off the front.
+        while self.ring.len() > MAX_PREKEY_RING {
+            self.ring.remove(0);
+        }
+        if let Some(p) = self.ring.last() {
+            self.prekey_pub = p.public;
+        }
+    }
+
+    /// How many prekey secrets are held right now (for tests and status UIs).
+    pub fn prekey_count(&self) -> usize {
+        self.ring.len()
+    }
+
+    /// Serialise the ring so a restart keeps it: `[0x01][n:1][(pub:32, sec:32, born:4 BE)]×n`.
+    ///
+    /// **This is secret material** — every byte of it opens mail. Store it where
+    /// you would store the identity seed, and understand that a *backup* of it
+    /// defeats the seven-day window exactly as a backup of any forward-secret
+    /// keystore would. That is not a flaw in the design; it is the design being
+    /// honest about what deletion means.
+    pub fn prekey_ring(&self) -> Vec<u8> {
+        let n = self.ring.len().min(MAX_PREKEY_RING);
+        let mut out = Vec::with_capacity(2 + n * 68);
+        out.push(1);
+        out.push(n as u8);
+        for pk in &self.ring[self.ring.len() - n..] {
+            out.extend_from_slice(&pk.public);
+            out.extend_from_slice(&pk.secret);
+            out.extend_from_slice(&pk.born.to_be_bytes());
+        }
+        out
+    }
+
+    /// Restore a ring from [`Node::prekey_ring`], **replacing** the current one.
+    ///
+    /// Replacing rather than merging is deliberate: the stored blob is the
+    /// authority on what secrets still exist, so a bootstrap key that has already
+    /// aged out of it does not come back to life just because `from_seed` can
+    /// still derive it. Returns `false` and changes nothing if the blob is
+    /// malformed.
+    pub fn restore_prekey_ring(&mut self, blob: &[u8]) -> bool {
+        if blob.len() < 2 || blob[0] != 1 {
+            return false;
+        }
+        let n = blob[1] as usize;
+        if n == 0 || n > MAX_PREKEY_RING || blob.len() != 2 + n * 68 {
+            return false;
+        }
+        let mut ring = Vec::with_capacity(n);
+        for i in 0..n {
+            let o = 2 + i * 68;
+            let mut public = [0u8; 32];
+            let mut secret = [0u8; 32];
+            public.copy_from_slice(&blob[o..o + 32]);
+            secret.copy_from_slice(&blob[o + 32..o + 64]);
+            let born = u32::from_be_bytes([blob[o + 64], blob[o + 65], blob[o + 66], blob[o + 67]]);
+            // Recompute the public half rather than trusting it: a corrupted or
+            // hostile blob must not make us advertise a key we cannot open.
+            let derived = Prekey::from_secret(secret, born);
+            if derived.public != public {
+                return false;
+            }
+            ring.push(derived);
+        }
+        ring.sort_by_key(|p| p.born);
+        self.prekey_pub = ring[ring.len() - 1].public;
+        self.ring = ring;
+        true
+    }
+
+    /// Open a box sealed to any prekey we still hold, newest first.
+    ///
+    /// Trying the whole live ring is what lets a rotation happen without dropping
+    /// mail: a sender who last heard an older ANNOUNCE sealed to an older prekey,
+    /// and that is fine until the secret expires. Once it has been swept
+    /// ([`Node::sweep_prekeys`]) this returns `None` forever — that is the point,
+    /// not a bug.
+    ///
+    /// The nonce is derived from the *recipient's* public key, so a secret must be
+    /// tried against its own public half; the ring stores both.
     pub fn open(&self, sealed: &[u8]) -> Option<Vec<u8>> {
         use crypto_box::aead::{generic_array::GenericArray, Aead};
         use crypto_box::{PublicKey, SalsaBox};
@@ -419,10 +621,15 @@ impl Node {
         let mut ep = [0u8; 32];
         ep.copy_from_slice(&sealed[..32]);
         let eph_pub = PublicKey::from(ep);
-        let nonce = seal_nonce(&ep, &self.prekey_pub);
-        SalsaBox::new(&eph_pub, &self.prekey_sec)
-            .decrypt(GenericArray::from_slice(&nonce), &sealed[32..])
-            .ok()
+        for pk in self.ring.iter().rev() {
+            let nonce = seal_nonce(&ep, &pk.public);
+            if let Ok(m) = SalsaBox::new(&eph_pub, &crypto_box::SecretKey::from(pk.secret))
+                .decrypt(GenericArray::from_slice(&nonce), &sealed[32..])
+            {
+                return Some(m);
+            }
+        }
+        None
     }
 
     // ---- origination -----------------------------------------------------
@@ -755,7 +962,28 @@ impl Node {
     }
 
     /// Build+sign this node's ANNOUNCE (prekey + busy + topics), ready to flood (§4).
+    ///
+    /// Mesh-wide: `hops = 16`, so every node that hears it relays it. §5.4b caps
+    /// this at roughly one per hour per node — see [`ANNOUNCE_FLOOD_MIN_SECS`] and
+    /// [`Node::build_hello`], which is the cheap link-local form meant for the
+    /// frequent beacon.
     pub fn build_announce(&mut self, now: u32) -> Vec<Forward> {
+        self.build_announce_at_hops(now, 16)
+    }
+
+    /// The **link HELLO** of §4: the same ANNOUNCE payload at `hops = 0`.
+    ///
+    /// §5 stops forwarding at `hops == 0`, so this reaches direct neighbours on
+    /// every interface and goes no further. That is what makes it affordable to
+    /// send often — it teaches neighbours our prekey, topics and `busy` byte, and
+    /// carries the §5.4c backpressure signal, without costing the whole mesh a
+    /// flood. §4 specified this form from the start; nothing built it until
+    /// S-023, so the daemon was beaconing the *flooded* variant every few seconds.
+    pub fn build_hello(&mut self, now: u32) -> Vec<Forward> {
+        self.build_announce_at_hops(now, 0)
+    }
+
+    fn build_announce_at_hops(&mut self, now: u32, hops: u8) -> Vec<Forward> {
         let mut p = Vec::new();
         p.extend_from_slice(&self.prekey_pub);
         p.push(self.busy()); // §5.4c backpressure
@@ -767,9 +995,14 @@ impl Node {
         p.extend_from_slice(self.petname.as_bytes());
         let mut e = Envelope::new(ty::ANNOUNCE, ZERO_DEST, now + 3600, p);
         e.flags |= fl::FLOOD;
+        e.hops = hops;
         e.sign(&self.sk);
         self.mark_seen(&e);
-        self.store_put(&e);
+        // A HELLO is link-local and immediately superseded by the next one, so it
+        // is not worth a store slot or an INV entry; a flooded ANNOUNCE is.
+        if hops > 0 {
+            self.store_put(&e);
+        }
         self.forward_intents(&e, NO_IFACE, now)
     }
 
@@ -847,6 +1080,10 @@ impl Node {
             self.seen.retain(|_, until| *until > now);
             // A set that has heard nothing for the timeout is abandoned or fake.
             self.frags.retain(|_, f| now.saturating_sub(f.started) < PARTIAL_TIMEOUT_SECS);
+            // §7 prekey ring. Driven from the sweep rather than left to the
+            // embedder, because a forward-secrecy property that each platform has
+            // to remember to switch on is one that most platforms will not have.
+            self.maybe_rotate_prekey(now);
         }
 
         // Dedup: prefer evicting whatever is nearest to expiring, so the ids most
@@ -3300,6 +3537,208 @@ mod tests {
         let c = Node::new("c", &[]);
         let (_, _, enc2) = a.send_direct(c.addr, b"hello stranger", now);
         assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
+    }
+
+    // -- §7 prekey ring (S-022) --------------------------------------------
+
+    #[test]
+    fn a_rotation_keeps_old_mail_readable_until_the_secret_expires() {
+        let day = PREKEY_PERIOD_SECS;
+        let t0 = 1_700_000_000;
+        let mut bob = Node::new("bob", &[]);
+
+        // Sealed to the prekey Bob advertises today.
+        let old_pub = bob.prekey_pub;
+        let old_mail = seal(b"north pier midnight", &old_pub);
+        assert_eq!(bob.open(&old_mail).as_deref(), Some(&b"north pier midnight"[..]));
+
+        // A day later he rotates. A sender who only heard the old ANNOUNCE still
+        // reaches him — that is why `open` tries the whole live ring.
+        bob.rotate_prekey(t0 + day);
+        assert_ne!(bob.prekey_pub, old_pub, "he advertises the new one");
+        assert_eq!(bob.prekey_count(), 2);
+        assert_eq!(bob.open(&old_mail).as_deref(), Some(&b"north pier midnight"[..]));
+        let new_mail = seal(b"and the new one", &bob.prekey_pub);
+        assert_eq!(bob.open(&new_mail).as_deref(), Some(&b"and the new one"[..]));
+
+        // Past the lifetime the old secret is gone, and with it the old mail.
+        bob.sweep_prekeys(t0 + day + PREKEY_LIFETIME_SECS + 1);
+        assert!(bob.open(&old_mail).is_none(), "THE forward-secrecy property");
+        assert_eq!(bob.open(&new_mail).as_deref(), Some(&b"and the new one"[..]));
+    }
+
+    /// The failure mode of the old design, stated as a test: a seed-derived prekey
+    /// is re-derivable, so "deleting" it means nothing. A rotated one is random,
+    /// so restoring from the seed cannot bring it back.
+    #[test]
+    fn a_seed_restore_does_not_resurrect_a_swept_prekey() {
+        let t0 = 1_700_000_000;
+        let mut a = Node::from_seed("a", &[], &[9u8; 32]);
+        a.rotate_prekey(t0);
+        let rotated_pub = a.prekey_pub;
+        let mail = seal(b"only the ring can read this", &rotated_pub);
+        assert!(a.open(&mail).is_some());
+
+        // Persist both halves and come back: still readable.
+        let seed = a.seed();
+        let ring = a.prekey_ring();
+        let mut back = Node::from_seed("a", &[], &seed);
+        assert!(back.restore_prekey_ring(&ring), "a well-formed ring restores");
+        assert_eq!(back.addr, a.addr, "same identity");
+        assert_eq!(back.prekey_pub, rotated_pub, "and the same advertised prekey");
+        assert!(back.open(&mail).is_some());
+
+        // Sweep the rotated secret away, persist *that*, and it stays gone.
+        back.sweep_prekeys(t0 + PREKEY_LIFETIME_SECS + 1);
+        back.rotate_prekey(t0 + PREKEY_LIFETIME_SECS + 2);
+        back.sweep_prekeys(t0 + PREKEY_LIFETIME_SECS + 2);
+        assert!(back.open(&mail).is_none(), "swept");
+        let swept_ring = back.prekey_ring();
+        let mut again = Node::from_seed("a", &[], &seed);
+        assert!(again.restore_prekey_ring(&swept_ring));
+        assert!(again.open(&mail).is_none(), "a restore must not resurrect it");
+
+        // And the seed alone gives only the bootstrap key — no rotated secret.
+        let seed_only = Node::from_seed("a", &[], &seed);
+        assert_eq!(seed_only.prekey_count(), 1);
+        assert!(seed_only.open(&mail).is_none(), "the seed is not the ring");
+    }
+
+    #[test]
+    fn an_announce_moves_a_peers_seal_target_to_the_newest_prekey() {
+        let now = 1_700_000_000;
+        let mut bob = Node::new("bob", &[]);
+        let mut alice = Node::new("alice", &[]);
+
+        let a1 = bob.build_announce(now);
+        let Forward::Flood { bytes, .. } = &a1[0] else { panic!() };
+        alice.on_rx(bytes, 0, Some(bob.addr), now);
+        assert_eq!(alice.peer_prekey(&bob.addr), Some(bob.prekey_pub));
+
+        bob.rotate_prekey(now + PREKEY_PERIOD_SECS);
+        let a2 = bob.build_announce(now + PREKEY_PERIOD_SECS);
+        let Forward::Flood { bytes, .. } = &a2[0] else { panic!() };
+        alice.on_rx(bytes, 0, Some(bob.addr), now + PREKEY_PERIOD_SECS);
+        assert_eq!(alice.peer_prekey(&bob.addr), Some(bob.prekey_pub), "follows the rotation");
+
+        // And a message sealed to what Alice now knows still opens.
+        let sealed = seal(b"ack", &alice.peer_prekey(&bob.addr).unwrap());
+        assert_eq!(bob.open(&sealed).as_deref(), Some(&b"ack"[..]));
+    }
+
+    #[test]
+    fn the_ring_is_bounded_and_never_empty() {
+        let mut n = Node::new("n", &[]);
+        // Rotate far more often than the lifetime would ever allow, so nothing
+        // expires and only the hard cap can hold the ring down.
+        for i in 0..(MAX_PREKEY_RING as u32 * 4) {
+            n.rotate_prekey(1_700_000_000 + i);
+        }
+        assert_eq!(n.prekey_count(), MAX_PREKEY_RING, "capped");
+        // The newest always survives a sweep, however far in the future it runs.
+        n.sweep_prekeys(u32::MAX);
+        assert_eq!(n.prekey_count(), 1, "everything but the current key expired");
+        let m = seal(b"still reachable", &n.prekey_pub);
+        assert_eq!(n.open(&m).as_deref(), Some(&b"still reachable"[..]));
+        // Sweeping again changes nothing.
+        let before = n.prekey_pub;
+        n.sweep_prekeys(u32::MAX);
+        assert_eq!(n.prekey_count(), 1);
+        assert_eq!(n.prekey_pub, before, "idempotent");
+    }
+
+    #[test]
+    fn rotation_happens_by_operating_not_by_being_asked() {
+        let t0 = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let boot = a.prekey_pub;
+        let mut b = Node::new("b", &[]);
+
+        // Ordinary traffic drives the sweep, which drives rotation.
+        let fwd = b.build_announce(t0);
+        let Forward::Flood { bytes, .. } = &fwd[0] else { panic!() };
+        a.on_rx(bytes, 0, Some(b.addr), t0);
+        assert_ne!(a.prekey_pub, boot, "the bootstrap key is replaced on first sweep");
+
+        let after_first = a.prekey_pub;
+        let fwd = b.build_announce(t0 + 60);
+        let Forward::Flood { bytes, .. } = &fwd[0] else { panic!() };
+        a.on_rx(bytes, 0, Some(b.addr), t0 + 60);
+        assert_eq!(a.prekey_pub, after_first, "and not again a minute later");
+    }
+
+    #[test]
+    fn restore_prekey_ring_rejects_hostile_blobs_without_panicking() {
+        let mut n = Node::new("n", &[]);
+        n.rotate_prekey(1_700_000_000);
+        let good = n.prekey_ring();
+        let pub_before = n.prekey_pub;
+
+        let mut v = Node::new("v", &[]);
+        assert!(!v.restore_prekey_ring(&[]), "empty");
+        assert!(!v.restore_prekey_ring(&[1]), "truncated header");
+        assert!(!v.restore_prekey_ring(&[9, 1]), "unknown version");
+        assert!(!v.restore_prekey_ring(&[1, 0]), "zero entries");
+        assert!(!v.restore_prekey_ring(&[1, 255]), "absurd count");
+        for i in 0..good.len() {
+            assert!(!v.restore_prekey_ring(&good[..i]), "truncated at {i}");
+        }
+        // A blob whose public half does not match its secret must be refused, or a
+        // node would advertise a key it cannot open.
+        let mut lying = good.clone();
+        lying[2] ^= 0xff;
+        assert!(!v.restore_prekey_ring(&lying), "public/secret mismatch");
+        // Every single-byte corruption: reject or accept, never panic.
+        for i in 0..good.len() {
+            let mut bad = good.clone();
+            bad[i] ^= 0xff;
+            let _ = v.restore_prekey_ring(&bad);
+        }
+        // A rejected restore left the victim untouched.
+        let mut fresh = Node::new("f", &[]);
+        let untouched = fresh.prekey_pub;
+        assert!(!fresh.restore_prekey_ring(&lying));
+        assert_eq!(fresh.prekey_pub, untouched, "a bad blob changes nothing");
+        assert!(fresh.restore_prekey_ring(&good), "the intact one still works");
+        assert_eq!(fresh.prekey_pub, pub_before);
+    }
+
+    /// S-023. Two properties the daemon got wrong for as long as it existed: the
+    /// beacon's Trickle interval was in the wrong unit, and the frame it beaconed
+    /// was the mesh-wide flood rather than §4's link-local HELLO.
+    #[test]
+    fn hello_is_link_local_and_the_beacon_cadence_is_in_seconds() {
+        // The spec says the HELLO interval doubles 5 -> 80 *minutes*. These are
+        // seconds, because that is the timer's base — the bug was passing 5 and 80.
+        assert_eq!(HELLO_MIN_SECS, 300, "5 minutes, in the timer's own unit");
+        assert_eq!(HELLO_MAX_SECS, 4800, "80 minutes");
+        assert_eq!(ANNOUNCE_FLOOD_MIN_SECS, 3600, "the spec's 'ANNOUNCE flood <= 1/h'");
+
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &["news"]);
+
+        // A HELLO stops at the first hop: hops == 0, so §5 rule 5 drops it there.
+        let hello = a.build_hello(now);
+        assert!(!hello.is_empty(), "a HELLO goes out on every interface");
+        let Forward::Flood { bytes, .. } = &hello[0] else { panic!("HELLO floods locally") };
+        let (he, _) = Envelope::decode(bytes).expect("decode HELLO");
+        assert_eq!(he.hops, 0, "a HELLO must not be relayed");
+        assert_eq!(he.typ, ty::ANNOUNCE);
+        assert!(he.verify(), "still signed — it teaches our prekey");
+
+        // A neighbour learns from it and does not pass it on.
+        let mut b = Node::new("b", &[]);
+        let rx = b.on_rx(bytes, 0, Some(a.addr), now);
+        assert!(b.peer_prekey(&a.addr).is_some(), "the neighbour learned our prekey");
+        assert!(rx.forwards.is_empty(), "hops == 0 => the mesh never sees it");
+
+        // The flooded form is the expensive one, and is the one worth storing.
+        let flood = a.build_announce(now);
+        let Forward::Flood { bytes: fb, .. } = &flood[0] else { panic!("ANNOUNCE floods") };
+        let (fe, _) = Envelope::decode(fb).expect("decode ANNOUNCE");
+        assert_eq!(fe.hops, 16, "mesh-wide");
+        let mut c = Node::new("c", &[]);
+        assert!(!c.on_rx(fb, 0, Some(a.addr), now).forwards.is_empty(), "and it is relayed");
     }
 
     #[test]

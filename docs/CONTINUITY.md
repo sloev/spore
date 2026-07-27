@@ -139,6 +139,16 @@ Authenticity can't depend on a live server either. The anchors:
   — only for hashing/verifying correctly.
 - **Signed everything.** Path learning binds only from signed frames; releases are
   signed manifests; the manual can carry the maintainers' public keys.
+- **A seed is not a whole backup any more.** The 32-byte identity seed restores the
+  address and signing key — that is what makes an identity portable across paper,
+  a QR code, or a memorised mnemonic. It deliberately does **not** restore the
+  prekey ring (§7), whose secrets are random so that deleting them means something.
+  Carry `Node::prekey_ring()` alongside the seed if you want to keep reading mail
+  already sealed to you, and understand the trade: a copy of the ring on a spare
+  disk is a copy of your inbox key for as long as it exists, which is precisely the
+  seven-day window the ring is there to close. Continuity of *identity* and
+  forward secrecy of *content* pull in opposite directions here, and this is the
+  one place in SPORE where you have to choose.
 - **Reproducible builds.** A rebuilt binary should hash to a published value, so a
   copy is verifiable offline against a number you can print, sign, or memorize. The
   single-file node prints the SHA-256 of its embedded wasm in its own footer.

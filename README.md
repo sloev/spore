@@ -88,8 +88,11 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 - **Routing** (§4–§5) — path learning ("first copy wins"), damped flood vs.
   directed unicast, dedup, store with eviction, the full `on_rx` router.
 - **Sync & custody** (§6) — `ANNOUNCE` / `INV` / `WANT`.
-- **Crypto** (§7) — anonymous sealed boxes to a recipient prekey; forward
-  secrecy by rotating and deleting prekeys.
+- **Crypto** (§7) — anonymous sealed boxes to a recipient prekey, over a **prekey
+  ring**: a fresh random prekey daily, secrets deleted after seven days, opening
+  tries every live one. Mail sealed to an expired prekey is unreadable by anyone,
+  including you — that is the point. Persist `prekey_ring()` next to `seed()`, or
+  a restart keeps your identity and loses your inbox (S-022).
 - **Bridges** (Page 2) — a bridge only moves envelope bytes in and out of a node;
   the router never changes. Implemented: UDP, an HTTP `/spore/{push,inv,want}` bag,
   a `<hexid>.spore` folder store, a streaming KISS framer, and `~S1.…~` armor for

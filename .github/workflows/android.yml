@@ -43,28 +43,41 @@ jobs:
           yes | sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" >/dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
 
+      # Version scheme.
+      #
+      #   rolling / nightly:  <major>.<minor>.<YYYYMMDDHHMM>+<short sha>
+      #   tagged:             the tag, verbatim
+      #
+      # `<major>.<minor>` comes from `Cargo.toml` and is the **only** part a human
+      # touches — bumping it is a deliberate act, made in a commit, reviewable. The
+      # patch is the merge time and the build metadata is the commit, so every
+      # rolling build is uniquely and monotonically named and points at the exact
+      # source it came from. Nothing here derives a version from a git tag: the
+      # previous scheme did, found the `rolling` tag this workflow creates itself,
+      # and produced "SPORE rolling rolling+2026.07.27".
+      #
+      # 12-digit patch numbers are valid semver (numeric, no leading zero).
       - name: Compute version + release kind
         id: ver
         run: |
           date=$(date -u +'%Y.%m.%d')
+          stamp=$(date -u +'%Y%m%d%H%M')
+          sha7=$(git rev-parse --short=7 HEAD)
+          # The package version, not a dependency's: first `version =` after [package].
+          pkg=$(awk '/^\[package\]/{p=1} p && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.toml)
+          mm=${pkg%.*}
+          if [ -z "$mm" ]; then echo "::error::could not read version from Cargo.toml"; exit 1; fi
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            # Tagged: this tag IS the (next) current version.
             echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "kind=tagged" >> "$GITHUB_OUTPUT"
           else
-            # Rolling: current version (latest v* tag, or v0.0) + build date.
-            #
-            # `--match 'v*'` matters: this workflow creates and moves a tag called
-            # `rolling`, so a bare `git describe --tags` finds *its own* tag from
-            # the previous run. That is how builds ended up named
-            # "SPORE rolling rolling+2026.07.27" — the version was literally the
-            # word "rolling". Only v* tags are versions.
-            cur=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0)
-            echo "name=${cur}+${date}" >> "$GITHUB_OUTPUT"
+            echo "name=${mm}.${stamp}+${sha7}" >> "$GITHUB_OUTPUT"
             echo "kind=$([ "${{ github.event_name }}" = "push" ] && echo rolling || echo none)" >> "$GITHUB_OUTPUT"
           fi
+          # Android versionCode must fit a signed 32-bit int, so it stays a date.
           echo "code=$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
           echo "date=${date}" >> "$GITHUB_OUTPUT"
+          echo "base=${mm}" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

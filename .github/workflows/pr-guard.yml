@@ -1,6 +1,6 @@
 name: PR guard (API freeze)
 
-# Refuse pull requests that change the frozen 1.0 contract or the test suite that
+# Refuse pull requests that change the frozen v1 contract or the test suite that
 # guarantees it. Combined with branch protection (this check + CI required, no
 # direct pushes), this is what keeps `master` from ever silently breaking the API.
 #
@@ -10,9 +10,18 @@ name: PR guard (API freeze)
 #
 # To change a frozen file on purpose — a deliberate, major-version decision — add
 # the `allow-frozen-change` label to the PR.
+#
+# `labeled`/`unlabeled` are in the trigger list because the check reads the label
+# from `github.event.pull_request.labels`, which is a snapshot of the payload that
+# started the run. Without them, adding the label did nothing: the default types
+# are opened/synchronize/reopened, so the only way to get a payload carrying the
+# label was to push another commit — and re-running the failed job replays the
+# original, label-free payload, so that did not work either. The instruction two
+# lines above was therefore false unless you already knew to push again.
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   frozen-files:
@@ -36,7 +45,7 @@ jobs:
           frozen='^(tests/|reference/vectors\.json|reference/test_t0\.py|bindings/spore\.h|examples/(gen_vectors|worked)\.rs|site/seed/.*\.test\.mjs|web/(test|ws-test)\.mjs|\.github/workflows/(ci|pr-guard)\.yml)'
           hits="$(echo "$changed" | grep -E "$frozen" || true)"
           if [ -n "$hits" ]; then
-            echo "::error::This PR modifies frozen 1.0 contract / test files:"
+            echo "::error::This PR modifies frozen v1 contract / test files:"
             echo "$hits"
             echo "These files are frozen to guarantee the API and wire format. Changing them is a"
             echo "backwards-incompatible (major-version) act — add the 'allow-frozen-change' label to proceed."

@@ -191,7 +191,7 @@ contract and all existing guards stay intact.
 
 ## Interplay with governance
 
-- Nothing here weakens the frozen 1.0 core: the JNI is additive, the release workflow
+- Nothing here weakens the frozen v1 core: the JNI is additive, the release workflow
   is a new file, and the Android bridges reuse `src/bridge/*` (already covered by the
   docs-sync bridge guard) plus the web transports (already covered).
 - The APK is a **release artifact**, never committed.

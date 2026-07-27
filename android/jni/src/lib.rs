@@ -133,6 +133,49 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSeed(
     env.byte_array_from_slice(&s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
+/// The prekey ring (§7) — persist it *beside* the seed.
+///
+/// The seed restores the identity. It does not restore prekey secrets: those are
+/// random, which is precisely what makes deleting them mean something (S-022). An
+/// app that saves only the seed comes back unable to open mail sealed to any
+/// prekey the node had rotated to.
+///
+/// Secret material. Store it wherever the seed is stored, and no less carefully.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePrekeyRing(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jbyteArray {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let s = r.hub.with_node(|n| n.prekey_ring());
+    env.byte_array_from_slice(&s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Restore a ring from `nativePrekeyRing`. Returns true on success; a malformed
+/// blob is refused and leaves the node untouched.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRestorePrekeyRing(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    blob: JByteArray,
+) -> jboolean {
+    let Some(r) = rt(ptr) else {
+        return JNI_FALSE;
+    };
+    let Ok(bytes) = env.convert_byte_array(&blob) else {
+        return JNI_FALSE;
+    };
+    if r.hub.with_node(|n| n.restore_prekey_ring(&bytes)) {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
 /// Follow a topic so its traffic is delivered to us.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeSubscribe(
@@ -549,6 +592,20 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeBeacon(
         return;
     };
     r.hub.beacon();
+}
+
+/// Send the link-local HELLO (`hops = 0`) on every interface.
+///
+/// The cheap beacon. `nativeBeacon` floods mesh-wide and every node that hears it
+/// relays it, which is why §5.4b holds that to roughly once an hour; this reaches
+/// direct neighbours and stops. The housekeeping loop used to call `nativeBeacon`
+/// every 2-30 s — the same mistake the daemon made (S-023).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeHello(_env: JNIEnv, _class: JClass, ptr: jlong) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
+    r.hub.hello();
 }
 
 /// Peers we've heard from, freshest first, one per line:

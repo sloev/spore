@@ -33,6 +33,28 @@ await new Promise((r) => setTimeout(r, 50)); // let the loopback microtasks flus
 assert.strictEqual(got, msg, 'B should receive exactly what A published');
 const [a, b] = [hubA.node.addr(), hubB.node.addr()];
 assert.notDeepStrictEqual(a, b, 'the two nodes have distinct addresses');
+
+// §7 prekey ring across the wasm boundary. The browser node persists seed + ring
+// to localStorage; if these exports are wrong, a page reload silently loses the
+// ability to open mail already sealed to it, which no other test would notice.
+{
+  const ring = hubA.node.prekeyRing();
+  assert.ok(ring.length >= 2 + 68, `ring blob looks sane, got ${ring.length}`);
+  assert.strictEqual(ring[0], 1, 'ring format version');
+
+  // A different node restores A's ring and thereby A's advertised prekey.
+  const other = spore.newNode();
+  assert.ok(other.restorePrekeyRing(ring), 'a well-formed ring restores');
+  assert.deepStrictEqual(other.prekeyRing(), ring, 'and round-trips byte for byte');
+
+  // Malformed blobs are refused rather than accepted or thrown on.
+  assert.strictEqual(other.restorePrekeyRing(new Uint8Array(0)), false, 'empty');
+  assert.strictEqual(other.restorePrekeyRing(new Uint8Array([1, 0])), false, 'zero entries');
+  const lying = Uint8Array.from(ring);
+  lying[2] ^= 0xff; // public half no longer matches its secret
+  assert.strictEqual(other.restorePrekeyRing(lying), false, 'public/secret mismatch');
+  assert.deepStrictEqual(other.prekeyRing(), ring, 'a refused restore changes nothing');
+}
 console.log('WEB OK — A published, B received + verified over a transport');
 console.log('  node A addr:', Buffer.from(a).toString('hex'));
 console.log('  node B addr:', Buffer.from(b).toString('hex'));

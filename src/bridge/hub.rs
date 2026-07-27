@@ -201,11 +201,28 @@ impl Hub {
         self.dispatch(forwards);
     }
 
-    /// Flood the node's ANNOUNCE beacon on every interface.
+    /// Flood the node's ANNOUNCE mesh-wide (`hops = 16`).
+    ///
+    /// Expensive: every node that hears it relays it. Call at most once an hour
+    /// ([`spore::ANNOUNCE_FLOOD_MIN_SECS`]); for the frequent beacon use
+    /// [`Hub::hello`].
     pub fn beacon(&self) {
         let forwards = {
             let mut n = lock(&self.node);
             n.build_announce(now())
+        };
+        self.dispatch(forwards);
+    }
+
+    /// Send the link-local HELLO (`hops = 0`) on every interface.
+    ///
+    /// Reaches direct neighbours and stops there, so it is cheap enough to repeat
+    /// on the Trickle schedule and is what carries the `busy` backpressure byte to
+    /// the peers that act on it.
+    pub fn hello(&self) {
+        let forwards = {
+            let mut n = lock(&self.node);
+            n.build_hello(now())
         };
         self.dispatch(forwards);
     }

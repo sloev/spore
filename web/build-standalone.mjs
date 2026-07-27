@@ -212,6 +212,10 @@ const LS = {
   del(k) { try { localStorage.removeItem(k); } catch (e) { /* */ } },
 };
 const K_SEED = 'spore.seed', K_BRIDGES = 'spore.bridges', K_TOPICS = 'spore.topics';
+// The prekey ring is secret material and must be persisted with the seed: the
+// seed restores the identity, the ring restores the ability to open mail already
+// sealed to us. Saving only the seed silently loses inbound mail after a rotation.
+const K_RING = 'spore.ring';
 
 let spore, hub;
 let saved = [];      // [{type, fields}] persisted bridges
@@ -228,10 +232,23 @@ async function boot() {
     if (seedHex && /^[0-9a-fA-F]{64}$/.test(seedHex)) {
       hub = new Hub(spore.newNode(hexToBytes(seedHex)));
       restored = true;
+      // Prekey ring (§7). Absent or corrupt is survivable — the node keeps its
+      // identity and mints a new prekey — so a bad blob is not fatal, it just
+      // means mail sealed to an older prekey can no longer be opened.
+      const ringHex = LS.get(K_RING);
+      if (ringHex && /^[0-9a-fA-F]+$/.test(ringHex) && ringHex.length % 2 === 0) {
+        if (!hub.node.restorePrekeyRing(hexToBytes(ringHex))) LS.del(K_RING);
+      }
     } else {
       hub = new Hub(spore.newNode());
       LS.set(K_SEED, hexOf(hub.node.seed()));
     }
+    // Save the ring now and whenever it may have rotated. Rotation is driven by
+    // the router's sweep, so any tick can change it; writing the same bytes twice
+    // is cheap next to losing a secret we still need.
+    const saveRing = () => { try { LS.set(K_RING, hexOf(hub.node.prekeyRing())); } catch (e) {} };
+    saveRing();
+    setInterval(saveRing, 60000);
     $('addr').textContent = 'addr ' + hexOf(hub.node.addr());
 
     hub.onDeliver = (env) => {
@@ -653,7 +670,7 @@ $('save').onclick = () => {
 };
 $('forget').onclick = () => {
   if (!confirm('Forget the saved identity and bridges in this browser? This node will come back as a new stranger.')) return;
-  LS.del(K_SEED); LS.del(K_BRIDGES); LS.del(K_TOPICS);
+  LS.del(K_SEED); LS.del(K_BRIDGES); LS.del(K_TOPICS); LS.del(K_RING);
   location.reload();
 };
 

@@ -132,6 +132,48 @@ pub unsafe extern "C" fn spore_node_seed(n: *mut Node, out: *mut u8) {
     std::ptr::copy_nonoverlapping(s.as_ptr(), out, 32);
 }
 
+/// Bytes needed for [`spore_node_prekey_ring`], so a caller can size its buffer.
+///
+/// # Safety
+/// `n` is a valid handle.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_prekey_ring_len(n: *mut Node) -> usize {
+    (*n).prekey_ring().len()
+}
+
+/// Write the node's prekey ring (§7) so a caller can persist it beside the seed.
+///
+/// **The seed is not enough.** Prekey secrets are random, not derived from the
+/// seed — that is what makes deleting them mean something (S-022). A page that
+/// stores only the seed comes back unable to open mail sealed to any prekey the
+/// node had rotated to. Persist both.
+///
+/// This is secret material: every byte opens mail. Treat it like the seed.
+///
+/// # Safety
+/// `n` is a valid handle; `out` points to at least
+/// [`spore_node_prekey_ring_len`] writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_prekey_ring(n: *mut Node, out: *mut u8) -> usize {
+    let r = (*n).prekey_ring();
+    std::ptr::copy_nonoverlapping(r.as_ptr(), out, r.len());
+    r.len()
+}
+
+/// Restore a ring written by [`spore_node_prekey_ring`]. Returns 1 on success, 0
+/// if the blob is malformed — in which case the node is left untouched.
+///
+/// # Safety
+/// `n` is valid; `blob`/`len` describe readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_restore_prekey_ring(n: *mut Node, blob: *const u8, len: usize) -> u32 {
+    if blob.is_null() {
+        return 0;
+    }
+    let s = std::slice::from_raw_parts(blob, len);
+    u32::from((*n).restore_prekey_ring(s))
+}
+
 /// Follow a feed/topic so its traffic is delivered to us.
 ///
 /// # Safety

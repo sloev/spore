@@ -129,6 +129,30 @@ class SporeNode {
     this.s.ex.spore_free(p, 32);
     return s;
   }
+  /** The prekey ring (§7) — persist it *alongside* `seed()`.
+   *
+   * The seed restores the identity; it does not restore prekey secrets, because
+   * those are random and that is exactly what makes deleting them mean something
+   * (S-022). A page that saves only the seed comes back unable to open mail
+   * sealed to any prekey the node had rotated to.
+   *
+   * Secret material: every byte opens mail. Guard it like the seed. */
+  prekeyRing() {
+    const n = this.s.ex.spore_node_prekey_ring_len(this.ptr);
+    const p = this.s.ex.spore_alloc(n);
+    const wrote = this.s.ex.spore_node_prekey_ring(this.ptr, p);
+    const r = this.s._u8(p, wrote).slice();
+    this.s.ex.spore_free(p, n);
+    return r;
+  }
+  /** Restore a ring from `prekeyRing()`. Returns false for a malformed blob, in
+   * which case the node is left as it was. */
+  restorePrekeyRing(blob) {
+    const p = this.s._put(blob);
+    const ok = this.s.ex.spore_node_restore_prekey_ring(this.ptr, p, blob.length);
+    this.s.ex.spore_free(p, blob.length);
+    return ok === 1;
+  }
   subscribe(topic) {
     const t = new TextEncoder().encode(topic);
     const p = this.s._put(t);

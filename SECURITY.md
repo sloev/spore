@@ -79,7 +79,7 @@ Report these only if you can show something *worse* than what is written here.
 
 ## Supported versions
 
-The 1.x wire format is frozen; `master` is the only supported branch. Fixes land
+The v1 wire format is frozen; `master` is the only supported branch. Fixes land
 there and reach releases from there — there are no maintained back-branches to
 backport to.
 

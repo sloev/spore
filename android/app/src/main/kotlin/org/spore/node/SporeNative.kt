@@ -21,6 +21,22 @@ object SporeNative {
     /** The node's 32-byte signing seed (persist it, pass back to nativeNew). */
     external fun nativeSeed(ptr: Long): ByteArray
 
+    /**
+     * The prekey ring (SPEC §7) — persist it *alongside* the seed.
+     *
+     * The seed restores the identity. It does not restore prekey secrets: those
+     * are random, which is exactly what makes deleting them mean something
+     * (S-022). Saving only the seed means that after a rotation the app comes
+     * back unable to open mail already sealed to it.
+     *
+     * Secret material — every byte opens mail. Store it no less carefully than
+     * the seed.
+     */
+    external fun nativePrekeyRing(ptr: Long): ByteArray
+
+    /** Restore a ring from [nativePrekeyRing]; false leaves the node untouched. */
+    external fun nativeRestorePrekeyRing(ptr: Long, blob: ByteArray): Boolean
+
     /** Follow a topic so its traffic is delivered to us. */
     external fun nativeSubscribe(ptr: Long, topic: String)
 
@@ -92,6 +108,15 @@ object SporeNative {
 
     /** Flood our ANNOUNCE so peers learn our address, prekey and a path back. */
     external fun nativeBeacon(ptr: Long)
+
+    /**
+     * Send the link-local HELLO (hops 0) — the cheap, frequent beacon.
+     *
+     * [nativeBeacon] floods mesh-wide and is relayed by every node that hears it,
+     * so SPEC §5.4b holds it to about once an hour. This reaches direct neighbours
+     * and stops there, and is what carries the `busy` backpressure byte.
+     */
+    external fun nativeHello(ptr: Long)
 
     /** Peers heard from, freshest first: "addrhex:secondsAgo:hasPrekey:name" lines. */
     external fun nativePeers(ptr: Long): String

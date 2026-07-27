@@ -81,12 +81,28 @@ object NodeController {
     // ceiling on a transfer is storage rather than the heap of a phone app.
     private const val STORE_BUDGET_BYTES = 256 * 1024 * 1024
     private const val MEM_BUDGET_BYTES = 8 * 1024 * 1024
+
+    /** SPEC §5.4b: the mesh-wide ANNOUNCE flood is held to about one an hour. */
+    private const val ANNOUNCE_FLOOD_INTERVAL_MS = 3_600_000L
     private var lastFileSender: String = Petnames.PUBLIC   // thread for the next completed file
     private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
     private var topicAddrToName = mutableMapOf<String, String>() // topicAddrHex -> name
 
     @Synchronized
+    /**
+     * Write the prekey ring to preferences. Called at start and after any tick
+     * that could have rotated it — rotation is driven by the router's sweep, so
+     * there is no single moment to hook. Writing the same bytes twice costs
+     * nothing next to losing a secret we still need.
+     */
+    private fun saveRing(prefs: android.content.SharedPreferences) {
+        runCatching {
+            val ring = SporeNative.nativePrekeyRing(ptr)
+            prefs.edit().putString("prekeyRing", Base64.encodeToString(ring, Base64.NO_WRAP)).apply()
+        }
+    }
+
     fun start(ctx: Context) {
         if (ptr != 0L) return
         appCtx = ctx.applicationContext
@@ -100,6 +116,19 @@ object NodeController {
             val fresh = SporeNative.nativeSeed(ptr)
             prefs.edit().putString("seed", Base64.encodeToString(fresh, Base64.NO_WRAP)).apply()
         }
+        // Prekey ring (SPEC §7). The seed restores who we are; the ring restores
+        // what we can still open. Without this the node keeps its address across
+        // restarts but silently loses inbound mail sealed to any prekey it had
+        // rotated to — which is most of it, since rotation is daily.
+        prefs.getString("prekeyRing", null)?.let { ringB64 ->
+            val blob = runCatching { Base64.decode(ringB64, Base64.NO_WRAP) }.getOrNull()
+            // A corrupt blob is survivable: we keep the identity and mint a new
+            // prekey. Drop it rather than retrying it every start.
+            if (blob == null || !SporeNative.nativeRestorePrekeyRing(ptr, blob)) {
+                prefs.edit().remove("prekeyRing").apply()
+            }
+        }
+        saveRing(prefs)
         address.value = SporeNative.nativeAddr(ptr).toHex()
         // The core defaults to a desktop-ish 10 MB held entirely in memory.
         // Since manifests became trees this budget — not the wire format — is
@@ -149,8 +178,19 @@ object NodeController {
         // and mark delivered anything whose receipt has come back.
         houseJob = CoroutineScope(Dispatchers.IO).launch {
             var tick = 0
+            // Beacon cadence, S-023. This loop used to call nativeBeacon — the
+            // mesh-wide flood, relayed by every node that hears it — every 2-30 s,
+            // against SPEC §5.4b's ceiling of roughly one an hour. On a phone
+            // bridging to LoRa that is also a duty-cycle problem, not just battery.
+            // The HELLO is the frequent, link-local form; the flood is hourly.
+            var lastFloodMs = 0L
             while (isActive) {
-                SporeNative.nativeBeacon(ptr)
+                SporeNative.nativeHello(ptr)
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastFloodMs >= ANNOUNCE_FLOOD_INTERVAL_MS) {
+                    lastFloodMs = nowMs
+                    SporeNative.nativeBeacon(ptr)
+                }
                 SporeNative.nativeResendUnacked(ptr)
                 peers.value = SporeNative.nativePeers(ptr).lines().filter { it.isNotBlank() }
                     .mapNotNull { line ->
@@ -167,6 +207,10 @@ object NodeController {
                 // then settle down to stay cheap on battery — but keep chasing
                 // chunks while a file is still coming in.
                 val fetching = transfers.value.any { it.have < it.count }
+                // Prekey rotation is driven by the router's sweep, so any tick can
+                // have changed the ring. Persisting it here is what makes the
+                // seven-day window survive an app restart.
+                if (tick % 20 == 0) saveRing(ctx.getSharedPreferences("spore", Context.MODE_PRIVATE))
                 delay(if (fetching) 2_000L else if (tick++ < 6) 5_000L else 30_000L)
             }
         }
