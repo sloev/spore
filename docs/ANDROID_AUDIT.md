@@ -82,9 +82,36 @@ disk and step 2 alone leaves them going to Drive:
   crashing. Losing an identity is worse than the status quo ante; the fallback is a
   deliberate trade, not an oversight.
 
+### Two corrections to the above, both caught after it was written
+
+**The manifest did not parse.** The explanatory comment went *inside* the
+`<application>` start tag, between the tag name and its attributes, which is not
+well-formed XML. The APK job failed with a bare
+`ManifestMerger2$MergeFailureException: Error parsing AndroidManifest.xml` and no
+line number. There is no Android SDK in the environment this was written in, so the
+change was verified by reading — and reading is exactly what does not catch a
+misplaced comment. Fixed, and every XML file in the repository now parses.
+
+**`<device-transfer>` was excluding three named paths, not the data.** The seed
+(`spore.xml`) and the store (`filesDir/store`) were covered. Received attachments
+were not: they are written into the external files dir under names taken from the
+sender (`NodeController.kt:413`), so there is no list of paths to enumerate. Since
+`allowBackup="false"` does *not* govern device-to-device transfer on API 31+, a
+transfer to a new phone would have carried every received file across in the clear
+while the identity beside it was correctly excluded.
+
+That is the repository's most-recorded failure shape — a fix verified on the artefact
+it was written for and assumed on its neighbour (S-015, S-019, S-023, S-025, S-026,
+S-029, S-030). The rules now exclude whole domains rather than named paths, in both
+blocks, so a new file in a new location is excluded by default rather than by
+someone remembering to add it.
+
 **Not yet verified on a device.** This compiles and the logic is straightforward,
 but the migration path — old install, upgrade, same address — has not been run on
-real hardware. That is the check that matters and it has not happened.
+real hardware, and neither has a device-to-device pairing. Those are the checks that
+matter and they have not happened. The `path="."` idiom in particular is **Reasoned**:
+it follows from how the framework resolves a rule path against its domain root, and I
+have not watched a transfer skip the files.
 
 Worth a findings-register entry when it is confirmed working.
 
@@ -280,3 +307,7 @@ Listed so it is not mistaken for a clean bill:
   line-by-line; bridge event-loop races remain open (task #26).
 - No review of Compose recomposition cost in the message list, which matters once
   the chat rewrite lands.
+- **Nothing here was run on a device, or even compiled locally** — there is no
+  Android SDK in the environment this was written in, so the only build feedback is
+  what `android.yml` reports after a push. The manifest that did not parse (§0) is
+  what that costs, and it is a compile error; a runtime one would have been quieter.

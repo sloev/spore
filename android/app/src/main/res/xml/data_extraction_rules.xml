@@ -1,16 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- API 31+. allowBackup="false" already covers cloud backup; this also blocks
-     device-to-device transfer, a separate path that would otherwise carry the
-     seed and prekey ring to a new phone in the clear. -->
+<!-- API 31+ replacement for fullBackupContent.
+
+     `allowBackup="false"` in the manifest already turns cloud backup off, so the
+     <cloud-backup> block below is belt-and-braces. <device-transfer> is the one
+     that does real work: device-to-device transfer is a *separate* path that
+     `allowBackup` does not govern, so without this it would carry the seed, the
+     prekey ring and every received attachment to a new phone in the clear.
+
+     Whole domains rather than named paths. The seed and ring live in `spore.xml`
+     and the store is `filesDir/store`, but received files are written into the
+     external files dir under names taken from the sender (NodeController.kt:413),
+     so there is no list to enumerate. Nothing leaves at all.
+
+     `path="."` resolves to the domain root, which excludes the domain. Reasoned
+     from how the framework's rule parser resolves paths, not observed on a
+     device; pairing an old phone to a new one is the check that would confirm it.
+     See docs/ANDROID_AUDIT.md §0. -->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="sharedpref" path="spore.xml" />
-        <exclude domain="sharedpref" path="petnames.xml" />
-        <exclude domain="file" path="store" />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="database" path="." />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="sharedpref" path="spore.xml" />
-        <exclude domain="sharedpref" path="petnames.xml" />
-        <exclude domain="file" path="store" />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="database" path="." />
     </device-transfer>
 </data-extraction-rules>
