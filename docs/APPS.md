@@ -44,6 +44,12 @@ Install it as you would any APK; you may need to allow installs from your browse
 or files app. Builds are debug-signed until a release keystore is configured, so
 Android will warn about an unknown developer.
 
+**Going back a version.** `rolling` is a moving pointer and holds only the current
+APK, which is no help when a build breaks something. The `nightly-<date>` releases
+keep the **last five dated builds** for exactly that — pick one and install it over
+the top. Older nightlies are pruned automatically, so this is a rollback window,
+not an archive.
+
 **There is no stable release yet** — no `v*` tag has been cut, so every build is a
 rolling one off `master`. This page used to advertise a "latest stable release"
 link; it pointed at `/releases/latest`, which resolves to nothing while the only

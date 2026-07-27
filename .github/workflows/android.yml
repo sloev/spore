@@ -64,6 +64,7 @@ jobs:
             echo "kind=$([ "${{ github.event_name }}" = "push" ] && echo rolling || echo none)" >> "$GITHUB_OUTPUT"
           fi
           echo "code=$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+          echo "date=${date}" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -184,6 +185,53 @@ jobs:
 
             SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
             `sha256sum -c spore-android.apk.sha256`.
+
+            Need to go back a few days? The `nightly-*` releases keep the last five
+            dated builds.
+
+      # Dated history, five deep. The `rolling` release above is a moving pointer
+      # and deliberately holds only the current APK — which is no help when a build
+      # breaks something and you want yesterday's. One release per day (a second
+      # merge the same day updates that day's), pruned below.
+      - name: Nightly release (master) — dated
+        if: steps.ver.outputs.kind == 'rolling'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly-${{ steps.ver.outputs.date }}
+          name: SPORE nightly ${{ steps.ver.outputs.date }}
+          prerelease: true
+          make_latest: false
+          files: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.sums.outputs.sums }}
+          body: |
+            Dated nightly — **${{ steps.ver.outputs.name }}**, built from `master` at
+            ${{ github.sha }}. Kept as one of the last five nightlies so a bad build
+            can be rolled back from; for the current build use
+            [`rolling`](https://github.com/sloev/spore/releases/tag/rolling).
+
+            SHA-256 `${{ steps.sums.outputs.sha }}`.
+
+      # Retention. Without this the nightlies grow without bound — the accumulation
+      # bug that made the old rolling release hold four days of APKs, just moved up a
+      # level. Sorted by tag name, which for `nightly-YYYY.MM.DD` is chronological
+      # and, unlike `createdAt`, does not shift when a release is updated in place.
+      - name: Keep only the last 5 nightlies
+        if: steps.ver.outputs.kind == 'rolling'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          stale=$(gh release list --limit 200 --json tagName \
+            --jq '[.[].tagName | select(startswith("nightly-"))] | sort | reverse | .[5:] | .[]')
+          if [ -z "$stale" ]; then
+            echo "nothing to prune"
+            exit 0
+          fi
+          echo "$stale" | while read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "pruning $tag"
+            gh release delete "$tag" --yes --cleanup-tag
+          done
 
       # A tagged release keeps both names: the versioned one is the archive copy
       # (each tag is its own release, so nothing accumulates), and the constant one

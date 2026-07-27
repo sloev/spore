@@ -772,6 +772,74 @@ the next merge builds. Worth noting as the weakest verification in this register
 
 ---
 
+## S-022
+
+**The one-shot seal has no forward secrecy, and three places said it did.** Medium
+(false security claim). `docs/SPEC.md` §7, `src/seal.rs` module docs and its §7
+banner, versus `src/lib.rs` `Node::from_seed`.
+
+**Root cause.** §7 read: *"seal to the recipient's **newest** prekey … Rotate
+prekeys daily; **delete private prekeys after 7 d** → seized devices cannot read
+mail older than a week."* `src/seal.rs` repeated the conclusion twice. None of the
+mechanism exists:
+
+```rust
+// Node::from_seed — src/lib.rs
+let mut buf = seed.to_vec();
+buf.extend_from_slice(b"spore/prekey/v1");
+let pb: [u8; 32] = Sha256::digest(&buf).into();
+let prekey_sec = crypto_box::SecretKey::from(pb);
+```
+
+One prekey, derived from the identity seed, for the life of the identity. `announce`
+carries that same `prekey_pub` forever. There is no set of prekeys, no age, no
+rotation function, no expiry — `grep -rn 'rotate_prekey\|prekey_age\|old_prekey'`
+over `src/`, `web/`, `android/` and `bindings/` returns nothing.
+
+And this is not merely unimplemented — as designed it is **unimplementable in the
+form described**. The prekey is a pure function of the seed that `Node::seed`
+persists so an identity can be restored. Deleting the private half achieves nothing,
+because anyone holding the seed re-derives it. The stated conclusion is therefore
+false in the strongest sense: seize a device, take the seed, and read *every* message
+ever sealed to that node, week-old mail included.
+
+This is the same class as S-014, where the MSRV floor was asserted in a comment and
+false in two ways at once. A property claimed in prose and contradicted by the code
+is worse than an absent property, because it is the one people plan around.
+
+**Exploit.** Device seizure or a backup leak — the threat §7 explicitly claimed to
+mitigate. Not remote, and not a break of the sealing itself, which is sound. What
+fails is the time-bound: there is no window after which sealed mail becomes
+unreadable.
+
+**Reproduced.** By reading, not running: the derivation above, the single
+`prekey_pub` field, `announce` at `src/lib.rs:760`, and the empty grep. Prompted by
+being asked to justify the phrase "which §7 describes and nothing enforces" — which
+was itself too generous, and is corrected here.
+
+**Patch (this commit).** The claims are removed, not softened. §7 now marks rotation
+`SHOULD` and adds §7.2 stating what this implementation does; `src/seal.rs` says
+plainly that the path has no forward secrecy and that its own comment used to claim
+otherwise. Sessions (`ratchet`) do have it, and the docs now distinguish the two
+instead of letting one borrow the other's reputation.
+
+**Patch (not done).** Real rotation needs prekey secrets held and deleted
+independently of the identity seed — a ring of recent prekeys with timestamps,
+ANNOUNCE advertising the newest, opening trying all live ones, and expiry dropping
+the secret. That changes what restoring from a seed recovers: mail sealed to an
+expired prekey becomes permanently unreadable, which is the *point* and is also a
+change to a documented guarantee. Left for a decision rather than assumed.
+
+**Behaviour change?** None. Documentation only.
+
+**Freeze impact?** None.
+
+**Tests.** None — nothing changed behaviourally. The absence of a test here is
+honest: there is no property to assert until rotation exists. Noted so this entry is
+not mistaken for a fix.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and
@@ -800,11 +868,12 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
-- **Prekey rotation is not enforced.** S-020 heals a stolen group key but not a
-  stolen prekey secret, because contributions are sealed to prekeys. §7 describes
-  rotating prekeys daily and deleting the private half after seven days; nothing in
-  the library makes a node do it, so an application that never rotates keeps a
-  permanent decryption oracle for every contribution addressed to it.
+- **Prekey rotation does not exist** (S-022 documents the gap; closing it is open).
+  One prekey per identity, derived from the seed, forever. So the one-shot seal has
+  no forward secrecy, and S-020's healing does not survive a stolen prekey secret —
+  that secret is a permanent decryption oracle for every contribution addressed to
+  the member. Fixing it means prekey secrets held and expired independently of the
+  identity seed, which trades away part of what restoring from a seed recovers.
 - **Encrypted groups have no roster.** Membership, and therefore who a contribution
   is sealed to, is entirely the application's problem. In a partition two halves can
   diverge onto different keys; `topic::key_id` makes that legible but does not

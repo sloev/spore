@@ -62,6 +62,12 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   noticed. `topic::contribute`/`absorb` now fold sealed fresh entropy into the key,
   so a group heals through ordinary use against an attacker holding the chain.
   Additive — every existing function is byte-for-byte unchanged.
+- **S-022** The one-shot seal was documented as forward-secret in three places —
+  §7 and two comments in `src/seal.rs` — via prekey rotation that does not exist.
+  There is one prekey per identity, derived from the seed, forever; and because it
+  is a pure function of the seed a node persists, deleting it would achieve nothing.
+  The claims are removed rather than softened. No behaviour change; sessions
+  (`ratchet`) do have forward secrecy and the docs now distinguish the two.
 - **S-021** The Android release advertised a dead "stable release" link, showed a
   three-day-old publication date while building on every merge, accumulated one
   APK per day with no indication which was current, and named itself from its own
@@ -132,7 +138,9 @@ does and does not mean.
   it to 6.6 MB, verified to still build cold from a clean extraction.
 - The Android APK now has a permanent download URL —
   `releases/download/rolling/spore-android.apk` — instead of a versioned filename
-  nothing could link to, and `docs/APPS.md` leads with it (**S-021**).
+  nothing could link to, and `docs/APPS.md` leads with it (**S-021**). Dated
+  `nightly-<date>` releases keep the last five builds for rollback, pruned
+  automatically so they cannot accumulate the way the old assets did.
 - Every in-page anchor on the docs site was dead: 116 of them, including the whole
   bridge index. `marked` emits no heading ids, and the docs are written for GitHub,
   which adds them silently. Headings now carry GitHub's own slugs, and the site
