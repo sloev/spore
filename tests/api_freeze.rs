@@ -1,13 +1,13 @@
-//! FROZEN 1.0 CONTRACT — do not edit without a major-version bump.
+//! FROZEN v1 CONTRACT — do not edit without bumping the *wire* version.
 //!
-//! This file pins SPORE's public API and wire format for v1.x. The golden hex
+//! This file pins SPORE's public API and the v1 wire format. The golden hex
 //! below is the on-the-wire contract: any code change that alters it is a
 //! backwards-incompatible break and must fail CI. The `_frozen_api_surface`
 //! function pins the public *shape* (names + signatures) at compile time —
 //! removing or changing a listed item stops this file compiling.
 //!
 //! The PR guard (`.github/workflows/pr-guard.yml`) refuses to let a pull request
-//! modify this file, so the 1.0 contract can only change by a deliberate,
+//! modify this file, so the v1 contract can only change by a deliberate,
 //! admin-level act. The values are reproduced by `cargo run --example gen_vectors`
 //! and mirrored in `reference/vectors.json` and `docs/REBUILD.md`.
 

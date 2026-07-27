@@ -1,6 +1,6 @@
 # Changelog
 
-The 1.x wire format is frozen, so this records what changed *around* it: security
+The v1 wire format is frozen, so this records what changed *around* it: security
 fixes, bridges, tooling, and the handful of local-policy changes that alter how a
 node behaves without altering what goes on the wire.
 
@@ -8,7 +8,7 @@ Two conventions specific to this project:
 
 - **Wire status is stated on every entry.** "Wire unchanged" means
   `cargo run --example gen_vectors` still produces `reference/vectors.json`
-  byte-for-byte, so every reference decoder and every 1.x peer is unaffected.
+  byte-for-byte, so every reference decoder and every v1 peer is unaffected.
 - **Security fixes reference their finding.** `S-0nn` links to
   [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md), which carries the
   reproduction, root cause and regression test for each one.
@@ -21,16 +21,23 @@ things, so rather than let anyone infer it wrongly:
 | Number | Versions | Frozen? | Lives in |
 |---|---|---|---|
 | **SPORE v1** | the wire format — envelope layout, addressing, routing, crypto | yes, CI-enforced | the `VER` byte, `docs/SPEC.md`, `reference/vectors.json` |
-| **`spore` 1.0.0** | the Rust crate's public API surface | yes, CI-enforced | `Cargo.toml`, `tests/api_freeze.rs` |
-| **release 0.1.0** | the shipped distribution — Android APK, single-file browser node, Seed Sheet, desktop daemon | no | this tag |
+| **`spore` 0.1.x** | the crate and the shipped distribution | its *API shape* is CI-enforced | `Cargo.toml`, `tests/api_freeze.rs` |
 
-The wire format and the crate API are stable at 1.x and stay there; nothing here
-walks either of them back. What is at 0.1.0 is the **distribution**, which has never
-been released before. Calling that 1.0 would claim a maturity it does not have: no
-radio bridge has been verified against real hardware — every 🧪 in
-[`BRIDGES.md`](docs/BRIDGES.md) — and [`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md)
-carries open items, including that the one-shot seal has no forward secrecy (S-022).
-0.1.0 says so; a 1.0 badge would not.
+Freezing the wire at v1 while the software is at 0.1 is not a contradiction. The
+protocol is what peers and reimplementations depend on, and it does not move. The
+software is early and says so: no radio bridge has been verified against real
+hardware — every 🧪 in [`BRIDGES.md`](docs/BRIDGES.md) — and
+[`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md) carries open items, including
+that the one-shot seal has no forward secrecy (S-022). A 1.0 badge would have said
+otherwise.
+
+**How the numbers are produced from here.** `major.minor` lives in `Cargo.toml` and
+is the only part a human touches — bumping it is a deliberate, reviewable commit.
+Everything else is generated: every merge to `master` publishes
+`<major>.<minor>.<YYYYMMDDHHMM>+<short sha>`, so a rolling build is uniquely and
+monotonically named and points at the exact commit it came from. No version is ever
+derived from a git tag again; doing that is how a build ended up called
+"SPORE rolling rolling+2026.07.27".
 
 Wire unchanged throughout. One frozen *Rust* signature changed (`Node::send`);
 `bindings/spore.h` and the vectors are untouched.
@@ -93,7 +100,7 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
 ### Changed — local policy, not wire
 
 Both alter how a node behaves on a network without changing what it emits, so a
-node running this interoperates with a 1.0 peer that is simply more permissive.
+node running this interoperates with a v1 peer that is simply more permissive.
 
 - Mail must be stamped to **16 leading zero bits** (was: any non-zero stamp) to skip
   the per-source quota or a busy peer's backpressure.

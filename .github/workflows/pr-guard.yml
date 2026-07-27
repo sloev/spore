@@ -1,6 +1,6 @@
 name: PR guard (API freeze)
 
-# Refuse pull requests that change the frozen 1.0 contract or the test suite that
+# Refuse pull requests that change the frozen v1 contract or the test suite that
 # guarantees it. Combined with branch protection (this check + CI required, no
 # direct pushes), this is what keeps `master` from ever silently breaking the API.
 #
@@ -36,7 +36,7 @@ jobs:
           frozen='^(tests/|reference/vectors\.json|reference/test_t0\.py|bindings/spore\.h|examples/(gen_vectors|worked)\.rs|site/seed/.*\.test\.mjs|web/(test|ws-test)\.mjs|\.github/workflows/(ci|pr-guard)\.yml)'
           hits="$(echo "$changed" | grep -E "$frozen" || true)"
           if [ -n "$hits" ]; then
-            echo "::error::This PR modifies frozen 1.0 contract / test files:"
+            echo "::error::This PR modifies frozen v1 contract / test files:"
             echo "$hits"
             echo "These files are frozen to guarantee the API and wire format. Changing them is a"
             echo "backwards-incompatible (major-version) act — add the 'allow-frozen-change' label to proceed."
