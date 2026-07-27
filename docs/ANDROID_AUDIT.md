@@ -10,9 +10,23 @@ findings that existed only in prose, and an audit that blurs the two just adds t
 
 ---
 
+## Progress
+
+Updated as work lands, so this file never describes a state the code left behind.
+
+| Item | Status |
+|---|---|
+| §0 Backup exfiltration — `allowBackup="false"` + extraction rules | ✅ fixed |
+| §0 Encryption at rest — Keystore `EncryptedSharedPreferences` + migration | ✅ fixed, **not yet run on a device** |
+| §2 Petname save feedback | open |
+| §2 Bridge lifecycle (needs `nativeStopBridge` first) | open |
+| §2 `FileProvider` + `ACTION_VIEW` + previews | open |
+| §2 Chat rewrite | open |
+| §1 Battery measurement, JNI soak | open |
+
 ## 0. Ship this first: the seed and prekey ring are world-readable to a backup
 
-**Verified.** Severity: **High**.
+**Verified.** Severity: **High**. **Status: fixed — see the end of this section.**
 
 ```
 NodeController.kt:110    getSharedPreferences("spore", MODE_PRIVATE)   ← seed, base64
@@ -44,7 +58,35 @@ every prekey that has not yet expired.
 3. Longer term: prekey secrets should not cross the JNI boundary in the clear at
    all. Export them wrapped under a Keystore key so Kotlin never holds plaintext.
 
-Steps 1 and 2 are worth a findings-register entry when they land.
+### What landed
+
+Steps 1 and 2, together, because step 1 alone leaves the secrets in cleartext on
+disk and step 2 alone leaves them going to Drive:
+
+- `android:allowBackup="false"`, `android:fullBackupContent="false"`, and
+  `res/xml/data_extraction_rules.xml` excluding `spore.xml`, `petnames.xml` and the
+  `store` directory from **both** cloud backup and device-to-device transfer. The
+  transfer path is separate from backup and would otherwise have carried the same
+  secrets to a new phone in the clear.
+- `NodeController.secretPrefs()` — `EncryptedSharedPreferences` over a Keystore
+  `MasterKey` (AES256-SIV keys, AES256-GCM values), replacing every
+  `getSharedPreferences("spore", MODE_PRIVATE)` call site.
+- `migrateSecrets()` copies an existing install's seed and ring into the encrypted
+  store on first run and clears the plaintext file. **Without this an upgrade looks
+  like a factory reset** — new identity, new address, unreachable inbox.
+- No user authentication to unwrap: the foreground service must keep relaying while
+  the screen is locked. The threat this closes is offline extraction, not a thief
+  holding an unlocked phone. Said plainly in the code comment so nobody later
+  "hardens" it into a node that stops carrying mail at lock.
+- Keystore failure falls back to plaintext prefs with a loud log rather than
+  crashing. Losing an identity is worse than the status quo ante; the fallback is a
+  deliberate trade, not an oversight.
+
+**Not yet verified on a device.** This compiles and the logic is straightforward,
+but the migration path — old install, upgrade, same address — has not been run on
+real hardware. That is the check that matters and it has not happened.
+
+Worth a findings-register entry when it is confirmed working.
 
 ---
 

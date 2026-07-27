@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 31+. allowBackup="false" already covers cloud backup; this also blocks
+     device-to-device transfer, a separate path that would otherwise carry the
+     seed and prekey ring to a new phone in the clear. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="spore.xml" />
+        <exclude domain="sharedpref" path="petnames.xml" />
+        <exclude domain="file" path="store" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="spore.xml" />
+        <exclude domain="sharedpref" path="petnames.xml" />
+        <exclude domain="file" path="store" />
+    </device-transfer>
+</data-extraction-rules>
