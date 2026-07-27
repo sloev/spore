@@ -15,6 +15,14 @@ Two conventions specific to this project:
 
 ## Unreleased
 
+- **The release-bump workflow's first run failed on its last line.** Three separate
+  defects, all mine: GitHub Actions cannot open pull requests unless the repository
+  enables it (off by default, and I did not check), a re-run would have died on the
+  branch the failed run left behind, and the "is `## Unreleased` empty" guard counted
+  the section's own explanatory boilerplate as content — so it would have cut `0.4.0`
+  with a changelog consisting of the text describing what changelogs are for. The PR
+  step is now best-effort with a printed link, the push is `--force-with-lease`, and
+  the guard requires an actual `- ` bullet.
 - **S-030** The tag-cutting step looked up `v0.3.0` but the existing tag was
   `V0.3.0`; git tags are case-sensitive, so it missed it and published a second
   release for the same version. That is S-025's exact trap reproduced inside the fix
