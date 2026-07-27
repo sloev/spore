@@ -15,6 +15,14 @@ Two conventions specific to this project:
 
 ## Unreleased
 
+- **S-030** The tag-cutting step looked up `v0.3.0` but the existing tag was
+  `V0.3.0`; git tags are case-sensitive, so it missed it and published a second
+  release for the same version. That is S-025's exact trap reproduced inside the fix
+  for S-025. Now checks both cases. One accidental upside: the duplicate became
+  "latest" and `releases/latest/download/spore-android.apk` returns 206 for the first
+  time — a correct outcome from a broken mechanism, which is the most misleading
+  state a release pipeline can be in.
+
 Entries accumulate here as work merges. `release.yml` retitles this heading to the
 new version when you bump, and refuses to release if it is empty — a release nobody
 can read about is the failure this guards against.

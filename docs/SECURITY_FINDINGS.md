@@ -54,6 +54,7 @@ than fixing a crash, it says so explicitly.
 | [S-027](#s-027) | Persistent DoS (folder sync) | Medium | ✅ | ✅ | ✅ | no |
 | [S-028](#s-028) | Memory amplification (materialize) | Low | reasoned | ✅ | ✗ | no |
 | [S-029](#s-029) | Release integrity (my own fix, racy) | Low | ✅ | ✅ | ✗ manual | release plumbing |
+| [S-030](#s-030) | Release integrity (S-025's trap, in S-025's fix) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
@@ -1227,6 +1228,61 @@ no test (S-021, S-025, S-026, S-029). That is the pattern worth naming: this
 subsystem is only observable by running it against GitHub, every fix here has been
 verified by inspecting the artefacts afterwards, and twice that inspection found the
 fix had broken something else. Nothing in CI will catch the fifth one either.
+
+---
+
+## S-030
+
+**I reproduced S-025's bug inside the fix for S-025.** Low (release integrity).
+`.github/workflows/android.yml` — the tag-cutting step. **Self-inflicted, third
+time.**
+
+**Root cause.** The step that cuts a tagged release when `Cargo.toml` names a new
+version checked whether that release already existed:
+
+```sh
+tag="v${ver}"
+if gh release view "$tag" >/dev/null 2>&1; then exit 0; fi
+```
+
+Git tags are case-sensitive, and so is `gh release view`. `Cargo.toml` said `0.3.0`
+and a hand-cut **`V0.3.0`** already existed, so the lookup missed it and the step
+published a *second* release for the same version.
+
+S-025 was: a `v*` glob does not match a `V` tag. This is the identical mismatch, in
+the remedy for it, written while that register entry was open. Three of the last
+four findings have been my own fixes breaking something (S-026 → S-029 → S-030).
+
+**Exploit.** None. The damage is a releases page carrying two entries for 0.3.0 —
+`V0.3.0` empty, `v0.3.0` with the artefacts — which is confusing rather than
+dangerous, and would recur on every future release cut against a hand-made capital
+tag.
+
+**Reproduced.** Predicted from reading the diff before the run finished, then
+confirmed: `GET /releases` returns both `v0.3.0` (id 360447083, `github-actions`,
+with assets) and `V0.3.0` (id 360429808, `sloev`, `"assets": []`).
+
+**The upside, recorded because it is instructive.** `v0.3.0` is a non-prerelease
+newer than `V0.3.0`, so it became "latest" — and
+`releases/latest/download/spore-android.apk` returned **206** for the first time in
+this project's history. The link `docs/APPS.md` has promised since S-021 now works.
+A correct outcome produced by a broken mechanism is not a working mechanism, and is
+the single most misleading state a release pipeline can be in: had nobody checked,
+"the download works" would have been taken as evidence the code was right.
+
+**Patch.** Check both `v${ver}` and `V${ver}` before creating. Two lines.
+
+**Behaviour change?** Release plumbing only. The duplicate `V0.3.0` is left in place
+— deleting a published release is the maintainer's call, not CI's.
+
+**Freeze impact?** None.
+
+**Tests.** None, and this is the fifth release-plumbing finding without one (S-021,
+S-025, S-026, S-029, S-030). The pattern is now unambiguous: **every fix in this
+subsystem has been verified only by inspecting the artefacts afterwards, and three
+of those inspections found the fix had broken something else.** The subsystem needs
+a way to be exercised without publishing, or it will keep producing findings at this
+rate. That is the recommendation this entry exists to make.
 
 ---
 
