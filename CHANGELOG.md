@@ -77,6 +77,12 @@ node running this interoperates with a 1.0 peer that is simply more permissive.
 
 ### Added — bridges
 
+**NFC (Web NFC)** — tap-to-transfer as an `application/x-spore` NDEF record. The
+NDEF codec is pure and tested; the tap needs a phone, so the bridge ships 🧪. It
+lives in the browser rather than the daemon because a Rust NFC bridge needs
+`libnfc` or PC/SC — a C library, which is the dependency rule that also kept TLS
+out.
+
 AX.25/KISS, Tor (SOCKS5), I2P (SAM v3, dial and accept), copyparty/WebDAV, UDP
 multicast on any address family (which unblocked Yggdrasil, cjdns, BATMAN and
 Thread), Reticulum over TCP/UDP, ICMP echo, and NNCP/UUCP via a new spool bridge.

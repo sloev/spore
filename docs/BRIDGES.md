@@ -167,6 +167,7 @@ one.
 | `tcp` | the peer, plus anyone on the path without a tunnel | the traffic; see the TLS section below |
 | `reticulum` | the companion host and the RNS network | as much as its configured interfaces expose |
 | `ssb` | the SSB feed's followers | envelopes published into a gossip log are effectively public and hard to unpublish |
+| `nfc` | anyone who can hold a reader within a few centimetres | in practice nobody, which is the point: proximity *is* the access control, and the gesture is deliberate |
 | `tor`, `i2p` | the introduction points | the least of any bridge here; this is what to reach for when the observer matters |
 
 Three consequences worth stating outright:
@@ -290,7 +291,7 @@ Status is the emoji on each name. Follow the link for the deep dive.
 | [ESP-NOW ⚪](#esp-now) | dgram | `[u8;6]` | 250 | connectionless 2.4 GHz on ESP32 |
 | [BLE GATT ⚪](#ble-gatt) | stream | `[u8;6]` | ~247 | serial-over-BLE via a GATT characteristic |
 | [BLE Mesh ⚪](#ble-mesh) | dgram | `u16` | 380 | managed-flood BLE mesh |
-| [NFC (ISO 14443) ⚪](#nfc) | dgram | `[u8;7]` | ~255 | tap-to-transfer NDEF records |
+| [NFC (ISO 14443) 🧪](#nfc) | dgram | `[u8;7]` | ~255 | tap-to-transfer NDEF records (Web NFC) |
 | [LiFi (802.15.7) ⚪](#lifi) | dgram | `[u8;6]` | var | visible-light modem |
 | [IrDA ⚪](#irda) | dgram | `u32` | 2048 | infrared IrCOMM |
 | [Zigbee ⚪](#zigbee) | dgram | `u64` | 104 | 802.15.4 mesh with APS fragmentation |
@@ -624,7 +625,7 @@ independent.
 </details>
 
 <a id="nfc"></a>
-## NFC (ISO/IEC 14443) ⚪
+## NFC (ISO/IEC 14443) 🧪
 
 **Summary.** Tap-to-transfer at a few centimetres. An envelope becomes an NDEF
 record, moved by touching two phones or a phone to a tag — a deliberate, physical
@@ -634,18 +635,43 @@ record, moved by touching two phones or a phone to a tag — a deliberate, physi
 |---|---|
 | Driver form | `dgram` (one shot) |
 | `U` | `[u8;7]` (UID) or `()` |
-| MTU | ~255/record (tag-class dependent) |
+| MTU | ~130 B (NTAG213) … ~850 B (NTAG216); phone-to-phone larger |
 | State | stateful (field present) |
-| Status | ⚪ planned |
-| Code | NDEF `application/x-spore` via platform NFC / Web NFC |
+| Status | 🧪 NDEF codec implemented + tested; the tap itself needs a phone |
+| Code | [`web/transports/webnfc.mjs`](../web/transports/webnfc.mjs) |
 
 <details><summary>Deep dive</summary>
 
 **Protocol.** An NDEF message wraps the envelope in a MIME record
-(`application/x-spore`). Larger envelopes span multiple taps (fountain fragments),
-or use a bigger tag class.
+(`application/x-spore`). `encodeNdef` emits the short-record form whenever the
+payload fits in a byte — the common case for a fragment — and the 4-byte length
+field beyond that. Larger objects span multiple taps as fountain fragments, and
+any ~K of N suffice, so a mistimed tap costs a repeat rather than a restart.
 
-**Security.** Proximity is the channel; the envelope signature authenticates.
+**Why the browser and not the daemon.** A Rust NFC bridge needs `libnfc` or
+PC/SC — a C library. That is the one thing the bridge selection rule excludes, and
+it is the same rule that kept TLS out (see the TLS section). Web NFC needs no
+dependency at all, and the realistic gesture — two phones touching — is a phone
+scenario anyway. There is therefore no Rust twin and nothing for
+`web/codec-test.mjs` to check parity *against*; it tests the codec on its own.
+
+**Verification, honestly.** The codec is pure and covered by twelve checks in
+`web/codec-test.mjs`: short and long records round-trip, and a URL tag, a foreign
+MIME type, a length that runs past the buffer, and every truncation of a valid
+message are all refused. The `NDEFReader` plumbing is *not* tested — Web NFC is
+Chrome on Android over HTTPS with a user gesture, and there is no headless way to
+present a tag. Same split as the ICMP bridge: the framing is tested, the hardware
+loop is the operator's.
+
+**Bounded like every other bridge.** A tag is written by whoever held it last, so
+the decoder checks every declared length against what actually arrived rather than
+believing it. Outbound envelopes queue until a tag enters the field, and that queue
+is capped (`MAX_QUEUED`, oldest dropped) — a phone in a pocket must not accumulate
+a backlog because nothing has been tapped for an hour.
+
+**Security.** Proximity is the channel; the envelope signature authenticates. The
+range is the honest guarantee here — a few centimetres is a real access-control
+property in a way no radio bridge can claim.
 
 **References.** [ISO/IEC 14443](https://www.iso.org/standard/73597.html);
 [NFC Forum NDEF](https://nfc-forum.org/build/specifications); [W3C Web NFC](https://w3c.github.io/web-nfc/).
@@ -1592,6 +1618,27 @@ automatically via trackers.
 
 **Security.** DTLS-SRTP encrypts the channel; the DTLS fingerprint is exchanged in
 the SDP. SPORE's signature authenticates the application payload regardless.
+
+**Browser only, deliberately — there is no daemon WebRTC bridge.** This is the
+most-asked-for missing bridge, so the answer is recorded here rather than
+rediscovered. A native Rust WebRTC stack means ICE, DTLS and SCTP; none of those
+are small, and the lightest credible option (a sans-IO crate such as `str0m`) is
+still the largest dependency this project would have taken. That is the same
+budget that keeps TLS out of the tree and put [NFC](#nfc) in the browser, and it is
+the rule that selected every bridge on this page. Spending it here was considered
+and declined.
+
+What you lose is NAT traversal between two daemons with no reachable address. What
+you have instead: [Tor](#tor) and [I2P](#i2p) both traverse NAT and do it with
+better metadata properties, and either is a `torrc`/SAM config away.
+
+The browser and the Android WebView keep WebRTC because there it costs nothing —
+the platform ships the stack. Note that the Android app does not currently *load*
+this transport (its WebView is given `websocket`, `nostr` and `webtorrent`), though
+WebRTC demonstrably works there, since `webtorrent` negotiates data channels
+itself. What is missing on Android is not the runtime but signaling: this transport
+takes an already-open `RTCDataChannel`, and there is no human present to paste an
+offer into a headless WebView.
 
 **References.** [RFC 8831](https://www.rfc-editor.org/rfc/rfc8831) (data channels);
 [RFC 8832](https://www.rfc-editor.org/rfc/rfc8832) (DCEP);

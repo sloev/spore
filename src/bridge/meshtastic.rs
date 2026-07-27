@@ -321,6 +321,16 @@ pub struct StreamFramer {
 }
 
 impl StreamFramer {
+    /// How many bytes are held pending a complete frame.
+    ///
+    /// Exposed so a fuzz target and the robustness harness can assert the framer
+    /// stays *bounded*, not merely that it does not panic. A framer that grows
+    /// quietly is the S-013 failure mode — no crash, no error, just memory — and
+    /// "it returned" is not evidence against it.
+    pub fn buffered(&self) -> usize {
+        self.buf.len()
+    }
+
     pub fn new() -> StreamFramer {
         StreamFramer { buf: Vec::new() }
     }

@@ -5,9 +5,12 @@
 //   * KISS framing (matches src/kiss.rs)
 //   * Meshtastic MeshPacket protobuf (byte-identical to the Rust bridge)
 //   * the 16-FSK audio modem (bit-compatible with bridge::audio)
+//   * NDEF records for Web NFC — browser-only, since a dependency-free NFC
+//     bridge for the daemon is not possible, so there is no Rust twin to match
 import { kissFrame, KissDeframer } from './transports/kiss.mjs';
 import { modulate, Demod } from './transports/audio.mjs';
 import { encodeMeshPacket, decodeMeshPacket } from './transports/meshtastic.mjs';
+import { encodeNdef, decodeNdef, SPORE_MIME } from './transports/webnfc.mjs';
 
 let fails = 0;
 const eq = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
@@ -55,5 +58,44 @@ const startsWith = (u8, prefix) => prefix.every((b, i) => u8[i] === b);
   }
 }
 
-console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, and audio wire formats verified');
+
+// --- NDEF: short + long records, and everything a tag might hold instead ------
+{
+  const env = Uint8Array.from({ length: 40 }, (_, i) => (i * 3) & 0xff);
+  const msg = encodeNdef(env);
+  check('ndef: short record round-trips', eq(decodeNdef(msg), env));
+  check('ndef: short-record flag set below 256 B', (msg[0] & 0x10) !== 0);
+
+  // Past 255 bytes NDEF switches to the 4-byte length field.
+  const big = Uint8Array.from({ length: 700 }, (_, i) => i & 0xff);
+  const bigMsg = encodeNdef(big);
+  check('ndef: long record round-trips', eq(decodeNdef(bigMsg), big));
+  check('ndef: short-record flag clear at 700 B', (bigMsg[0] & 0x10) === 0);
+
+  // A tag is written by whoever held it last, so the decoder has to survive
+  // whatever is on it — not just records we wrote.
+  check('ndef: empty input rejected', decodeNdef(new Uint8Array(0)) === null);
+  check('ndef: null rejected', decodeNdef(null) === null);
+
+  const url = new Uint8Array([0xd1, 0x01, 0x05, 0x55, 0x01, 0x61, 0x62, 0x63, 0x64]);
+  check('ndef: a URL tag is not ours', decodeNdef(url) === null);
+
+  const wrongMime = encodeNdef(env);
+  wrongMime[4] = 'X'.charCodeAt(0); // corrupt the type string
+  check('ndef: another MIME type is not ours', decodeNdef(wrongMime) === null);
+
+  // A length that runs past the buffer must be refused, not trusted.
+  const lying = encodeNdef(env);
+  lying[2] = 0xff;
+  check('ndef: payload length past the end refused', decodeNdef(lying) === null);
+
+  let truncOk = true;
+  for (let cut = 0; cut < msg.length; cut++) {
+    if (decodeNdef(msg.subarray(0, cut)) !== null) truncOk = false;
+  }
+  check('ndef: every truncation rejected', truncOk);
+  check('ndef: mime type is the documented one', SPORE_MIME === 'application/x-spore');
+}
+
+console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio and NDEF wire formats verified');
 process.exit(fails ? 1 : 0);

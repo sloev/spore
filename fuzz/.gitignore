@@ -2,3 +2,7 @@ target
 corpus
 artifacts
 coverage
+
+# `seeds/` is committed on purpose: a starting corpus checked into the repo,
+# distinct from `corpus/`, which libFuzzer grows locally and nobody should commit.
+!seeds/

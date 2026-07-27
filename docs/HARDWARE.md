@@ -28,6 +28,7 @@ independent; run the ones you have hardware for and note the date + result.
 | 15 | **I2P** | `i2pd` or Java I2P running with SAM enabled (`:7656`); on one host note its b32, on the other `spore i2p:<b32>.b32.i2p` | SAM session opens, tunnels build (30–60 s is normal), envelopes flow with neither end learning the other's IP |
 | 16 | **Copyparty / WebDAV** | A copyparty share (`copyparty -v .::rw`); `spore copyparty:http://host:3923/bag/` on two machines | `<hexid>.spore` files appear in the share; each node imports the other's within one poll |
 | 12 | **BLE generic (NUS)** | Chrome desktop web node → "Web Bluetooth", an nRF/ESP32 running Nordic UART | KISS frames cross; MTU chunking reassembles |
+| 17 | **NFC tap** | Two Android phones on Chrome over **HTTPS** with the web node open, or one phone plus an NTAG213/216 tag; tap → "Web NFC" | the `application/x-spore` record is written and read back; an envelope crosses in one tap. A tag holding anything else (a URL, another app's record) is ignored rather than mis-parsed. Objects past the tag's capacity should take several taps and still reassemble |
 
 **Recording results.** Append a dated line to the table's history below when a
 row is verified (device, OS/firmware, result). A row with no history is still a
