@@ -109,3 +109,11 @@ jobs:
           node seed/fountain.test.mjs
           node seed/seedsheet.test.mjs
           node seed/build-seedsheet.mjs
+
+      # The docs site renders here as well as in pages.yml, because its build
+      # fails on a broken internal link or a dead anchor and that has to be
+      # caught on the pull request, not after the deploy. A doc that renames a
+      # heading and orphans six cross-references still looks correct in review.
+      - name: Docs site builds and every internal link resolves
+        working-directory: site
+        run: node build.mjs
