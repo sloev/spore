@@ -91,7 +91,8 @@ cargo run                    # in-memory mesh demo (A — B — C — D)
 cargo run -- node.yaml       # a real node with the bridges in a config file
 ```
 
-Configuration and the bridge list are in the [README](../README.md#build--run);
+Configuration and the bridge list are in the
+[README](https://github.com/sloev/spore#build--run);
 what each bridge speaks is in [`BRIDGES.md`](BRIDGES.md).
 
 Plain `std`, so one source targets Linux, macOS, Windows and Android; the core

@@ -3,6 +3,10 @@
 **S**tore-and-forward **P**lanetary **O**pportunistic **R**elay **E**nvelope — a
 Rust reference implementation of the [SPORE v1 spec](docs/SPEC.md).
 
+*New here, or sending someone else?* [**sloev.github.io/spore**](https://sloev.github.io/spore/)
+says what this is without assuming you build software, and has a node you can try
+in the browser. This README is the implementer's entry point.
+
 <p align="center">
   <a href="docs/spore-v1.png"><img src="docs/spore-v1.png" alt="SPORE v1 — the whole protocol on one page: postcard model, envelope layout, routing, crypto, mix mode, and bindings" width="820" /></a>
 </p>

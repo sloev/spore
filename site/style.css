@@ -110,3 +110,30 @@ main.doc .share h2 { margin: 0 0 6px; font-size: 18px; padding: 0; border: 0; }
 main.doc a.share-btn { color: inherit; }
 .share-btn:hover { border-color: currentColor; background: color-mix(in srgb, currentColor 8%, transparent); }
 @media print { .share { display: none !important; } }
+
+/* ---------------------------------------------------------------------------
+   Front page.
+
+   The home page is the one page written for someone who has not decided yet, so
+   it gets a larger opening and real call-to-action buttons instead of a line of
+   underlined links. Everything here is scoped to `.page-index`; the docs pages
+   keep the denser reading layout they already had.
+   --------------------------------------------------------------------------- */
+body.page-index main.doc > h1 { font-size: clamp(30px, 5.5vw, 46px); line-height: 1.15;
+  border: 0; padding: 0; margin: 8px 0 18px; letter-spacing: -0.02em; }
+/* The paragraph straight after the title is the pitch — it carries the page. */
+body.page-index main.doc > h1 + p { font-size: 18.5px; line-height: 1.55;
+  color: var(--ink); max-width: 40em; }
+body.page-index main.doc > ul:first-of-type { max-width: 40em; }
+body.page-index main.doc > ul:first-of-type li { margin: 9px 0; }
+
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 10px; }
+main.doc .cta a { text-decoration: none; display: inline-block; font-size: 16px;
+  line-height: 1; padding: 14px 20px; border-radius: 10px; border: 1px solid var(--edge);
+  white-space: nowrap; }
+main.doc .cta a.cta-primary { background: var(--accent); border-color: var(--accent);
+  color: #08130c; font-weight: 650; }
+main.doc .cta a.cta-secondary { color: var(--ink); background: var(--panel); }
+main.doc .cta a:hover { filter: brightness(1.08); }
+main.doc .cta a.cta-secondary:hover { border-color: var(--ink); }
+.cta-note { color: var(--dim); font-size: 14px; margin: 0 0 24px; max-width: 40em; }
