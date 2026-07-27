@@ -95,6 +95,7 @@ jobs:
           echo "code=$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
           echo "date=${date}" >> "$GITHUB_OUTPUT"
           echo "base=${mm}" >> "$GITHUB_OUTPUT"
+          echo "pkg=${pkg}" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -292,6 +293,67 @@ jobs:
             echo "pruning $tag"
             gh release delete "$tag" --yes --cleanup-tag
           done
+
+      # Cut the tagged release when Cargo.toml names a version with no tag.
+      #
+      # This is the other half of `release.yml`. That workflow opens a PR bumping
+      # `Cargo.toml`; merging it lands here, and *this* step creates the tag and
+      # publishes the release — in the job that is already running.
+      #
+      # It deliberately does not push a tag and wait for the `tags:` trigger to fire
+      # a second build. A tag pushed by `GITHUB_TOKEN` does not trigger workflows, so
+      # that would be a green job that produced nothing: the exact shape of S-025,
+      # S-026 and S-029. `gh release create` makes the tag and the release together.
+      - name: Cut the tagged release if Cargo.toml names a new version
+        if: steps.ver.outputs.kind == 'rolling'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: android
+        run: |
+          set -euo pipefail
+          ver='${{ steps.ver.outputs.pkg }}'
+          tag="v${ver}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released — nothing to cut."
+            exit 0
+          fi
+          # The archive copy carries the version; the constant name is what
+          # /releases/latest/download can point at.
+          cp spore-android.apk "spore-${tag}.apk"
+          sha256sum "spore-${tag}.apk" > "spore-${tag}.apk.sha256"
+          # Release notes: this version's CHANGELOG section, then the standing
+          # caveats. Written to a file so newlines survive.
+          awk -v v="$ver" '
+            $0 ~ ("^## " v " ") { f = 1; next }
+            /^## / { if (f) exit }
+            f
+          ' ../CHANGELOG.md > notes.md
+          cat >> notes.md <<'NOTE'
+
+          ---
+
+          **[⬇ spore-android.apk](https://github.com/sloev/spore/releases/latest/download/spore-android.apk)**
+          — a permanent link that always serves the newest stable release.
+
+          This number versions the **distribution**, not the protocol. The SPORE v1
+          wire format and the crate's API shape are frozen and unaffected by it.
+
+          Before you rely on it: no radio bridge has been verified against real
+          hardware (every 🧪 in
+          [BRIDGES.md](https://github.com/sloev/spore/blob/master/docs/BRIDGES.md)),
+          and the **Still open** section of
+          [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
+          what is known and unfixed. Builds are debug-signed until a release keystore
+          is configured, so Android will warn about an unknown developer.
+          NOTE
+          echo "SHA-256 \`$(cut -d' ' -f1 "spore-${tag}.apk.sha256")\`" >> notes.md
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "SPORE $tag" \
+            --notes-file notes.md \
+            "spore-${tag}.apk" "spore-${tag}.apk.sha256" \
+            spore-android.apk spore-android.apk.sha256
+          echo "cut $tag"
 
       # A tagged release keeps both names: the versioned one is the archive copy
       # (each tag is its own release, so nothing accumulates), and the constant one
