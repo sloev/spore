@@ -18,7 +18,7 @@ Updated as work lands, so this file never describes a state the code left behind
 |---|---|
 | §0 Backup exfiltration — `allowBackup="false"` + extraction rules | ✅ fixed |
 | §0 Encryption at rest — Keystore `EncryptedSharedPreferences` + migration | ✅ fixed, **not yet run on a device** |
-| §2 Petname save feedback | open |
+| §2 Petname save feedback — snackbar + `enabled` state on both Save buttons | ✅ fixed, **not yet run on a device** |
 | §2 Bridge lifecycle (needs `nativeStopBridge` first) | open |
 | §2 `FileProvider` + `ACTION_VIEW` + previews | open |
 | §2 Chat rewrite | open |
@@ -155,9 +155,32 @@ up. The hypothesis above is a hypothesis.
 
 | Report | What the code actually does |
 |---|---|
-| "No reaction on clicking save on settings.petname" | `MainActivity.kt:362` — `onClick = { Petnames.set(peer, editingName) }`. **It does save.** There is no snackbar, no dismiss, no visible state change, so it reads as broken. The fix is feedback, not persistence — a review guessing "missing onClick handler" would fix the wrong thing. |
+| "No reaction on clicking save on settings.petname" | `MainActivity.kt:362` — `onClick = { Petnames.set(peer, editingName) }`. **It does save.** There is no snackbar, no dismiss, no visible state change, so it reads as broken. The fix is feedback, not persistence — a review guessing "missing onClick handler" would fix the wrong thing. **Fixed — see below.** |
 | "Can't delete/edit/disable/enable bridges" | Only `addBridgeState` exists (`NodeController.kt:565`). The list is append-only by construction, and there is **no JNI call to stop a bridge** — that is the harder half of the fix. |
 | "Can't open attached files" | Only `ACTION_SEND` (share out) at `MainActivity.kt:258` and `:505`. No `FileProvider`, no `ACTION_VIEW`. |
+
+#### What landed for the save buttons
+
+A `SnackbarHostState` on the existing `Scaffold`, provided to the screens through a
+`LocalSnackbar` composition local, and a `rememberConfirm()` helper. Both Save
+buttons now confirm, and both are `enabled` only while the field differs from what
+is stored — so the button carries state *before* the press as well as after, which
+is the half a snackbar alone does not cover.
+
+Two things surfaced while wiring it that the report could not have known:
+
+- **Compare what will be stored, not what is typed.** `Petnames.set` trims and
+  `setMyName` trims *and* caps at 32. Comparing the raw field would leave Save lit
+  forever against a value already saved — a trailing space, or a 40-character name.
+  The `enabled` check uses the same transform the setter applies.
+- **`setMyName` returned `Unit` and bailed on `ptr == 0L`.** Before the node is up
+  the call is a silent no-op, so a snackbar bolted on at the call site would have
+  cheerfully confirmed a save that never happened — the original bug wearing a
+  different hat. It now returns `Boolean` and the UI says "Node not started yet —
+  not saved". `Petnames.set` needs no equivalent: it writes to prefs and is
+  independent of the node handle.
+
+**Not yet run on a device.**
 
 ### Chat view
 

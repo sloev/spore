@@ -551,14 +551,20 @@ object NodeController {
 
     // -- your name, and invites -------------------------------------------------
 
-    /** The name we announce to the mesh (others see it as a suggested petname). */
-    fun setMyName(name: String) {
-        if (ptr == 0L) return
+    /**
+     * The name we announce to the mesh (others see it as a suggested petname).
+     *
+     * Returns false when the node is not up yet, so the caller can say so instead
+     * of showing a confirmation for a save that did not happen.
+     */
+    fun setMyName(name: String): Boolean {
+        if (ptr == 0L) return false
         val n = name.trim().take(32)
         myName.value = n
         SporeNative.nativeSetName(ptr, n)
         secretPrefs(appCtx).edit().putString("myname", n).apply()
         SporeNative.nativeBeacon(ptr) // let peers see the new name right away
+        return true
     }
 
     /**
