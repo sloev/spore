@@ -15,8 +15,15 @@ fs.mkdirSync(out, { recursive: true });
 
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
+//
+// The front page is `site/home.md`, not the README. They have different jobs: a
+// README opens on "what is this and how do I build it" for someone who already
+// arrived at a repository, while the front page has to make sense to someone who
+// has never heard of any of this and is deciding whether it is for them. Serving
+// the README as `index.html` made the first screen a badge row and a feature
+// table. The README stays as it is on GitHub.
 const pages = [
-  ['README.md', 'index.html', 'Home'],
+  ['site/home.md', 'index.html', 'Home'],
   ['docs/SPEC.md', 'spec.html', 'Spec'],
   ['docs/APPS.md', 'apps.html', 'Apps'],
   ['docs/DESIGN.md', 'design.html', 'Design'],
@@ -44,9 +51,50 @@ for (const [src, dst] of pages) {
   linkMap.set(src, dst); // exact repo path
   linkMap.set(base, dst); // bare filename
 }
-// README.md is ambiguous (root vs bindings vs web); exact paths above win, and a
-// bare "readme.md" falls back to Home.
+// README.md is ambiguous (root vs bindings vs web) and no longer a page of its
+// own; exact paths above win, and a bare "readme.md" falls back to Home, which is
+// where a reader following "see the README" wants to land on the site.
+linkMap.set('README.md', 'index.html');
 linkMap.set('readme.md', 'index.html');
+
+// Per-page <meta name="description">, keyed by output page. Search results and
+// link previews quote this, so it is the one line most people read before
+// deciding whether to click; pages without an entry fall back to the site line.
+const DESC_DEFAULT =
+  'SPORE — a public-domain store-and-forward mesh: signed messages that travel ' +
+  'over the internet, a shared folder, a USB stick, sound, paper, or radio.';
+// Titles for pages the nav does not name. Without these the tab reads "SPORE —
+// readme" for three different pages, which is no help to anyone with a dozen tabs
+// open.
+const titles = new Map([
+  ['index.html', 'SPORE — messages that still get through'],
+  ['security-policy.html', 'SPORE — reporting a vulnerability'],
+  ['security.html', 'SPORE — security findings'],
+  ['changelog.html', 'SPORE — changelog'],
+  ['hardware.html', 'SPORE — hardware verification'],
+  ['bindings.html', 'SPORE — language bindings'],
+  ['reference.html', 'SPORE — reference decoders'],
+  ['webguide.html', 'SPORE — the browser node'],
+  ['contributing.html', 'SPORE — contributing'],
+]);
+
+const descriptions = new Map([
+  [
+    'index.html',
+    'Send notes, files and updates between your own devices with no account and ' +
+      'no company in the middle — over Wi-Fi, a shared folder, a USB stick, ' +
+      'Bluetooth, sound, or radio. Free and public domain.',
+  ],
+  [
+    'spec.html',
+    'The SPORE v1 wire format in full: envelope layout, addressing, routing, ' +
+      'fragmentation, sealing and congestion rules — enough to reimplement it.',
+  ],
+  ['apps.html', 'Download SPORE: the browser node, the desktop daemon, the Android app, and the language bindings.'],
+  ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
+  ['security.html', 'The SPORE findings register: what was found, how it was reproduced, what was changed, and what is still open.'],
+  ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
+]);
 
 const navLinks = pages
   .filter(([, , label]) => label)
@@ -184,16 +232,76 @@ function nav(self) {
   return `<nav>${items}</nav>`;
 }
 
+// Minimal escaping for text going into an attribute value.
+const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+// ---------------------------------------------------------------------------
+// Heading anchors.
+//
+// The docs are written for GitHub, where every heading silently gets an `id` and
+// `[Bridge index](#bridge-index)` just works. `marked` emits none, so all 116
+// in-page links on the built site — including the whole bridge index, which is
+// how anyone finds one bridge among fifty — pointed at nothing. Slugs are
+// generated with GitHub's own algorithm so the same anchor resolves in both
+// places, and `checkLinks` below fails the build if one ever does not.
+// ---------------------------------------------------------------------------
+function slugify(text) {
+  return text
+    .replace(/<[^>]*>/g, '') // heading text may hold <code>, <em>, <a>
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d))
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\- ]+/g, '') // drop punctuation, keep word chars, - and space
+    .replace(/ /g, '-');
+}
+
+/// Add `id` to every heading, returning [html, Set<id>].
+///
+/// The set also carries ids the markdown placed itself — BRIDGES.md marks each of
+/// its fifty bridges with an explicit `<a id="…"></a>` rather than relying on the
+/// heading text, since a bridge's heading includes its status emoji.
+function anchorHeadings(html) {
+  const seen = new Map();
+  const ids = new Set();
+  for (const [, id] of html.matchAll(/\bid="([^"]+)"/g)) ids.add(id);
+  for (const [, name] of html.matchAll(/<a[^>]*\bname="([^"]+)"/g)) ids.add(name);
+  const out = html.replace(/<h([1-6])>([\s\S]*?)<\/h\1>/g, (m, depth, inner) => {
+    const base = slugify(inner);
+    if (!base) return m;
+    // GitHub disambiguates repeats as `slug-1`, `slug-2`, …
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    const id = n === 0 ? base : `${base}-${n}`;
+    ids.add(id);
+    return `<h${depth} id="${id}">${inner}</h${depth}>`;
+  });
+  return [out, ids];
+}
+
 function page(title, bodyHtml, self) {
   // A per-page body class, so a page can carry its own rules — the spec needs
   // print styling that would be wrong everywhere else.
   const cls = self.replace(/\.html$/, '');
+  const desc = descriptions.get(self) || DESC_DEFAULT;
+  const url = SHARE.url + (self === 'index.html' ? '' : self);
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${title}</title>
+<meta name="description" content="${attr(desc)}" />
+<link rel="canonical" href="${attr(url)}" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="SPORE" />
+<meta property="og:title" content="${attr(title)}" />
+<meta property="og:description" content="${attr(desc)}" />
+<meta property="og:url" content="${attr(url)}" />
+<meta name="twitter:card" content="summary" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body class="page-${cls}">
@@ -213,6 +321,10 @@ ${bodyHtml}
 
 marked.setOptions({ gfm: true, breaks: false });
 
+// dst -> set of heading ids on that page, filled as we render and consumed by
+// checkLinks once every page exists.
+const anchors = new Map();
+
 for (const [src, dst, label] of pages) {
   const abs = path.join(root, src);
   if (!fs.existsSync(abs)) {
@@ -220,14 +332,19 @@ for (const [src, dst, label] of pages) {
     continue;
   }
   const md = fs.readFileSync(abs, 'utf8');
-  const title = label && label !== 'Home' ? `SPORE — ${label}` : 'SPORE';
+  // The front page's title is the promise, not the product name: it is what shows
+  // in a search result and a browser tab, where "SPORE" alone means nothing to
+  // someone who has not met it yet.
+  const title = titles.get(dst) || (label ? `SPORE — ${label}` : 'SPORE');
   let html = rewriteLinks(marked.parse(md), dst);
   if (dst === 'index.html') {
-    // Right after the intro, before the first section — seen without scrolling,
-    // without interrupting the opening pitch.
-    html = html.replace('<h2', shareBar() + '<h2');
+    // At the foot of the page. Asking someone to pass it on before they know what
+    // it is gets nothing; after the honest section it is a reasonable request.
+    html += shareBar();
   }
-  fs.writeFileSync(path.join(out, dst), page(title, html, dst));
+  const [anchored, ids] = anchorHeadings(html);
+  anchors.set(dst, ids);
+  fs.writeFileSync(path.join(out, dst), page(title, anchored, dst));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
 
@@ -246,4 +363,52 @@ for (const img of docsImgs) {
   fs.writeFileSync(path.join(out, 'docs', img), bytes);
   console.log(`copied docs/${img} -> _site/${img} and _site/docs/${img}`);
 }
+// ---------------------------------------------------------------------------
+// Link check.
+//
+// Every internal href must resolve to a file in `_site` and, if it carries an
+// anchor, to a heading that exists on the target page. This is a build step
+// rather than a separate script because the failure it catches is silent: a
+// renamed heading or a doc that stops being a page leaves a link that still looks
+// fine in the markdown and lands nowhere on the site. Being wrong here is
+// cheap for us and expensive for the reader.
+// ---------------------------------------------------------------------------
+
+// Added after this script runs, by the Pages workflow (the standalone node and
+// the Seed Sheet), so they are not on disk when the check runs.
+const PROVIDED_LATER = new Set(['demo/', 'spore-standalone.html', 'spore-seedsheet.html']);
+
+function checkLinks() {
+  const problems = [];
+  for (const [, dst] of pages) {
+    const file = path.join(out, dst);
+    if (!fs.existsSync(file)) continue;
+    const html = fs.readFileSync(file, 'utf8');
+    for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
+      if (/^(https?:|mailto:|data:)/.test(href)) continue;
+      const [target, anchor] = href.split('#');
+      const on = target === '' ? dst : target;
+      if (target !== '' && !PROVIDED_LATER.has(target)) {
+        if (!fs.existsSync(path.join(out, target))) {
+          problems.push(`${dst}: -> ${href} (no such file in _site)`);
+          continue;
+        }
+      }
+      // An anchor into a page the workflow adds later cannot be checked here.
+      if (!anchor || PROVIDED_LATER.has(on)) continue;
+      const ids = anchors.get(on);
+      if (!ids) continue; // an asset, not a rendered page
+      if (!ids.has(anchor)) problems.push(`${dst}: -> ${href} (no heading "#${anchor}" on ${on})`);
+    }
+  }
+  if (problems.length) {
+    console.error(`\nBROKEN LINKS (${problems.length}):`);
+    for (const p of problems) console.error(`  ${p}`);
+    process.exit(1);
+  }
+  console.log('links OK — every internal href and anchor resolves');
+}
+
+checkLinks();
+
 console.log('done. build the standalone into _site/demo/index.html to finish.');

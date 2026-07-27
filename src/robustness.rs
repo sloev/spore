@@ -102,6 +102,11 @@ fn feed_every_parser(data: &[u8]) {
     // Crypto open paths, with a key the caller does not hold.
     let _ = topic_open(data, &[7u8; 32]);
     let _ = open_sealed(data, &[9u8; 32]);
+    // A contribution message rotates the group key, so it is worth forging: the
+    // count field is attacker-chosen and drives a loop over sealed boxes.
+    let _ = crate::topic::absorb(&[3u8; 32], data, &[9u8; 32]);
+    let _ = crate::topic::open(data, &[3u8; 32]);
+    let _ = crate::topic::rekey_open(data, &[9u8; 32]);
 }
 
 #[test]

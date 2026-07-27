@@ -1,9 +1,18 @@
 //! §7 crypto — sealing to a recipient prekey, encrypted topics, and sealed files.
 //!
 //! Anonymous sealed boxes in the libsodium `crypto_box_seal` shape: an ephemeral
-//! keypair per message, so the ciphertext names no sender. Forward secrecy comes
-//! from rotating prekeys daily and deleting the private half after seven days — a
-//! seized device cannot read week-old mail.
+//! keypair per message, so the ciphertext names no sender.
+//!
+//! **This path has no forward secrecy today, and this comment used to claim it
+//! did.** §7 describes rotating prekeys daily and deleting the private half after
+//! seven days, concluding that "a seized device cannot read week-old mail". No such
+//! rotation exists: [`Node::from_seed`] derives one prekey for the life of the
+//! identity, `SHA-256(seed ‖ "spore/prekey/v1")`, and ANNOUNCE carries that same
+//! key forever. Worse, deleting it would achieve nothing — it is a pure function of
+//! the identity seed that [`Node::seed`] persists, so anyone holding the seed
+//! re-derives it and opens every message ever sealed to that node. See S-022 in
+//! `docs/SECURITY_FINDINGS.md`. Sessions ([`crate::ratchet`]) do have forward
+//! secrecy; the one-shot seal does not.
 //!
 //! Extracted from `lib.rs` unchanged: same primitives, same bytes on the wire,
 //! re-exported so `spore::seal`, `spore::open_sealed`, `spore::topic_seal`,
@@ -17,8 +26,8 @@ use crate::*;
 
 // ---------------------------------------------------------------------------
 // §7 Crypto — seal to a recipient prekey (libsodium crypto_box_seal shape).
-// Forward secrecy comes from rotating prekeys daily and deleting the private
-// half after 7 days: a seized device cannot read week-old mail.
+// No forward secrecy: one prekey per identity, derived from the seed. See the
+// module docs and S-022.
 // ---------------------------------------------------------------------------
 
 pub(crate) fn seal_nonce(eph_pub: &[u8; 32], recip_pub: &[u8; 32]) -> [u8; 24] {

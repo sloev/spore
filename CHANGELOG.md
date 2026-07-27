@@ -13,7 +13,24 @@ Two conventions specific to this project:
   [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md), which carries the
   reproduction, root cause and regression test for each one.
 
-## Unreleased
+## 0.1.0 — 2026-07-27
+
+**First tagged release.** Three numbers meet here and they version different
+things, so rather than let anyone infer it wrongly:
+
+| Number | Versions | Frozen? | Lives in |
+|---|---|---|---|
+| **SPORE v1** | the wire format — envelope layout, addressing, routing, crypto | yes, CI-enforced | the `VER` byte, `docs/SPEC.md`, `reference/vectors.json` |
+| **`spore` 1.0.0** | the Rust crate's public API surface | yes, CI-enforced | `Cargo.toml`, `tests/api_freeze.rs` |
+| **release 0.1.0** | the shipped distribution — Android APK, single-file browser node, Seed Sheet, desktop daemon | no | this tag |
+
+The wire format and the crate API are stable at 1.x and stay there; nothing here
+walks either of them back. What is at 0.1.0 is the **distribution**, which has never
+been released before. Calling that 1.0 would claim a maturity it does not have: no
+radio bridge has been verified against real hardware — every 🧪 in
+[`BRIDGES.md`](docs/BRIDGES.md) — and [`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md)
+carries open items, including that the one-shot seal has no forward secrecy (S-022).
+0.1.0 says so; a 1.0 badge would not.
 
 Wire unchanged throughout. One frozen *Rust* signature changed (`Node::send`);
 `bindings/spore.h` and the vectors are untouched.
@@ -56,6 +73,22 @@ peer on the medium crash a node, exhaust its memory, or use it as an amplifier.
   `decode`'s protobuf loops — a remote panic on any build with overflow checks on,
   which is every `cargo build` without `--release`. Found by the new `radio_codecs`
   fuzz target within 90 seconds. The sibling parser already did this correctly.
+- **S-020** The encrypted-topic ratchet had forward secrecy but no
+  post-compromise security: `rotate` is a hash chain, so anyone who obtained one
+  group key derived every later one and the group stayed compromised until a human
+  noticed. `topic::contribute`/`absorb` now fold sealed fresh entropy into the key,
+  so a group heals through ordinary use against an attacker holding the chain.
+  Additive — every existing function is byte-for-byte unchanged.
+- **S-022** The one-shot seal was documented as forward-secret in three places —
+  §7 and two comments in `src/seal.rs` — via prekey rotation that does not exist.
+  There is one prekey per identity, derived from the seed, forever; and because it
+  is a pure function of the seed a node persists, deleting it would achieve nothing.
+  The claims are removed rather than softened. No behaviour change; sessions
+  (`ratchet`) do have forward secrecy and the docs now distinguish the two.
+- **S-021** The Android release advertised a dead "stable release" link, showed a
+  three-day-old publication date while building on every merge, accumulated one
+  APK per day with no indication which was current, and named itself from its own
+  moving tag (`SPORE rolling rolling+2026.07.27`).
 
 ### Changed — local policy, not wire
 
@@ -120,11 +153,23 @@ does and does not mean.
   bridge exists for (**S-009**).
 - The offline bundle was 290 MB of build output; excluding artifacts properly brings
   it to 6.6 MB, verified to still build cold from a clean extraction.
+- The Android APK now has a permanent download URL —
+  `releases/download/rolling/spore-android.apk` — instead of a versioned filename
+  nothing could link to, and `docs/APPS.md` leads with it (**S-021**). Dated
+  `nightly-<date>` releases keep the last five builds for rollback, pruned
+  automatically so they cannot accumulate the way the old assets did.
+- Every in-page anchor on the docs site was dead: 116 of them, including the whole
+  bridge index. `marked` emits no heading ids, and the docs are written for GitHub,
+  which adds them silently. Headings now carry GitHub's own slugs, and the site
+  build fails on any internal link or anchor that does not resolve — which is now a
+  CI check, not just a deploy-time one.
 - Rust 1.75 compatibility restored in earnest: `zeroize_derive` pinned, lockfile
   regenerated at version 3, and four uses of post-1.75 APIs replaced.
 
-## 1.0.0
+## 1.0.0 — the frozen contract (never tagged)
 
-The frozen contract: envelope format, the five medium shapes, `bindings/spore.h`,
-`reference/vectors.json`, and the reference decoders. Everything since has been
-built without moving any of it.
+Not a release; the baseline the freeze is measured against, recorded here because
+every entry above is defined by not having moved it. The envelope format, the five
+medium shapes, `bindings/spore.h`, `reference/vectors.json` and the reference
+decoders. It sits below 0.1.0 in this file because it predates it — the distribution
+was first shipped at 0.1.0, on top of an already-frozen v1 protocol.

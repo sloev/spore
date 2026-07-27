@@ -1,17 +1,23 @@
 name: GitHub Pages
 
-# Build the docs site (README + docs/*.md) and the live wasm demo, then deploy
-# to GitHub Pages. Runs on the main branches, this reference branch, and on
-# manual dispatch.
+# Build the docs site (site/home.md + docs/*.md + a few root files) and the live
+# wasm demo, then deploy to GitHub Pages. Runs on the main branches, this
+# reference branch, and on manual dispatch.
+#
+# Keep these paths in step with the `pages` array in site/build.mjs — a rendered
+# source that is not listed here means an edit that never reaches the site.
 on:
   push:
     branches: [master]
     paths:
-      - "README.md"
       - "docs/**"
-      - "bindings/README.md"
-      - "web/**"
       - "site/**"
+      - "web/**"
+      - "bindings/README.md"
+      - "reference/README.md"
+      - "SECURITY.md"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
       - "src/**"
       - "Cargo.*"
       - ".github/workflows/pages.yml"

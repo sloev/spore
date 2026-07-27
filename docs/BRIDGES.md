@@ -147,11 +147,17 @@ between a folder in someone's cloud account and a serial cable.
 
 **The part people get wrong first: a public flood is not encrypted.** Sealing is
 something a *sender* does. An envelope to `ZERO_DEST` or to a plaintext topic
-carries its payload in the clear, by design — that is what makes it readable by
-every node that relays it. Signed does not mean secret. If a message must stay
-private on a medium anyone can watch, it has to be sealed to a recipient prekey or
-sent on an encrypted topic (§7); otherwise assume it is a postcard, because it is
-one.
+carries its payload in the clear, by design — and the reason is that there is no
+key to encrypt it to. A public topic's whole job is to be readable by a node that
+joined afterwards, that you have never met, receiving it third-hand; anything
+needing a prior key exchange is not that. (It is *not* that relays must read the
+payload to route: forwarding runs entirely on the header, and sealed unicast
+floods perfectly well with an opaque body.) Signed does not mean secret.
+
+If a message must stay private on a medium anyone can watch, seal it to a
+recipient prekey, or use an encrypted topic (§7) — which is a real private group,
+with `topic::rotate` for forward secrecy and `topic::rekey_seal` to evict a member.
+Otherwise assume it is a postcard, because it is one.
 
 | Bridge | Who can observe | What they get beyond metadata |
 |---|---|---|
