@@ -179,11 +179,25 @@ pub fn demodulate(samples: &[f32]) -> Vec<Vec<u8>> {
 #[derive(Default)]
 pub struct Demod {
     buf: Vec<f32>,
+    /// Offsets below this have been tested for sync and cannot match later.
+    ///
+    /// Without it `push` restarted at zero every call, so the work per call was
+    /// proportional to the whole retained buffer rather than to the new samples.
+    /// Measured before the fix: a 100 ms push cost 13 ms with 1 s buffered, 94 ms
+    /// with 6 s, and the buffer caps at 175 s — about 27x real time, one core
+    /// saturated for as long as the room is noisy. Any sound that does not decode
+    /// gets you there, with no key and no protocol participation (S-031).
+    scanned: usize,
+}
+
+/// Samples one maximal frame can span — the most the buffer ever needs to hold.
+fn max_frame_samples() -> usize {
+    (SYNC.len() + 2 * (2 + MAX_FRAME_PAYLOAD + 4)) * SYMBOL_LEN
 }
 
 impl Demod {
     pub fn new() -> Self {
-        Demod { buf: Vec::new() }
+        Demod { buf: Vec::new(), scanned: 0 }
     }
 
     /// Append newly captured samples; returns any frames that completed.
@@ -191,7 +205,10 @@ impl Demod {
         self.buf.extend_from_slice(samples);
         let mut out = Vec::new();
         let step = SYMBOL_LEN / 8;
-        let mut off = 0usize;
+        // Resume where the last call stopped. An offset that had a full sync
+        // window and did not match cannot start matching once *more* samples
+        // arrive after it, so retesting it is pure waste.
+        let mut off = self.scanned;
         let mut consumed = 0usize;
         while off + SYNC.len() * SYMBOL_LEN <= self.buf.len() {
             if sync_matches(&self.buf, off) {
@@ -201,16 +218,27 @@ impl Demod {
                     consumed = end;
                     continue;
                 }
+                // Sync is here but the frame did not decode. Usually that means
+                // the body is still arriving, so hold this offset and retry on the
+                // next push — advancing past it would drop every frame whose sync
+                // lands near the end of a chunk, which is most of them. Only give
+                // up once the buffer is long enough that even a maximal frame
+                // would have fitted, which bounds the stall.
+                if self.buf.len() - off < max_frame_samples() {
+                    break;
+                }
             }
             off += step;
         }
+        self.scanned = off;
         // Drop everything we've fully consumed; keep a tail that might hold the
         // start of a frame still being received. Cap the buffer so a silent mic
         // can't grow it without bound.
-        let max_frame_samples = (SYNC.len() + 2 * (2 + MAX_FRAME_PAYLOAD + 4)) * SYMBOL_LEN;
-        let keep_from = consumed.max(self.buf.len().saturating_sub(max_frame_samples));
+        let keep_from = consumed.max(self.buf.len().saturating_sub(max_frame_samples()));
         if keep_from > 0 {
             self.buf.drain(..keep_from);
+            // Offsets shifted down by exactly what was removed.
+            self.scanned = self.scanned.saturating_sub(keep_from);
         }
         out
     }
@@ -325,5 +353,79 @@ mod tests {
             got.extend(d.push(chunk));
         }
         assert_eq!(got, vec![msg.to_vec()]);
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+
+    /// S-031. The cursor must not cost us frames: a payload split across many
+    /// small pushes — which is what a real mic delivers — must still decode.
+    #[test]
+    fn a_frame_split_across_many_pushes_still_decodes() {
+        for chunk in [64usize, 257, 1024, 4096] {
+            let payload = b"the dam holds, and the pier is clear".to_vec();
+            let mut pcm = vec![0.0f32; 3000]; // lead-in silence, as a real mic has
+            pcm.extend(modulate(&payload));
+            pcm.extend(vec![0.0f32; 3000]);
+            let mut d = Demod::new();
+            let mut got = Vec::new();
+            for part in pcm.chunks(chunk) {
+                got.extend(d.push(part));
+            }
+            assert_eq!(got, vec![payload.clone()], "lost the frame at chunk size {chunk}");
+        }
+    }
+
+    /// Two frames back to back, so the cursor has to survive a consume + drain.
+    #[test]
+    fn two_frames_in_a_stream_both_decode() {
+        let mut pcm = vec![0.0f32; 2000];
+        pcm.extend(modulate(b"first"));
+        pcm.extend(vec![0.0f32; 2000]);
+        pcm.extend(modulate(b"second"));
+        pcm.extend(vec![0.0f32; 2000]);
+        let mut d = Demod::new();
+        let mut got = Vec::new();
+        for part in pcm.chunks(512) {
+            got.extend(d.push(part));
+        }
+        assert_eq!(got, vec![b"first".to_vec(), b"second".to_vec()]);
+    }
+
+    /// The property the cursor exists for: work per push must not grow with the
+    /// buffer. Noise never syncs, so the buffer fills to its cap; if the scan
+    /// still restarted at zero this would grow without bound.
+    #[test]
+    fn scanning_does_not_redo_work_as_the_buffer_fills() {
+        let chunk = SAMPLE_RATE as usize / 10;
+        let mut x = 12345u32;
+        let noise: Vec<f32> = (0..chunk)
+            .map(|_| {
+                x = x.wrapping_mul(1103515245).wrapping_add(12345);
+                (x >> 16) as f32 / 32768.0 - 1.0
+            })
+            .collect();
+        let mut d = Demod::new();
+        for _ in 0..5 {
+            d.push(&noise);
+        }
+        let early = std::time::Instant::now();
+        d.push(&noise);
+        let early = early.elapsed();
+        for _ in 0..40 {
+            d.push(&noise);
+        }
+        let late = std::time::Instant::now();
+        d.push(&noise);
+        let late = late.elapsed();
+        // Before the cursor this ratio tracked the buffer length and reached ~30x.
+        // Generous bound: timing on shared CI is noisy, and the point is that it
+        // is flat rather than linear.
+        assert!(
+            late < early * 8 + std::time::Duration::from_millis(5),
+            "push cost grew with the buffer: {early:?} early vs {late:?} late"
+        );
     }
 }

@@ -15,6 +15,13 @@ Two conventions specific to this project:
 
 ## Unreleased
 
+- **S-031** Any sound in the room could saturate a CPU core indefinitely.
+  `Demod::push` rescanned its whole retained buffer every call, so work grew with
+  the buffer rather than with the new samples — 13 ms per 100 ms push at 1 s
+  buffered, 94 ms at 6 s, and the buffer caps at 175 s, about 27x real time. No key
+  or protocol participation needed; on Android it runs in a foreground service off
+  the mic. A scan cursor makes it flat at 1.5 ms. Found by the discovery audit and
+  measured before and after.
 - **The release-bump workflow's first run failed on its last line.** Three separate
   defects, all mine: GitHub Actions cannot open pull requests unless the repository
   enables it (off by default, and I did not check), a re-run would have died on the

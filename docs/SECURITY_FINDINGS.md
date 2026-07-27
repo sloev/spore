@@ -55,6 +55,7 @@ than fixing a crash, it says so explicitly.
 | [S-028](#s-028) | Memory amplification (materialize) | Low | reasoned | ✅ | ✗ | no |
 | [S-029](#s-029) | Release integrity (my own fix, racy) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 | [S-030](#s-030) | Release integrity (S-025's trap, in S-025's fix) | Low | ✅ | ✅ | ✗ manual | release plumbing |
+| [S-031](#s-031) | Remote CPU exhaustion (audio) | **High** | ✅ measured | ✅ | ✅ | no |
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
@@ -1283,6 +1284,64 @@ subsystem has been verified only by inspecting the artefacts afterwards, and thr
 of those inspections found the fix had broken something else.** The subsystem needs
 a way to be exercised without publishing, or it will keep producing findings at this
 rate. That is the recommendation this entry exists to make.
+
+---
+
+## S-031
+
+**Any noise in the room saturates a core, permanently.** High.
+`src/bridge/audio.rs` — `Demod::push`.
+
+**Root cause.** `push` restarted its scan at offset `0` across the entire retained
+buffer on every call, so the work per call was proportional to the *buffer*, not to
+the new samples. `consumed` only advances when a frame successfully decodes, so a
+stream that never syncs never advances it and the buffer sits at its cap:
+`(6 + 2*(2+4096+4)) * 1024` = **8,407,040 samples = 175 seconds**.
+
+The S-013-era cap bounds *memory*. It was mistaken for bounding *work*.
+
+**Exploit.** Play anything that does not decode — noise, music, speech, a silent mic
+with dither — near a node running the audio bridge. No key, no session, no protocol
+participation, no need to be a peer at all. Measured on this machine, feeding 100 ms
+chunks:
+
+| audio buffered | cost of one 100 ms push |
+|---|---|
+| 1.0 s | 13.2 ms |
+| 3.0 s | 44.0 ms |
+| 6.0 s | 93.9 ms ← real-time budget |
+
+Linear, crossing the budget at ~6.4 s and settling near **2.7 s of CPU per 100 ms of
+audio** at the cap — roughly 27× real time. The demod thread never catches up, and on
+Android this runs in a foreground service fed by `AudioRecord`.
+
+**Reproduced.** Measured, not reasoned: a harness feeding 100 ms noise chunks through
+the real `Demod::push` and timing each call, producing the table above.
+
+**Patch.** A `scanned` cursor. An offset that had a full sync window and did not
+match cannot begin matching once *more* samples arrive after it, so it is never
+retested. `push` resumes where it stopped, and the cursor is shifted down when the
+buffer is drained.
+
+The subtlety that makes this safe: when sync *does* match but the frame does not
+decode, the body is usually still arriving, so the cursor **holds** at that offset
+rather than advancing past it — otherwise every frame whose sync lands near the end
+of a chunk would be dropped, which is most of them. It gives up only once the buffer
+is longer than a maximal frame, which bounds the stall.
+
+**After:** flat at **1.5 ms** per push regardless of buffer length — 63× faster at
+6 s, and no longer growing.
+
+**Behaviour change?** None observable. Same frames decoded; the pre-existing
+round-trip, chunked-streaming and back-to-back-frame tests all still pass unchanged.
+
+**Freeze impact?** None. `Demod` gains a private field; no public signature moves.
+
+**Tests.** `a_frame_split_across_many_pushes_still_decodes` across four chunk sizes
+(64, 257, 1024, 4096) with lead-in silence — the case the cursor could plausibly
+break. `two_frames_in_a_stream_both_decode`, so the cursor survives a consume and a
+drain. `scanning_does_not_redo_work_as_the_buffer_fills` asserts the cost stays flat
+as noise fills the buffer, which is the property itself rather than a proxy for it.
 
 ---
 
