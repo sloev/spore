@@ -95,7 +95,7 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
 ## Build & run
 
 ```sh
-cargo test              # 78 tests
+cargo test              # the whole suite: wire vectors, router, bridges, robustness
 cargo run               # in-memory mesh demo (A — B — C — D)
 cargo run -- node.yaml  # run a real node with the bridges named in a config file
 ```
