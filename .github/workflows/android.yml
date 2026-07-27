@@ -256,3 +256,19 @@ jobs:
 
             SHA-256 `${{ steps.sums.outputs.sha }}` — verify with
             `sha256sum -c spore-${{ github.ref_name }}.apk.sha256`.
+
+            ---
+
+            This number versions the **distribution**, not the protocol. The SPORE v1
+            wire format and the `spore` crate's API are frozen at 1.x and unaffected
+            by it — the table at the top of
+            [CHANGELOG.md](https://github.com/sloev/spore/blob/master/CHANGELOG.md)
+            says which number covers what.
+
+            Before you rely on it: no radio bridge has been verified against real
+            hardware (every 🧪 in
+            [BRIDGES.md](https://github.com/sloev/spore/blob/master/docs/BRIDGES.md)),
+            and the **Still open** section of
+            [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
+            what is known and unfixed. Builds are debug-signed until a release
+            keystore is configured, so Android will warn about an unknown developer.
