@@ -1,5 +1,13 @@
 # Continuity — SPORE as a seed
 
+<p align="center">
+  <a href="spore-continuity.png"><img src="spore-continuity.png" alt="SPORE continuity on one page: what a seed is today, cold-start playbooks for a browser / radios / paper / one offline laptop, trust without infrastructure, and how one copy propagates into many" width="820" /></a>
+</p>
+
+<p align="center"><em>The whole continuity story on one page — <a href="spore-continuity.png">open full size</a>.
+The <a href="#roadmap">roadmap below</a> is authoritative for what is actually done;
+the poster is a summary and can lag it.</em></p>
+
 SPORE is named for a reason. A spore is a small, hardy, self-contained capsule
 that can lie dormant and later **regrow the whole organism** from a single
 survivor. This document is about making the *software* behave the same way: so
