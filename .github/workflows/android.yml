@@ -1,17 +1,23 @@
 name: android
 
 # Builds the SPORE Android APK (Rust JNI via cargo-ndk + Gradle) and releases it:
-#   * push to master  -> a rolling pre-release "<current version>+<date>" at the
-#                        moving `rolling` tag (the current version is the latest
-#                        git tag; date is the build date).
-#   * push a v* tag    -> a normal release AT that tag — the next current version,
-#                        which rolling builds then track from.
+#   * push to master  -> a rolling pre-release "<major>.<minor>.<stamp>+<sha>" at the
+#                        moving `rolling` tag, plus a dated nightly-<date> release
+#                        (last five kept).
+#   * push a v*/V* tag -> a normal release AT that tag; Cargo.toml must already
+#                        carry the same major.minor or the build fails.
 #   * pull_request     -> just build a debug APK artifact.
 # A new workflow file (not frozen); does not touch ci.yml / pr-guard.yml.
 on:
   push:
     branches: [master]
-    tags: ['v*']
+    # Both cases. Glob matching here is case-sensitive, so `tags: ['v*']` alone
+    # silently ignored `V0.1.0` and `V0.2.0`: the tags existed, GitHub made
+    # releases for them, and no build ever ran — leaving a non-prerelease "latest"
+    # with zero assets, which is a worse failure than having no release at all,
+    # because `releases/latest/download/spore-android.apk` then 404s from a page
+    # that looks real.
+    tags: ['v*', 'V*']
   pull_request:
     paths:
       - 'android/**'
@@ -68,6 +74,17 @@ jobs:
           mm=${pkg%.*}
           if [ -z "$mm" ]; then echo "::error::could not read version from Cargo.toml"; exit 1; fi
           if [ "${{ github.ref_type }}" = "tag" ]; then
+            # A tag is the human's version bump, so Cargo.toml must already agree
+            # with it. When they disagree the rolling builds are versioned from
+            # Cargo.toml and the newest release from the tag, and the two drift
+            # apart without anything complaining — V0.2.0 was cut while Cargo.toml
+            # still said 0.1.0. Fail loudly instead.
+            tag_mm=$(printf '%s' "${{ github.ref_name }}" | sed -E 's/^[vV]//; s/^([0-9]+\.[0-9]+).*/\1/')
+            if [ "$tag_mm" != "$mm" ]; then
+              echo "::error::tag ${{ github.ref_name }} is ${tag_mm}.x but Cargo.toml says ${pkg}."
+              echo "Bump Cargo.toml's major.minor to ${tag_mm} and re-tag, or tag ${mm}.x instead."
+              exit 1
+            fi
             echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             echo "kind=tagged" >> "$GITHUB_OUTPUT"
           else
@@ -255,6 +272,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: SPORE ${{ github.ref_name }}
+          # Append: a tag usually already has GitHub's generated "What's Changed",
+          # and the caveats below belong under it, not instead of it.
+          append_body: true
           files: |
             ${{ steps.apk.outputs.path }}
             ${{ steps.sums.outputs.sums }}

@@ -44,6 +44,17 @@ than fixing a crash, it says so explicitly.
 | [S-017](#s-017) | Resource exhaustion (ratchet keys) | Medium | ✅ | ✅ | ✅ | no |
 | [S-018](#s-018) | Availability (mutex poisoning) | Medium | ✅ | ✅ | ✅ | yes (recover, not die) |
 | [S-019](#s-019) | Remote DoS (integer overflow) | Medium | ✅ | ✅ | ✅ | no |
+| [S-020](#s-020) | No post-compromise security (topics) | Medium | ✅ | ✅ | ✅ | no |
+| [S-021](#s-021) | Release integrity (stale/dead release) | Low | ✅ | ✅ | ✗ manual | release layout |
+| [S-022](#s-022) | False security claim → no seal FS | Medium | ✅ | ✅ | ✅ | **yes — `seed()` is no longer a whole backup** |
+| [S-023](#s-023) | Spec violation / duty cycle (beacon) | Medium | ✅ | ✅ | ✅ | yes (hourly flood, not 5 s) |
+| [S-024](#s-024) | Doc-vs-code mismatch | Low | ✅ | ✗ recorded | n/a | no |
+| [S-025](#s-025) | Release integrity (empty "latest") | Low | ✅ | ✅ | ✗ manual | release plumbing |
+
+Two entries above are deliberately not "fixed": S-024 records mismatches whose
+resolution is a design choice rather than a repair. And two have no automated test,
+both release plumbing — the checklist step in `CONTRIBUTING.md` is the only guard,
+which is precisely how S-025 shipped.
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
 `i2p`, spill adoption in `store`). Same class as S-007, already merged, each with
@@ -967,6 +978,58 @@ the envelope expires, and `ingest` independently drops anything with
 `e.expiry < now`, so a forgotten id cannot be re-accepted. It is the same
 fixed-in-one-twin-not-the-other shape as S-015 and S-019, and it is a misleading
 expression sitting in the dedup path, which is worth knowing about.
+
+---
+
+## S-025
+
+**A capital letter published a release that served nothing.** Low (release
+integrity). `.github/workflows/android.yml`.
+
+**Root cause.** The workflow triggered on `tags: ['v*']`. GitHub Actions glob
+matching is **case-sensitive**, so `V0.1.0` and `V0.2.0` did not match it. Both tags
+were created, GitHub created a release for each, and no build ever ran.
+
+`V0.2.0` is not a pre-release, so it became **"latest" while holding zero assets**.
+That makes `releases/latest/download/spore-android.apk` — the permanent stable link
+`docs/APPS.md` advertises, added in S-021 — return 404 from a page that looks like a
+finished release. Strictly worse than the state S-021 fixed, where the link 404'd
+because no non-prerelease existed at all: a missing release reads as "not out yet",
+an empty one reads as "broken download".
+
+A second mismatch rode along. The tag said `0.2.0` while `Cargo.toml` said `0.1.0`,
+so rolling builds would have been named `0.1.<stamp>` while the newest release was
+`0.2.0`, drifting apart with nothing checking.
+
+**Exploit.** None; availability and trust again. But note the shape, because it is
+the third of its kind in this register: the mechanism was verified once, by hand,
+against a case that happened to work (`rolling` builds, which are branch-triggered),
+and the untested neighbouring path was assumed to work. S-015, S-019 and S-023 were
+all "fixed in one twin, missed in the other". This is the same error with `v` and `V`
+as the twins.
+
+**Reproduced.** `git ls-remote --tags` shows `V0.1.0` and `V0.2.0`; the release API
+reports `"assets": []` for `V0.2.0` with `prerelease: false`; and
+`curl -o /dev/null -w '%{http_code}'` on the stable link returns **404** while the
+rolling link returns 206.
+
+**Patch.** `tags: ['v*', 'V*']`. The tagged path now also derives the tag's
+`major.minor` and **fails the build** if it disagrees with `Cargo.toml`, so the two
+cannot drift silently. `Cargo.toml` bumped to `0.2.0` to match the tag that exists.
+The tagged release step gained `append_body: true`, so re-running a release build
+adds its caveats under GitHub's generated notes instead of overwriting them.
+
+`CONTRIBUTING.md` gains the step this needed: bump `Cargo.toml` before tagging, and
+**confirm the release has assets** with `curl -fsI` before announcing it. A tag whose
+build never ran still produces a release page.
+
+**Behaviour change?** Release plumbing only.
+
+**Freeze impact?** None.
+
+**Tests.** None automated — this is workflow-trigger behaviour, only observable by
+tagging. The `curl -fsI` step in the release checklist is the manual check that would
+have caught it, and its absence is why this shipped.
 
 ---
 

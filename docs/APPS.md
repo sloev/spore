@@ -12,6 +12,7 @@ one router. Pick by what the machine in front of you has.
 
 [apk]: https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
 [apk-rolling]: https://github.com/sloev/spore/releases/tag/rolling
+[apk-stable]: https://github.com/sloev/spore/releases/latest/download/spore-android.apk
 [standalone]: https://sloev.github.io/spore/demo/spore-standalone.html
 [seedsheet]: https://sloev.github.io/spore/demo/spore-seedsheet.html
 
@@ -30,7 +31,8 @@ Built to feel familiar to Meshtastic users: simple by default, advanced options
 one tap away, a little kawaii.
 
 **[⬇ Download spore-android.apk][apk]** — a permanent link that always serves the
-newest build. Rebuilt on every merge to `master` and versioned `<tag>+<date>`; the
+newest build. Rebuilt on every merge to `master` and versioned
+`<major>.<minor>.<YYYYMMDDHHMM>+<short sha>`; the
 [release notes][apk-rolling] name the version and carry its SHA-256. Verify before
 installing if you care to:
 
@@ -50,11 +52,14 @@ keep the **last five dated builds** for exactly that — pick one and install it
 the top. Older nightlies are pruned automatically, so this is a rollback window,
 not an archive.
 
-**There is no stable release yet** — no `v*` tag has been cut, so every build is a
-rolling one off `master`. This page used to advertise a "latest stable release"
-link; it pointed at `/releases/latest`, which resolves to nothing while the only
-release is a pre-release. When the first tag lands, the stable download will live
-at `/releases/latest/download/spore-android.apk` and this section will say so.
+**Stable releases** are tagged `vX.Y.Z` (either case), and their permanent link is
+[`/releases/latest/download/spore-android.apk`][apk-stable].
+
+Be warned that this link is only as good as the last tagged *build*. A tag with no
+build behind it produces a release page that looks real and serves nothing — which
+is exactly what `V0.1.0` and `V0.2.0` did, because the workflow matched `v*` and
+those tags start with a capital. Fixed, but the lesson stands: check the release has
+assets before pointing anyone at it. `curl -fsI` on the link above is the check.
 
 <details>
 <summary>What it does, and what still needs your hardware</summary>
