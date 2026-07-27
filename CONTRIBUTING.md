@@ -63,4 +63,33 @@ python3 reference/test_t0.py
 python3 scripts/check_docs_sync.py
 cargo build --release --lib --target wasm32-unknown-unknown && node web/test.mjs
 ( cd site && npm install && node seed/fountain.test.mjs && node seed/seedsheet.test.mjs )
+( cd site && node build.mjs )        # also fails on a broken internal link or anchor
 ```
+
+## Cutting a release
+
+Three numbers version different things and only one of them moves when you cut a
+release. `CHANGELOG.md`'s top entry has the table; the short version is that **SPORE
+v1** (the wire format) and **`spore` 1.0.0** (the crate API) are frozen and stay put,
+while the **release** number versions the shipped distribution — the APK, the
+single-file browser node, the Seed Sheet, the daemon. Do not bump `Cargo.toml` for a
+distribution release; it is not what is being released.
+
+1. Everything in "Running everything locally" passes on `master`.
+2. `CHANGELOG.md`: retitle `## Unreleased` to `## <version> — <YYYY-MM-DD>`. Every
+   entry states its wire status, and security entries name their `S-0nn`.
+3. Check the register's **Still open** section. Anything there that a user would
+   reasonably assume is closed belongs in the release notes, not just the register.
+   Shipping a release that oversells is the failure mode this project cares about.
+4. Tag and push: `git tag v<version> && git push origin v<version>`.
+5. `.github/workflows/android.yml` does the rest on the tag — builds the APK,
+   publishes a release with both the versioned filename and the constant
+   `spore-android.apk`, and prints the SHA-256. Watch it; a red release job leaves a
+   tag with no artifacts.
+6. Confirm `https://github.com/sloev/spore/releases/latest/download/spore-android.apk`
+   resolves. It only works once a non-prerelease exists, which is exactly what the
+   tag creates — and it is the link `docs/APPS.md` promises.
+
+Rolling and nightly builds need none of this: every merge to `master` replaces the
+`rolling` release and writes a dated `nightly-<date>`, of which the last five are
+kept.

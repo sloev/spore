@@ -13,7 +13,24 @@ Two conventions specific to this project:
   [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md), which carries the
   reproduction, root cause and regression test for each one.
 
-## Unreleased
+## 0.1.0 — 2026-07-27
+
+**First tagged release.** Three numbers meet here and they version different
+things, so rather than let anyone infer it wrongly:
+
+| Number | Versions | Frozen? | Lives in |
+|---|---|---|---|
+| **SPORE v1** | the wire format — envelope layout, addressing, routing, crypto | yes, CI-enforced | the `VER` byte, `docs/SPEC.md`, `reference/vectors.json` |
+| **`spore` 1.0.0** | the Rust crate's public API surface | yes, CI-enforced | `Cargo.toml`, `tests/api_freeze.rs` |
+| **release 0.1.0** | the shipped distribution — Android APK, single-file browser node, Seed Sheet, desktop daemon | no | this tag |
+
+The wire format and the crate API are stable at 1.x and stay there; nothing here
+walks either of them back. What is at 0.1.0 is the **distribution**, which has never
+been released before. Calling that 1.0 would claim a maturity it does not have: no
+radio bridge has been verified against real hardware — every 🧪 in
+[`BRIDGES.md`](docs/BRIDGES.md) — and [`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md)
+carries open items, including that the one-shot seal has no forward secrecy (S-022).
+0.1.0 says so; a 1.0 badge would not.
 
 Wire unchanged throughout. One frozen *Rust* signature changed (`Node::send`);
 `bindings/spore.h` and the vectors are untouched.
@@ -149,8 +166,10 @@ does and does not mean.
 - Rust 1.75 compatibility restored in earnest: `zeroize_derive` pinned, lockfile
   regenerated at version 3, and four uses of post-1.75 APIs replaced.
 
-## 1.0.0
+## 1.0.0 — the frozen contract (never tagged)
 
-The frozen contract: envelope format, the five medium shapes, `bindings/spore.h`,
-`reference/vectors.json`, and the reference decoders. Everything since has been
-built without moving any of it.
+Not a release; the baseline the freeze is measured against, recorded here because
+every entry above is defined by not having moved it. The envelope format, the five
+medium shapes, `bindings/spore.h`, `reference/vectors.json` and the reference
+decoders. It sits below 0.1.0 in this file because it predates it — the distribution
+was first shipped at 0.1.0, on top of an already-frozen v1 protocol.
