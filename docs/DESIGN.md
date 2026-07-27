@@ -440,17 +440,47 @@ cleanly through two mixes, and the batch queue holds until full-and-due.
 
 A public topic is readable by anyone who follows it. An *encrypted* topic adds a
 shared password: members seal every message under a pre-shared key, so the mesh
-still carries and stores the traffic but only key-holders can read it.
+still carries and stores the traffic but only key-holders can read it. This is the
+shape a private group takes — the same one Signal and WhatsApp arrive at, where a
+symmetric group key is handed to each member over a pairwise channel and rotated
+when the membership changes.
 
 <details>
-<summary>Deep dive: topic seal/open and key rotation</summary>
+<summary>Deep dive: topic seal/open, the epoch ratchet, and membership rekey</summary>
 
 `topic_seal(msg, psk)` / `topic_open(ct, psk)` use XChaCha20-Poly1305 with a 32-byte
 pre-shared key and a random 24-byte nonce prefixed to the ciphertext (spec §7). The
 envelope rides a normal topic with `ENCRYPTED` set; relays are oblivious, endpoints
-with the key decrypt. **Key rotation** stays a documented convention: flood a
-`KEYROT` carrying the new key, signed by the old one, so members roll forward while
-outsiders can't. Tested: a key-holder round-trips, a wrong key fails.
+with the key decrypt.
+
+`topic.rs` implements the two reasons a key has to change:
+
+- **Time.** `rotate(key)` advances one epoch, `next = SHA-256(key ‖ domain)`. Keep
+  only the current key and a leak of it cannot open past traffic, because hashing
+  does not run backwards. `seal`/`open` tag each message with a 4-byte epoch so a
+  receiver picks the right key and a stale epoch simply fails to open.
+- **Membership.** To remove someone, choose a fresh random key and hand it to each
+  *remaining* member with `rekey_seal` — a sealed box to their prekey. The departed
+  member holds no prekey that opens any of those boxes and never learns the new
+  key. This is exactly the pairwise distribution step Signal's sender keys use.
+
+Tested: rotation is deterministic and one-way, an epoch-tagged message opens only
+under its own epoch's key, and a rekey box opens for the member and not an outsider.
+
+**What is deliberately not solved here.** Two things separate this from a
+messenger's group chat, and neither is a cryptography problem:
+
+1. **There is no roster and no arbiter of one.** Signal has a server that gives
+   every member the same view of who is in the group. A partitioned mesh does not:
+   two halves can disagree about membership, and a rekey that reaches only one half
+   splits the conversation into two that can no longer read each other. Key
+   management here is the application's, and `Node::subscribe`/`publish` cover
+   plaintext topics only — an encrypted group composes `topic::seal` with `publish`.
+2. **Forward secrecy, but not post-compromise security.** A hash chain protects the
+   past: steal today's key and yesterday's traffic stays shut. It does not heal —
+   an attacker holding the current key reads forward until a membership rekey
+   replaces it with fresh randomness. A Double Ratchet locks an intruder out on its
+   own once a new DH lands; this does not. Rekey on suspicion, not on schedule.
 </details>
 
 ## Delivery receipts (§8)  ✅ implemented
@@ -599,7 +629,7 @@ the rest is designed and slots into the same tag/endpoint model.
 | L3 sessions — datagram link + reliable stream | ✅ implemented |
 | L4 request/response — RPC convention | ✅ implemented |
 | L5 feeds — pub/sub over topics | ✅ implemented |
-| §7 crypto — Double Ratchet + encrypted topics | ✅ implemented (KEYROT convention) |
+| §7 crypto — Double Ratchet + encrypted topics | ✅ implemented (KEYROT: epoch ratchet + membership rekey in `topic.rs`; the group *roster* is the app's) |
 | §8 receipts — ACKREQ + signed receipt + backoff resend | ✅ implemented |
 | §9 anonymity — mix-mode onion + batch timing | ✅ implemented (Poisson/decoys = runner policy) |
 | §5.4 congestion — backoff, Trickle, token bucket, busy-byte | ✅ implemented |

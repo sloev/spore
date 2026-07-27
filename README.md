@@ -73,7 +73,10 @@ design write-up is in [docs/DESIGN.md](docs/DESIGN.md).
   Trickle beacon timer, exponential backoff, and a busy-byte in ANNOUNCE for
   backpressure.
 - **Encrypted topics** (§7) — `topic_seal`/`topic_open` (XChaCha20-Poly1305, PSK):
-  the mesh carries the traffic, only key-holders read it.
+  the mesh carries the traffic, only key-holders read it. `topic::rotate` ratchets
+  the key forward per epoch and `topic::rekey_seal` hands a fresh one to each
+  remaining member to evict someone — a private group, with the roster left to the
+  application (see [DESIGN.md](docs/DESIGN.md)).
 - **CSMA + CRC** (§5.5) — `Csma` damped flooding (listen-before-talk, cancel on
   overhearing) and a SHA-256[0:4] tail for buses with no native CRC.
 - **Folder sync** — `foldersync::publish_dir` / `materialize`: Syncthing over SPORE,

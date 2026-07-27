@@ -44,10 +44,12 @@ long-range radio if you have the hardware.
 SPORE is open source and public domain — no company owns it and there is nothing
 to buy.
 
-**Private messages are private; group posts are not.** A message sealed to one
-person can only be read by them. A post to an open group travels in the clear, on
-purpose — that is what lets every device pass it along, exactly like a postcard on
-a noticeboard.
+**Private messages are private. Posts to an open group are public — on purpose.**
+A message to one person can only be read by that person. A closed group can have a
+key too, and then only its members can read it. But a post to an *open* group
+travels in the clear, deliberately: that is what lets a device you have never met
+pass it along, exactly like a postcard on a noticeboard. If it matters who reads
+it, send it to a person or a closed group.
 
 Some parts are further along than others. The radio options are written and
 tested in software, but until someone has run them on real hardware we say so
