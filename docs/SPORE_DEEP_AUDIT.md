@@ -31,8 +31,11 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR5** | Store spilled id verify | Medium hardening | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | PR4 | — |
+| **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | — (no core freeze) | PR0–PR7 |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
+
+**Direct-pipe track (orthogonal):** PR8 can start anytime; does not block phone-node definition of done. Ships as optional library + docs, not a relay behaviour change.
 
 ---
 
@@ -59,12 +62,11 @@ const MAX_SKIPPED_KEYS: usize = 4 * MAX_SKIP as usize; // 2048
 pub struct Ratchet {
     dhs_sec: [u8; 32],
     dhs_pub: [u8; 32],
-    // ...
     rk: [u8; 32],
     cks: Option<[u8; 32]>,
     ckr: Option<[u8; 32]>,
     nr: u16,
-    skipped: HashMap<([u8; 32], u16), [u8; 32]>,  // ← no age, no zeroize
+    skipped: HashMap<([u8; 32], u16), [u8; 32]>,  // no age, no zeroize
 }
 ```
 
@@ -88,8 +90,6 @@ const SKIP_TTL_SECS: u32 = 7 * 24 * 3600; // matches SPEC §7 / PREKEY_LIFETIME
 Map becomes `HashMap<([u8; 32], u16), SkippedKey>`.
 
 ### 2. Thread `now` into decrypt/skip
-
-Change signatures:
 
 ```rust
 pub fn decrypt(&mut self, msg: &[u8], now: u32) -> Option<Vec<u8>> {
@@ -124,8 +124,6 @@ fn skip(&mut self, until: u16, now: u32) -> Option<()> {
     Some(())
 }
 ```
-
-Also call `purge_skipped(now)` at the top of `skip` if invoked standalone.
 
 ### 3. Purge by age
 
@@ -165,14 +163,14 @@ impl Drop for SkippedKey {
 
 ### 5. Call-site wiring
 
-`now` is already `spore::bridge::hub::now()` / `Node` paths. Grep for `.decrypt(` and `Ratchet::` in `src/session.rs`, `src/node/*`, `src/lib.rs` and pass `now`. Prefer adding `now` only where missing; do not invent a second clock.
+`now` is already `spore::bridge::hub::now()` / Node paths. Grep for `.decrypt(` and `Ratchet::` in `src/session.rs`, `src/node/*`, `src/lib.rs` and pass `now`. Do not invent a second clock.
 
 ### 6. Tests (in `src/ratchet.rs`)
 
 ```rust
 #[test]
 fn skipped_keys_expire_after_ttl() {
-    // alice encrypts msgs 0..3; bob receives only 3 first → skips 0..2
+    // alice encrypts msgs 0..3; bob receives only 3 first -> skips 0..2
     // advance now by SKIP_TTL_SECS + 1; bob must fail to open 0 and skipped.is_empty()
 }
 
@@ -180,11 +178,8 @@ fn skipped_keys_expire_after_ttl() {
 fn skipped_keys_live_inside_ttl() {
     // same setup; now += SKIP_TTL_SECS - 60; open still works
 }
-
-// existing: the_skipped_key_cache_cannot_grow_without_bound, absurd_gap_refused
+// Keep: the_skipped_key_cache_cannot_grow_without_bound, absurd_gap_refused
 ```
-
-Optional: debug canary that `Drop` clears (e.g. pattern fill + assert after drop in a scope).
 
 ## Freeze impact
 None.
@@ -200,12 +195,12 @@ None.
 - **S-024a:** Ratchet skipped-key cache is age-bounded (7 days) and zeroized on drop.
 ```
 
-## Still open update (`docs/SECURITY_FINDINGS.md`)
-Mark S-024a closed with link to this PR; leave “no platform has field-verified the seven-day window” as process item for PR6.
+## Still open update
+Mark S-024a closed in `docs/SECURITY_FINDINGS.md`; leave field-verification of the 7-day window for PR6.
 
 ---
 
-# PR1 — Chat attachments: stage → one bubble → preview → Open
+# PR1 — Chat attachments: stage -> one bubble -> preview -> Open
 
 ## Why
 Release APK: pick file publishes immediately; no stage; bubbles lack preview/Open; no FileProvider. Highest daily annoyance. JNI file APIs already exist (`nativePublishFile`, `nativeOpenFile`, `nativeSaveFile`).
@@ -214,11 +209,10 @@ Release APK: pick file publishes immediately; no stage; bubbles lack preview/Ope
 | Path | Action |
 |------|--------|
 | `android/.../ChatScreens.kt` | Composer staging, marker parse, bubble layout, viewer entry |
-| `android/.../NodeController.kt` | Optional helpers; keep `sendFile` for publish; new `sendTextWithAttachment` |
+| `android/.../NodeController.kt` | Extract publish-only; add `sendTextWithAttachment` |
 | `android/app/src/main/AndroidManifest.xml` | FileProvider provider |
 | `android/app/src/main/res/xml/file_paths.xml` | **New** |
 | `android/UX-ISSUES.md` | **New** — problem, marker, acceptance |
-| Optional small composable file | `AttachmentViewer.kt` if ChatScreens grows too large |
 
 ## Current behaviour (broken UX)
 
@@ -230,13 +224,9 @@ val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetCont
 }
 ```
 
-`sendFile` publishes and appends a message with `magnet` but no unified text+attach body; Bubble has no Open/preview path.
-
 ## Implementation steps
 
 ### 1. Staging model (composer state)
-
-In `ChatDetail` (per-peer):
 
 ```kotlin
 data class StagedAttachment(
@@ -245,22 +235,22 @@ data class StagedAttachment(
     val mime: String,
 )
 
-// remember per peer (key by peer string)
 var staged by remember(peer) { mutableStateOf<StagedAttachment?>(null) }
 
 val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
     if (uri == null) return@rememberLauncherForActivityResult
     val name = /* DISPLAY_NAME as today */ ?: "file.bin"
     val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
-    val data = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@rememberLauncherForActivityResult
+    val data = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: return@rememberLauncherForActivityResult
     staged = StagedAttachment(name, data, mime)
     // do NOT call sendFile here
 }
 ```
 
-UI under composer field:
-- If `staged != null`: chip with name / optional thumbnail + **✕** clears staged.
-- Send button:
+UI under composer:
+- If `staged != null`: chip with name / optional thumbnail + X clears staged.
+- Send:
   ```kotlin
   {
       val s = staged
@@ -275,19 +265,15 @@ UI under composer field:
   }
   ```
 
-Keep staged when switching away and back to the same peer (`remember(peer)`).
-
 ### 2. Send path — one body with marker
 
 ```kotlin
 // NodeController.kt
 fun sendTextWithAttachment(peer: String, text: String, att: StagedAttachment) {
-    // 1) publish file (existing sendFile core without appending a separate msg)
     val magnet = publishFile(peer, att.name, att.bytes) ?: return
-    // 2) body
     val marker = "📎 ${att.name} | spore:$magnet | ${att.mime}"
     val body = if (text.isBlank()) marker else "$text\n\n$marker"
-    send(peer, body) // existing text path (seal/ACK as today)
+    send(peer, body)
 }
 ```
 
@@ -298,7 +284,7 @@ Extract publish-only from current `sendFile` so we do not double-append messages
 📎 <filename> | spore:<hex-magnet> | <mime>
 ```
 - Last line matching `^📎 .+ \| spore:[0-9a-fA-F]+ \| \S+`
-- Application convention only; relays see opaque UTF-8 payload.
+- Application convention only; relays see opaque UTF-8.
 
 ### 3. Bubble parse + layout
 
@@ -315,28 +301,20 @@ fun parseAttachmentMarker(body: String): Pair<String, ParsedAttach?> {
 }
 ```
 
-Bubble structure (preserve side + border for mine/theirs):
+Bubble (preserve side + border for mine/theirs):
+- message text (marker stripped)
+- attachment chip / image preview
+- existing SegmentedLed + served/fetching
+- time / lock / badges
 
-```
-┌ crate ─────────────────────────────────────┐
-│ caption / peer                             │
-│ message text (without marker line)         │
-│ ┌ attachment chip / image ───────────────┐ │
-│ │ thumbnail OR filename · mime           │ │
-│ └────────────────────────────────────────┘ │
-│ SegmentedLed + served/fetching (existing)  │
-│ time · 🔒 · badges                         │
-└────────────────────────────────────────────┘
-```
-
-- `image/*` + enough bytes: decode with `inSampleSize` from ~280.dp width on `Dispatchers.IO` (reuse Feed approach).
-- Incomplete transfer: placeholder chip + LED only — **never** partial corrupt bitmap.
-- Tap chip → `AttachmentViewer`.
+Rules:
+- `image/*` + enough bytes: `inSampleSize` from ~280.dp on `Dispatchers.IO` (reuse Feed).
+- Incomplete: placeholder + LED only — never partial corrupt bitmap.
+- Tap chip -> AttachmentViewer.
 
 ### 4. FileProvider
 
 **AndroidManifest.xml** (inside `<application>`):
-
 ```xml
 <provider
     android:name="androidx.core.content.FileProvider"
@@ -350,7 +328,6 @@ Bubble structure (preserve side + border for mine/theirs):
 ```
 
 **res/xml/file_paths.xml** (new):
-
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
@@ -363,7 +340,6 @@ Bubble structure (preserve side + border for mine/theirs):
 ### 5. AttachmentViewer + cache
 
 ```kotlin
-// On open request:
 val cacheRoot = File(ctx.cacheDir, "attachments/${magnet.take(16)}")
 cacheRoot.mkdirs()
 val out = File(cacheRoot, safeName)
@@ -378,29 +354,27 @@ val intent = Intent(Intent.ACTION_VIEW)
 ctx.startActivity(Intent.createChooser(intent, "Open"))
 ```
 
-- Preview/open cache under `cacheDir` (reclaimable).
-- Explicit **Save** → `externalFilesDir` or MediaStore.
-- Eviction: on start or idle, delete cache dirs older than 14 days or over ~50 MB total.
-- Never write sealed ciphertext to a world-readable path.
+- Preview/open: `cacheDir` (reclaimable).
+- Explicit Save: externalFiles / MediaStore.
+- Eviction: ~14 days or ~50 MB.
+- Never write sealed ciphertext world-readable.
 
 ### 6. Crypto honesty
-- Staged send must use the same sealed-publish path as today’s `sendFile` when peer key is known.
-- Keep **“served from this node”** / **“fetching”** — do not invent “delivered to peer”.
+- Same sealed-publish path as today's `sendFile` when peer key known.
+- Keep "served from this node" / "fetching".
 
 ### 7. Docs
-Create `android/UX-ISSUES.md` with: problem statement, current vs target, marker format, acceptance, non-goals (multi-file, in-app video, edit history).
+Create `android/UX-ISSUES.md`: problem, current vs target, marker, acceptance, non-goals.
 
 ## Non-goals (v1)
-- Multi-file per send
-- ExoPlayer / in-app video
-- Editing messages after send
+Multi-file per send; ExoPlayer; editing after send.
 
 ## Acceptance
-- [ ] Pick → composer chip; thread unchanged until Send
-- [ ] Remove staged → text-only Send
-- [ ] Send → **one** bubble text+attach for sender and receiver
+- [ ] Pick -> composer chip; thread unchanged until Send
+- [ ] Remove staged -> text-only Send
+- [ ] Send -> **one** bubble text+attach for sender and receiver
 - [ ] LED while fetching; preview when image decodable
-- [ ] Open via FileProvider for images (PDF if straightforward)
+- [ ] Open via FileProvider for images
 - [ ] No pink-on-olive; contentDescription on chips
 - [ ] Sealed path preserved
 
@@ -409,26 +383,26 @@ Create `android/UX-ISSUES.md` with: problem statement, current vs target, marker
 - Android: chat attachments stage until Send; one bubble with preview; FileProvider Open/Share/Save.
 ```
 
-## Manual QA checklist
-1. Stage image, add text, Send → one bubble both sides (two devices or loopback).
-2. Stage then ✕ → Send text only.
-3. Large image → LED then preview; Open works.
-4. Peer without file yet → fetching language, no crash on Open.
-5. Reduced motion still respects system setting.
+## Manual QA
+1. Stage image + text, Send -> one bubble both sides.
+2. Stage then X -> Send text only.
+3. Large image -> LED then preview; Open works.
+4. Peer without file -> fetching language, no crash on Open.
+5. Reduced motion respected.
 
 ---
 
 # PR2 — Hub unregister + bridge stop/remove UI
 
 ## Why
-`Hub` slots and JNI `ifaces` only grow. UI cannot stop/delete bridges. A live-looking switch without backend repeats the “Save did nothing” failure mode.
+Hub slots and JNI ifaces only grow. UI cannot stop/delete bridges. A live-looking switch without backend repeats the "Save did nothing" failure mode.
 
 ## Files
 | Path | Action |
 |------|--------|
 | `src/bridge/hub.rs` | `unregister(iface)` |
 | `android/jni/src/lib.rs` | `nativeUnregisterIface` |
-| `android/.../SporeNative.kt` | `external fun nativeUnregisterIface` |
+| `android/.../SporeNative.kt` | external fun |
 | `android/.../NodeController.kt` | stop helpers, list removal |
 | `android/.../NodeScreens.kt` | BridgeRow actions |
 | Bridge classes | Call unregister from existing `stop()` |
@@ -436,7 +410,6 @@ Create `android/UX-ISSUES.md` with: problem statement, current vs target, marker
 ## Current shape
 
 ```rust
-// hub.rs
 pub fn register(&self) -> (Iface, Receiver<Forward>) {
     let mut o = lock(&self.out);
     let iface = o.len() as Iface;
@@ -446,14 +419,9 @@ pub fn register(&self) -> (Iface, Receiver<Forward>) {
 ```
 
 ```kotlin
-// SporeNative.kt
 external fun nativeRegisterIface(ptr: Long): Int
 external fun nativeRegisterIfaceLimited(ptr: Long, bulkBytesPerSec: Int): Int
 // no unregister
-```
-
-```kotlin
-// NodeScreens BridgeRow — display only, no Stop/Remove
 ```
 
 ## Implementation steps
@@ -461,8 +429,8 @@ external fun nativeRegisterIfaceLimited(ptr: Long, bulkBytesPerSec: Int): Int
 ### 1. Hub unregister
 
 ```rust
-/// Drop the outbound sender for `iface`. Receivers see disconnect; slot stays
-/// as a hole so iface indices remain stable for any in-flight references.
+/// Drop the outbound sender for `iface`. Receivers see disconnect.
+/// Slot stays as a hole so iface indices remain stable.
 pub fn unregister(&self, iface: Iface) {
     let mut o = lock(&self.out);
     if let Some(slot) = o.get_mut(iface as usize) {
@@ -472,12 +440,11 @@ pub fn unregister(&self, iface: Iface) {
 }
 ```
 
-Index stability: do **not** `remove()` from the Vec (would renumber later ifaces). Clear the slot in place. Document that iface ids are never recycled within a process lifetime (same as today’s append-only allocation).
+Do **not** `Vec::remove` (would renumber). Document: iface ids never recycled within process lifetime.
 
 ### 2. JNI
 
 ```rust
-// android/jni/src/lib.rs
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeUnregisterIface(
     _env: JNIEnv, _class: JClass, ptr: jlong, iface: jint,
@@ -492,7 +459,6 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeUnregisterIface(
 ### 3. Kotlin façade
 
 ```kotlin
-// SporeNative.kt
 external fun nativeUnregisterIface(ptr: Long, iface: Int)
 ```
 
@@ -500,23 +466,21 @@ external fun nativeUnregisterIface(ptr: Long, iface: Int)
 
 Each bridge that registered an iface must:
 1. Cancel pump jobs
-2. Call `nativeUnregisterIface(ptr, iface)`
-3. Release platform resources (GATT, AudioRecord, etc.)
+2. `nativeUnregisterIface(ptr, iface)`
+3. Release platform resources
+
+Store `iface: Int` on the bridge instance or in `BridgeState` at register time.
 
 ```kotlin
-// NodeController — example
 fun stopBridge(kind: String) {
     when (kind) {
         "Audio" -> audioBridge?.stop()
         "Meshtastic BLE" -> meshtasticBridge?.stop()
         // ...
     }
-    // stop() implementations call unregister for their iface id
     bridges.value = bridges.value.filterNot { it.kind == kind }
 }
 ```
-
-Store `iface: Int` on the bridge instance or in `BridgeState` when registering.
 
 ### 5. BridgeRow UI
 
@@ -525,28 +489,24 @@ Store `iface: Int` on the bridge instance or in `BridgeState` when registering.
 private fun BridgeRow(b: BridgeState) {
     // existing LED + kind + detail + status word
     Row {
-        // ...
         CrateButton("Stop", { NodeController.stopBridge(b.kind) }, enabled = b.canStop)
-        CrateButton("Remove", {
-            NodeController.stopBridge(b.kind)
-            // already removed from list in stopBridge
-        })
+        CrateButton("Remove", { NodeController.stopBridge(b.kind) })
     }
 }
 ```
 
-- **Edit** (URL bridges: ws/nostr/tcp): implement as Remove + re-add with new value until native supports mutate.
-- If a kind cannot stop yet: omit Stop or disable with caption *“Stop requires a core update”* — **never** a grey switch that no-ops.
+- Edit (URL bridges): Remove + re-add until native mutate exists.
+- Unsupported stop: omit or disable with caption — **never** a grey no-op switch.
 
 ### 6. Tests
-- Rust unit: register two ifaces, unregister first, `on_rx` / originate only fans to live slots.
-- Android manual: add Audio, Stop → status offline, Remove → row gone; re-add works.
+- Rust: register two, unregister first, forwards only to live slots.
+- Android manual: add Audio, Stop, Remove, re-add.
 
 ## Acceptance
 - [ ] Remove drops UI row, stops pumps, unregisters iface
-- [ ] Start/Stop round-trip for ≥1 Kotlin bridge and ≥1 URL bridge
+- [ ] Start/Stop round-trip for >=1 Kotlin and >=1 URL bridge
 - [ ] Unsupported Stop does not look live
-- [ ] No renumbering of still-live ifaces after unregister
+- [ ] No renumbering of still-live ifaces
 
 ## CHANGELOG
 ```markdown
@@ -558,20 +518,20 @@ private fun BridgeRow(b: BridgeState) {
 # PR3 — Android lifecycle hygiene (depends on PR2)
 
 ## Why
-Sticky service restart can orphan native handles; AudioBridge stop not re-entrant-safe; BLE drain launches overlapping coroutines; no reconnect; Wi-Fi Direct may start UDP before group is up.
+Sticky restart can orphan native handles; AudioBridge stop not re-entrant-safe; BLE drain stacks coroutines; no reconnect; Wi-Fi Direct may start UDP before group is up.
 
 ## Files
 | Path | Action |
 |------|--------|
 | `NodeService.kt` | Controlled shutdown on destroy |
-| `NodeController.kt` | `stop()` that cancels jobs, stops bridges, `nativeFree` when last owner |
+| `NodeController.kt` | `stopFromService()` |
 | `AudioBridge.kt` | Null fields after release |
 | `BleBridges.kt` | Single drain job; reconnect backoff |
-| `WifiDirectBridge.kt` | Wait for group/CONNECTION_CHANGED |
+| `WifiDirectBridge.kt` | Wait for group up |
 
 ## Implementation steps
 
-### 1. NodeService + NodeController.stop
+### 1. Service shutdown
 
 ```kotlin
 // NodeService.kt
@@ -581,14 +541,12 @@ override fun onDestroy() {
     NodeController.stopFromService()
     super.onDestroy()
 }
-```
 
-```kotlin
 // NodeController
 fun stopFromService() {
     // cancel housekeeping / poll jobs
     audioBridge?.stop(); audioBridge = null
-    // ... all bridges stop (unregister via PR2)
+    // all bridges stop (unregister via PR2)
     val p = ptr
     if (p != 0L) {
         SporeNative.nativeFree(p)
@@ -597,9 +555,9 @@ fun stopFromService() {
 }
 ```
 
-`START_STICKY` restart must go through normal `start()` and `nativeNew` again — never reuse a freed jlong (registry already no-ops bad handles; still free explicitly).
+Sticky restart must `nativeNew` again — never reuse a freed jlong.
 
-### 2. AudioBridge.stop hygiene
+### 2. AudioBridge.stop
 
 ```kotlin
 fun stop() {
@@ -608,7 +566,6 @@ fun stop() {
     try { record?.stop(); record?.release() } catch (_: Exception) {}
     try { track?.stop(); track?.release() } catch (_: Exception) {}
     record = null; track = null
-    // unregister iface if held
 }
 ```
 
@@ -620,32 +577,24 @@ private var drainJob: Job? = null
 fun requestDrain(g: BluetoothGatt) {
     if (drainJob?.isActive == true) return
     drainJob = scope.launch {
-        try {
-            // existing FromRadio read loop (up to 32)
-        } finally {
-            drainJob = null
-        }
+        try { /* existing FromRadio loop */ }
+        finally { drainJob = null }
     }
 }
 ```
 
 ### 4. BLE reconnect
 
-On `STATE_DISCONNECTED`:
-- Update BridgeState status to `"reconnecting"`
-- Schedule reconnect with exponential backoff (1s, 2s, 4s, … cap 60s)
-- Cancel on explicit `stop()` / Remove
-
-Mirror native `stream_link` spirit; keep UI status word honest.
+On DISCONNECTED: status `"reconnecting"`; exponential backoff 1s, 2s, 4s … cap 60s; cancel on explicit stop/Remove.
 
 ### 5. Wi-Fi Direct
 
-Do not call `nativeStartUdpLimited` until `CONNECTION_CHANGED` / group info confirms the P2P iface is up. On failure/BUSY, surface status and allow retry.
+Start UDP only after CONNECTION_CHANGED / group info confirms iface up.
 
 ## Acceptance
-- [ ] Force-stop / destroy does not leave zombie native pumps after sticky restart
-- [ ] AudioBridge can start → stop → start without crash
-- [ ] Rapid FromNum notifies do not stack drain coroutines
+- [ ] Destroy does not leave zombie pumps after sticky restart
+- [ ] AudioBridge start -> stop -> start without crash
+- [ ] Rapid FromNum does not stack drains
 - [ ] BLE disconnect shows status and backs off
 
 ## CHANGELOG
@@ -655,10 +604,10 @@ Do not call `nativeStartUdpLimited` until `CONNECTION_CHANGED` / group info conf
 
 ---
 
-# PR4 — Profile: “Name others see” + local avatar
+# PR4 — Profile: "Name others see" + local avatar
 
 ## Why
-ANNOUNCE already carries petname; Nearby already prefers local → quoted announced → address. UX does not frame the field as public-facing. No avatar at all.
+ANNOUNCE already carries petname; Nearby already prefers local -> quoted announced -> address. UX does not frame the field as public-facing. No avatar.
 
 ## Files
 | Path | Action |
@@ -666,24 +615,22 @@ ANNOUNCE already carries petname; Nearby already prefers local → quoted announ
 | `NodeScreens.kt` / Connect / Advanced | Label + live preview |
 | `NodeController.kt` / prefs | Avatar magnet in EncryptedSharedPreferences |
 | `ChatScreens.kt` Nearby / headers | Optional avatar slot |
-| Optional core follow-up | ANNOUNCE avatar magnet (document as app convention) |
 
 ## Implementation steps
 
 ### 1. Name copy
-- Label: **“Name others see”** (not only “petname”).
-- Live preview string using same rules as `ChatsList` Nearby.
-- Existing dirty-enabled Save + confirm stays.
+- Label: **"Name others see"**
+- Live preview matching `ChatsList` Nearby rules
+- Existing dirty-enabled Save + confirm stays
 
 ### 2. Local avatar
-1. User picks image (size-cap before publish, e.g. max edge 256 px / ≤128 KB).
-2. `nativePublishFile` (or existing publish helper) → magnet.
-3. Store magnet in EncryptedSharedPreferences via the **single seed/prekey accessor pattern** (load-bearing — do not invent a second prefs path).
-4. Show on own Connect / profile / optional chat header; letter avatar fallback.
+1. Pick image; size-cap (max edge 256 px / <=128 KB) before publish
+2. Publish via existing file API -> magnet
+3. Store magnet via **single seed/prekey accessor pattern** (load-bearing)
+4. Show on own Connect/profile/header; letter fallback
 
-### 3. Mesh avatar (optional same PR or PR4b)
-- ANNOUNCE payload convention: optional trailing avatar magnet bytes — **document in DESIGN notes as application-level**, do not claim wire freeze change if it fits existing name blob extensibility; if it requires a new flag/field, split to a labelled discussion.
-- Prefer **local-only in PR4** if any freeze risk.
+### 3. Mesh avatar
+Prefer local-only in PR4. Mesh ANNOUNCE convention as optional PR4b if no freeze risk.
 
 ## Acceptance
 - [ ] Preview matches Nearby
@@ -692,7 +639,7 @@ ANNOUNCE already carries petname; Nearby already prefers local → quoted announ
 
 ## CHANGELOG
 ```markdown
-- Android: “Name others see” framing; local profile avatar publish/cache.
+- Android: "Name others see" framing; local profile avatar publish/cache.
 ```
 
 ---
@@ -700,55 +647,44 @@ ANNOUNCE already carries petname; Nearby already prefers local → quoted announ
 # PR5 — Store spilled-file id verify (C-ST4)
 
 ## Why
-Spill path trusts filename == content id. Disk bit-rot or a replaced file would be served as valid.
+Spill path trusts filename == content id. Bit-rot or replaced file would be served as valid.
 
 ## Files
 | Path | Action |
 |------|--------|
-| `src/store.rs` | Verify on `wire()` read from disk |
+| `src/store.rs` | Verify on `wire()` disk read |
 
 ## Current
 
 ```rust
-pub fn wire(&self, id: &Id) -> Option<Vec<u8>> {
-    match &self.map.get(id)?.body {
-        Body::Mem(w) => Some(w.clone()),
-        Body::Evicted => std::fs::read(self.spill.as_ref()?.join(filename(id))).ok(),
-    }
-}
+Body::Evicted => std::fs::read(self.spill.as_ref()?.join(filename(id))).ok(),
 ```
 
 ## Implementation
 
 ```rust
-pub fn wire(&self, id: &Id) -> Option<Vec<u8>> {
-    match &self.map.get(id)?.body {
-        Body::Mem(w) => Some(w.clone()),
-        Body::Evicted => {
-            let path = self.spill.as_ref()?.join(filename(id));
-            let bytes = std::fs::read(path).ok()?;
-            // id = SHA-256(envelope with hops=0)[..16]
-            if let Ok((env, n)) = crate::envelope::Envelope::decode(&bytes) {
-                if n == bytes.len() && env.id() == *id {
-                    return Some(bytes);
-                }
-            }
-            None // treat as not held; mesh can re-fetch
+Body::Evicted => {
+    let path = self.spill.as_ref()?.join(filename(id));
+    let bytes = std::fs::read(path).ok()?;
+    if let Ok((env, n)) = crate::envelope::Envelope::decode(&bytes) {
+        if n == bytes.len() && env.id() == *id {
+            return Some(bytes);
         }
     }
+    None // treat as not held; mesh can re-fetch
 }
 ```
 
-Use the same `Envelope::decode` / `id()` path the rest of the crate uses (confirm exact method names in `envelope.rs`).
+Confirm exact `Envelope::decode` / `id()` names in `envelope.rs`.
 
 ## Tests
-- Put envelope, spill, `wire` OK.
-- Corrupt one byte on disk → `wire` returns `None`.
-- Truncated file → `None`.
+- Intact spill -> OK
+- Corrupt one byte -> None
+- Truncated -> None
 
 ## Acceptance
-- [ ] Intact spill still loads
-- [ ] Mismatch → `None`, no panic
+- [ ] Intact spill loads
+- [ ] Mismatch -> None, no panic
 - [ ] No freeze surface touch
 
 ## CHANGELOG
@@ -761,37 +697,31 @@ Use the same `Envelope::decode` / `id()` path the rest of the crate uses (confir
 # PR6 — Field verification + docs honesty
 
 ## Why
-Still open: no platform field-verified 7-day FS; all radio bridges 🧪; HARDWARE.md procedure only; Android never device-run for backup exclusion.
+Still open: no field-verified 7-day FS; all radios 🧪; HARDWARE.md procedure only; Android backup exclusion untested on device.
 
 ## Deliverables
 
-### 1. Device matrix checklist
-Add to `docs/ANDROID_AUDIT.md` and/or `android/TESTING.md`:
+### 1. Device matrix (`docs/ANDROID_AUDIT.md` / `android/TESTING.md`)
 
 | # | Test | Pass criteria |
-|---|------|----------------|
+|---|------|---------------|
 | 1 | Fresh install | Node starts, address shown |
-| 2 | Upgrade from prior APK | Seed reveal works (0.6.0 regression class) |
-| 3 | Reveal seed | Matches expected; single accessor |
-| 4 | `adb backup` / cloud backup attempt | Identity + prekey ring **absent** from backup |
-| 5 | Device transfer (if available) | spore prefs/store absent per extraction rules |
-| 6 | 24–48 h soak | No native crash; audio/BLE optional |
-| 7 | 7-day FS procedure | Document steps; mark result when run |
+| 2 | Upgrade from prior APK | Seed reveal works |
+| 3 | Reveal seed | Matches; single accessor |
+| 4 | adb/cloud backup attempt | Identity + prekey ring **absent** |
+| 5 | Device transfer | spore prefs/store absent |
+| 6 | 24–48 h soak | No native crash |
+| 7 | 7-day FS procedure | Documented; result when run |
 
 ### 2. HARDWARE.md
-- Run procedure for **one** of Meshtastic BLE or RNode **or**
-- Demote README/APPS language that implies radio readiness until results exist.
+Run procedure for one of Meshtastic BLE or RNode **or** demote README/APPS radio readiness language.
 
 ### 3. Surface Still open
-- Docs site security page: short “Still open” blurb
-- App Advanced/About: one paragraph on FS windows (prekey 7d; ratchet age-bounded after PR0)
-
-### 4. Optional note
-Release pipeline dry-run / fixture approach (historical S-021…S-030) — design note only unless implementing.
+Docs site + app Advanced/About short FS blurb (prekey 7d; ratchet age-bounded after PR0).
 
 ## Acceptance
-- [ ] Checklist exists and at least backup + migration run once on hardware
-- [ ] HARDWARE.md has results **or** marketing demoted
+- [ ] Checklist exists; backup + migration run once on hardware
+- [ ] HARDWARE results **or** marketing demoted
 
 ## CHANGELOG
 ```markdown
@@ -805,15 +735,169 @@ Release pipeline dry-run / fixture approach (historical S-021…S-030) — desig
 | Item | Sketch |
 |------|--------|
 | Ring health UI | `Prekeys: N live · oldest Xd · next mint ~Yh` + Export with FS warning |
-| Group `key_id` badge | On mismatch show warning; never claim roster consensus |
-| Boot receiver | Optional, **default off**, user setting |
+| Group key_id badge | Warn on mismatch; never claim roster consensus |
+| Boot receiver | Optional, **default off** |
 | Sound/particles | Behind setting, default off |
 | contentDescription | LEDs, badges, attachment chips |
-| Housekeeping assert | Android intervals match SPEC 5→80 min HELLO / 1 h flood |
-| `demod_out` cap | JNI VecDeque max ~32 frames, drop oldest |
-| Docs sync | Android bridge list ⊆ `docs/BRIDGES.md` if not automated |
+| Housekeeping assert | Android intervals match SPEC 5->80 min / 1 h |
+| demod_out cap | JNI VecDeque max ~32, drop oldest |
+| Docs sync | Android bridge list ⊆ BRIDGES.md |
 
-Ship as one PR or small stacked PRs under the same milestone.
+---
+
+
+---
+
+# PR8 — SPORE Direct: negotiated non-routed E2E pipe (general)
+
+## Why
+Apps need a **general low-latency encrypted pipe** (voice, telemetry, interactive data, optional streams) between two SPORE identities when a **direct underlay** exists (UDP, ESP-NOW, TCP, BLE, …). Store-and-forward remains correct for async mesh; it is the wrong plane for full-duplex media.
+
+This milestone implements that as an **application-level profile** on top of existing unicast send/recv — **no envelope, store, hub, or freeze-surface changes**.
+
+## Goals
+1. **Negotiate** on the SPORE plane: throughput need (`min_bps` / MTU / optional latency), cipher suite, ephemeral key agreement, and a **subset of mediums** that are E2E-capable and meet capacity.
+2. **Open one direct port** on the chosen medium.
+3. **Same frame/record spec on every medium**; only the adapter differs.
+4. **General pipe** — not audio-only: `DATA` / `MEDIA` / optional channels; reliability optional *above* the pipe.
+
+## Non-goals
+- Routing direct records through the postcard mesh
+- Changing T0–T2 relay behaviour
+- Guaranteeing latency on LoRa / duty-cycled radios (reject or PTT-fallback only)
+- Replacing SIP/Asterisk feature-complete PBX
+
+## Files (suggested layout — new code only)
+
+| Path | Action |
+|------|--------|
+| `direct/` or crate `spore-direct` | Offer/answer, HKDF, record AEAD, `Pipe` API |
+| `direct/port.rs` | `DatagramPort` trait: `mtu` / `send` / `try_recv` / `close` |
+| `direct/udp.rs` | UDP adapter (1 datagram = 1 record) |
+| `direct/tcp.rs` | TCP adapter (`u16be len ‖ record`) |
+| `direct/espnow.rs` | Optional / `cfg` — ESP-IDF or stub + docs |
+| `docs/DIRECT.md` | **New** — profile, threat model, candidate table |
+| `examples/direct_udp.rs` | Loopback or localhost two-peer smoke test |
+| Signaling only | Existing `Node::send` / `send_direct` with opaque `SPDR` payloads |
+
+Do **not** modify `src/envelope.rs`, `store.rs`, `hub.rs`, or frozen contract files.
+
+## Signaling (`SPDR` app payloads)
+
+Magic prefix `SPDR` + version byte so other apps ignore the payload.
+
+**OFFER**
+
+```text
+ver, pipe_id (16 B),
+min_bps, max_bps, mtu_needed, max_latency_ms (optional),
+features: datagram | multiplex | …,
+cipher_suites: ["chacha20poly1305"],
+eph_pub (X25519),
+candidates[]: { medium, locator, est_bps, mtu, rtt_hint? }
+```
+
+**ANSWER**
+
+```text
+pipe_id, status ok|reject,
+chosen candidate (or reject reason: no_medium | throughput | busy),
+eph_pub, agreed_bps, agreed_mtu, cipher
+```
+
+**CLOSE** / optional **REKEY** on the SPORE plane only.
+
+Negotiation messages should be sealed/signed like normal peer traffic so `eph_pub` is bound to the SPORE identity.
+
+## Medium selection
+
+Local capability table (not in core):
+
+```text
+medium   e2e?   est_bps     mtu
+udp      yes    high        ≥1200
+espnow   yes    ~200–500kb  ~250
+tcp      yes    high        ≥1400 (framed)
+ble      yes    low–med     20–200
+spore    fallback only      envelope path — not for full-duplex voice
+```
+
+Algorithm: intersect offer candidates with local E2E capability; drop if `est_bps < min_bps` or `mtu < mtu_needed`; sort by latency then capacity; else `reject/throughput` or `no_medium`.
+
+## Key schedule
+
+```text
+shared = X25519(eph_a, eph_b)
+tx_key, rx_key, salt = HKDF-SHA256(
+  shared,
+  info = "spore-direct-v1" || pipe_id || addr_a || addr_b || medium
+)
+```
+
+Bind both SPORE addresses into `info`. Media keys never appear on the wire.
+
+## Record format (same on every medium)
+
+```text
+offset  size  field
+0       1     ver = 1
+1       1     type  (0=MEDIA 1=KEEPALIVE 2=CONTROL 3=DATA 4=STREAM …)
+2       2     seq   u16 BE
+4       4     pipe_id trunc
+8       n     AEAD ciphertext + tag
+```
+
+- **UDP / ESP-NOW:** one packet = one record  
+- **TCP / serial / BLE:** `u16be length ‖ record` (BLE may chunk further)
+
+Pipe is **best-effort datagram**. Optional ordered `STREAM` or RPC retries live in the app library, not in the outer AEAD record (avoids HOL on voice).
+
+## API sketch
+
+```rust
+// conceptual — spore-direct
+let offer = PipeOffer {
+    min_bps: 5_000,
+    mtu_needed: 64,
+    features: Feature::DATAGRAM,
+    candidates: local_candidates(),
+};
+let mut pipe = Pipe::negotiate(&node, peer_addr, offer)?;
+// uses node only to send/recv SPDR; then:
+pipe.send(Type::Data, payload)?;
+while let Some((ty, bytes)) = pipe.poll() { /* … */ }
+pipe.close()?;
+```
+
+## Tests
+- Unit: offer/answer encode/decode; candidate filter (throughput / mtu / empty → reject)
+- Unit: record seal/open; seq; wrong peer binding fails MAC
+- Integration: two processes, UDP port, `DATA` round-trip
+- Optional: TCP framing round-trip
+- Document ESP-NOW as 🧪 until hardware procedure exists (same honesty as bridges)
+
+## Acceptance
+- [ ] Negotiation selects a medium that meets `min_bps` + MTU or rejects clearly
+- [ ] Keys derived; records authenticate; no media in SPORE store
+- [ ] Same record bytes work on ≥2 adapters (UDP + TCP framing minimum)
+- [ ] General `DATA` path works without any audio codec in tree
+- [ ] Zero changes to frozen contract / envelope layout
+- [ ] `docs/DIRECT.md` states threat model (underlay can drop/delay/record ciphertext)
+
+## CHANGELOG
+```markdown
+- **Direct (optional):** application profile for negotiated E2E datagram pipes (throughput + medium + key); same record, per-medium ports; does not alter v1 relay behaviour.
+```
+
+## Branch naming
+```
+feat/spore-direct-pipe
+```
+
+## Depends / parallel
+- **No dependency** on PR0–PR7 for a library + UDP example
+- Android/ESP32 UI and Codec2-on-pipe can follow as PR8b / separate apps
+- Complements session layer (`src/session.rs`): sessions ride envelopes; Direct rides a sideband port after SPORE signaling
 
 ---
 
@@ -822,16 +906,20 @@ Ship as one PR or small stacked PRs under the same milestone.
 ```
 Week 1
   d1–2  PR0  ratchet (core)
-  d2–4  PR1  attachments (Android)     ∥ PR0
-  d4–5  PR2  unregister + bridge UI     ∥ if capacity
+  d2–4  PR1  attachments (Android)     || PR0
+  d4–5  PR2  unregister + bridge UI
 
 Week 2
   d1–2  PR3  lifecycle (after PR2)
   d2–3  PR4  profile local
-  d3    PR5  store verify              ∥ anytime
-  d4–7  PR6  device matrix + hardware note
+  d3    PR5  store verify              || anytime
+  d4–7  PR6  device matrix + hardware
 
 Later   PR7  polish
+
+Anytime (parallel track)
+  PR8  spore-direct library + docs/DIRECT.md + UDP/TCP example
+  PR8b Codec2 / ESP-NOW / Android call UI (optional follow-ups)
 ```
 
 ## Branch naming
@@ -844,6 +932,7 @@ fix/android-lifecycle
 feat/android-profile-local
 fix/store-spill-verify
 docs/device-hardware-matrix
+feat/spore-direct-pipe
 ```
 
 ## Definition of done — credible phone node
@@ -851,8 +940,8 @@ docs/device-hardware-matrix
 - [ ] PR0 merged — FS claim matches code
 - [ ] PR1 merged — attachments usable end-to-end
 - [ ] PR2 merged — bridges stoppable/removable
-- [ ] ≥1 device-matrix pass (backup exclusion + migration)
-- [ ] One radio path ✅ in HARDWARE.md **or** marketing demoted
+- [ ] >=1 device-matrix pass (backup exclusion + migration)
+- [ ] One radio path checked in HARDWARE.md **or** marketing demoted
 
 ---
 
@@ -868,6 +957,7 @@ docs/device-hardware-matrix
 | PR5 | C-ST4, Patch C |
 | PR6 | Still open field gaps, D-1 |
 | PR7 | UX-1/2, A-M3, A-NC3, A-J3, C-D1 |
+| PR8 | Design discussion (Direct plane); no prior S-nnn — new optional profile |
 
 ---
 
@@ -878,7 +968,8 @@ docs/device-hardware-matrix
 - Multi-file attach, in-app video, post-send edit
 - Claiming 🧪 radios production-ready without HARDWARE results
 - Full release-pipeline fixture automation (note only)
+- Routing Direct records through store-and-forward relays (Direct is non-routed by definition)
 
 ---
 
-*Actionable plan derived from static audit of the 0.6.0 tree (2026-07-28). Update when PRs land or hardware results arrive.*
+*Actionable plan derived from static audit of the 0.6.0 tree (2026-07-28), plus Direct-pipe design track. Update when PRs land or hardware results arrive.*
