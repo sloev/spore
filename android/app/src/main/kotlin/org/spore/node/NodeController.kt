@@ -21,6 +21,10 @@ data class Msg(
     val encrypted: Boolean = false, // sealed to the peer's prekey (§7)
     val id: String? = null, // envelope id, for delivery receipts (mine only)
     val delivered: Boolean = false, // a receipt came back (§8)
+    // Set when this message *is* a file. The chunk state lives in `transfers`
+    // rather than being copied in here, so one poll updates every bubble that
+    // shows it and the two can never disagree.
+    val magnet: String? = null,
     val ts: Long = System.currentTimeMillis(),
 )
 
@@ -63,6 +67,9 @@ object NodeController {
     val storeCount = MutableStateFlow(0) // envelopes held for the mesh
     val resumed = MutableStateFlow(0) // envelopes adopted from disk at startup
     val transfers = MutableStateFlow<List<Transfer>>(emptyList()) // files in flight
+    // magnet -> where the completed file landed on disk. The Feed needs this to
+    // render an attached image; without it a post can only say a file exists.
+    val filePaths = MutableStateFlow<Map<String, String>>(emptyMap())
     val address = MutableStateFlow("")
     val myName = MutableStateFlow("") // the name we announce (a hint for others)
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
@@ -168,6 +175,21 @@ object NodeController {
     }
 
     private var cachedPrefs: android.content.SharedPreferences? = null
+
+    /**
+     * The seed as hex, for the Advanced screen's reveal.
+     *
+     * This exists because the encryption change moved the seed and the UI kept
+     * reading the old plaintext file directly. `migrateSecrets` clears that file,
+     * so on any upgraded install "Reveal seed" showed `unavailable` — the identity
+     * was fine, the one screen that displays it was not. An accessor rather than a
+     * second copy of the prefs-opening logic: there is exactly one place that
+     * knows where secrets live, and now the UI goes through it.
+     */
+    fun seedHex(): String? =
+        secretPrefs(appCtx).getString("seed", null)
+            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
+            ?.joinToString("") { b -> "%02x".format(b) }
 
     fun start(ctx: Context) {
         if (ptr != 0L) return
@@ -370,12 +392,18 @@ object NodeController {
         val destHex = if (peer == Petnames.PUBLIC) "" else peer
         val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return
         val sealed = res.getOrNull(1) == "1"
-        res.getOrNull(0)?.let { savedMagnets.add(it) } // never re-save our own file
+        val magnet = res.getOrNull(0)?.takeIf { it.isNotBlank() }
+        magnet?.let { savedMagnets.add(it) } // never re-save our own file
         val how = if (sealed) "sealed" else "signed, not encrypted"
         append(
             Msg(peer, "📎 shared $name (${data.size / 1024} KB · $how)",
-                mine = true, verified = true, encrypted = sealed)
+                mine = true, verified = true, encrypted = sealed, magnet = magnet)
         )
+        // The chunk count arrives with the next housekeeping tick. Deliberately not
+        // refreshed inline: this runs on the UI thread from a picker callback, and
+        // `pumpFiles` scans every known manifest and can write files to disk. The
+        // bubble says "counting chunks" until the tick lands, which is a second of
+        // honest uncertainty rather than a frame drop on the main thread.
     }
 
     /** Largest file we can share right now (store-bound, minus sealing overhead). */
@@ -408,18 +436,22 @@ object NodeController {
             // disk, decrypting a chunk at a time. The bytes never come through
             // the JVM heap, so a big file costs a chunk rather than three copies.
             // '/' is sanitised away, so a name can't escape the directory.
-            val fname = (SporeNative.nativeFileName(ptr, magnet) ?: continue)
-                .replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "file.bin" }
-            val dir = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
-            val f = File(dir, fname)
+            val fname = safeName(SporeNative.nativeFileName(ptr, magnet) ?: continue)
+            val f = File(imageDir(), fname)
             val written = SporeNative.nativeSaveFile(ptr, magnet, f.absolutePath)
             savedMagnets.add(magnet)
+            if (written >= 0) filePaths.value = filePaths.value + (magnet to f.absolutePath)
+            // A file some post already points at is that post's attachment, not a
+            // separate thing that happened. Announcing it in a chat thread as well
+            // would report one arrival twice, in a conversation that had nothing
+            // to do with it.
+            if (posts.value.any { Markdown.imageMagnet(it.text) == magnet }) continue
             append(
                 Msg(
                     lastFileSender,
                     if (written >= 0) "📎 received ${f.name} (${written / 1024} KB) → ${f.path}"
                     else "⚠ received ${f.name} but could not save it",
-                    mine = false, verified = true
+                    mine = false, verified = true, magnet = magnet
                 )
             )
         }
@@ -446,6 +478,53 @@ object NodeController {
         SporeNative.nativeSendCounted(ptr, dest, text.toByteArray(Charsets.UTF_8))
         posts.value = (posts.value + Post(topic, address.value, text, verified = true)).takeLast(500)
     }
+
+    /**
+     * Post with an image attached.
+     *
+     * The image does not travel *inside* the post: a post is one signed envelope
+     * carrying UTF-8, and an image is not that size. The bytes go out through the
+     * same manifest-and-chunk path as any shared file — published unsealed,
+     * because a topic post is public by construction and sealing it to nobody in
+     * particular would only cost bytes — and the post body carries a markdown
+     * image whose URL is the magnet.
+     *
+     * A reader who already has the chunks renders it; a reader who does not sees
+     * the transfer fill in. Returns false when the image is refused, so the
+     * composer can say why instead of posting a marker pointing at nothing.
+     */
+    fun postWithImage(topic: String, text: String, name: String, image: ByteArray): Boolean {
+        if (ptr == 0L) return false
+        val cap = maxFileBytes()
+        if (image.isEmpty() || image.size > cap) return false
+        val res = SporeNative.nativePublishFile(ptr, name, image, "")?.split(':') ?: return false
+        val magnet = res.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return false
+        // Our own file never comes back to us through the mesh, so write the local
+        // copy ourselves — otherwise the author is the one person who cannot see
+        // the image they just posted.
+        savedMagnets.add(magnet)
+        // Off the UI thread: this is called from a picker callback and an image is
+        // megabytes. The post goes out immediately either way — the local copy only
+        // decides whether the author sees their own thumbnail, so it is allowed to
+        // land a moment later.
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                val f = File(imageDir(), safeName(name))
+                f.writeBytes(image)
+                filePaths.value = filePaths.value + (magnet to f.absolutePath)
+            }.onFailure { android.util.Log.w("spore", "could not cache posted image", it) }
+        }
+        val body = text.trimEnd() + Markdown.imageMarker(name, magnet)
+        post(topic, body)
+        return true
+    }
+
+    /** Where received and self-posted attachments land. */
+    private fun imageDir(): File = appCtx.getExternalFilesDir(null) ?: appCtx.filesDir
+
+    /** '/' and friends sanitised away, so a sender's name can't escape the directory. */
+    private fun safeName(name: String): String =
+        name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "file.bin" }
 
     // -- bridges ----------------------------------------------------------------
 

@@ -19,9 +19,12 @@ Updated as work lands, so this file never describes a state the code left behind
 | §0 Backup exfiltration — `allowBackup="false"` + extraction rules | ✅ fixed |
 | §0 Encryption at rest — Keystore `EncryptedSharedPreferences` + migration | ✅ fixed, **not yet run on a device** |
 | §2 Petname save feedback — snackbar + `enabled` state on both Save buttons | ✅ fixed, **not yet run on a device** |
-| §2 Bridge lifecycle (needs `nativeStopBridge` first) | open |
-| §2 `FileProvider` + `ACTION_VIEW` + previews | open |
-| §2 Chat rewrite | open |
+| §2 Chat rewrite — bubbles, alignment, segmented fragment status | ✅ fixed, **not yet run on a device** |
+| §2 Feed — markdown bodies, inline image attachments, Compose Post screen | ✅ fixed, **not yet run on a device** |
+| §2 Bridges — grouped by transport, LED status per row | ✅ fixed, **not yet run on a device** |
+| §2 Bridge enable/disable (needs `nativeStopBridge` first) | open |
+| §2 `FileProvider` + `ACTION_VIEW` for received files | open |
+| §2 Message reactions | open |
 | §1 Battery measurement, JNI soak | open |
 
 ## 0. Ship this first: the seed and prekey ring are world-readable to a backup
@@ -180,11 +183,14 @@ up. The hypothesis above is a hypothesis.
 
 ### Confirmed bugs
 
+Line numbers are omitted on purpose: the screens have since been rewritten, and a
+citation that has drifted is worse than none.
+
 | Report | What the code actually does |
 |---|---|
-| "No reaction on clicking save on settings.petname" | `MainActivity.kt:362` — `onClick = { Petnames.set(peer, editingName) }`. **It does save.** There is no snackbar, no dismiss, no visible state change, so it reads as broken. The fix is feedback, not persistence — a review guessing "missing onClick handler" would fix the wrong thing. **Fixed — see below.** |
-| "Can't delete/edit/disable/enable bridges" | Only `addBridgeState` exists (`NodeController.kt:565`). The list is append-only by construction, and there is **no JNI call to stop a bridge** — that is the harder half of the fix. |
-| "Can't open attached files" | Only `ACTION_SEND` (share out) at `MainActivity.kt:258` and `:505`. No `FileProvider`, no `ACTION_VIEW`. |
+| "No reaction on clicking save on settings.petname" | `onClick = { Petnames.set(peer, editingName) }`. **It does save.** There was no snackbar, no dismiss, no visible state change, so it read as broken. The fix is feedback, not persistence — a review guessing "missing onClick handler" would have fixed the wrong thing. **Fixed — see below.** |
+| "Can't delete/edit/disable/enable bridges" | Only `addBridgeState` exists. The list is append-only by construction, and there is **no JNI call to stop a bridge** — that is the harder half, and it is still open. |
+| "Can't open attached files" | Only `ACTION_SEND` (share out). No `FileProvider`, no `ACTION_VIEW`. Still open for received files; feed images now render inline, which is a different path. |
 
 #### What landed for the save buttons
 
@@ -209,33 +215,82 @@ Two things surfaced while wiring it that the report could not have known:
 
 **Not yet run on a device.**
 
+#### A regression the encryption fix left behind
+
+`MainActivity.kt` read `getSharedPreferences("spore", MODE_PRIVATE)` directly to
+show the seed on the Advanced screen. `migrateSecrets()` clears that file, so on
+every upgraded install "Reveal seed" displayed `unavailable` — the identity was
+intact, the one screen that shows it was not. I replaced all the call sites in
+`NodeController.kt` and none in the UI.
+
+Same shape as S-015/S-019/S-023/S-025/S-026/S-029/S-030: verified on the artefact
+the change was written for, assumed on its neighbour. Now a `NodeController.seedHex()`
+accessor, so exactly one file knows where secrets live and the UI cannot go around
+it.
+
 ### Chat view
 
-The weakest screen, and the one people judge the app by. Target shape:
+The weakest screen, and the one people judge the app by. **Rewritten** against the
+Claude Design mock, with `docs/VISUALDESIGN.md` §3's chrome rather than the mock's
+own rounded-and-soft styling — see that file's status table for the two places the
+mock and the spec disagreed and which won.
 
-```kotlin
-LazyColumn(reverseLayout = true, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-    items(messages, key = { it.id }) { m ->
-        Row(Modifier.fillMaxWidth(),
-            horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
-            Surface(
-                shape = bubbleShape(m.mine, m.groupedWithPrevious),
-                color = if (m.mine) colorScheme.primaryContainer else colorScheme.surfaceVariant,
-                modifier = Modifier.widthIn(max = 280.dp),
-            ) { MessageContent(m) }   // text | image | audio | video | file | link
-        }
-    }
-}
-```
+What landed:
 
-- `reverseLayout = true` is what puts new messages at the bottom without scroll
-  gymnastics, and it keeps position across insertions for free.
-- **Asymmetric corner radii on the grouped edge** are what make it read as Signal
-  rather than as a list of cards. Same-sender runs share a tighter corner.
-- Reactions: a `FlowRow` overlapping the bubble's bottom edge by ~8 dp, opened by
-  long-press.
-- Inline previews need the `FileProvider` work above as a prerequisite — images via
-  Coil, audio/video via ExoPlayer with a thumbnail and play affordance.
+- Messages are crates, right-aligned when mine and left when not. Sent and received
+  are told apart by **border colour *and* side**, never fill alone — §1 forbids
+  signalling by colour only, and alignment is what carries it for anyone who cannot
+  see the difference.
+- **Fragment status is real, on both directions.** `Msg` gained a `magnet`, so a
+  file bubble reads its chunk state out of the existing `transfers` flow rather than
+  keeping a second copy that can disagree. Progress is a §3 segmented LED, because
+  fountain chunks are a countable unit of work and a smooth bar would be inventing
+  precision.
+  - An *incoming* file shows `have/count · fetching` and fills as chunks land.
+  - An *outgoing* file is complete the moment it is published, so the LED fills
+    immediately and the label says **"served from this node"** rather than
+    implying anyone fetched it. Whether a peer pulled a chunk is not observable
+    from here, and a status line that claims delivery it cannot see is a lie.
+- The mock's **unread badge is deliberately absent.** There is no read tracking in
+  the app, so the number would have nothing behind it.
+
+Still open: reactions (a `FlowRow` overlapping the bubble's bottom edge, opened by
+long-press), and audio/video previews — those need the `FileProvider` work above
+first, and ExoPlayer, which is a dependency worth its own decision.
+
+### Feed
+
+Also rewritten, and it gained the mock's Compose Post screen.
+
+- **Markdown renders.** `Markdown.kt` handles `**bold**`, `*italic*`/`_italic_`,
+  `` `code` `` and `[text](url)` — inline only, no headings or lists, no dependency.
+  A post is a sentence or two under a per-envelope size budget; a full parser here
+  would be a fuzz target for no gain. Unmatched delimiters stay literal, so `2 * 3`
+  survives and a truncated post still reads. Links are styled but **not tappable**:
+  the text is attacker-controlled and signed-but-public, so the URL rides as an
+  annotation and nothing opens it.
+- **Images are referenced from the post body**, as
+  `![name](spore:<magnet>)`. The image cannot be *in* the post — a post is one
+  signed envelope of UTF-8 — so the bytes go through the same manifest-and-chunk
+  path as any shared file and the marker points at them. A reader with the chunks
+  renders it; a reader without sees the LED fill. A client that does not know the
+  marker sees a plain markdown image link, which is a reasonable thing to see.
+- The author's own copy is written locally on IO, because our own file never comes
+  back through the mesh — otherwise the one person who cannot see the image is the
+  person who posted it.
+- Decoding uses `inSampleSize` inside `produceState` on `Dispatchers.IO`. A phone
+  photo is tens of megapixels; decoding it whole for a 220 dp row would spend
+  ~100 MB of heap, and doing it in composition would stall a scrolling list.
+
+### Bridges
+
+Grouped by transport (Radio / Network / Web) as the mock does, with a status LED per
+row. The buckets are **derived from the kind string**, so a new bridge kind lands in
+"Other" rather than vanishing from the list.
+
+The mock draws a switch on each row. There is still no `nativeStopBridge`, so a
+switch would be a control that cannot turn anything off — the row reports state
+instead, and the toggle lands when the JNI call does.
 
 ### Text density
 
@@ -281,17 +336,21 @@ are.
 
 ## 4. Launch roadmap
 
-1. **`allowBackup="false"` + `EncryptedSharedPreferences`.** Everything else is
-   cosmetic next to shipping identity keys to Google Drive.
-2. **Bridge lifecycle** — a `nativeStopBridge` on the JNI side, a real
+1. ~~**`allowBackup="false"` + `EncryptedSharedPreferences`.**~~ Done. Everything
+   else was cosmetic next to shipping identity keys to Google Drive.
+2. ~~**The chat and feed rewrite.**~~ Done — bubbles, alignment, fragment status,
+   markdown, inline images, Compose Post.
+3. **Bridge lifecycle** — a `nativeStopBridge` on the JNI side, a real
    `data class Bridge(id, kind, detail, enabled)` model, `SwipeToDismissBox` and a
-   trailing `Switch` in the UI. Without it the app accumulates dead bridges until
-   reinstall.
-3. **`FileProvider` + `ACTION_VIEW` + inline previews.** Received files that cannot
-   be opened make file sharing a demo.
-4. **The chat rewrite.** Split into three PRs: layout and alignment, then inline
-   attachments, then reactions.
-5. **Battery instrumentation.** Battery Historian, 12 hours, all bridges up, before
+   trailing `CrateSwitch` in the UI. Without it the app accumulates dead bridges
+   until reinstall. `CrateSwitch` already exists in `Chrome.kt` waiting for it.
+4. **`FileProvider` + `ACTION_VIEW`.** Received files that cannot be opened make
+   file sharing a demo. Feed images render inline now; a received PDF still cannot
+   be opened.
+5. **Reactions**, then audio/video previews — the latter needs ExoPlayer, which is
+   a dependency decision, not a UI task.
+6. **Run it on a device.** Everything above is compile-and-reason; see §5.
+7. **Battery instrumentation.** Battery Historian, 12 hours, all bridges up, before
    any optimisation. Then a soak run for the JNI reference question, since that
    failure mode is an abort under sustained load rather than a slow leak.
 
