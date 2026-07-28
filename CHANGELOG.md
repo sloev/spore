@@ -18,6 +18,17 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **`lib.rs` dropped from 3977 to 2205 lines.** The 1776-line `impl Node` block
+  moved into `src/node/{identity,send,ingest,sync,datagram,files}.rs`, each an
+  `impl Node` in a descendant module of the crate root — so the methods keep full
+  access to `Node`'s private fields with **no field's visibility widened**. Nine
+  private methods called across the new group boundaries became `pub(crate)` (the
+  compiler's exact list); their bodies are unchanged. `Node`'s private fields, which
+  were already crate-visible via the crate-root descendant rule, are now reachable
+  only from the `node::` tree — a slightly *tighter* wall than before. Wire
+  unchanged: `reference/vectors.json` reproduces byte-for-byte and the frozen API
+  surface is untouched, so no frozen file was edited. Task #23.
+
 ## 0.6.0 — 2026-07-28
 
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
