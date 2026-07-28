@@ -18,6 +18,15 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **`main.rs` dropped from 799 to 38 lines**, finishing task #23. The CLI binary's
+  three concerns moved into `src/cli/{sim,config,run}.rs` — the in-memory demo, the
+  config parser, and the config-driven daemon — leaving `main.rs` as just `main()`
+  and the dispatch. A pure move: a reconstructed diff against the original shows the
+  only content changes are the visibility bumps the sibling-module split required
+  (`sim`, `parse_config`, `run_config`, `Spec`, `Config` and its fields → `pub(crate)`);
+  every other line is byte-identical, and the demo prints the same output. Binary
+  only — no wire contract, no frozen file touched.
+
 - **`lib.rs` dropped from 3977 to 2205 lines.** The 1776-line `impl Node` block
   moved into `src/node/{identity,send,ingest,sync,datagram,files}.rs`, each an
   `impl Node` in a descendant module of the crate root — so the methods keep full
