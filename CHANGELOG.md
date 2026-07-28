@@ -15,7 +15,43 @@ Two conventions specific to this project:
 
 ## Unreleased
 
-Nothing yet.
+<!-- Add `- ` bullets here as work merges. This note is a comment so it
+     cannot reach a release page; the bump refuses if there are no bullets. -->
+
+- **The Android app now looks like the design language instead of describing it.**
+  `VISUALDESIGN.md` §3's shapes — the ammo crate, the Toughbook input with its screw
+  dots, the radio-switch button that physically throws, the segmented LED, the
+  sticker badges — exist as Compose primitives in `Chrome.kt`, and every screen was
+  rebuilt on them from a Claude Design mock. Chat gets right/left-aligned crate
+  bubbles; Feed gets inline markdown, image attachments and a dedicated Compose Post
+  screen; Bridges is grouped by transport with a status LED per row. Three places
+  Android cannot match the spec exactly (no Impact font, the hard shadow is drawn by
+  hand because Compose's is blurred, reduced motion is inferred from
+  `ANIMATOR_DURATION_SCALE`) are now recorded in the spec rather than left to be
+  found as bugs.
+- **File transfers report their fragmentation in both directions.** `Msg` carries the
+  magnet, so a file bubble reads chunk state out of the existing `transfers` flow
+  rather than keeping a second copy that can drift. Incoming shows `have/count ·
+  fetching` and fills as chunks land; outgoing fills at once and says "served from
+  this node" — not "delivered", because whether a peer pulled a chunk is not
+  observable from here.
+- **Feed posts can carry an image, referenced from the markdown body.** A post is one
+  signed envelope of UTF-8, so the bytes ride the ordinary manifest-and-chunk path
+  and the body carries `![name](spore:<magnet>)` pointing at them. Readers without
+  the chunks see the transfer fill; clients that do not know the marker see a plain
+  markdown image link. Decoding is `inSampleSize`-capped on `Dispatchers.IO`, since a
+  phone photo decoded whole for a 220 dp row costs ~100 MB of heap.
+- **"Reveal seed" showed `unavailable` on every upgraded install.** The encryption
+  change moved the seed into the Keystore-backed store and cleared the plaintext
+  file, but the Advanced screen still read the plaintext prefs directly — all the
+  call sites in `NodeController` were replaced and none in the UI. The same shape as
+  S-015, S-019, S-023, S-025, S-026, S-029 and S-030: verified on the artefact the
+  change was written for, assumed on its neighbour. There is now one accessor and the
+  UI cannot go around it.
+- One thing from the mock was **not** implemented: its "+ subscribe" chip puts pink
+  text on kevlar olive, which is 2.32:1 and the single pairing §1 forbids outright.
+  It is outlined on void instead. `StickerBadge` takes its own background rather than
+  inheriting the crate fill, specifically so this is hard to reintroduce.
 
 ## 0.5.0 — 2026-07-27
 

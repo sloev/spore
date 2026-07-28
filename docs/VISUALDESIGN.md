@@ -23,7 +23,27 @@ Which surfaces actually consume these tokens, so nobody has to guess:
 |---|---|---|
 | `site/style.css` — the Pages site | ✅ | ✅ |
 | `web/spore-standalone.html` — the browser node | ✅ inherits the stylesheet | ✅ |
-| Android — `MainActivity.kt`, `SporeDark/LightColors` | ✅ | partial — colour only; the crate/switch chrome is Compose work not yet done |
+| Android — `Chrome.kt` + `MainActivity.kt` | ✅ | ✅ crate, Toughbook input, radio switch, segmented LED, stickers, scanlines, reduced motion |
+
+**Three places Android cannot match this document exactly.** Recorded here rather
+than left for someone to discover as a bug:
+
+- **No Impact.** §2 names Impact/Haettenschweiler; neither ships on Android and
+  constraint 1 forbids downloading one. `FontFamily.SansSerif` at
+  `FontWeight.Black` stands in. The weight and the tracking carry over; the
+  condensed width does not.
+- **The hard shadow is drawn by hand.** Compose's `Modifier.shadow` is a *blurred*
+  elevation shadow — the Material look this language exists to replace. `Chrome.kt`
+  paints the 4 dp offset rect itself, into reserved padding so a crate never bleeds
+  over its neighbour.
+- **Reduced motion is inferred.** Android has no `prefers-reduced-motion`. The
+  platform signal is `ANIMATOR_DURATION_SCALE == 0`, which the accessibility
+  "remove animations" toggle sets. Scanlines, the CRT bloom and the mascot sparkle
+  are all gated on it.
+
+The **clack and particle burst** in §3 are deliberately absent: §7 requires sound
+off until the user enables it, there is no such setting yet, and shipping it
+on-by-default is not a thing to get wrong once.
 
 Keep this table honest. A design language whose spec is ahead of its
 implementation is a document describing an appearance nothing has, and this
