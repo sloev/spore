@@ -18,6 +18,11 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+## 0.6.0 — 2026-07-28
+
+<!-- Add `- ` bullets here as work merges. This note is a comment so it
+     cannot reach a release page; the bump refuses if there are no bullets. -->
+
 - **The Android app now looks like the design language instead of describing it.**
   `VISUALDESIGN.md` §3's shapes — the ammo crate, the Toughbook input with its screw
   dots, the radio-switch button that physically throws, the segmented LED, the
