@@ -3,6 +3,7 @@ package org.spore.node
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -456,12 +457,17 @@ internal fun CrateButton(
     }
 }
 
-/** Clickable without Material's ripple — the throw is the feedback (§3). */
+/**
+ * Clickable without Material's ripple — the throw is the feedback (§3).
+ *
+ * `clickable` is an extension on [Modifier], so it has to be called on the
+ * receiver. Writing it fully qualified does not resolve an extension.
+ */
 private fun Modifier.radioClickable(
     interaction: MutableInteractionSource,
     enabled: Boolean,
     onClick: () -> Unit,
-): Modifier = androidx.compose.foundation.clickable(
+): Modifier = this.clickable(
     interactionSource = interaction,
     indication = null,
     enabled = enabled,

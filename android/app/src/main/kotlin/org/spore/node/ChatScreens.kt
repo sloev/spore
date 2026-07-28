@@ -131,10 +131,6 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                                 Modifier.fillMaxWidth(),
                             )
                         }
-                        if (unread > 0) {
-                            HGap(6.dp)
-                            StickerBadge("$unread", ink = Palette.Pink)
-                        }
                     }
                 }
             }
