@@ -32,10 +32,16 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR6** | Device matrix + HARDWARE honesty | Process | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | PR4 | — |
 | **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | — (no core freeze) | PR0–PR7 |
+| **PR9** | Offline crypto lifetime knobs (FS vs DTN) | **Semi-urgent** product/security honesty | **PR0** (ratchet TTL exists) | PR1–PR2 |
+| **PR10** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | — | PR2 helpful for stop/unregister |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
 **Direct-pipe track (orthogonal):** PR8 can start anytime; does not block phone-node definition of done. Ships as optional library + docs, not a relay behaviour change.
+
+**FS/DTN honesty track:** PR9 should land soon after PR0 so defaults and UI match the real decrypt window. Optional longer offline is opt-in with theft warning.
+
+**Iroh track:** PR10 is a normal bridge (like tor/i2p/tcp): carry SPORE envelopes over iroh QUIC; 🧪 until exercised.
 
 ---
 
@@ -892,12 +898,166 @@ pipe.close()?;
 ## Branch naming
 ```
 feat/spore-direct-pipe
+feat/offline-crypto-lifetime-knob
+feat/bridge-iroh
 ```
 
 ## Depends / parallel
 - **No dependency** on PR0–PR7 for a library + UDP example
 - Android/ESP32 UI and Codec2-on-pipe can follow as PR8b / separate apps
 - Complements session layer (`src/session.rs`): sessions ride envelopes; Direct rides a sideband port after SPORE signaling
+
+---
+
+
+---
+
+# PR9 — Offline crypto lifetime knobs (FS vs sneakernet honesty)
+
+## Why
+Sneakernet can deliver ciphertext weeks late; default prekey / (post-PR0) ratchet skipped-key lifetimes are ~**7 days**. Users who expect “message in a bottle” will hit undecryptable sealed mail without explanation. The fix is not one true lifetime — it is **disclose the window, let them raise it, warn that theft exposure grows**.
+
+Semi-urgent: without this, PR0’s honest 7-day ratchet TTL and existing prekey ring feel like a silent foot-gun.
+
+## Depends
+- **PR0** should land first (or same release train) so ratchet age bound exists to configure.
+- Prekey lifetime already exists in core (`PREKEY_LIFETIME_SECS` / ring sweep) — expose and document; do not invent a second clock.
+
+## Goals
+1. Single clear **policy surface**: how long sealed/session material stays openable while offline.
+2. **Safe default** (~7 days) unchanged for phones.
+3. **Opt-in longer window** in Android settings + daemon config.
+4. Honest copy on decrypt failure and in Advanced / About.
+5. Optional alignment note: store may still hold ciphertext longer than keys survive.
+
+## Files (indicative)
+
+| Path | Action |
+|------|--------|
+| `src/node/identity.rs` (or constants) | Confirm prekey lifetime is configurable / not only a hard const |
+| `src/ratchet.rs` | `SKIP_TTL_SECS` from config/param after PR0 (default 7d) |
+| Daemon YAML / CLI config | `prekey_lifetime_secs`, `ratchet_skip_ttl_secs` |
+| Android Advanced settings | Slider or presets: 7d (default) / 14d / 30d / custom |
+| EncryptedSharedPreferences | Persist chosen policy via **single accessor** pattern |
+| About / security blurb | “Encrypted DMs readable ~N days offline…” |
+| `docs/DESIGN.md` or `SECURITY.md` | Document FS vs DTN tradeoff |
+| Decrypt-failure UI | “Key expired for offline window; ask resend or raise Offline encrypted mail” |
+
+## Behaviour
+
+| Setting | Effect |
+|---------|--------|
+| Default (7d) | Current security posture |
+| Raised (e.g. 30d) | Keep prekey secrets + skipped keys longer; **warn**: stolen device reads more history |
+| Ring backup | Still defeats the window if restored — label that separately |
+
+Do **not** restore deleted prekeys from seed alone. Longer lifetime only keeps secrets that were never wiped.
+
+## Acceptance
+- [ ] Default remains ~7 days for prekey + ratchet skip TTL
+- [ ] User/daemon can raise lifetime; value survives restart
+- [ ] Warning shown when raising above default
+- [ ] About/Advanced states the active window in plain language
+- [ ] Failed open of expired sealed mail shows actionable message
+- [ ] No freeze-surface change
+
+## CHANGELOG
+```markdown
+- Config/UI: offline encrypted-mail window (prekey + ratchet skip TTL) adjustable; default 7 days; longer = more theft exposure.
+```
+
+## Branch
+```
+feat/offline-crypto-lifetime-knob
+```
+
+---
+
+# PR10 — Iroh bridge (QUIC p2p envelopes)
+
+## Why
+[Iroh](https://github.com/n0-computer/iroh) (n0) gives **QUIC** connections between endpoints identified by keys, with **hole punching** and **relay fallback** when direct paths fail. That fills a gap between LAN UDP and Tor/I2P: internet-friendly peer paths without requiring a stable public IP.
+
+Fit for SPORE: a **shape-2 byte-stream / datagram** bridge — same role as `tcp` / `tor` / `stream_link`, carrying opaque SPORE envelopes. Router stays medium-agnostic.
+
+## Fit / non-fit
+
+| Iroh provides | SPORE use |
+|---------------|-----------|
+| Endpoint ID (key-based) | Locator in bridge config / invite candidate — **not** a replacement for SPORE Ed25519 identity |
+| QUIC streams or datagrams | One envelope per datagram **or** length-prefixed frames on a stream (match existing stream bridges) |
+| Relay servers (public or self-hosted) | Optional fallback underlay; document trust (relay sees ciphertext only if envelopes are sealed; metadata/timing still visible) |
+| NAT traversal | Main product win vs raw UDP |
+
+**Not** a substitute for store-and-forward mesh; offline peers still use S&F. Iroh is for **when both ends can reach the network**.
+
+## Suggested design
+
+```text
+bridge::iroh
+  - Endpoint from iroh (or configured secret)
+  - Map: dial peer by iroh EndpointId exchanged out-of-band
+    (SPORE invite payload / ANNOUNCE extension / manual config)
+  - On connect: stream_link-style pump
+      poll SPORE forward queue → write framed envelopes
+      read frames → hub.on_rx
+  - register_limited bulk budget like other internet bridges
+  - 🧪 until integration test + manual two-host run
+```
+
+### Framing
+Prefer reuse of existing patterns:
+- **Datagram path** if iroh exposes unreliable datagrams sized for envelopes, or
+- **Stream + length prefix / KISS** consistent with `stream_link` / TCP bridges so code stays familiar.
+
+### Identity binding (important)
+- SPORE address ≠ iroh EndpointId unless you deliberately derive one from the other (usually **don’t** — keep layers separate).
+- After connect, only accept/forward envelopes that verify as usual (S-002 class: no trust from underlay id alone).
+- Optional: first message must be a signed SPORE hello binding SPORE addr ↔ this session.
+
+### Dependencies / supply chain
+- Add `iroh` behind a **Cargo feature** e.g. `bridge-iroh` so default/MSRV/offline-bundle builds stay lean.
+- Check `deny.toml` licences; pin versions compatible with MSRV 1.75 if possible — **if iroh requires newer Rust**, document “iroh bridge needs toolchain ≥ X” and keep feature off in MSRV CI (same pattern as nightly-only fuzz).
+- Public relay use: document in BRIDGES.md (phone-home, operator trust, self-host option).
+
+## Files (indicative)
+
+| Path | Action |
+|------|--------|
+| `src/bridge/iroh.rs` | **New** — endpoint, dial, frame, pump |
+| `src/bridge/mod.rs` | Feature-gate module |
+| `Cargo.toml` | Optional dep + feature `bridge-iroh` |
+| `docs/BRIDGES.md` | Table row + security notes + 🧪 |
+| `docs/HARDWARE.md` or networking runbook | Two-machine checklist (direct + relay path) |
+| Daemon config | `iroh:` section: endpoint secret path, relay URLs, peer EndpointIds |
+| Android (optional follow-up) | Only if JNI/feature story is clear; desktop/daemon first is enough |
+
+## Tests
+- Unit: framing round-trip with mock read/write
+- `#[cfg(feature = "bridge-iroh")]` integration: two endpoints localhost / relay if available in CI
+- Fuzz: framer only if custom parser (prefer proven length-prefix)
+
+## Acceptance
+- [ ] Feature-gated build; default CI green without iroh
+- [ ] Two nodes exchange sealed SPORE envelopes over iroh
+- [ ] Works with relay fallback documented (or explicit “direct only” mode)
+- [ ] Unregister/stop clean when PR2 exists
+- [ ] BRIDGES.md entry with 🧪 and trust notes (relays, EndpointId ≠ SPORE id)
+- [ ] Licence / MSRV story documented if toolchain diverges
+
+## CHANGELOG
+```markdown
+- Bridges: optional `bridge-iroh` — QUIC p2p (hole punch + relay fallback) for envelope transport (🧪).
+```
+
+## Branch
+```
+feat/bridge-iroh
+```
+
+## Notes vs PR8 Direct
+- **Iroh bridge:** underlay for **SPORE envelopes** (mesh/S&F still applies once injected into the hub).
+- **SPORE Direct (PR8):** sideband **non-stored** pipe after negotiation; can later list `iroh` as a **Direct candidate medium** once both exist — not required for PR10.
 
 ---
 
@@ -917,9 +1077,13 @@ Week 2
 
 Later   PR7  polish
 
+Week 2–3 (semi-urgent honesty)
+  after PR0  PR9  offline crypto lifetime knobs + UI/config copy
+
 Anytime (parallel track)
-  PR8  spore-direct library + docs/DIRECT.md + UDP/TCP example
-  PR8b Codec2 / ESP-NOW / Android call UI (optional follow-ups)
+  PR8   spore-direct library + docs/DIRECT.md + UDP/TCP example
+  PR8b  Codec2 / ESP-NOW / Android call UI (optional follow-ups)
+  PR10  bridge-iroh feature + BRIDGES.md (desktop/daemon first)
 ```
 
 ## Branch naming
@@ -958,6 +1122,8 @@ feat/spore-direct-pipe
 | PR6 | Still open field gaps, D-1 |
 | PR7 | UX-1/2, A-M3, A-NC3, A-J3, C-D1 |
 | PR8 | Design discussion (Direct plane); no prior S-nnn — new optional profile |
+| PR9 | FS vs DTN / prekey window productization; pairs with S-022 residual + S-024a |
+| PR10 | New bridge; follow BRIDGES.md 🧪 pattern (tor/i2p class) |
 
 ---
 
@@ -972,4 +1138,4 @@ feat/spore-direct-pipe
 
 ---
 
-*Actionable plan derived from static audit of the 0.6.0 tree (2026-07-28), plus Direct-pipe design track. Update when PRs land or hardware results arrive.*
+*Actionable plan derived from static audit of the 0.6.0 tree (2026-07-28), plus Direct-pipe, offline-lifetime knobs, and iroh bridge tracks. Update when PRs land or hardware results arrive.*
