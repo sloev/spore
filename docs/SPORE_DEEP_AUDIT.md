@@ -23,7 +23,7 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 
 | PR | Title | Urgency | Depends | Parallel with |
 |----|-------|---------|---------|---------------|
-| **PR0** | Ratchet age-bound skipped keys + zeroize | **P0 security** | — | PR1, PR5 |
+| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | — | PR1, PR5 |
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | — | PR0, PR5 |
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | — | PR0, PR1 |
 | **PR3** | Service / Audio / BLE lifecycle | High reliability | **PR2** | — |
@@ -32,20 +32,19 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR6** | Device matrix + HARDWARE honesty | Process | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | PR4 | — |
 | **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | — (no core freeze) | PR0–PR7 |
-| **PR9** | Offline crypto lifetime knobs (FS vs DTN) | **Semi-urgent** product/security honesty | **PR0** (ratchet TTL exists) | PR1–PR2 |
-| **PR10** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | — | PR2 helpful for stop/unregister |
+| **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | — | PR2 helpful for stop/unregister |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
-**Direct-pipe track (orthogonal):** PR8 can start anytime; does not block phone-node definition of done. Ships as optional library + docs, not a relay behaviour change.
+**Direct-pipe track (orthogonal):** PR8 can start anytime; does not block phone-node definition of done.
 
-**FS/DTN honesty track:** PR9 should land soon after PR0 so defaults and UI match the real decrypt window. Optional longer offline is opt-in with theft warning.
+**Iroh track:** PR9 is a normal bridge (like tor/i2p/tcp): carry SPORE envelopes over iroh QUIC; 🧪 until exercised.
 
-**Iroh track:** PR10 is a normal bridge (like tor/i2p/tcp): carry SPORE envelopes over iroh QUIC; 🧪 until exercised.
+**Note:** Former “PR9 offline lifetime knobs” is **folded into PR0** so crypto default and user-facing policy ship together.
 
 ---
 
-# PR0 — Ratchet skipped-key TTL + zeroize (S-024a)
+# PR0 — Ratchet TTL + zeroize + offline crypto lifetime knobs (S-024a + FS/DTN honesty)
 
 ## Why
 SPEC §7 claims a 7-day window. Code is count-only (`MAX_SKIPPED_KEYS = 2048`). Nothing zeroizes on drop. Last High forward-secrecy gap in core crypto.
@@ -202,7 +201,38 @@ None.
 ```
 
 ## Still open update
-Mark S-024a closed in `docs/SECURITY_FINDINGS.md`; leave field-verification of the 7-day window for PR6.
+Mark S-024a closed in `docs/SECURITY_FINDINGS.md`; leave **field-verification** of the window for PR6.
+
+## Part B — Offline lifetime knobs (FS vs sneakernet honesty)
+
+Sneakernet can deliver ciphertext weeks late; default prekey + ratchet skip TTL are ~**7 days**. Users who expect “message in a bottle” will hit undecryptable sealed mail without explanation. Ship **disclose + optional raise + theft warning** in the same PR as the crypto fix so policy and code cannot drift.
+
+### Config / UI
+| Surface | Keys |
+|---------|------|
+| Daemon YAML / CLI | `prekey_lifetime_secs`, `ratchet_skip_ttl_secs` (default `604800`) |
+| Android Advanced | Presets: 7d (default) / 14d / 30d / custom; persist via **single accessor** |
+| About / security blurb | “Encrypted DMs readable ~N days offline…” |
+| Decrypt-failure UI | “Key expired for offline window; ask resend or raise offline encrypted mail” |
+
+### Implementation notes
+- `SKIP_TTL_SECS` and prekey lifetime read from one **policy** object (default 7d), not scattered consts.
+- Raising above default requires an explicit warning: longer window ⇒ stolen device reads more history.
+- Seed restore must **not** resurrect deleted prekey secrets; only a ring backup does (label that separately).
+- Topic/group key rotation (S-020) is **out of scope** for the slider; copy should say sealed DMs / ratchet sessions only.
+
+### Extra acceptance (Part B)
+- [ ] Default remains ~7 days for prekey + ratchet skip TTL
+- [ ] User/daemon can raise lifetime; value survives restart
+- [ ] Warning shown when raising above default
+- [ ] About/Advanced states the active window in plain language
+- [ ] Failed open of expired sealed mail shows actionable message
+
+### CHANGELOG (single bullet set for PR0)
+```markdown
+- **S-024a:** Ratchet skipped-key cache is age-bounded (default 7 days) and zeroized on drop.
+- Config/UI: offline encrypted-mail window (prekey + ratchet skip TTL) adjustable; longer = more theft exposure.
+```
 
 ---
 
@@ -895,85 +925,20 @@ pipe.close()?;
 - **Direct (optional):** application profile for negotiated E2E datagram pipes (throughput + medium + key); same record, per-medium ports; does not alter v1 relay behaviour.
 ```
 
-## Branch naming
+## Branch
 ```
 feat/spore-direct-pipe
-feat/offline-crypto-lifetime-knob
-feat/bridge-iroh
 ```
 
 ## Depends / parallel
 - **No dependency** on PR0–PR7 for a library + UDP example
 - Android/ESP32 UI and Codec2-on-pipe can follow as PR8b / separate apps
 - Complements session layer (`src/session.rs`): sessions ride envelopes; Direct rides a sideband port after SPORE signaling
+- Offline sealed-mail windows are **PR0 Part B**; Direct (PR8) does not replace them
 
 ---
 
-
----
-
-# PR9 — Offline crypto lifetime knobs (FS vs sneakernet honesty)
-
-## Why
-Sneakernet can deliver ciphertext weeks late; default prekey / (post-PR0) ratchet skipped-key lifetimes are ~**7 days**. Users who expect “message in a bottle” will hit undecryptable sealed mail without explanation. The fix is not one true lifetime — it is **disclose the window, let them raise it, warn that theft exposure grows**.
-
-Semi-urgent: without this, PR0’s honest 7-day ratchet TTL and existing prekey ring feel like a silent foot-gun.
-
-## Depends
-- **PR0** should land first (or same release train) so ratchet age bound exists to configure.
-- Prekey lifetime already exists in core (`PREKEY_LIFETIME_SECS` / ring sweep) — expose and document; do not invent a second clock.
-
-## Goals
-1. Single clear **policy surface**: how long sealed/session material stays openable while offline.
-2. **Safe default** (~7 days) unchanged for phones.
-3. **Opt-in longer window** in Android settings + daemon config.
-4. Honest copy on decrypt failure and in Advanced / About.
-5. Optional alignment note: store may still hold ciphertext longer than keys survive.
-
-## Files (indicative)
-
-| Path | Action |
-|------|--------|
-| `src/node/identity.rs` (or constants) | Confirm prekey lifetime is configurable / not only a hard const |
-| `src/ratchet.rs` | `SKIP_TTL_SECS` from config/param after PR0 (default 7d) |
-| Daemon YAML / CLI config | `prekey_lifetime_secs`, `ratchet_skip_ttl_secs` |
-| Android Advanced settings | Slider or presets: 7d (default) / 14d / 30d / custom |
-| EncryptedSharedPreferences | Persist chosen policy via **single accessor** pattern |
-| About / security blurb | “Encrypted DMs readable ~N days offline…” |
-| `docs/DESIGN.md` or `SECURITY.md` | Document FS vs DTN tradeoff |
-| Decrypt-failure UI | “Key expired for offline window; ask resend or raise Offline encrypted mail” |
-
-## Behaviour
-
-| Setting | Effect |
-|---------|--------|
-| Default (7d) | Current security posture |
-| Raised (e.g. 30d) | Keep prekey secrets + skipped keys longer; **warn**: stolen device reads more history |
-| Ring backup | Still defeats the window if restored — label that separately |
-
-Do **not** restore deleted prekeys from seed alone. Longer lifetime only keeps secrets that were never wiped.
-
-## Acceptance
-- [ ] Default remains ~7 days for prekey + ratchet skip TTL
-- [ ] User/daemon can raise lifetime; value survives restart
-- [ ] Warning shown when raising above default
-- [ ] About/Advanced states the active window in plain language
-- [ ] Failed open of expired sealed mail shows actionable message
-- [ ] No freeze-surface change
-
-## CHANGELOG
-```markdown
-- Config/UI: offline encrypted-mail window (prekey + ratchet skip TTL) adjustable; default 7 days; longer = more theft exposure.
-```
-
-## Branch
-```
-feat/offline-crypto-lifetime-knob
-```
-
----
-
-# PR10 — Iroh bridge (QUIC p2p envelopes)
+# PR9 — Iroh bridge (QUIC p2p envelopes)
 
 ## Why
 [Iroh](https://github.com/n0-computer/iroh) (n0) gives **QUIC** connections between endpoints identified by keys, with **hole punching** and **relay fallback** when direct paths fail. That fills a gap between LAN UDP and Tor/I2P: internet-friendly peer paths without requiring a stable public IP.
@@ -1057,39 +1022,37 @@ feat/bridge-iroh
 
 ## Notes vs PR8 Direct
 - **Iroh bridge:** underlay for **SPORE envelopes** (mesh/S&F still applies once injected into the hub).
-- **SPORE Direct (PR8):** sideband **non-stored** pipe after negotiation; can later list `iroh` as a **Direct candidate medium** once both exist — not required for PR10.
+- **SPORE Direct (PR8):** sideband **non-stored** pipe after negotiation; can later list `iroh` as a **Direct candidate medium** once both exist — not required for iroh PR9.
 
 ---
 
 ## Suggested calendar
 
 ```
-Week 1
-  d1–2  PR0  ratchet (core)
-  d2–4  PR1  attachments (Android)     || PR0
+Week 1 — ship blockers
+  d1–3  PR0  ratchet TTL + zeroize + offline lifetime knobs/UI
+  d2–4  PR1  attachments                 || PR0
   d4–5  PR2  unregister + bridge UI
 
-Week 2
+Week 2 — harden phone node
   d1–2  PR3  lifecycle (after PR2)
   d2–3  PR4  profile local
-  d3    PR5  store verify              || anytime
-  d4–7  PR6  device matrix + hardware
+  d3    PR5  store spill verify          || anytime
+  d4–7  PR6  device matrix + HARDWARE honesty
 
-Later   PR7  polish
+Later
+  PR7   polish (ring health, key_id badge, boot, a11y, …)
 
-Week 2–3 (semi-urgent honesty)
-  after PR0  PR9  offline crypto lifetime knobs + UI/config copy
-
-Anytime (parallel track)
+Parallel anytime (non-blocking)
   PR8   spore-direct library + docs/DIRECT.md + UDP/TCP example
-  PR8b  Codec2 / ESP-NOW / Android call UI (optional follow-ups)
-  PR10  bridge-iroh feature + BRIDGES.md (desktop/daemon first)
+  PR8b  Codec2 / ESP-NOW / call UI (after PR8)
+  PR9   bridge-iroh (feature-gated; desktop/daemon first)
 ```
 
 ## Branch naming
 
 ```
-fix/ratchet-skip-ttl
+fix/ratchet-skip-ttl          # includes offline lifetime knobs/UI
 feat/android-attachments
 feat/hub-unregister-bridges
 fix/android-lifecycle
@@ -1097,11 +1060,12 @@ feat/android-profile-local
 fix/store-spill-verify
 docs/device-hardware-matrix
 feat/spore-direct-pipe
+feat/bridge-iroh
 ```
 
 ## Definition of done — credible phone node
 
-- [ ] PR0 merged — FS claim matches code
+- [ ] PR0 merged — FS claim matches code **and** offline window disclosed + configurable
 - [ ] PR1 merged — attachments usable end-to-end
 - [ ] PR2 merged — bridges stoppable/removable
 - [ ] >=1 device-matrix pass (backup exclusion + migration)
@@ -1113,7 +1077,7 @@ feat/spore-direct-pipe
 
 | PR | IDs |
 |----|-----|
-| PR0 | S-024a, C-R1, C-R2 |
+| PR0 | S-024a, C-R1, C-R2 + FS/DTN knobs (ex-PR9) |
 | PR1 | A-NS3, Part VII §62, Patch F |
 | PR2 | A-N2, C-H4, A-NS2, Patch B |
 | PR3 | A-S1, A-A2, A-B1/B2/B6, A-W1, C-B1, Patch D/E |
@@ -1122,8 +1086,7 @@ feat/spore-direct-pipe
 | PR6 | Still open field gaps, D-1 |
 | PR7 | UX-1/2, A-M3, A-NC3, A-J3, C-D1 |
 | PR8 | Design discussion (Direct plane); no prior S-nnn — new optional profile |
-| PR9 | FS vs DTN / prekey window productization; pairs with S-022 residual + S-024a |
-| PR10 | New bridge; follow BRIDGES.md 🧪 pattern (tor/i2p class) |
+| PR9 | Iroh bridge; BRIDGES.md 🧪 pattern (tor/i2p class) |
 
 ---
 
@@ -1135,6 +1098,65 @@ feat/spore-direct-pipe
 - Claiming 🧪 radios production-ready without HARDWARE results
 - Full release-pipeline fixture automation (note only)
 - Routing Direct records through store-and-forward relays (Direct is non-routed by definition)
+
+---
+
+
+---
+
+## Plan health check (review)
+
+### Structure
+| Check | Status |
+|-------|--------|
+| PR0–PR10 each have Why / files or deliverables / acceptance / CHANGELOG / branch | OK (PR7 is a batch table by design) |
+| Dependency edges (PR3→PR2, PR0 includes lifetime knobs) | OK |
+| Freeze surface called out | OK — no PR requires `allow-frozen-change` |
+| Parallel tracks labeled | OK — Direct, Iroh, FS/DTN honesty |
+| Branch list matches PR map | OK after cleanup |
+
+### Coverage vs audit P0–P2
+| Audit theme | Plan |
+|-------------|------|
+| Ratchet TTL + zeroize | PR0 |
+| Device matrix / backup / 7d field verify | PR6 (PR0 copy) |
+| Hardware 🧪 honesty | PR6 |
+| Bridge stop/unregister | PR2 |
+| Attachments / FileProvider | PR1 |
+| Lifecycle BLE/audio/service | PR3 |
+| Store spill verify | PR5 |
+| FS vs long offline honesty | PR0 (Part B) |
+| Release pipeline dry-run | Explicitly out of scope |
+| Group roster consensus | Out of scope (key_id badge in PR7 only) |
+
+### Intentionally small / deferred (not missing blockers)
+| Item | Where it lives |
+|------|----------------|
+| S-024b `mark_seen` vs ingest | Optional one-liner under PR0 or PR7 — dead code align |
+| Ring health + export FS warning | PR7 |
+| Group `key_id` divergence badge | PR7 |
+| Boot receiver, sound, Baud | PR7 |
+| Web/wasm iroh or Direct | Follow-up; daemon/Android first |
+| Android iroh UI | After PR10 desktop proves path |
+| Codec2 / POTS / ESP32 | PR8b / out-of-repo app — not core milestone |
+| `with_node` reentrancy guard | Still open; low — optional polish |
+| Beacon duty-cycle measurement | PR6 / HARDWARE.md |
+| CI release dry-run fixtures | Out of scope (note only) |
+
+### Renumbering note
+Former standalone “offline lifetime knobs” PR is **Part B of PR0**. Iroh is **PR9** (was PR10).
+
+### No obvious *blocker* milestone missing
+Ship order PR0 → PR1 → PR2 still matches “credible phone node.”  
+PR8/PR9 (iroh) are growth tracks.  
+
+**Optional future PR11** (only if you want it tracked): `chore: mark_seen align + SECURITY_FINDINGS Still-open pass` after PR0 — process hygiene, not user-facing.
+
+### Risks to watch
+1. **PR0 policy object** — one defaulted policy for prekey + skip TTL used by crypto and UI.
+2. **Iroh MSRV** — may force feature-gate + newer toolchain; keep default CI on 1.75.
+3. **PR1 marker format** — document as app convention in UX-ISSUES so Feed/chat stay consistent.
+4. **PR2 iface holes** — never renumber; document for all bridges including iroh stop.
 
 ---
 
