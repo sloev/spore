@@ -135,14 +135,42 @@ while let Some((ty, bytes)) = pipe.poll() { /* … */ }
 
 A `DatagramPort` is whatever the chosen medium's adapter provides — `mtu`, `send`,
 `try_recv`, driven by polling (the same model the JNI bridges use). The crate ships
-an in-memory `Loopback` for tests and for wiring two in-process peers; see
-`examples/direct_loopback.rs`.
+an in-memory `Loopback` for tests and for wiring two in-process peers (see
+`examples/direct_loopback.rs`), plus two real socket adapters described next.
+
+## Socket adapters
+
+`direct/udp.rs` and `direct/tcp.rs` implement `DatagramPort` over real sockets.
+Both use `std::net`, so both are gated `#[cfg(not(target_arch = "wasm32"))]`; the
+negotiation core above still compiles for the web.
+
+- **`UdpPort`** — one datagram carries exactly one sealed record, so there is no
+  framing to add. The socket is *connected* to the negotiated peer: not a security
+  boundary (the record MAC is), but a cheap kernel-level filter that drops stray
+  packets before they cost a decrypt. `UdpPort::connect` binds and connects in one
+  step; `UdpPort::from_socket` wraps a socket that already carried the out-of-band
+  signalling. A datagram larger than the receive buffer is truncated and simply
+  fails the MAC — the correct "drop it" outcome.
+- **`TcpPort`** — TCP is a byte stream, so each record is written with a 4-byte
+  big-endian length prefix and reads accumulate until a whole record is present,
+  restoring the one-`send`-one-record shape. Nagle is disabled (latency is the
+  point) and the stream is non-blocking with a small out-buffer, so neither `send`
+  nor `try_recv` ever blocks the poll loop. A length prefix larger than any record
+  could legitimately be is treated as a corrupt or hostile stream: the buffer is
+  dropped rather than grown toward the claim, closing an unbounded-buffering DoS.
+
+Both keep the record layer **best-effort** — the pipe's sequence numbers and
+per-record AEAD do not assume in-order, gap-free delivery, so layering an ordered
+stream on top (which would reintroduce head-of-line blocking) is deliberately
+avoided even on TCP.
 
 ## Status
 
-This increment lands the **pure protocol core**: the `SPDR` negotiation codec, the
-key schedule, the AEAD record, medium selection, the `DatagramPort` trait, the
-`Loopback` transport, and the `Pipe` — all unit-tested end to end. The real socket
-adapters (`direct/udp.rs`, `direct/tcp.rs`), the mesh signalling glue that carries
-`SPDR` over `send_direct`, and `CLOSE`/`REKEY` are follow-ups; they add transport,
-not protocol.
+The **pure protocol core** landed first: the `SPDR` negotiation codec, the key
+schedule, the AEAD record, medium selection, the `DatagramPort` trait, the
+`Loopback` transport, and the `Pipe` — all unit-tested end to end. This increment
+adds the **real UDP and TCP socket adapters** above, exercised against real kernel
+sockets — including a genuine two-process UDP round-trip that re-execs the test
+binary and negotiates a live pipe across the process boundary. Still to come: the
+mesh signalling glue that carries `SPDR` over `send_direct`, BLE/ESP-NOW adapters,
+and `CLOSE`/`REKEY`; those add transport and lifecycle, not protocol.
