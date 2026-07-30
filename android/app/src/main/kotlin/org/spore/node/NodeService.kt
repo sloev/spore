@@ -36,6 +36,11 @@ class NodeService : Service() {
 
     override fun onDestroy() {
         try { multicastLock?.release() } catch (_: Exception) {}
+        multicastLock = null
+        // Tear the node down cleanly: cancel its pumps and free the native handle,
+        // so a START_STICKY restart runs `NodeController.start` from scratch
+        // (`nativeNew` again) rather than trying to reuse a jlong we've dropped.
+        NodeController.stopFromService()
         super.onDestroy()
     }
 

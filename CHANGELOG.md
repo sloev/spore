@@ -18,6 +18,19 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android lifecycle hygiene.** The foreground service now tears the node down on
+  `onDestroy` — cancels and *joins* the poll/house loops before `nativeFree`, so no
+  coroutine reads a freed handle — and a `START_STICKY` restart mints a fresh node
+  rather than reusing a dropped `jlong`. `AudioBridge.stop` nulls its record/track
+  after release so a stop→start cycle can't reuse a released object. BLE bridges
+  reconnect on an unexpected drop with exponential backoff (1s→60s, reset on
+  connect, cancelled by an explicit stop) instead of going dead until re-added, and
+  the Meshtastic FromRadio drain is single-flighted so a burst of FromNum
+  notifications can't stack coroutines racing on one characteristic. Wi-Fi Direct
+  starts its UDP flood only once a group is confirmed up (a `CONNECTION_CHANGED`
+  receiver + group-info check), not eagerly when the group is merely requested. Wire
+  unchanged; Android compiled by CI, device QA is a PR6 item.
+
 - **Bridges can be stopped and removed.** `Hub::unregister(iface)` retires an
   interface by emptying its slot rather than removing it — ids are never recycled,
   because `Flood`'s `except` addresses interfaces by index and a shifting vector

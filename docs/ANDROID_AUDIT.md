@@ -141,9 +141,13 @@ radio out of power-save.
 
 ### JNI boundary
 
-**Verified:** the `Runtime` behind the `jlong` handle is never freed — the app holds
-one for its lifetime and `nativeFree` is never called. Defensible, but a path that
-calls `nativeNew` twice leaks an entire node. Worth an explicit guard.
+**Verified, addressed in PR3:** the `Runtime` behind the `jlong` handle used never
+to be freed — nothing called `nativeFree`. The service's `onDestroy` now calls
+`NodeController.stopFromService`, which cancels and joins the poll/house loops
+(so no coroutine touches the handle mid-free), stops the bridges, then frees the
+node and zeroes `ptr`; a `START_STICKY` restart re-runs `start` and mints a fresh
+one. That both removes the lifetime leak and makes the "`nativeNew` twice" path
+harmless — the first node is freed before the second is made.
 
 **Reasoned, and the most likely real defect:** local-reference accumulation.
 `env.byte_array_from_slice(...).into_raw()` runs inside `nativePollForward` and

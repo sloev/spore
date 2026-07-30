@@ -1,7 +1,10 @@
 package org.spore.node
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.wifi.p2p.WifiP2pManager
 
 /**
@@ -13,6 +16,8 @@ import android.net.wifi.p2p.WifiP2pManager
 class WifiDirectBridge(private val ctx: Context, private val ptr: Long) {
     private var manager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
+    private var receiver: BroadcastReceiver? = null
+    private var udpStarted = false
     var onState: ((String) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
@@ -22,26 +27,48 @@ class WifiDirectBridge(private val ctx: Context, private val ptr: Long) {
         manager = m
         val ch = m.initialize(ctx, ctx.mainLooper, null)
         channel = ch
-        m.createGroup(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                onState?.invoke("group up")
-                // Flood the group over limited broadcast on the P2P subnet.
-                SporeNative.nativeStartUdpLimited(ptr, 0)
+
+        // Start the UDP flood only when a group is actually formed, not when
+        // createGroup is merely *requested*. The old code floods in the
+        // createGroup callback — but on the BUSY path (we're joining an existing
+        // group) the interface may not be up yet, so packets went nowhere until a
+        // later retry. CONNECTION_CHANGED + a group-info check is the real signal.
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION) return
+                m.requestGroupInfo(ch) { group ->
+                    if (group != null && !udpStarted) {
+                        udpStarted = true
+                        onState?.invoke("group up")
+                        SporeNative.nativeStartUdpLimited(ptr, 0)
+                    }
+                }
             }
+        }
+        receiver = r
+        ctx.registerReceiver(r, IntentFilter(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION))
+
+        // Ask to own a group. Success or BUSY (a group already exists / we join as
+        // client) both lead to a CONNECTION_CHANGED that the receiver acts on; a
+        // hard failure is surfaced and no UDP is started.
+        m.createGroup(ch, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { onState?.invoke("group requested") }
             override fun onFailure(reason: Int) {
-                // BUSY often means a group already exists (e.g. we're a client) —
-                // the UDP bridge still floods it.
-                onState?.invoke(if (reason == WifiP2pManager.BUSY) "joined existing" else "error $reason")
-                SporeNative.nativeStartUdpLimited(ptr, 0)
+                onState?.invoke(if (reason == WifiP2pManager.BUSY) "joining existing" else "error $reason")
             }
         })
     }
 
     @SuppressLint("MissingPermission")
     fun stop() {
-        val m = manager ?: return
-        val ch = channel ?: return
-        m.removeGroup(ch, null)
+        receiver?.let { runCatching { ctx.unregisterReceiver(it) } }
+        receiver = null
+        udpStarted = false
+        val m = manager
+        val ch = channel
+        if (m != null && ch != null) m.removeGroup(ch, null)
+        manager = null
+        channel = null
         onState?.invoke("stopped")
     }
 }
