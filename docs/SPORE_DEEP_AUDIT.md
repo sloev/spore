@@ -25,14 +25,14 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 |----|-------|---------|--------|---------|---------------|
 | **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | 🟡 **partial** — Part A merged (#40); Part B carried forward | — | PR1, PR5 |
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
-| **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — in review (#42); items carried forward | — | PR0, PR1 |
-| **PR3** | Service / Audio / BLE lifecycle | High reliability | 🟡 in review (#44) | **PR2** | — |
-| **PR4** | Name others see + local avatar | Medium product | — | PR3+ |
-| **PR5** | Store spilled id verify | Medium hardening | — | PR0–PR2 |
-| **PR6** | Device matrix + HARDWARE honesty | Process | PR0–PR3 ideally | — |
-| **PR7** | Polish batch | Low | PR4 | — |
-| **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | — (no core freeze) | PR0–PR7 |
-| **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | — | PR2 helpful for stop/unregister |
+| **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — merged (#42); items carried forward | — | PR0, PR1 |
+| **PR3** | Service / Audio / BLE lifecycle | High reliability | ✅ merged (#44) | **PR2** | — |
+| **PR4** | Name others see + local avatar | Medium product | 🟡 4a in review (#45); 4b (mesh record) to follow | — | PR3+ |
+| **PR5** | Store spilled id verify | Medium hardening | ⬜ todo | — | PR0–PR2 |
+| **PR6** | Device matrix + HARDWARE honesty | Process | ⬜ todo | PR0–PR3 ideally | — |
+| **PR7** | Polish batch | Low | ⬜ todo | PR4 | — |
+| **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | ⬜ todo | — (no core freeze) | PR0–PR7 |
+| **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | ⬜ todo | — | PR2 helpful for stop/unregister |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 

@@ -89,6 +89,10 @@ object NodeController {
     val filePaths = MutableStateFlow<Map<String, String>>(emptyMap())
     val address = MutableStateFlow("")
     val myName = MutableStateFlow("") // the name we announce (a hint for others)
+    // Absolute path to our own avatar image, or null if none set. Local only in
+    // PR4a; PR4b publishes it to the mesh so peers can fetch it. Not a secret, so
+    // it lives in a plain file, not the encrypted store.
+    val myAvatarPath = MutableStateFlow<String?>(null)
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
     val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
 
@@ -250,6 +254,7 @@ object NodeController {
         // The name we announce; peers offer it as the default petname for us.
         myName.value = prefs.getString("myname", "") ?: ""
         if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
+        myAvatarPath.value = avatarFile().takeIf { it.exists() && it.length() > 0 }?.absolutePath
 
         // Refollow persisted topics.
         prefs.getStringSet("topics", emptySet())?.forEach { follow(it, persist = false) }
@@ -744,7 +749,28 @@ object NodeController {
         webHost(ctx).addWebTorrent(name.trim())
     }
 
-    // -- your name, and invites -------------------------------------------------
+    // -- your name, avatar, and invites -----------------------------------------
+
+    /** Where our own avatar image lives on disk (one fixed slot). */
+    private fun avatarFile(): File = File(appCtx.filesDir, "avatar.img")
+
+    /**
+     * Set (or replace) our own avatar from already-downscaled bytes.
+     *
+     * The caller caps size and re-encodes (max edge / bytes) before this — image
+     * decoding stays in the UI layer where the picked bytes already are; here it is
+     * just a small file write. Returns false if the node isn't up or the write
+     * fails, so the UI can say so rather than show an avatar that didn't persist.
+     * PR4a is local only; PR4b will publish these bytes to the mesh.
+     */
+    fun setAvatar(bytes: ByteArray): Boolean {
+        if (ptr == 0L || bytes.isEmpty()) return false
+        return runCatching {
+            avatarFile().writeBytes(bytes)
+            myAvatarPath.value = avatarFile().absolutePath
+            true
+        }.getOrDefault(false)
+    }
 
     /**
      * The name we announce to the mesh (others see it as a suggested petname).

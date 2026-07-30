@@ -18,6 +18,15 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: a local profile photo, and the name framed as public.** The Advanced
+  screen's name field is now "Name others see," with a live preview of the avatar +
+  name exactly as a peer's Nearby row renders them. You can pick a photo; it's
+  downscaled to a ≤256 px JPEG off the main thread and cached locally. This is the
+  local half (PR4a) — the photo is shown on your own surfaces only; publishing it to
+  the mesh so peers can fetch and cache it (PR4b) follows as an app-layer profile
+  record on the existing topic + file primitives, no wire change. Compiled by CI,
+  device QA is a PR6 item.
+
 - **Android lifecycle hygiene.** The foreground service now tears the node down on
   `onDestroy` — cancels and *joins* the poll/house loops before `nativeFree`, so no
   coroutine reads a freed handle — and a `START_STICKY` restart mints a fresh node
