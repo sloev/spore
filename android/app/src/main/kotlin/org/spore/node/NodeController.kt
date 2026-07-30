@@ -48,8 +48,20 @@ data class ScannedInvite(val addr: String, val suggestedName: String, val bridge
 /** One microblog post on a followed topic. */
 data class Post(val topic: String, val author: String, val text: String, val verified: Boolean, val ts: Long = System.currentTimeMillis())
 
-/** A configured bridge and its status line. */
-data class BridgeState(val kind: String, val detail: String, val status: String)
+/**
+ * A configured bridge and its status line. `iface` is the hub interface to
+ * unregister when the bridge is removed (null for a core-owned bridge like TCP/UDP
+ * whose interface this app didn't register and can't cleanly stop). `canStop`
+ * gates the Remove control — a bridge we cannot stop shows no button rather than a
+ * dead one.
+ */
+data class BridgeState(
+    val kind: String,
+    val detail: String,
+    val status: String,
+    val iface: Int? = null,
+    val canStop: Boolean = false,
+)
 
 /**
  * Owns the one native node for the whole app (the Service starts it; the UI reads
@@ -625,7 +637,7 @@ object NodeController {
         // Sound moves ~23 bytes a second, so this link talks but does not haul.
         val iface = limitedIface("audio")
         audio = AudioBridge(ptr, iface).also { it.start() }
-        addBridgeState("Audio modem", "16-FSK · mic + speaker", "on")
+        addBridgeState("Audio modem", "16-FSK · mic + speaker", "on", iface, canStop = true)
         return true
     }
 
@@ -639,7 +651,7 @@ object NodeController {
         }
         val b = MeshtasticBleBridge(ptr, iface, ctx, device, myNode)
         bleBridges.add(b)
-        addBridgeState("Meshtastic BLE", deviceLabel(device), "connecting")
+        addBridgeState("Meshtastic BLE", deviceLabel(device), "connecting", iface, canStop = true)
         b.onState = { s -> updateBridgeState("Meshtastic BLE", s) }
         b.start()
     }
@@ -653,7 +665,7 @@ object NodeController {
         val iface = limitedIface("reticulum")
         val b = RNodeBleBridge(ptr, iface, ctx, device, freqHz, bwHz, sf, cr, txDbm)
         bleBridges.add(b)
-        addBridgeState("RNode BLE", deviceLabel(device), "connecting")
+        addBridgeState("RNode BLE", deviceLabel(device), "connecting", iface, canStop = true)
         b.onState = { s -> updateBridgeState("RNode BLE", s) }
         b.start()
     }
@@ -663,7 +675,7 @@ object NodeController {
         if (ptr == 0L || wifiDirect != null) return
         val w = WifiDirectBridge(ctx, ptr)
         wifiDirect = w
-        addBridgeState("Wi-Fi Direct", "P2P group + UDP flood", "starting")
+        addBridgeState("Wi-Fi Direct", "P2P group + UDP flood", "starting", canStop = true)
         w.onState = { s -> updateBridgeState("Wi-Fi Direct", s) }
         w.start()
     }
@@ -677,7 +689,7 @@ object NodeController {
         h.onEvent = { msg -> updateBridgeState("Web", msg) }
         h.start()
         webHost = h
-        addBridgeState("Web", "WebSocket / Nostr / WebTorrent host", "up")
+        addBridgeState("Web", "WebSocket / Nostr / WebTorrent host", "up", h.ifaceId, canStop = true)
         return h
     }
 
@@ -781,8 +793,38 @@ object NodeController {
         messages.value = (messages.value + m).takeLast(1000)
     }
 
-    private fun addBridgeState(kind: String, detail: String, status: String) {
-        bridges.value = bridges.value + BridgeState(kind, detail, status)
+    private fun addBridgeState(
+        kind: String,
+        detail: String,
+        status: String,
+        iface: Int? = null,
+        canStop: Boolean = false,
+    ) {
+        bridges.value = bridges.value + BridgeState(kind, detail, status, iface, canStop)
+    }
+
+    /**
+     * Stop and remove a bridge: cancel its pumps, unregister its hub interface, and
+     * drop its row. Only bridges this app registered an interface for can be fully
+     * unregistered; a core-owned bridge (TCP/UDP) has `canStop = false` and never
+     * reaches here from the UI. The interface id is not recycled — a restart gets a
+     * fresh one.
+     */
+    fun stopBridge(state: BridgeState) {
+        when (state.kind) {
+            "Audio modem" -> { audio?.stop(); audio = null }
+            "Meshtastic BLE", "RNode BLE" -> {
+                val b = bleBridges.firstOrNull { it.ifaceId == state.iface }
+                b?.stop()
+                bleBridges.remove(b)
+            }
+            "Wi-Fi Direct" -> { wifiDirect?.stop(); wifiDirect = null }
+            "Web" -> { webHost?.stop(); webHost = null }
+        }
+        if (ptr != 0L) state.iface?.let { SporeNative.nativeUnregisterIface(ptr, it) }
+        // Match the exact row: kind alone isn't unique (two BLE bridges), so key on
+        // the interface too.
+        bridges.value = bridges.value.filterNot { it.kind == state.kind && it.iface == state.iface }
     }
 
     private fun updateBridgeState(kind: String, status: String) {

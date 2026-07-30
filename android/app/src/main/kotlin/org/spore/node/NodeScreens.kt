@@ -429,12 +429,13 @@ internal fun BridgesList() {
 }
 
 /**
- * One bridge: an LED dot, the kind, its status line.
+ * One bridge: an LED dot, the kind, its status line, and — for a bridge this app
+ * can actually stop — a Remove control.
  *
- * The mock draws a switch here. There is no `nativeStopBridge` on the JNI side —
- * the bridge list is append-only by construction — so a switch would be a control
- * that cannot turn anything off. The dot reports state honestly instead, and the
- * toggle lands when the JNI call exists (docs/ANDROID_AUDIT.md §2).
+ * `canStop` is the honest gate (§ VISUALDESIGN / audit "no fake UI"): a bridge we
+ * registered the interface for (Audio, BLE, Wi-Fi Direct, Web) gets a real Remove
+ * that cancels its pumps and unregisters the interface; a core-owned bridge
+ * (TCP/UDP) shows a plain caption instead of a button that would do nothing.
  */
 @Composable
 private fun BridgeRow(b: BridgeState) {
@@ -455,6 +456,10 @@ private fun BridgeRow(b: BridgeState) {
             HGap(6.dp)
             // Never colour alone (§1) — the dot is paired with the status word.
             Caption(label)
+            if (b.canStop) {
+                HGap(6.dp)
+                CrateButton("Remove", { NodeController.stopBridge(b) })
+            }
         }
     }
 }

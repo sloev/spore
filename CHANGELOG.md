@@ -18,6 +18,16 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Bridges can be stopped and removed.** `Hub::unregister(iface)` retires an
+  interface by emptying its slot rather than removing it — ids are never recycled,
+  because `Flood`'s `except` addresses interfaces by index and a shifting vector
+  would silently misroute it. A new `nativeUnregisterIface` JNI call exposes it, and
+  the Android bridge list gets a **Remove** that cancels the bridge's pumps and
+  unregisters its interface (Audio, BLE, Wi-Fi Direct, Web). Core-owned TCP/UDP show
+  no control rather than a dead one — no fake UI. Rust side is unit-tested (stop one
+  of two interfaces, the other keeps its id and traffic); the Android side is
+  compiled by CI, device QA is a PR6 item. Wire unchanged.
+
 - **Android: chat attachments stage until Send, then arrive as one bubble.** Picking
   a file no longer publishes it immediately — it stages in the composer with a
   remove (✕) affordance, and Send produces a single bubble carrying the text and the
