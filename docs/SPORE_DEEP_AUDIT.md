@@ -28,7 +28,7 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — merged (#42); items carried forward | — | PR0, PR1 |
 | **PR3** | Service / Audio / BLE lifecycle | High reliability | ✅ merged (#44) | **PR2** | — |
 | **PR4** | Name others see + local avatar + mesh profile | Medium product | 🟢 4a merged (#45); 4b (mesh pull) in review | — | PR3+ |
-| **PR5** | Store spilled id verify | Medium hardening | ⬜ todo | — | PR0–PR2 |
+| **PR5** | Store spilled id verify | Medium hardening | 🟡 in review | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | ⬜ todo | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | ⬜ todo | PR4 | — |
 | **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | ⬜ todo | — (no core freeze) | PR0–PR7 |
@@ -804,9 +804,9 @@ Confirm exact `Envelope::decode` / `id()` names in `envelope.rs`.
 - Truncated -> None
 
 ## Acceptance
-- [ ] Intact spill loads
-- [ ] Mismatch -> None, no panic
-- [ ] No freeze surface touch
+- [x] Intact spill loads
+- [x] Mismatch -> None, no panic
+- [x] No freeze surface touch (only `src/store.rs`; wire vectors unchanged)
 
 ## CHANGELOG
 ```markdown

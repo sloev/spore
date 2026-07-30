@@ -168,10 +168,25 @@ impl Store {
     /// `None` if we don't hold it — or if a spilled file has gone missing, which
     /// is treated as not holding it rather than as an error, since the mesh can
     /// always be asked again.
+    ///
+    /// A spilled file is **re-verified on every read**, not just when adopted
+    /// (`set_spill_dir`): the spill directory is on disk where the OS, a backup
+    /// tool, or a corrupted sector can change a file after we recorded it, and its
+    /// name is only a claim about its content. Serving bytes whose id no longer
+    /// matches would hand a peer a file that fails its own signature/content check
+    /// and blame us for it (C-ST4). The read is bounded (a valid entry is one
+    /// envelope), the decode must consume exactly the file, and the recomputed id
+    /// must equal the one asked for; anything else reads as "not held" so the mesh
+    /// re-fetches a good copy.
     pub fn wire(&self, id: &Id) -> Option<Vec<u8>> {
         match &self.map.get(id)?.body {
             Body::Mem(w) => Some(w.clone()),
-            Body::Evicted => std::fs::read(self.spill.as_ref()?.join(filename(id))).ok(),
+            Body::Evicted => {
+                let path = self.spill.as_ref()?.join(filename(id));
+                let wire = read_capped(&path, MAX_ADOPT_BYTES).ok()?;
+                let (e, n) = Envelope::decode(&wire).ok()?;
+                (n == wire.len() && e.id() == *id).then_some(wire)
+            }
         }
     }
 
@@ -308,6 +323,52 @@ mod tests {
         std::fs::write(&p, vec![7u8; 1024 * 1024]).unwrap();
         assert!(read_capped(&p, 1024).is_err());
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn spilled_wire_is_verified_against_its_id_on_read() {
+        // C-ST4: the spill dir is on disk, so a file can rot or be swapped after we
+        // recorded it. Its name is only a claim about its content, so `wire` must
+        // re-check the id it reads back and refuse a mismatch rather than serve a
+        // peer bytes that fail their own content check.
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("spore-spillverify-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut store = Store::new();
+        store.set_spill_dir(&dir, 1).unwrap();
+
+        // One envelope, written through to disk, then dropped from memory so `wire`
+        // has to read it back. An unsigned envelope is enough: the id is a hash of
+        // the wire, independent of any signature.
+        let e = Envelope::new(ty::DATA, [9u8; 8], 1_000_000, b"north pier at midnight".to_vec());
+        let wire = e.wire();
+        let id = e.id();
+        store.put(id, wire.clone(), e.expiry, e.stamp(), 0, e.dest);
+        store.set_mem_budget(0); // force eviction to Body::Evicted
+        assert!(matches!(store.map.get(&id).unwrap().body, Body::Evicted), "must be spilled");
+
+        let path = dir.join(filename(&id));
+
+        // Intact spill loads and round-trips.
+        assert_eq!(store.wire(&id).as_deref(), Some(&wire[..]), "intact spill loads");
+
+        // Flip the last byte on disk: recomputed id no longer matches -> not held.
+        let mut corrupt = wire.clone();
+        *corrupt.last_mut().unwrap() ^= 0x01;
+        std::fs::write(&path, &corrupt).unwrap();
+        assert_eq!(store.wire(&id), None, "a corrupted spill reads as not held");
+
+        // Truncated -> decode fails / length mismatch -> not held, no panic.
+        std::fs::write(&path, &wire[..wire.len() / 2]).unwrap();
+        assert_eq!(store.wire(&id), None, "a truncated spill reads as not held");
+
+        // Restore intact bytes -> loads again (the rejection was the content, not state).
+        std::fs::write(&path, &wire).unwrap();
+        assert_eq!(store.wire(&id).as_deref(), Some(&wire[..]), "intact again loads");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
