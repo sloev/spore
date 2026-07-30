@@ -13,6 +13,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -36,8 +38,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -180,14 +186,20 @@ internal fun ChatDetail(peer: String) {
     val thread = remember(messages, peer) { messages.filter { it.peer == peer } }
     val confirm = rememberConfirm()
 
+    // Staged, not sent: picking a file only fills this. Nothing goes on the wire
+    // or into the thread until Send — the file reads as attached to the message
+    // being composed, which is the whole point of the change.
+    var staged by remember(peer) { mutableStateOf<StagedAttachment?>(null) }
+
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
                 val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (c.moveToFirst() && i >= 0) c.getString(i) else null
             } ?: "file.bin"
+            val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
             val data = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (data != null) NodeController.sendFile(peer, name, data)
+            if (data != null) staged = StagedAttachment(name, data, mime)
         }
     }
 
@@ -221,14 +233,42 @@ internal fun ChatDetail(peer: String) {
                 Bubble(m, m.magnet?.let { mg -> transfers.firstOrNull { it.magnet == mg } })
             }
         }
+        // The staged attachment, if any: a chip above the composer with a clear
+        // affordance to drop it before sending.
+        staged?.let { s ->
+            Crate(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (s.mime.startsWith("image/")) "🖼" else "📎", Modifier.padding(end = 8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name, color = Palette.Amber, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Caption("${s.bytes.size / 1024} KB · staged, not sent")
+                    }
+                    CrateButton("✕", { staged = null })
+                }
+            }
+        }
         Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             CrateButton("📎", { pickFile.launch("*/*") })
             ToughbookField(text, { text = it }, Modifier.weight(1f), placeholder = "message…")
             HGap()
             CrateButton(
                 "Send",
-                { NodeController.send(peer, text); text = "" },
-                enabled = text.isNotBlank(),
+                {
+                    val s = staged
+                    if (s != null) {
+                        if (NodeController.sendTextWithAttachment(peer, text, s.name, s.bytes, s.mime)) {
+                            staged = null
+                            text = ""
+                        } else {
+                            confirm("Attachment too large for this node's store — send it smaller")
+                        }
+                    } else {
+                        NodeController.send(peer, text)
+                        text = ""
+                    }
+                },
+                // Send is live with either text or an attachment.
+                enabled = text.isNotBlank() || staged != null,
                 face = Palette.Pink,
                 // Pink face, void ink: 5.58:1. The reverse (pink on olive) is the
                 // one pairing §1 bans outright.
@@ -238,6 +278,9 @@ internal fun ChatDetail(peer: String) {
     }
 }
 
+/** A file chosen in the composer, held until Send (not yet on the wire). */
+internal data class StagedAttachment(val name: String, val bytes: ByteArray, val mime: String)
+
 /**
  * A message as a crate. Sent and received are told apart by *border colour and
  * side*, not by fill — §1 forbids signalling by colour alone, and the alignment
@@ -246,6 +289,9 @@ internal fun ChatDetail(peer: String) {
 @Composable
 private fun Bubble(m: Msg, transfer: Transfer?) {
     val mine = m.mine
+    // Strip the attachment marker from the displayed text; the attachment itself
+    // renders as a preview/chip below rather than as a line of marker syntax.
+    val shownText = remember(m.text) { Markdown.parseAttach(m.text).first }
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
@@ -254,7 +300,11 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
             Crate(edge = if (mine) Palette.Pink else Palette.Edge) {
                 Column {
                     if (!mine) Caption("${if (m.encrypted) "🔒 " else ""}${Petnames.label(m.peer)}")
-                    Text(m.text, color = Palette.Amber)
+                    if (shownText.isNotEmpty()) Text(shownText, color = Palette.Amber)
+                    if (m.magnet != null) {
+                        if (shownText.isNotEmpty()) VGap(6.dp)
+                        Attachment(m.magnet, m.mime, m.text)
+                    }
                     FragmentStatus(m, transfer)
                     Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Caption(timeOf(m.ts))
@@ -312,3 +362,102 @@ private fun FragmentStatus(m: Msg, transfer: Transfer?) {
         }
     }
 }
+
+/**
+ * The attachment part of a bubble: an inline image preview when the file is an
+ * image and its bytes are on disk, otherwise a tappable file chip. Tapping either
+ * hands the file to another app via [openAttachment].
+ *
+ * `path` is null until the file is complete on this device (our own send caches it
+ * immediately; a received file lands when [NodeController.pumpFiles] saves it). No
+ * path means the chip reads as not-here-yet and does not offer Open — the LED in
+ * [FragmentStatus] carries the progress.
+ */
+@Composable
+private fun Attachment(magnet: String, mime: String?, body: String) {
+    val ctx = LocalContext.current
+    val paths by NodeController.filePaths.collectAsState()
+    val path = paths[magnet]
+    val att = remember(body) { Markdown.parseAttach(body).second }
+    val name = att?.name ?: "attachment"
+    val isImage = (mime ?: att?.mime).orEmpty().startsWith("image/")
+    val here = path != null
+
+    if (isImage && here) {
+        val bmp by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, path) {
+            value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeFile(path, bounds)
+                    var scale = 1
+                    while (bounds.outWidth / scale > 1080) scale *= 2
+                    android.graphics.BitmapFactory.decodeFile(
+                        path,
+                        android.graphics.BitmapFactory.Options().apply { inSampleSize = scale },
+                    )
+                }.getOrNull()
+            }
+        }
+        val shown = bmp
+        if (shown != null) {
+            Image(
+                shown.asImageBitmap(),
+                contentDescription = "attached image: $name",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 220.dp)
+                    .border(2.dp, Palette.Edge)
+                    .clickable { openAttachment(ctx, magnet, name, mime ?: att?.mime, path) },
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+            return
+        }
+    }
+
+    // File chip (non-image, or image not decodable / not here yet).
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .border(2.dp, Palette.Edge, CrateShape)
+            .then(if (here) Modifier.clickable { openAttachment(ctx, magnet, name, mime ?: att?.mime, path) } else Modifier)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (isImage) "🖼" else "📎", Modifier.padding(end = 8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, color = Palette.Amber, maxLines = 1)
+            Caption(if (here) "tap to open" else "fetching…")
+        }
+    }
+}
+
+/**
+ * Hand a completed attachment to another app.
+ *
+ * The bytes are copied into `cacheDir/attachments/<magnet>` (reclaimable, never
+ * world-readable) and shared through a `FileProvider` content URI with a one-shot
+ * read grant — never a `file://` path, which modern Android rejects and which would
+ * expose the private store. `path` is the local copy when we have one; otherwise we
+ * ask the core to open the file from its store.
+ */
+private fun openAttachment(ctx: android.content.Context, magnet: String, name: String, mime: String?, path: String?) {
+    runCatching {
+        val dir = File(ctx.cacheDir, "attachments/${magnet.take(16)}").apply { mkdirs() }
+        val out = File(dir, safeName(name))
+        if (!out.exists() || out.length() == 0L) {
+            val bytes = path?.let { File(it).takeIf(File::exists)?.readBytes() }
+                ?: NodeController.openAttachmentBytes(magnet)
+                ?: return
+            out.writeBytes(bytes)
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", out)
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime ?: "application/octet-stream")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        ctx.startActivity(Intent.createChooser(intent, "Open $name"))
+    }.onFailure { android.util.Log.w("spore", "could not open attachment", it) }
+}
+
+/** '/' and friends sanitised away so a sender's name can't escape the directory. */
+private fun safeName(name: String): String =
+    name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "file.bin" }

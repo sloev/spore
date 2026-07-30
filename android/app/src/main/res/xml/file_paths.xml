@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paths the FileProvider (AndroidManifest.xml) may hand to other apps.
+
+     Exactly one: the attachments cache, where openAttachment() writes a
+     reclaimable copy for sharing. Nothing else is vendable — not the external
+     files dir, not `store`, not the encrypted prefs. The provider surface is the
+     copy made for the share and no more. -->
+<paths>
+    <cache-path name="attachments" path="attachments/" />
+</paths>

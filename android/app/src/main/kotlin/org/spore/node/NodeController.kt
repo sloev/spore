@@ -25,6 +25,10 @@ data class Msg(
     // rather than being copied in here, so one poll updates every bubble that
     // shows it and the two can never disagree.
     val magnet: String? = null,
+    // Mime type of the attachment, from the body marker. Decides whether the
+    // bubble renders an inline image or a file chip; null when there is no
+    // attachment.
+    val mime: String? = null,
     val ts: Long = System.currentTimeMillis(),
 )
 
@@ -341,10 +345,25 @@ object NodeController {
                 return
             }
             lastFileSender = thread
-            append(Msg(thread, "📎 incoming file…", mine = false, verified = true, encrypted = sealed))
+            // A sealed file is a DM attachment: its sender also sends a marker text
+            // body, and that bubble is the one that shows the file, its preview and
+            // its chunk status. Announcing "incoming file…" as well would be the
+            // second contextless bubble this PR exists to remove. A public/unsealed
+            // file has no marker sender, so it still gets the status line.
+            if (!sealed) {
+                append(Msg(thread, "📎 incoming file…", mine = false, verified = true, encrypted = sealed))
+            }
             return
         }
-        append(Msg(thread, payload.toString(Charsets.UTF_8), mine = false, verified = ok, encrypted = sealed))
+        // Plain text — but it may carry an attachment marker. Parse it so the
+        // receiver's bubble previews and Opens exactly like the sender's; the body
+        // is stored whole (the bubble strips the marker for display).
+        val body = payload.toString(Charsets.UTF_8)
+        val (_, att) = Markdown.parseAttach(body)
+        append(
+            Msg(thread, body, mine = false, verified = ok, encrypted = sealed,
+                magnet = att?.magnet, mime = att?.mime)
+        )
     }
 
     /**
@@ -353,18 +372,29 @@ object NodeController {
      * ANNOUNCE, and asks for a delivery receipt; a broadcast can be neither.
      */
     fun send(peer: String, text: String) {
-        if (ptr == 0L || text.isEmpty()) return
+        if (text.isEmpty()) return
+        sendBody(peer, text, magnet = null, mime = null)
+    }
+
+    /**
+     * Send a UTF-8 body and append the sender's own bubble. Shared by plain text
+     * and by attachment sends; `magnet`/`mime` are stamped onto the appended [Msg]
+     * so an attachment bubble previews and shows chunk status, and are null for
+     * ordinary text. A public post floods; a DM is sealed and receipted.
+     */
+    private fun sendBody(peer: String, body: String, magnet: String?, mime: String?) {
+        if (ptr == 0L || body.isEmpty()) return
         val dest = destOf(peer) ?: return
-        val bytes = text.toByteArray(Charsets.UTF_8)
+        val bytes = body.toByteArray(Charsets.UTF_8)
         if (peer == Petnames.PUBLIC) {
             val n = SporeNative.nativeSendCounted(ptr, dest, bytes)
-            append(Msg(peer, text, mine = true, verified = true, fragments = n))
+            append(Msg(peer, body, mine = true, verified = true, fragments = n, magnet = magnet, mime = mime))
             return
         }
         val res = SporeNative.nativeSendDirect(ptr, dest, bytes)?.split(':')
         val id = res?.getOrNull(0)
         val enc = res?.getOrNull(1) == "1"
-        append(Msg(peer, text, mine = true, verified = true, encrypted = enc, id = id))
+        append(Msg(peer, body, mine = true, verified = true, encrypted = enc, id = id, magnet = magnet, mime = mime))
     }
 
     /**
@@ -374,12 +404,41 @@ object NodeController {
      * To a known peer it is **sealed** — contents *and* file name — so relays
      * carrying the chunks learn neither.
      */
-    fun sendFile(peer: String, name: String, data: ByteArray) {
-        if (ptr == 0L || data.isEmpty()) return
+    /**
+     * Send a message that carries an attachment as one bubble.
+     *
+     * Two envelopes go out: the file's manifest+chunks (published first, sealed to
+     * the peer when known), and a DATA body ending in the canonical marker
+     * `📎 name | spore:<magnet> | mime`. Both sender and receiver render that one
+     * body — the marker drives the inline preview, the "Open" action, and the
+     * chunk status — so a file no longer arrives as a separate, contextless bubble.
+     *
+     * `text` may be blank (attachment only). Returns false if the file is refused
+     * (empty or over the store budget) so the composer can say why and keep the
+     * staged file rather than silently dropping it.
+     */
+    fun sendTextWithAttachment(peer: String, text: String, name: String, data: ByteArray, mime: String): Boolean {
+        val magnet = publishAttachment(peer, name, data) ?: return false
+        val marker = Markdown.attachMarker(name, magnet, mime)
+        val body = if (text.isBlank()) marker else "$text\n\n$marker"
+        sendBody(peer, body, magnet, mime)
+        return true
+    }
+
+    /**
+     * Publish a file's manifest + chunks and return its magnet, or null if refused.
+     *
+     * Publish-only: appends no chat bubble (the caller's [sendBody] does that) and
+     * caches a local copy so the sender can preview and Open their own attachment,
+     * since our own file never comes back to us through the mesh. The cache write
+     * is off the UI thread — this is called from a picker callback and an image is
+     * megabytes.
+     */
+    private fun publishAttachment(peer: String, name: String, data: ByteArray): String? {
+        if (ptr == 0L || data.isEmpty()) return null
         // Manifests are trees now, so a file's size is bounded by the store every
         // chunk has to sit in — not by what one envelope can list. Refuse clearly
-        // rather than publishing chunks we would immediately evict and then be
-        // unable to serve.
+        // rather than publishing chunks we would immediately evict.
         val cap = maxFileBytes()
         if (data.size > cap) {
             append(
@@ -387,23 +446,30 @@ object NodeController {
                     "about ${cap / 1024 / 1024} MB per file. Send it in parts.",
                     mine = true, verified = true)
             )
-            return
+            return null
         }
         val destHex = if (peer == Petnames.PUBLIC) "" else peer
-        val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return
-        val sealed = res.getOrNull(1) == "1"
-        val magnet = res.getOrNull(0)?.takeIf { it.isNotBlank() }
-        magnet?.let { savedMagnets.add(it) } // never re-save our own file
-        val how = if (sealed) "sealed" else "signed, not encrypted"
-        append(
-            Msg(peer, "📎 shared $name (${data.size / 1024} KB · $how)",
-                mine = true, verified = true, encrypted = sealed, magnet = magnet)
-        )
-        // The chunk count arrives with the next housekeeping tick. Deliberately not
-        // refreshed inline: this runs on the UI thread from a picker callback, and
-        // `pumpFiles` scans every known manifest and can write files to disk. The
-        // bubble says "counting chunks" until the tick lands, which is a second of
-        // honest uncertainty rather than a frame drop on the main thread.
+        val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return null
+        val magnet = res.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return null
+        savedMagnets.add(magnet) // never re-save our own file
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                val f = File(imageDir(), safeName(name))
+                f.writeBytes(data)
+                filePaths.value = filePaths.value + (magnet to f.absolutePath)
+            }.onFailure { android.util.Log.w("spore", "could not cache sent attachment", it) }
+        }
+        return magnet
+    }
+
+    /**
+     * The plaintext bytes of a completed attachment, or null if it isn't fully
+     * here (or is sealed to someone else). For the viewer's copy-to-cache path;
+     * the core decrypts a sealed file it can open.
+     */
+    fun openAttachmentBytes(magnet: String): ByteArray? {
+        if (ptr == 0L) return null
+        return SporeNative.nativeOpenFile(ptr, magnet)
     }
 
     /** Largest file we can share right now (store-bound, minus sealing overhead). */
@@ -441,11 +507,13 @@ object NodeController {
             val written = SporeNative.nativeSaveFile(ptr, magnet, f.absolutePath)
             savedMagnets.add(magnet)
             if (written >= 0) filePaths.value = filePaths.value + (magnet to f.absolutePath)
-            // A file some post already points at is that post's attachment, not a
-            // separate thing that happened. Announcing it in a chat thread as well
-            // would report one arrival twice, in a conversation that had nothing
-            // to do with it.
-            if (posts.value.any { Markdown.imageMagnet(it.text) == magnet }) continue
+            // A file some message already points at — a feed post's image or a
+            // chat attachment marker — is that message's attachment, not a separate
+            // arrival. The save above still recorded its path for preview/Open; we
+            // only skip announcing it a second time.
+            if (posts.value.any { Markdown.imageMagnet(it.text) == magnet } ||
+                messages.value.any { it.magnet == magnet }
+            ) continue
             append(
                 Msg(
                     lastFileSender,
