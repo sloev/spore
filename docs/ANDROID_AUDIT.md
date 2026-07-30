@@ -374,3 +374,14 @@ Listed so it is not mistaken for a clean bill:
   Android SDK in the environment this was written in, so the only build feedback is
   what `android.yml` reports after a push. The manifest that did not parse (§0) is
   what that costs, and it is a compile error; a runtime one would have been quieter.
+
+## 6. On-device checklist
+
+The tests a device settles and CI cannot — fresh install, upgrade, seed reveal,
+**backup/transfer exclusion of the identity**, a 24–48 h soak, and the 7-day
+forward-secrecy window — are written up as a repeatable checklist in
+[`../android/TESTING.md`](../android/TESTING.md), with a History section to record
+each run (device, OS, APK commit, result). It ships ahead of a hardware run: the
+rows are the claims still marked unverified above, so a passing build is not
+mistaken for a passing device. The radio/air-interface paths keep their own
+checklist in [`HARDWARE.md`](HARDWARE.md).

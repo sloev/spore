@@ -27,9 +27,9 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — merged (#42); items carried forward | — | PR0, PR1 |
 | **PR3** | Service / Audio / BLE lifecycle | High reliability | ✅ merged (#44) | **PR2** | — |
-| **PR4** | Name others see + local avatar + mesh profile | Medium product | 🟢 4a merged (#45); 4b (mesh pull) in review | — | PR3+ |
-| **PR5** | Store spilled id verify | Medium hardening | 🟡 in review | — | PR0–PR2 |
-| **PR6** | Device matrix + HARDWARE honesty | Process | ⬜ todo | PR0–PR3 ideally | — |
+| **PR4** | Name others see + local avatar + mesh profile | Medium product | ✅ 4a merged (#45); 4b (mesh pull) merged (#46) | — | PR3+ |
+| **PR5** | Store spilled id verify | Medium hardening | ✅ merged (#47) | — | PR0–PR2 |
+| **PR6** | Device matrix + HARDWARE honesty | Process | 🟡 docs in review; on-device runs deferred to hardware QA | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | ⬜ todo | PR4 | — |
 | **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | ⬜ todo | — (no core freeze) | PR0–PR7 |
 | **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | ⬜ todo | — | PR2 helpful for stop/unregister |
@@ -841,12 +841,16 @@ Run procedure for one of Meshtastic BLE or RNode **or** demote README/APPS radio
 Docs site + app Advanced/About short FS blurb (prekey 7d; ratchet age-bounded after PR0).
 
 ## Acceptance
-- [ ] Checklist exists; backup + migration run once on hardware
-- [ ] HARDWARE results **or** marketing demoted
+- [x] Checklist exists (`android/TESTING.md`, 7 rows + History), linked from ANDROID_AUDIT §6
+- [ ] Backup + migration run once on hardware — **deferred to hardware QA** (no device in CI)
+- [x] Marketing already honest: README caveats radios ("need real hardware to test"),
+      HARDWARE.md marks every radio 🧪 with a History section — no demotion needed
+- [x] Forward-secrecy blurb in the app's About card
 
 ## CHANGELOG
 ```markdown
-- Docs: Android device-test checklist; HARDWARE.md [results or honesty pass].
+- Docs: Android device-test checklist; app forward-secrecy blurb. Radio readiness
+  already honest (HARDWARE.md 🧪 + History); on-device runs remain for hardware QA.
 ```
 
 ---

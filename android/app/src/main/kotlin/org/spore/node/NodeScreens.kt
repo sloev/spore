@@ -316,7 +316,9 @@ internal fun AdvancedScreen(addr: String) {
                 Column {
                     DisplayHeading("About", size = 15)
                     Caption("SPORE — store-and-forward planetary opportunistic relay envelope. This phone is a full node: it signs, relays, and delivers across every enabled bridge. Public domain. 🍄")
-                }
+                    VGap(6.dp)
+                    Caption("Forward secrecy: the keys others seal mail to (prekeys) rotate on a 7-day window, and a conversation's keys ratchet forward per message — a key kept to decrypt an out-of-order message is dropped after 7 days too. Losing today's device doesn't expose messages older than that window. Your seed is stored in Android's encrypted preferences and excluded from cloud/adb backup.")
+}
             }
         }
     }
