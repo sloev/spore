@@ -18,6 +18,14 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **S-024a:** the Double Ratchet's skipped-key cache is now age-bounded (seven days,
+  `SKIP_TTL_SECS = PREKEY_LIFETIME_SECS`) and zeroized on drop, closing the last
+  forward-secrecy gap in core crypto. `decrypt`/`skip` take `now`; expired keys are
+  purged before use. The session layer and the seal layer now read the same window,
+  so SPEC §7's seven-day claim matches the code rather than only the prose. Wire
+  unchanged — the ratchet is not on the frozen surface. Field-verification of the
+  window on a device is tracked for a later PR.
+
 - **`main.rs` dropped from 799 to 38 lines**, finishing task #23. The CLI binary's
   three concerns moved into `src/cli/{sim,config,run}.rs` — the in-memory demo, the
   config parser, and the config-driven daemon — leaving `main.rs` as just `main()`
