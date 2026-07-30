@@ -329,6 +329,7 @@ before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
 | `CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
+| `docs/DIRECT.md` | SPORE Direct — the negotiated, non-routed E2E datagram pipe for low-latency media |
 
 ## License
 

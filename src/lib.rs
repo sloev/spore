@@ -467,6 +467,11 @@ pub mod bundle;
 // per-medium modules; each only moves envelope bytes in and out of a `Node`.
 pub mod bridge;
 
+// SPORE Direct — a negotiated, non-routed, end-to-end encrypted datagram pipe for
+// low-latency media between two identities. An application profile on top of the
+// existing sealed+signed unicast path; no envelope/store/hub/wire changes.
+pub mod direct;
+
 // C ABI for the Python / Go / JS wrappers under `bindings/`.
 pub mod ffi;
 

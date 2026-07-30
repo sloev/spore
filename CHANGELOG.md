@@ -18,6 +18,22 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **SPORE Direct: a negotiated, non-routed, end-to-end encrypted datagram pipe for
+  low-latency media.** Store-and-forward is the wrong plane for voice or a live
+  terminal, where holding a frame for relay adds exactly the latency you're avoiding.
+  Direct is the other plane: two identities agree on the mesh (an `SPDR` OFFER/ANSWER
+  carried over the existing sealed+signed `send_direct`) on a medium and an ephemeral
+  X25519 key, then talk **directly** over an underlay with a ChaCha20-Poly1305 record.
+  Keys bind both addresses, the pipe id, and the medium, so a record only opens for
+  the exact pair that negotiated it, and the header is authenticated so a flipped
+  type/seq fails the MAC. This first increment is the **pure protocol core** —
+  negotiation codec, key schedule, record, medium selection, a `DatagramPort` trait +
+  in-memory `Loopback`, and the `Pipe` — fully unit-tested end to end
+  (`examples/direct_loopback.rs`, `docs/DIRECT.md`). It is an application profile: **no
+  envelope/store/hub/wire-format change** (golden vectors byte-identical), and it
+  compiles everywhere the core does, wasm included. Real socket adapters (UDP/TCP/BLE)
+  and the mesh signalling glue are follow-ups — transport, not protocol.
+
 - **Android: the JNI audio-output queue is bounded.** The demodulator's completed
   frames sat in an unbounded queue — the mic thread fills it continuously while the
   poll loop drains one frame per tick, so a stalled consumer (or a fast/hostile
