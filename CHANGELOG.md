@@ -18,6 +18,14 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: the JNI audio-output queue is bounded.** The demodulator's completed
+  frames sat in an unbounded queue — the mic thread fills it continuously while the
+  poll loop drains one frame per tick, so a stalled consumer (or a fast/hostile
+  audio feed) could grow it without limit. It now caps at 64 frames and drops the
+  oldest on overflow: a demod backlog is stale audio, not data worth keeping, so the
+  freshest frames win. Same "bound every cache" hardening as the store and neighbour
+  caps.
+
 - **Docs: an Android device-test checklist, and a forward-secrecy note in the app.**
   New `android/TESTING.md` is the repeatable procedure for the things CI can't prove
   because they need a real device — fresh install, upgrade, seed reveal, that the
