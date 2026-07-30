@@ -11,8 +11,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,14 +30,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Meet someone: show them your QR, or scan/paste theirs. An invite carries your
@@ -179,9 +188,26 @@ internal fun AdvancedScreen(addr: String) {
     val confirm = rememberConfirm()
     val myName by NodeController.myName.collectAsState()
     var editName by remember(myName) { mutableStateOf(myName) }
+    val avatarPath by NodeController.myAvatarPath.collectAsState()
     val nearby by NodeController.peers.collectAsState()
     val stored by NodeController.storeCount.collectAsState()
     val resumed by NodeController.resumed.collectAsState()
+    val ctx = LocalContext.current
+    val confirmAvatar = rememberConfirm()
+
+    // Pick an image, downscale it off the main thread, hand the small bytes to the
+    // controller. Capped hard (max edge 256 px, JPEG) so an avatar is cheap to
+    // store now and cheap to flood in PR4b.
+    val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes != null) {
+                val small = downscaleAvatar(bytes)
+                if (small != null && NodeController.setAvatar(small)) confirmAvatar("Photo updated")
+                else confirmAvatar("Could not read that image")
+            }
+        }
+    }
 
     LazyColumn(
         Modifier.padding(12.dp).fillMaxSize(),
@@ -190,8 +216,25 @@ internal fun AdvancedScreen(addr: String) {
         item {
             Crate(Modifier.fillMaxWidth()) {
                 Column {
-                    DisplayHeading("You", size = 15)
-                    Caption("Announced to nodes in range as a suggested petname. A hint, not an identity.")
+                    // "Name others see" — the field is public-facing, so frame it as
+                    // what a peer will call you by, not as a private setting.
+                    DisplayHeading("Name others see", size = 15)
+                    Caption("Announced to nodes in range as a suggested petname and shown with your posts. A hint, not an identity.")
+                    VGap()
+                    // Live preview: the avatar + name exactly as a peer's Nearby row
+                    // renders them (ChatsList uses the same letter fallback).
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ProfilePic(avatarPath, editName.ifBlank { addr }, 44)
+                        HGap()
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                editName.trim().take(32).ifBlank { "…${addr.takeLast(6)}" },
+                                color = Palette.Amber, fontWeight = FontWeight.Bold, maxLines = 1,
+                            )
+                            Caption("this is how you appear to others")
+                        }
+                        CrateButton(if (avatarPath == null) "Add photo" else "Change", { pickAvatar.launch("image/*") })
+                    }
                     VGap()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ToughbookField(editName, { editName = it }, Modifier.weight(1f), placeholder = "name")
@@ -463,3 +506,67 @@ private fun BridgeRow(b: BridgeState) {
         }
     }
 }
+
+/**
+ * A profile picture: the avatar image at [path] if present, else the same kevlar
+ * letter tile [ChatsList]'s Nearby rows use, so a node with no photo still reads
+ * as itself. Square tile with the machined-metal border, per VISUALDESIGN §3.
+ */
+@Composable
+internal fun ProfilePic(path: String?, name: String, size: Int = 34) {
+    if (path != null) {
+        val bmp by produceState<android.graphics.Bitmap?>(null, path) {
+            value = withContext(Dispatchers.IO) {
+                runCatching { android.graphics.BitmapFactory.decodeFile(path) }.getOrNull()
+            }
+        }
+        val shown = bmp
+        if (shown != null) {
+            Image(
+                shown.asImageBitmap(),
+                contentDescription = "profile picture",
+                modifier = Modifier.size(size.dp).border(2.dp, Palette.Edge, CrateShape),
+                contentScale = ContentScale.Crop,
+            )
+            return
+        }
+    }
+    Box(
+        Modifier.size(size.dp).background(Palette.Kevlar, CrateShape).border(2.dp, Palette.Edge, CrateShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        // Amber on kevlar is 4.48:1 — large text only (§1), which a bold initial is.
+        Text(name.firstOrNull()?.uppercase() ?: "?", color = Palette.Amber, fontWeight = FontWeight.Bold)
+    }
+}
+
+/**
+ * Decode picked image bytes and re-encode a small JPEG (max edge 256 px). Returns
+ * null if the bytes aren't a decodable image. `inSampleSize` keeps the initial
+ * decode cheap — a phone photo is tens of megapixels — then an exact scale hits
+ * the 256 px cap, so an avatar stays a few KB whether it's cached (PR4a) or floods
+ * the mesh (PR4b).
+ */
+private fun downscaleAvatar(bytes: ByteArray): ByteArray? = runCatching {
+    val max = 256
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    var sample = 1
+    while (bounds.outWidth / sample > max * 2 || bounds.outHeight / sample > max * 2) sample *= 2
+    val decoded = android.graphics.BitmapFactory.decodeByteArray(
+        bytes, 0, bytes.size,
+        android.graphics.BitmapFactory.Options().apply { inSampleSize = sample },
+    ) ?: return@runCatching null
+    val scale = (max.toFloat() / maxOf(decoded.width, decoded.height)).coerceAtMost(1f)
+    val out = if (scale < 1f) {
+        android.graphics.Bitmap.createScaledBitmap(
+            decoded, (decoded.width * scale).toInt().coerceAtLeast(1),
+            (decoded.height * scale).toInt().coerceAtLeast(1), true,
+        )
+    } else {
+        decoded
+    }
+    val baos = java.io.ByteArrayOutputStream()
+    out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, baos)
+    baos.toByteArray()
+}.getOrNull()
