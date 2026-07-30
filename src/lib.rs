@@ -952,6 +952,7 @@ mod tests {
 
     #[test]
     fn double_ratchet_bidirectional_and_out_of_order() {
+        let now = 1_700_000_000; // fixed clock; this test is about ordering, not expiry
         let (a_sec, a_pub) = ratchet::keypair();
         let (b_sec, b_pub) = ratchet::keypair();
         let mut alice = ratchet::Ratchet::init_alice(a_sec, b_pub);
@@ -959,20 +960,20 @@ mod tests {
 
         // Alice -> Bob (bootstraps Bob's receiving chain).
         let m1 = alice.encrypt(b"hello bob");
-        assert_eq!(bob.decrypt(&m1).as_deref(), Some(&b"hello bob"[..]));
+        assert_eq!(bob.decrypt(&m1, now).as_deref(), Some(&b"hello bob"[..]));
 
         // Bob -> Alice (turns the ratchet in both directions).
         let r1 = bob.encrypt(b"hi alice");
-        assert_eq!(alice.decrypt(&r1).as_deref(), Some(&b"hi alice"[..]));
+        assert_eq!(alice.decrypt(&r1, now).as_deref(), Some(&b"hi alice"[..]));
 
         // Alice -> Bob, delivered out of order: the later one first.
         let m2 = alice.encrypt(b"one");
         let m3 = alice.encrypt(b"two");
-        assert_eq!(bob.decrypt(&m3).as_deref(), Some(&b"two"[..]), "arrives first");
-        assert_eq!(bob.decrypt(&m2).as_deref(), Some(&b"one"[..]), "skipped key recovers it");
+        assert_eq!(bob.decrypt(&m3, now).as_deref(), Some(&b"two"[..]), "arrives first");
+        assert_eq!(bob.decrypt(&m2, now).as_deref(), Some(&b"one"[..]), "skipped key recovers it");
 
         // A replay of an already-consumed message is rejected.
-        assert!(bob.decrypt(&m1).is_none(), "replay rejected");
+        assert!(bob.decrypt(&m1, now).is_none(), "replay rejected");
     }
 
     #[test]

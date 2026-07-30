@@ -973,6 +973,18 @@ but, as its own `Cargo.toml` comment says, only to pin a transitive version; no 
 uses it. §7 now states what the implementation does. Giving it the 7-day property
 means threading time into `Ratchet`, which touches its whole API.
 
+**Fixed (S-024a), PR0.** `decrypt` and the internal `skip` now take `now`, each
+skipped key is banked with its `inserted_at`, and `purge_skipped` drops (and
+zeroizes) any older than `SKIP_TTL_SECS` — defined as `crate::PREKEY_LIFETIME_SECS`
+so the session layer and the seal layer promise the *same* seven days rather than
+drifting. `Ratchet` and `SkippedKey` gained `Drop` impls that zeroize the root key,
+both chain keys, the DH secret, and every cached message key. Two tests pin the
+behaviour (`skipped_keys_expire_after_ttl`, `skipped_keys_live_inside_ttl`); the
+existing count-bound and absurd-gap tests still hold. The ratchet is not in the
+frozen API surface, so this touched no frozen file. **Field-verification** of the
+window end-to-end on a device remains open and is tracked for PR6 — the unit tests
+prove the deadline logic, not that a real node's clock and delivery behave.
+
 **(b) `mark_seen` ignores the 30-day dedup floor.** The spec's defaults line
 promises *"seen-set ≥ 30 d"*. `ingest` honours it —
 `e.expiry.max(now + SEEN_MIN_SECS)`. Its twin `mark_seen`, used by all fifteen
@@ -1373,9 +1385,10 @@ Carried deliberately, not overlooked.
 
 - **Ratchet, mix and lock ordering** are unreviewed: deeper state machines, but
   less "anyone on the medium can crash you" than the items above.
-- **The ratchet's skipped-key cache is count-bounded, not age-bounded** (S-024a).
-  Threading time into `Ratchet` would give it the 7-day window §7 originally
-  claimed. Nothing is zeroised on drop anywhere in the crate.
+- ~~**The ratchet's skipped-key cache is count-bounded, not age-bounded** (S-024a).~~
+  **Fixed in PR0:** the cache is now age-bounded to seven days
+  (`SKIP_TTL_SECS = PREKEY_LIFETIME_SECS`) and both `Ratchet` and its skipped keys
+  zeroize on drop. Field-verification of the window on hardware is still open (PR6).
 - **`mark_seen` vs `ingest`** disagree about the 30-day dedup floor (S-024b). Not
   exploitable, but one of them is doing nothing and says otherwise.
 - **Beacon cadence is fixed but unmeasured on radio.** S-023 makes the daemon obey
