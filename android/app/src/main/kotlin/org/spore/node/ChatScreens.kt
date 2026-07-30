@@ -14,7 +14,6 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -52,6 +50,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
     val messages by NodeController.messages.collectAsState()
     val names by Petnames.map.collectAsState()
     val nearby by NodeController.peers.collectAsState()
+    val avatars by NodeController.peerAvatarPath.collectAsState()
     var newPeer by remember { mutableStateOf("") }
 
     val threads = remember(messages, names) {
@@ -92,7 +91,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                         ?: Petnames.label(p.addr)
                     Crate(Modifier.fillMaxWidth().clickable { open(p.addr) }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Avatar(shown)
+                            ProfilePic(avatars[p.addr], shown)
                             HGap(10.dp)
                             Column(Modifier.weight(1f)) {
                                 Text(shown, color = Palette.Amber, fontWeight = FontWeight.Bold)
@@ -119,7 +118,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                 // left out rather than faked. Time and last line carry the row.
                 Crate(Modifier.fillMaxWidth().clickable { open(peer) }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(Petnames.label(peer))
+                        ProfilePic(avatars[peer], Petnames.label(peer))
                         HGap(10.dp)
                         Column(Modifier.weight(1f)) {
                             Row {
@@ -154,25 +153,6 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                 }
             }
         }
-    }
-}
-
-/** Initial in a kevlar tile — the mock's peer avatar. */
-@Composable
-private fun Avatar(name: String, size: Int = 34) {
-    Box(
-        Modifier
-            .size(size.dp)
-            .background(Palette.Kevlar, CrateShape)
-            .border(2.dp, Palette.Edge, CrateShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        // Amber on kevlar is 4.48:1 — large text only (§1), which a bold initial is.
-        Text(
-            name.firstOrNull()?.uppercase() ?: "?",
-            color = Palette.Amber,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 

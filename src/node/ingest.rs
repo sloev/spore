@@ -261,9 +261,14 @@ impl Node {
                     }
                 }
                 Some(rpc::RESPONSE_TAG) => {
-                    if let Some((id, resp)) = rpc::decode_response(&e.payload) {
-                        if self.rpc_pending.remove(&id) {
-                            self.rpc_responses.insert(id, resp);
+                    // Only an authenticated (signed) reply can be trusted to a
+                    // sender; an unsigned one names nobody, so it can't be checked
+                    // against the service that was asked and is dropped.
+                    if let Src::Full(pk) = &e.src {
+                        if let Some((id, resp)) = rpc::decode_response(&e.payload) {
+                            if self.rpc_pending.remove(&id) {
+                                self.rpc_responses.insert(id, (addr_of(pk), resp));
+                            }
                         }
                     }
                 }

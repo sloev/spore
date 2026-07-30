@@ -295,6 +295,15 @@ impl Node {
 
     /// Take the response to `id` if it has arrived.
     pub fn take_response(&mut self, id: u64) -> Option<rpc::Response> {
+        self.rpc_responses.remove(&id).map(|(_, r)| r)
+    }
+
+    /// Take the response to `id` along with its **authenticated** sender — the
+    /// address whose key signed the reply. A caller that knows which service it
+    /// asked can reject a reply that came from anyone else (a flooded response
+    /// is forgeable by any node that saw the request id, so this check is what
+    /// makes a pulled record trustworthy).
+    pub fn take_response_from(&mut self, id: u64) -> Option<(Addr, rpc::Response)> {
         self.rpc_responses.remove(&id)
     }
 

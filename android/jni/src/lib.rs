@@ -1153,3 +1153,128 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdpLimited(
         let _ = spore::bridge::udp::run(hub, iface, rx, port);
     });
 }
+
+// -- L4 request/response (used app-side for the profile pull) -----------------
+//
+// These expose the core's existing RPC layer to Kotlin without adding anything
+// to the wire: a REQUEST/RESPONSE is an ordinary signed DATA envelope, so the
+// profile feature is entirely an application on top of primitives the frozen
+// protocol already ships. The app defines the request path and the reply body
+// format; this glue only carries bytes and preserves the reply's authenticated
+// sender so the app can reject a forged one.
+
+/// Ask `dest` for `path` (method is always GET here). Returns the request id to
+/// match the reply with [`nativeRpcTakeResponse`], or 0 on a bad address.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRpcRequest(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    dest: JByteArray,
+    path: JString,
+    body: JByteArray,
+) -> jlong {
+    let Some(r) = rt(ptr) else { return 0 };
+    let d = env.convert_byte_array(&dest).unwrap_or_default();
+    if d.len() != 8 {
+        return 0;
+    }
+    let mut addr = [0u8; 8];
+    addr.copy_from_slice(&d);
+    let path: String = env.get_string(&path).map(|s| s.into()).unwrap_or_default();
+    let body = env.convert_byte_array(&body).unwrap_or_default();
+    let req = spore::rpc::Request { method: "GET".into(), path, body };
+    let now = spore::bridge::hub::now();
+    let (id, forwards) = r.hub.with_node(|n| n.request(addr, req, now));
+    r.hub.originate(forwards);
+    id as jlong
+}
+
+/// Drain requests delivered to us as a service, or null if there are none.
+/// Each is packed as `from[8] · id[8 BE] · pathLen[2 BE] · path · bodyLen[4 BE]
+/// · body`, concatenated; Kotlin walks the buffer.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRpcPollRequests(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jbyteArray {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let reqs = r.hub.with_node(|n| n.poll_requests());
+    if reqs.is_empty() {
+        return std::ptr::null_mut();
+    }
+    let mut out = Vec::new();
+    for (from, id, req) in reqs {
+        out.extend_from_slice(&from);
+        out.extend_from_slice(&id.to_be_bytes());
+        let pb = req.path.as_bytes();
+        out.extend_from_slice(&(pb.len().min(u16::MAX as usize) as u16).to_be_bytes());
+        out.extend_from_slice(&pb[..pb.len().min(u16::MAX as usize)]);
+        out.extend_from_slice(&(req.body.len() as u32).to_be_bytes());
+        out.extend_from_slice(&req.body);
+    }
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+/// Reply to request `req_id` from `to` with `status` and `body`.
+///
+/// A reply can be tens of KB (a profile carries an avatar), which does not fit
+/// one envelope, so — unlike the core's `respond` — this sends the RESPONSE
+/// payload through the fountain-fragmenting `send` path. The receiver reassembles
+/// it and re-enters the RPC demux exactly as a one-shot reply would. The payload
+/// bytes match `rpc::encode_response`: `[0x03][id:8 BE][status:2 BE][body]`.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRpcRespond(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    to: JByteArray,
+    req_id: jlong,
+    status: jint,
+    body: JByteArray,
+) {
+    let Some(r) = rt(ptr) else { return };
+    let d = env.convert_byte_array(&to).unwrap_or_default();
+    if d.len() != 8 {
+        return;
+    }
+    let mut addr = [0u8; 8];
+    addr.copy_from_slice(&d);
+    let body = env.convert_byte_array(&body).unwrap_or_default();
+    let mut payload = Vec::with_capacity(11 + body.len());
+    payload.push(spore::rpc::RESPONSE_TAG);
+    payload.extend_from_slice(&(req_id as u64).to_be_bytes());
+    payload.extend_from_slice(&(status.max(0) as u16).to_be_bytes());
+    payload.extend_from_slice(&body);
+    let now = spore::bridge::hub::now();
+    if let Ok(forwards) = r.hub.with_node(|n| n.send(addr, payload, now)) {
+        r.hub.originate(forwards);
+    }
+}
+
+/// Take the reply to `req_id` if it has arrived, packed as
+/// `from[8] · status[2 BE] · body`; null if nothing has come back yet. `from` is
+/// the reply's **authenticated** sender — the app checks it equals the address it
+/// asked, so a flooded forgery for a contact's profile is rejected.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeRpcTakeResponse(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    req_id: jlong,
+) -> jbyteArray {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let Some((from, resp)) = r.hub.with_node(|n| n.take_response_from(req_id as u64)) else {
+        return std::ptr::null_mut();
+    };
+    let mut out = Vec::with_capacity(10 + resp.body.len());
+    out.extend_from_slice(&from);
+    out.extend_from_slice(&resp.status.to_be_bytes());
+    out.extend_from_slice(&resp.body);
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}

@@ -27,7 +27,7 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — merged (#42); items carried forward | — | PR0, PR1 |
 | **PR3** | Service / Audio / BLE lifecycle | High reliability | ✅ merged (#44) | **PR2** | — |
-| **PR4** | Name others see + local avatar | Medium product | 🟡 4a in review (#45); 4b (mesh record) to follow | — | PR3+ |
+| **PR4** | Name others see + local avatar + mesh profile | Medium product | 🟢 4a merged (#45); 4b (mesh pull) in review | — | PR3+ |
 | **PR5** | Store spilled id verify | Medium hardening | ⬜ todo | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | ⬜ todo | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | ⬜ todo | PR4 | — |
@@ -729,17 +729,38 @@ ANNOUNCE already carries petname; Nearby already prefers local -> quoted announc
 3. Store magnet via **single seed/prekey accessor pattern** (load-bearing)
 4. Show on own Connect/profile/header; letter fallback
 
-### 3. Mesh avatar
-Prefer local-only in PR4. Mesh ANNOUNCE convention as optional PR4b if no freeze risk.
+### 3. Mesh avatar — PR4b, shipped as an RPC **pull** (not a topic push)
+Investigating the topic-record option showed the avatar can't ride it: fetching a
+file by a bare magnet doesn't bootstrap the manifest (`Node::missing` returns empty
+without it), so a peer reading a record could never pull the image. Chosen design
+instead (no wire-format change):
+- **Pull.** A peer asks us for `GET /profile` over the existing request/response
+  layer; we reply with `"SPR1" · nameLen[2] · name · avatarLen[4] · avatar(JPEG)`.
+  Tens of KB doesn't fit one envelope, so the reply is sent through the
+  fountain-fragmenting `send` path (the core's `respond` can't fragment) and
+  reassembles into the RPC demux on the caller.
+- **Authenticity.** An RPC reply now retains its verified `Src::Full` sender
+  (`take_response_from`); the caller drops any reply whose sender isn't the peer it
+  asked, so a flooded forgery can't poison a contact's avatar. Serving is
+  rate-limited (one reply per requester per cooldown) against amplification.
+- **Notify + advertise.** On name/photo change we flood a tiny marker on a
+  deterministic per-identity topic `spore:profile:<addr>`; watchers re-pull. The
+  reply's name is the advertised recommended petname.
+- **Core change:** internal only — `rpc_responses` keyed value gains the sender
+  `Addr`. Wire vectors byte-identical; `api_freeze` unaffected.
 
 ## Acceptance
-- [ ] Preview matches Nearby
-- [ ] Set/change local avatar; visible on own surfaces
-- [ ] Size cap enforced before publish
+- [x] Preview matches Nearby (PR4a)
+- [x] Set/change local avatar; visible on own surfaces (PR4a)
+- [x] Size cap enforced before publish (PR4a, ≤256 px / ≤40 KB)
+- [x] Peer avatar pulled on demand, verified to come from that peer, and cached (PR4b)
+- [x] Change floods a notify; watchers re-pull (PR4b)
 
 ## CHANGELOG
 ```markdown
 - Android: "Name others see" framing; local profile avatar publish/cache.
+- Android: mesh profile — peers pull name+avatar over RPC, verified + rate-limited,
+  with a change-notify on a per-identity topic. No wire-format change.
 ```
 
 ---
