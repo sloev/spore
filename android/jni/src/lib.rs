@@ -28,8 +28,17 @@ struct Runtime {
     // captured by Kotlin (AudioRecord) and fed here; the DSP is the same tested
     // `bridge::audio` the desktop daemon uses, so phone and laptop interoperate.
     demod: Mutex<spore::bridge::audio::Demod>,
+    // Completed demod frames waiting for the poll loop to drain them. Bounded: the
+    // mic thread produces continuously, so if the consumer stalls this must not
+    // grow without limit. A demod backlog is stale audio, not data worth keeping,
+    // so the oldest frames are dropped once it is full (see DEMOD_OUT_MAX).
     demod_out: Mutex<VecDeque<Vec<u8>>>,
 }
+
+/// Most completed demod frames to hold before dropping the oldest. A frame is one
+/// short envelope; a few dozen is ample slack for a briefly busy poll loop without
+/// letting a fast or hostile audio source grow the queue unboundedly.
+const DEMOD_OUT_MAX: usize = 64;
 
 /// Handles we've handed to Kotlin and not yet freed.
 ///
@@ -541,7 +550,14 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAudioDemodPush(
     }
     let frames = r.demod.lock().unwrap().push(&buf);
     if !frames.is_empty() {
-        r.demod_out.lock().unwrap().extend(frames);
+        let mut q = r.demod_out.lock().unwrap();
+        q.extend(frames);
+        // Drop the oldest beyond the cap: if the poll loop can't keep up, the
+        // freshest frames are the ones worth delivering, and an unbounded queue
+        // would let a fast (or malicious) audio feed grow memory without limit.
+        while q.len() > DEMOD_OUT_MAX {
+            q.pop_front();
+        }
     }
 }
 

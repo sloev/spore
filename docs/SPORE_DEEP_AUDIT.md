@@ -30,7 +30,7 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR4** | Name others see + local avatar + mesh profile | Medium product | ✅ 4a merged (#45); 4b (mesh pull) merged (#46) | — | PR3+ |
 | **PR5** | Store spilled id verify | Medium hardening | ✅ merged (#47) | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | 🟡 docs in review; on-device runs deferred to hardware QA | PR0–PR3 ideally | — |
-| **PR7** | Polish batch | Low | ⬜ todo | PR4 | — |
+| **PR7** | Polish batch | Low | 🟡 demod_out cap in review; a11y/intervals already met; UI features remain | PR4 | — |
 | **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | ⬜ todo | — (no core freeze) | PR0–PR7 |
 | **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | ⬜ todo | — | PR2 helpful for stop/unregister |
 
@@ -857,15 +857,18 @@ Docs site + app Advanced/About short FS blurb (prekey 7d; ratchet age-bounded af
 
 # PR7 — Polish (batchable)
 
-| Item | Sketch |
-|------|--------|
-| Ring health UI | `Prekeys: N live · oldest Xd · next mint ~Yh` + Export with FS warning |
-| Group key_id badge | Warn on mismatch; never claim roster consensus |
-| Boot receiver | Optional, **default off** |
-| Sound/particles | Behind setting, default off |
-| contentDescription | LEDs, badges, attachment chips |
-| Housekeeping assert | Android intervals match SPEC 5->80 min / 1 h |
-| demod_out cap | JNI VecDeque max ~32, drop oldest |
+Landed in slices. Status per item:
+
+| Item | Sketch | Status |
+|------|--------|--------|
+| demod_out cap | JNI VecDeque max ~32, drop oldest | ✅ in review — bounded at 64, drops oldest (the security-relevant one: unbounded audio-output queue) |
+| contentDescription | LEDs, badges, attachment chips | ✅ already covered — attachment/feed/QR/profile images are labelled; status badges render readable text |
+| Housekeeping assert | Android intervals match SPEC 5->80 min / 1 h | ✅ already correct — `ANNOUNCE_FLOOD_INTERVAL_MS` = 1 h (§5.4b); HELLO is the frequent link-local form |
+| Ring health UI | `Prekeys: N live · oldest Xd · next mint ~Yh` + Export with FS warning | ⬜ todo (UI feature) |
+| Group key_id badge | Warn on mismatch; never claim roster consensus | ⬜ todo (UI feature) |
+| Boot receiver | Optional, **default off** | ⬜ todo (UI feature) |
+| Sound/particles | Behind setting, default off | ⬜ todo (UI feature) |
+| Docs sync | Android bridge list ⊆ BRIDGES.md | ⬜ todo (honesty check) |
 | Docs sync | Android bridge list ⊆ BRIDGES.md |
 
 ---
