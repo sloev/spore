@@ -93,6 +93,12 @@ object NodeController {
     // PR4a; PR4b publishes it to the mesh so peers can fetch it. Not a secret, so
     // it lives in a plain file, not the encrypted store.
     val myAvatarPath = MutableStateFlow<String?>(null)
+    // PR4b — a peer's profile, pulled from them on demand and cached: addr hex ->
+    // that peer's avatar file path / advertised recommended name. Fetched over the
+    // request/response layer (no new wire format), verified to have come from that
+    // very peer, and refreshed when they flood a change-notify.
+    val peerAvatarPath = MutableStateFlow<Map<String, String>>(emptyMap())
+    val peerProfileName = MutableStateFlow<Map<String, String>>(emptyMap())
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
     val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
 
@@ -116,6 +122,25 @@ object NodeController {
     private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
     private var topicAddrToName = mutableMapOf<String, String>() // topicAddrHex -> name
+
+    // Profile-pull bookkeeping (PR4b). These are touched from two coroutines —
+    // the house loop (pumpProfiles) and the poll loop (route's change-notify) —
+    // so every access goes through [profileLock]. All are bounded: the owner-keyed
+    // ones by the (bounded) neighbour table; the requester-keyed serve map is
+    // age-pruned.
+    private val profileLock = Any()
+    private val profileTopicOwner = mutableMapOf<String, String>() // profile topicAddrHex -> owner addr hex
+    private val pendingProfileReq = mutableMapOf<Long, String>()    // rpc req id -> owner addr hex
+    private val profileReqAt = mutableMapOf<String, Long>()         // owner -> last request ms (cooldown)
+    private val profileServedAt = mutableMapOf<String, Long>()      // requester -> last served ms (anti-amplification)
+    private val profileHave = mutableSetOf<String>()               // owners we've pulled at least once
+    private const val PROFILE_PATH = "/profile"
+    private const val PROFILE_TOPIC_PREFIX = "spore:profile:"
+    // A reply must fit one fountain set (~mtu×255); an avatar is downscaled well
+    // under this, and anything larger is simply not advertised.
+    private const val PROFILE_MAX_AVATAR_BYTES = 40_000
+    private const val PROFILE_REQ_COOLDOWN_MS = 60_000L
+    private const val PROFILE_SERVE_COOLDOWN_MS = 15_000L
 
     @Synchronized
     /**
@@ -255,6 +280,8 @@ object NodeController {
         myName.value = prefs.getString("myname", "") ?: ""
         if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
         myAvatarPath.value = avatarFile().takeIf { it.exists() && it.length() > 0 }?.absolutePath
+        // Serve and change-notify our own profile (peers pull it over /profile).
+        watchOwnProfileTopic()
 
         // Refollow persisted topics.
         prefs.getStringSet("topics", emptySet())?.forEach { follow(it, persist = false) }
@@ -313,6 +340,7 @@ object NodeController {
                 storeCount.value = SporeNative.nativeStoreLen(ptr)
                 refreshDelivery()
                 pumpFiles()
+                pumpProfiles()
                 // Beacon briskly at first so a fresh node is discovered quickly,
                 // then settle down to stay cheap on battery — but keep chasing
                 // chunks while a file is still coming in.
@@ -383,6 +411,20 @@ object NodeController {
         // A broadcast (all-zero dest) belongs in the shared "everyone" thread, not
         // in a private conversation with whoever happened to send it.
         val thread = if (dest == null || dest.all { it == '0' }) Petnames.PUBLIC else src
+
+        // A profile change-notify: the owner floods a tiny marker on their profile
+        // topic. Verify it really came from that owner, then drop our cached copy
+        // and re-pull (bypassing the request cooldown, since the record changed).
+        // Our own echo (owner == us) is ignored. This is not a chat post.
+        val profileOwner = synchronized(profileLock) { dest?.let { profileTopicOwner[it] } }
+        if (profileOwner != null) {
+            if (ok && src == profileOwner && profileOwner != address.value) synchronized(profileLock) {
+                profileHave.remove(profileOwner)
+                profileReqAt.remove(profileOwner)
+                requestProfile(profileOwner)
+            }
+            return
+        }
 
         val topicName = dest?.let { topicAddrToName[it] }
         if (topicName != null) {
@@ -761,13 +803,15 @@ object NodeController {
      * decoding stays in the UI layer where the picked bytes already are; here it is
      * just a small file write. Returns false if the node isn't up or the write
      * fails, so the UI can say so rather than show an avatar that didn't persist.
-     * PR4a is local only; PR4b will publish these bytes to the mesh.
+     * The bytes stay on disk; peers fetch them by pulling our profile, and we
+     * flood a change-notify so anyone who cached the old one re-pulls.
      */
     fun setAvatar(bytes: ByteArray): Boolean {
         if (ptr == 0L || bytes.isEmpty()) return false
         return runCatching {
             avatarFile().writeBytes(bytes)
             myAvatarPath.value = avatarFile().absolutePath
+            notifyProfileChanged()
             true
         }.getOrDefault(false)
     }
@@ -784,7 +828,8 @@ object NodeController {
         myName.value = n
         SporeNative.nativeSetName(ptr, n)
         secretPrefs(appCtx).edit().putString("myname", n).apply()
-        SporeNative.nativeBeacon(ptr) // let peers see the new name right away
+        SporeNative.nativeBeacon(ptr) // let peers see the new announced name right away
+        notifyProfileChanged()        // and re-advertise the fuller profile record
         return true
     }
 
@@ -838,6 +883,162 @@ object NodeController {
                 "tcp" -> addTcp(value)
             }
         }
+    }
+
+    // -- profile: advertised name + avatar, pulled on demand and cached (PR4b) ---
+    //
+    // A profile is an application record, not a protocol object: peers *pull* it
+    // from us over the request/response layer (a GET on "/profile") and cache the
+    // reply, and we flood a tiny change-notify on a per-identity topic so a watcher
+    // knows to pull again. Nothing here touches the frozen wire format — a request
+    // and a reply are ordinary signed DATA envelopes.
+
+    /** The deterministic profile topic for an identity — anyone who knows the address derives it. */
+    private fun profileTopic(addrHex: String) = PROFILE_TOPIC_PREFIX + addrHex
+
+    /**
+     * Our profile as a self-describing blob served in reply to a /profile request:
+     * `"SPR1" · nameLen[2 BE] · name · avatarLen[4 BE] · avatar` (avatar is JPEG and
+     * may be empty). A peer parses it with [parseProfileBlob].
+     */
+    private fun myProfileBlob(): ByteArray {
+        val name = myName.value.toByteArray(Charsets.UTF_8)
+        val avatar = runCatching { avatarFile().takeIf { it.exists() }?.readBytes() }.getOrNull() ?: ByteArray(0)
+        val a = if (avatar.size in 1..PROFILE_MAX_AVATAR_BYTES) avatar else ByteArray(0)
+        val out = java.io.ByteArrayOutputStream()
+        out.write('S'.code); out.write('P'.code); out.write('R'.code); out.write('1'.code)
+        out.write((name.size ushr 8) and 0xff); out.write(name.size and 0xff)
+        out.write(name)
+        out.write((a.size ushr 24) and 0xff); out.write((a.size ushr 16) and 0xff)
+        out.write((a.size ushr 8) and 0xff); out.write(a.size and 0xff)
+        out.write(a)
+        return out.toByteArray()
+    }
+
+    /** Parse a profile blob into (recommended name, avatar bytes), or null if malformed. */
+    private fun parseProfileBlob(b: ByteArray): Pair<String, ByteArray>? {
+        if (b.size < 10 || b[0] != 'S'.code.toByte() || b[1] != 'P'.code.toByte() ||
+            b[2] != 'R'.code.toByte() || b[3] != '1'.code.toByte()
+        ) return null
+        var o = 4
+        val nameLen = ((b[o].toInt() and 0xff) shl 8) or (b[o + 1].toInt() and 0xff); o += 2
+        if (o + nameLen + 4 > b.size) return null
+        val name = String(b, o, nameLen, Charsets.UTF_8); o += nameLen
+        val aLen = ((b[o].toInt() and 0xff) shl 24) or ((b[o + 1].toInt() and 0xff) shl 16) or
+            ((b[o + 2].toInt() and 0xff) shl 8) or (b[o + 3].toInt() and 0xff); o += 4
+        if (aLen < 0 || o + aLen > b.size) return null
+        return name to b.copyOfRange(o, o + aLen)
+    }
+
+    /** Follow a peer's profile topic so we hear their change-notify; note who owns it. */
+    private fun watchProfile(ownerHex: String) {
+        if (ptr == 0L) return
+        val topic = profileTopic(ownerHex)
+        val addr = SporeNative.nativeTopicAddr(topic)?.toHex() ?: return
+        if (profileTopicOwner.put(addr, ownerHex) == null) SporeNative.nativeSubscribe(ptr, topic)
+    }
+
+    /** Subscribe to and register our own profile topic so our change-notify floods (and our echo is ignored). */
+    private fun watchOwnProfileTopic() {
+        if (ptr == 0L) return
+        val me = address.value
+        if (me.isEmpty()) return
+        val topic = profileTopic(me)
+        SporeNative.nativeSubscribe(ptr, topic)
+        SporeNative.nativeTopicAddr(topic)?.let { profileTopicOwner[it.toHex()] = me }
+    }
+
+    /**
+     * Ask a peer for its profile, unless we asked within the cooldown. The reply
+     * is verified and cached in [pollProfileResponses]. Public so a screen can
+     * prompt an immediate pull when the user opens a conversation.
+     */
+    fun requestProfile(ownerHex: String) = synchronized(profileLock) {
+        if (ptr == 0L || ownerHex == address.value) return@synchronized
+        val dest = destOf(ownerHex) ?: return@synchronized
+        val now = System.currentTimeMillis()
+        if (now - (profileReqAt[ownerHex] ?: 0L) < PROFILE_REQ_COOLDOWN_MS) return@synchronized
+        pendingProfileReq.entries.removeAll { it.value == ownerHex } // keep at most one in flight per owner
+        val id = SporeNative.nativeRpcRequest(ptr, dest, PROFILE_PATH, ByteArray(0))
+        if (id != 0L) {
+            pendingProfileReq[id] = ownerHex
+            profileReqAt[ownerHex] = now
+        }
+    }
+
+    /** Flood a tiny change-notify on our profile topic so watchers re-pull. */
+    private fun notifyProfileChanged() = synchronized(profileLock) {
+        if (ptr == 0L) return@synchronized
+        watchOwnProfileTopic() // ensure we can originate a flood on it
+        SporeNative.nativeTopicAddr(profileTopic(address.value))?.let {
+            SporeNative.nativeSendCounted(ptr, it, byteArrayOf(1))
+        }
+    }
+
+    /** Answer /profile requests, rate-limited so a reply (tens of KB) can't be used to amplify. */
+    private fun serveProfileRequests() {
+        if (ptr == 0L) return
+        val buf = SporeNative.nativeRpcPollRequests(ptr) ?: return
+        val now = System.currentTimeMillis()
+        profileServedAt.entries.removeAll { now - it.value > 300_000L } // age-prune the requester map
+        var o = 0
+        while (o + 18 <= buf.size) {
+            val from = buf.copyOfRange(o, o + 8).toHex(); o += 8
+            var id = 0L
+            for (i in 0 until 8) id = (id shl 8) or (buf[o + i].toLong() and 0xff)
+            o += 8
+            val pathLen = ((buf[o].toInt() and 0xff) shl 8) or (buf[o + 1].toInt() and 0xff); o += 2
+            if (o + pathLen + 4 > buf.size) break
+            val path = String(buf, o, pathLen, Charsets.UTF_8); o += pathLen
+            val bodyLen = ((buf[o].toInt() and 0xff) shl 24) or ((buf[o + 1].toInt() and 0xff) shl 16) or
+                ((buf[o + 2].toInt() and 0xff) shl 8) or (buf[o + 3].toInt() and 0xff); o += 4
+            if (o + bodyLen > buf.size) break
+            o += bodyLen // /profile ignores the request body
+            if (path != PROFILE_PATH) continue
+            if (now - (profileServedAt[from] ?: 0L) < PROFILE_SERVE_COOLDOWN_MS) continue
+            profileServedAt[from] = now
+            SporeNative.nativeRpcRespond(ptr, from.fromHex(), id, 200, myProfileBlob())
+        }
+    }
+
+    /** Collect profile replies that arrived, drop any not from the peer we asked, and cache the rest. */
+    private fun pollProfileResponses() {
+        if (ptr == 0L || pendingProfileReq.isEmpty()) return
+        val done = mutableListOf<Long>()
+        for ((id, owner) in pendingProfileReq) {
+            val r = SporeNative.nativeRpcTakeResponse(ptr, id) ?: continue
+            done.add(id)
+            if (r.size < 10) continue
+            // A flooded reply is forgeable by anyone who saw the request id, so it
+            // is only trusted if its authenticated sender is the peer we asked.
+            if (r.copyOfRange(0, 8).toHex() != owner) continue
+            val status = ((r[8].toInt() and 0xff) shl 8) or (r[9].toInt() and 0xff)
+            if (status != 200) continue
+            profileHave.add(owner)
+            val (name, avatar) = parseProfileBlob(r.copyOfRange(10, r.size)) ?: continue
+            if (name.isNotBlank()) peerProfileName.value = peerProfileName.value + (owner to name.take(32))
+            if (avatar.isNotEmpty()) runCatching {
+                val dir = File(appCtx.filesDir, "profiles").apply { mkdirs() }
+                val f = File(dir, "$owner.jpg")
+                f.writeBytes(avatar)
+                peerAvatarPath.value = peerAvatarPath.value + (owner to f.absolutePath)
+            }.onFailure { android.util.Log.w("spore", "could not cache peer avatar", it) }
+        }
+        done.forEach { pendingProfileReq.remove(it) }
+    }
+
+    /**
+     * Once per housekeeping tick: watch every keyed peer's profile topic, pull the
+     * profile of any we haven't yet, serve incoming requests, and cache replies.
+     */
+    private fun pumpProfiles() = synchronized(profileLock) {
+        for (p in peers.value) {
+            if (!p.hasKey || p.addr == address.value) continue
+            watchProfile(p.addr)
+            if (p.addr !in profileHave) requestProfile(p.addr)
+        }
+        serveProfileRequests()
+        pollProfileResponses()
     }
 
     // -- helpers ----------------------------------------------------------------

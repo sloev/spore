@@ -18,14 +18,27 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: profiles reach the mesh — peers pull your photo and name, and re-pull
+  when you change them (PR4b).** A peer's avatar now shows on their Nearby row and in
+  the conversation list, fetched from *them* on demand: the app asks a peer for its
+  profile over the request/response layer (`GET /profile`), and the peer replies with
+  a small record — its recommended name plus the ≤256 px JPEG. The reply is only
+  trusted if its **authenticated** sender is the very peer that was asked, so a
+  flooded forgery can't poison a contact's picture; serving is rate-limited so a
+  tens-of-KB reply can't be used to amplify. When you change your name or photo the
+  app floods a tiny change-notify on a deterministic per-identity topic, and anyone
+  who cached the old one re-pulls. Entirely an application on top of primitives the
+  frozen protocol already ships — a request and a reply are ordinary signed DATA
+  envelopes, so **no wire-format change** (the golden vectors are byte-identical).
+  The one core tweak is internal: an RPC reply now retains its verified sender so the
+  caller can check it. Compiled by CI, device QA is a PR6 item.
+
 - **Android: a local profile photo, and the name framed as public.** The Advanced
   screen's name field is now "Name others see," with a live preview of the avatar +
   name exactly as a peer's Nearby row renders them. You can pick a photo; it's
   downscaled to a ≤256 px JPEG off the main thread and cached locally. This is the
-  local half (PR4a) — the photo is shown on your own surfaces only; publishing it to
-  the mesh so peers can fetch and cache it (PR4b) follows as an app-layer profile
-  record on the existing topic + file primitives, no wire change. Compiled by CI,
-  device QA is a PR6 item.
+  local half (PR4a); PR4b (above) publishes it to the mesh. Compiled by CI, device
+  QA is a PR6 item.
 
 - **Android lifecycle hygiene.** The foreground service now tears the node down on
   `onDestroy` — cancels and *joins* the poll/house loops before `nativeFree`, so no

@@ -181,4 +181,24 @@ object SporeNative {
 
     /** How many envelopes we're storing and relaying for the mesh. */
     external fun nativeStoreLen(ptr: Long): Int
+
+    // -- L4 request/response (drives the profile pull; no new wire format) ------
+
+    /** Ask `dest` (8 bytes) for `path`. Returns the request id, or 0 on failure. */
+    external fun nativeRpcRequest(ptr: Long, dest: ByteArray, path: String, body: ByteArray): Long
+
+    /**
+     * Drain requests delivered to us as a service, or null if none. Packed as
+     * `from[8] · id[8 BE] · pathLen[2 BE] · path · bodyLen[4 BE] · body`, repeated.
+     */
+    external fun nativeRpcPollRequests(ptr: Long): ByteArray?
+
+    /** Reply to request `reqId` from `to` (8 bytes) with `status` and `body`. */
+    external fun nativeRpcRespond(ptr: Long, to: ByteArray, reqId: Long, status: Int, body: ByteArray)
+
+    /**
+     * Take the reply to `reqId`, packed as `from[8] · status[2 BE] · body`, or
+     * null if it hasn't arrived. `from` is the reply's authenticated sender.
+     */
+    external fun nativeRpcTakeResponse(ptr: Long, reqId: Long): ByteArray?
 }

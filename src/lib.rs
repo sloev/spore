@@ -311,7 +311,11 @@ pub struct Node {
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
     acked: HashSet<Id>,            // orig ids we've received receipts for
     rpc_pending: HashSet<u64>,     // request ids awaiting a response (L4)
-    rpc_responses: HashMap<u64, rpc::Response>,
+    // Keyed by request id; the `Addr` is the response's *authenticated* sender
+    // (its `Src::Full` key hashed), retained so a caller can check the reply
+    // actually came from the service it asked — a flooded response is otherwise
+    // forgeable by anyone who saw the request id.
+    rpc_responses: HashMap<u64, (Addr, rpc::Response)>,
     rpc_inbox: Vec<(Addr, u64, rpc::Request)>, // requests delivered to a service
     feed_inbox: Vec<feed::Event>,              // feed events on subscribed topics (L5)
     quotas: congestion::Quotas,                // per-source flood quota (§10)
@@ -2162,6 +2166,46 @@ mod tests {
         let resp = client.take_response(id).expect("response arrived");
         assert_eq!(resp.status, 200);
         assert_eq!(resp.body, b"21C");
+    }
+
+    // A large reply (a profile with an avatar is tens of KB) is too big for one
+    // envelope, so the responder sends the RESPONSE payload through the
+    // fountain-fragmenting `send` path rather than `respond`. This pins that the
+    // reassembled whole re-enters the RPC demux and its *authenticated* sender is
+    // retained — the check the app relies on so a flooded reply can't forge one.
+    #[test]
+    fn fragmented_response_reassembles_with_authenticated_sender() {
+        let now = 1_700_000_000;
+        let mut client = Node::new("c", &[]);
+        let mut server = Node::new("s", &[]);
+        meet(&mut client, &mut server, now);
+
+        let (id, fwds) = client.request(
+            server.addr,
+            rpc::Request { method: "GET".into(), path: "/profile".into(), body: vec![] },
+            now,
+        );
+        for f in &fwds {
+            server.on_rx(&fwd_bytes(f), 0, Some(client.addr), now);
+        }
+        let (from, rid, _) = server.poll_requests().into_iter().next().unwrap();
+        assert_eq!(rid, id);
+
+        // The responder builds the RESPONSE payload by hand and fragments it with
+        // `send` — the same bytes and path the JNI layer uses. 20 KB forces a
+        // multi-fragment fountain set.
+        let body = vec![0xABu8; 20_000];
+        let payload = rpc::encode_response(rid, &rpc::Response { status: 200, body: body.clone() });
+        let rf = server.send(from, payload.clone(), now).expect("fits a fountain set");
+        assert!(rf.len() > 1, "a 20 KB reply must fragment");
+
+        for f in &rf {
+            client.on_rx(&fwd_bytes(f), 0, Some(server.addr), now);
+        }
+        let (sender, resp) = client.take_response_from(id).expect("reassembled reply");
+        assert_eq!(sender, server.addr, "authenticated sender is the server");
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.body, body, "20 KB body survived fragmentation");
     }
 
     #[test]
