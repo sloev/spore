@@ -55,6 +55,13 @@ object SporeNative {
     /** As above, but the link carries at most `bulkBytesPerSec` of others' file chunks. */
     external fun nativeRegisterIfaceLimited(ptr: Long, bulkBytesPerSec: Int): Int
 
+    /**
+     * Retire a bridge's interface: stop routing to it and drop its forward queue.
+     * The id is not recycled (the hub keeps the slot as a hole so other interfaces
+     * keep their ids), so a restarted bridge must register a fresh one.
+     */
+    external fun nativeUnregisterIface(ptr: Long, iface: Int)
+
     /** The bulk budget the core suggests for "audio" / "meshtastic" / "reticulum". */
     external fun nativeSuggestedBulkBudget(kind: String): Int
 

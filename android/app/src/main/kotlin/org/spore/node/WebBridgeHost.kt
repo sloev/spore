@@ -25,6 +25,9 @@ import kotlinx.coroutines.launch
 @SuppressLint("SetJavaScriptEnabled")
 class WebBridgeHost(private val ctx: Context, private val ptr: Long) {
     private val iface: Int = SporeNative.nativeRegisterIface(ptr)
+
+    /** The hub interface id, so the controller can unregister it on stop. */
+    val ifaceId: Int get() = iface
     private var webView: WebView? = null
     private var pump: Job? = null
     private val main = Handler(Looper.getMainLooper())

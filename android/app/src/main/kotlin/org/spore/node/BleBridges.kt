@@ -35,6 +35,9 @@ abstract class BleBridge(
     private var txJob: Job? = null
     var onState: ((String) -> Unit)? = null
 
+    /** The hub interface id this bridge drives, so the controller can unregister it. */
+    val ifaceId: Int get() = iface
+
     /** Called once services are discovered; set up characteristics + notifies. */
     abstract fun onReady(g: BluetoothGatt)
 

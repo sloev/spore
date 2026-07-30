@@ -170,6 +170,23 @@ impl Hub {
         }
     }
 
+    /// Retire an interface: a stopped or removed bridge.
+    ///
+    /// The slot is emptied (`tx`/`bulk` cleared) rather than removed from the
+    /// vector, so every other interface keeps its id. `dispatch` already skips a
+    /// slot with no sender, and `Flood`'s `except` addresses interfaces by index —
+    /// `Vec::remove` here would renumber every later interface and silently
+    /// misroute the `except`, so **iface ids are never recycled** within a process.
+    /// The paired `Receiver` sees the channel disconnect when its `Sender` drops.
+    /// Idempotent, and a no-op for an id that was never registered.
+    pub fn unregister(&self, iface: Iface) {
+        let mut o = lock(&self.out);
+        if let Some(slot) = o.get_mut(iface as usize) {
+            slot.tx = None;
+            slot.bulk = None;
+        }
+    }
+
     /// Register a pull-only interface (an HTTP bag / server that answers requests
     /// from the shared store and never has anything pushed to it).
     pub fn register_pull(&self) -> Iface {
@@ -339,6 +356,35 @@ mod tests {
         let fast_served = drained(&fast_rx);
         assert!(fast_served > 0, "the fast link answered with chunks");
         assert_eq!(drained(&slow_rx), 0, "the slow link refused to haul them");
+    }
+
+    #[test]
+    fn unregister_stops_a_slot_without_renumbering_the_rest() {
+        let hub = Hub::new(Node::new("gateway", &[]));
+        let (a, a_rx) = hub.register();
+        let (b, b_rx) = hub.register();
+        assert_eq!((a, b), (0, 1), "ids are assigned in order");
+
+        // Both carry a public message.
+        hub.send(ZERO_DEST, b"one".to_vec()).unwrap();
+        assert_eq!(drained(&a_rx), 1);
+        assert_eq!(drained(&b_rx), 1);
+
+        // Retire the first. Its receiver disconnects; the second keeps its id.
+        hub.unregister(a);
+        hub.send(ZERO_DEST, b"two".to_vec()).unwrap();
+        assert_eq!(drained(&a_rx), 0, "a retired interface receives nothing");
+        assert_eq!(drained(&b_rx), 1, "the live interface still carries, id unchanged");
+
+        // A directed forward to the still-live id b reaches it — proof b was not
+        // renumbered into the hole a left.
+        let (c, c_rx) = hub.register();
+        assert_eq!(c, 2, "a new interface takes a fresh id, never a's hole");
+        hub.unregister(a); // idempotent
+        hub.unregister(99); // unknown id: no-op, no panic
+        hub.send(ZERO_DEST, b"three".to_vec()).unwrap();
+        assert_eq!(drained(&b_rx), 1);
+        assert_eq!(drained(&c_rx), 1);
     }
 
     #[test]

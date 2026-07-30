@@ -22,7 +22,7 @@ Updated as work lands, so this file never describes a state the code left behind
 | §2 Chat rewrite — bubbles, alignment, segmented fragment status | ✅ fixed, **not yet run on a device** |
 | §2 Feed — markdown bodies, inline image attachments, Compose Post screen | ✅ fixed, **not yet run on a device** |
 | §2 Bridges — grouped by transport, LED status per row | ✅ fixed, **not yet run on a device** |
-| §2 Bridge enable/disable (needs `nativeStopBridge` first) | open |
+| §2 Bridge stop/remove — `hub.unregister` + `nativeUnregisterIface` + Remove UI | ✅ fixed, **not yet run on a device** |
 | §2 `FileProvider` + `ACTION_VIEW` for received files | open |
 | §2 Message reactions | open |
 | §1 Battery measurement, JNI soak | open |
@@ -189,7 +189,7 @@ citation that has drifted is worse than none.
 | Report | What the code actually does |
 |---|---|
 | "No reaction on clicking save on settings.petname" | `onClick = { Petnames.set(peer, editingName) }`. **It does save.** There was no snackbar, no dismiss, no visible state change, so it read as broken. The fix is feedback, not persistence — a review guessing "missing onClick handler" would have fixed the wrong thing. **Fixed — see below.** |
-| "Can't delete/edit/disable/enable bridges" | Only `addBridgeState` exists. The list is append-only by construction, and there is **no JNI call to stop a bridge** — that is the harder half, and it is still open. |
+| "Can't delete/edit/disable/enable bridges" | **Fixed (PR2)** for the removable kinds. `Hub::unregister` + `nativeUnregisterIface` retire an interface (as a hole — ids never recycle, so `Flood`'s index `except` can't misroute); `stopBridge` cancels the bridge's pumps and drops its row. Audio, BLE (Meshtastic/RNode), Wi-Fi Direct and Web get a real **Remove**; core-owned TCP/UDP show no button rather than a dead one. *Edit* is still Remove-and-re-add; *enable/disable toggle* (vs remove) awaits PR3's reconnect work. |
 | "Can't open attached files" | Only `ACTION_SEND` (share out). No `FileProvider`, no `ACTION_VIEW`. Still open for received files; feed images now render inline, which is a different path. |
 
 #### What landed for the save buttons

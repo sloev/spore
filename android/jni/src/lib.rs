@@ -271,6 +271,27 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeRegisterIface(
     iface as jint
 }
 
+/// Retire a Kotlin-driven bridge's interface: a stopped or removed bridge.
+///
+/// Drops our end of its forward queue (so the bridge's drain loop sees the channel
+/// disconnect and exits) and tells the hub to stop routing to that slot. The iface
+/// id is not recycled — the hub keeps the slot as a hole to preserve every other
+/// interface's id — so a bridge must obtain a fresh id from `nativeRegisterIface`
+/// if it is ever restarted. Safe to call twice, and on an id that was never ours.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeUnregisterIface(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    iface: jint,
+) {
+    let Some(r) = rt(ptr) else {
+        return;
+    };
+    r.ifaces.lock().unwrap().remove(&iface);
+    r.hub.unregister(iface as Iface);
+}
+
 /// Register a Kotlin-driven bridge that will carry at most `bulkBytesPerSec` of
 /// other people's file chunks; returns its iface id.
 ///
