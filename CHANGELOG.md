@@ -18,6 +18,16 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Store: a spilled envelope is verified against its id on every read, not just
+  when adopted (C-ST4).** The spill directory is on disk, where a backup tool, the
+  OS, or a corrupted sector can change a file after we recorded it — and its name is
+  only a claim about its content. `Store::wire` now bounds the read, decodes, and
+  refuses to return bytes whose recomputed id doesn't match the one asked for;
+  a mismatch reads as "not held" so the mesh re-fetches a good copy instead of us
+  serving a peer bytes that fail their own content check. The adopt path
+  (`set_spill_dir`) already did this at startup; this closes the gap on later reads.
+  Unit-tested (intact loads, corrupted → None, truncated → None, no panic).
+
 - **Android: profiles reach the mesh — peers pull your photo and name, and re-pull
   when you change them (PR4b).** A peer's avatar now shows on their Nearby row and in
   the conversation list, fetched from *them* on demand: the app asks a peer for its
