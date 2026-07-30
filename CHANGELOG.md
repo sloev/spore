@@ -18,6 +18,19 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Docs: an Android device-test checklist, and a forward-secrecy note in the app.**
+  New `android/TESTING.md` is the repeatable procedure for the things CI can't prove
+  because they need a real device — fresh install, upgrade, seed reveal, that the
+  identity is **absent** from a cloud/adb backup and a device transfer, a 24–48 h
+  soak with no native abort, and the 7-day forward-secrecy window — each with a
+  History section to record runs. `docs/ANDROID_AUDIT.md` links it as §6. The app's
+  About card now states the forward-secrecy model in plain terms (prekeys rotate on
+  a 7-day window; conversation keys ratchet forward; skipped keys drop after 7 days;
+  the seed is in encrypted prefs and excluded from backup). The radio air-interface
+  paths keep their existing `docs/HARDWARE.md` checklist; the on-device runs remain
+  for hardware QA — this ships the procedure ahead of the run so a green build is
+  never mistaken for a green device.
+
 - **Store: a spilled envelope is verified against its id on every read, not just
   when adopted (C-ST4).** The spill directory is on disk, where a backup tool, the
   OS, or a corrupted sector can change a file after we recorded it — and its name is
