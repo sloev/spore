@@ -85,9 +85,17 @@ class AudioBridge(private val ptr: Long, private val iface: Int) {
         }
     }
 
+    /**
+     * Idempotent teardown. Nulls every handle after releasing it so a second stop()
+     * is a no-op and a later start() builds fresh objects — an `AudioRecord` or
+     * `AudioTrack` used after `release()` throws, so a stop→start cycle that kept the
+     * old references would crash on the next mic read.
+     */
     fun stop() {
         rxJob?.cancel(); txJob?.cancel()
+        rxJob = null; txJob = null
         try { record?.stop(); record?.release() } catch (_: Exception) {}
         try { track?.stop(); track?.release() } catch (_: Exception) {}
+        record = null; track = null
     }
 }

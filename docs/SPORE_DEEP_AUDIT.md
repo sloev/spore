@@ -26,7 +26,7 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | 🟡 **partial** — Part A merged (#40); Part B carried forward | — | PR1, PR5 |
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — in review (#42); items carried forward | — | PR0, PR1 |
-| **PR3** | Service / Audio / BLE lifecycle | High reliability | ⬜ todo | **PR2** | — |
+| **PR3** | Service / Audio / BLE lifecycle | High reliability | 🟡 in review (#44) | **PR2** | — |
 | **PR4** | Name others see + local avatar | Medium product | — | PR3+ |
 | **PR5** | Store spilled id verify | Medium hardening | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | PR0–PR3 ideally | — |

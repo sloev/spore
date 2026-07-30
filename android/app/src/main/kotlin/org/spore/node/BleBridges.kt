@@ -33,6 +33,11 @@ abstract class BleBridge(
 ) {
     protected var gatt: BluetoothGatt? = null
     private var txJob: Job? = null
+    private var reconnectJob: Job? = null
+    // Grows 1s → 2s → 4s … capped, reset to 1s on a successful connect. `stopping`
+    // makes stop() final: a disconnect it caused must not schedule a reconnect.
+    private var backoffMs = 1_000L
+    @Volatile private var stopping = false
     var onState: ((String) -> Unit)? = null
 
     /** The hub interface id this bridge drives, so the controller can unregister it. */
@@ -48,46 +53,79 @@ abstract class BleBridge(
     abstract fun onNotify(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray)
 
     fun start() {
-        gatt = device.connectGatt(ctx, false, object : BluetoothGattCallback() {
-            override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    onState?.invoke("discovering")
-                    g.requestMtu(247)
-                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+        stopping = false
+        connect()
+    }
+
+    private fun connect() {
+        gatt = device.connectGatt(ctx, false, callback)
+    }
+
+    private val callback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                backoffMs = 1_000L // a real connection resets the backoff
+                onState?.invoke("discovering")
+                g.requestMtu(247)
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                txJob?.cancel()
+                if (stopping) {
                     onState?.invoke("disconnected")
-                    txJob?.cancel()
+                } else {
+                    // The link dropped on its own — a radio moved, a device slept.
+                    // Retry with exponential backoff rather than giving up until
+                    // the user re-adds the bridge, and rather than hammering the
+                    // radio with an immediate reconnect loop.
+                    onState?.invoke("reconnecting")
+                    scheduleReconnect()
                 }
             }
+        }
 
-            override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-                g.discoverServices()
-            }
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            g.discoverServices()
+        }
 
-            override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    onReady(g)
-                    onState?.invoke("open")
-                    // TX pump: node forwards → device.
-                    txJob = CoroutineScope(Dispatchers.IO).launch {
-                        while (isActive) {
-                            val out = SporeNative.nativePollForward(ptr, iface)
-                            if (out != null) sendEnvelope(g, out) else delay(60)
-                        }
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                onReady(g)
+                onState?.invoke("open")
+                // TX pump: node forwards → device.
+                txJob = CoroutineScope(Dispatchers.IO).launch {
+                    while (isActive) {
+                        val out = SporeNative.nativePollForward(ptr, iface)
+                        if (out != null) sendEnvelope(g, out) else delay(60)
                     }
-                } else onState?.invoke("error")
-            }
+                }
+            } else onState?.invoke("error")
+        }
 
-            @Deprecated("pre-33 callback; fine for our minSdk")
-            override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
-                @Suppress("DEPRECATION")
-                onNotify(g, c, c.value ?: return)
-            }
-        })
+        @Deprecated("pre-33 callback; fine for our minSdk")
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
+            @Suppress("DEPRECATION")
+            onNotify(g, c, c.value ?: return)
+        }
+    }
+
+    private fun scheduleReconnect() {
+        if (reconnectJob?.isActive == true) return // one pending reconnect at a time
+        val wait = backoffMs
+        backoffMs = (backoffMs * 2).coerceAtMost(60_000L)
+        reconnectJob = CoroutineScope(Dispatchers.IO).launch {
+            delay(wait)
+            if (stopping || !isActive) return@launch
+            try { gatt?.close() } catch (_: Exception) {}
+            connect()
+        }
     }
 
     fun stop() {
-        txJob?.cancel()
+        // Final: no disconnect from here schedules a reconnect.
+        stopping = true
+        reconnectJob?.cancel(); reconnectJob = null
+        txJob?.cancel(); txJob = null
         try { gatt?.disconnect(); gatt?.close() } catch (_: Exception) {}
+        gatt = null
     }
 
     protected fun enableNotify(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
@@ -162,10 +200,21 @@ class MeshtasticBleBridge(ptr: Long, iface: Int, ctx: Context, device: Bluetooth
         if (c.uuid == FROMNUM) drain(g)
     }
 
-    /** FromNum says packets are waiting: read FromRadio until empty. */
+    private var drainJob: Job? = null
+
+    /**
+     * FromNum says packets are waiting: read FromRadio until empty.
+     *
+     * FromNum fires once per available packet, so a burst arriving together would
+     * otherwise launch a coroutine each — all racing on the same `fromRadio`
+     * characteristic's shared `value`, reading each other's bytes. One drain at a
+     * time: a notify while a drain is running is dropped, because the running drain
+     * reads until the queue is empty anyway.
+     */
     @Suppress("DEPRECATION")
     private fun drain(g: BluetoothGatt) {
-        CoroutineScope(Dispatchers.IO).launch {
+        if (drainJob?.isActive == true) return
+        drainJob = CoroutineScope(Dispatchers.IO).launch {
             val c = fromRadio ?: return@launch
             repeat(32) {
                 if (!g.readCharacteristic(c)) return@launch

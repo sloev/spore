@@ -5,6 +5,7 @@ import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -318,6 +319,41 @@ object NodeController {
                 delay(if (fetching) 2_000L else if (tick++ < 6) 5_000L else 30_000L)
             }
         }
+    }
+
+    /**
+     * Controlled shutdown from the service's `onDestroy`.
+     *
+     * Order matters and is the point. The poll/house loops call native functions
+     * with `ptr` every iteration, so they must be **stopped and joined before**
+     * `nativeFree` — otherwise a coroutine mid-`nativePollDelivery` would read a
+     * freed handle. `cancelAndJoin` (run on a throwaway blocking scope, since
+     * `onDestroy` is not a coroutine) guarantees the loop body has returned. The
+     * JNI handle registry turns a *later* stray call into a lookup miss rather than
+     * a crash, but joining first closes the narrow window where a call has already
+     * passed that check.
+     *
+     * After this, `ptr == 0L`, so a `START_STICKY` restart re-enters `start` and
+     * mints a fresh node — never reusing the dropped handle.
+     */
+    fun stopFromService() {
+        kotlinx.coroutines.runBlocking {
+            pollJob?.cancelAndJoin()
+            houseJob?.cancelAndJoin()
+        }
+        pollJob = null
+        houseJob = null
+        // Bridges hold their own pumps and native handles; stop them before the
+        // node goes away. Each stop() is idempotent (PR3).
+        audio?.stop(); audio = null
+        bleBridges.forEach { it.stop() }; bleBridges.clear()
+        wifiDirect?.stop(); wifiDirect = null
+        webHost?.stop(); webHost = null
+        bridges.value = emptyList()
+
+        val p = ptr
+        ptr = 0L
+        if (p != 0L) SporeNative.nativeFree(p)
     }
 
     /** Flip any of our messages whose delivery receipt has arrived. */
