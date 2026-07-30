@@ -21,12 +21,12 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 
 ## PR map
 
-| PR | Title | Urgency | Depends | Parallel with |
-|----|-------|---------|---------|---------------|
-| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | — | PR1, PR5 |
-| **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | — | PR0, PR5 |
-| **PR2** | Hub unregister + bridge stop/remove | **High UX** | — | PR0, PR1 |
-| **PR3** | Service / Audio / BLE lifecycle | High reliability | **PR2** | — |
+| PR | Title | Urgency | Status | Depends | Parallel with |
+|----|-------|---------|--------|---------|---------------|
+| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | 🟡 **partial** — Part A merged (#40); Part B carried forward | — | PR1, PR5 |
+| **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
+| **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — in review (#42); items carried forward | — | PR0, PR1 |
+| **PR3** | Service / Audio / BLE lifecycle | High reliability | ⬜ todo | **PR2** | — |
 | **PR4** | Name others see + local avatar | Medium product | — | PR3+ |
 | **PR5** | Store spilled id verify | Medium hardening | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | PR0–PR3 ideally | — |
@@ -41,6 +41,70 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 **Iroh track:** PR9 is a normal bridge (like tor/i2p/tcp): carry SPORE envelopes over iroh QUIC; 🧪 until exercised.
 
 **Note:** Former “PR9 offline lifetime knobs” is **folded into PR0** so crypto default and user-facing policy ship together.
+
+---
+
+## Carried forward from shipped PRs (TODO)
+
+PR0–PR2 each shipped their core and **deliberately deferred** parts. Recorded here
+so a deferral does not vanish into a merged PR body. Each notes *why* it was held
+and *what unblocks it*. None of these is a regression; they are scope the shipped PR
+did not claim to cover.
+
+### From PR0 — ratchet TTL + zeroize (merged #40, `fix/ratchet-skip-ttl`)
+
+Only **Part A** (the crypto: age-bound + zeroize on drop) shipped. **Part B —
+offline-lifetime knobs and UI — did not**, and is the larger remaining piece:
+
+- [ ] **Daemon config knobs** `prekey_lifetime_secs` / `ratchet_skip_ttl_secs`
+      (default `604800`), read from **one policy object**, not scattered consts.
+- [ ] **Android Advanced presets** — 7 d (default) / 14 d / 30 d / custom, persisted
+      via the single secret-accessor pattern.
+- [ ] **About / security blurb** stating the active window in plain language.
+- [ ] **Decrypt-failure UI** — "key expired for offline window; ask resend or raise
+      it," shown on a failed open of expired sealed mail.
+- [ ] **Raise-above-default warning** — a longer window means a stolen device reads
+      more history.
+- **Why deferred:** the Double Ratchet is a tested primitive **not yet wired into
+      any production send/receive path** (`decrypt` is called only from tests), so a
+      runtime TTL knob would configure dead code, and the Android sliders can't be
+      device-verified here — shipping them would break Principle #2 (no fake UI).
+- **Unblocked by:** wiring the ratchet into the DM/session path. Until then the
+      code-level anti-drift move is done (`SKIP_TTL_SECS = PREKEY_LIFETIME_SECS`, one
+      shared window). **Suggest a dedicated PR0b** once the ratchet is integrated.
+- [ ] **Field-verify the 7-day window end to end** on a device — already tracked in
+      **PR6**; unit tests prove the deadline logic, not a real node's clock/delivery.
+
+### From PR1 — chat attachments (merged #41, `feat/android-attachments`)
+
+Shipped: staging, one bubble, image preview, FileProvider Open. Carried forward:
+
+- [ ] **Multiple files per send** (v1 is one attachment per message).
+- [ ] **ExoPlayer** audio/video inline preview + playback (v1 previews images only;
+      other types are a tap-to-Open file chip).
+- [ ] **Edit / remove an attachment after send.**
+- [ ] **Merge the bubble for public/unsealed files too.** Only **sealed DM**
+      attachments collapse to one bubble today, because only they are guaranteed a
+      marker sender; a public or legacy marker-less file still shows the old
+      "incoming…/received…" status bubbles. Needs a way to correlate a manifest
+      envelope to its magnet at `route()` time (no `nativeEnvId` yet).
+- [ ] **Device QA** — stage/remove/send/open, large image, peer-without-file,
+      reduced motion — tracked in **PR6**.
+
+### From PR2 — hub unregister + bridge stop/remove (in review #42, `feat/hub-unregister-bridges`)
+
+Shipped: `Hub::unregister`, `nativeUnregisterIface`, Remove for Audio/BLE/Wi-Fi
+Direct/Web. Carried forward:
+
+- [ ] **Edit a bridge in place** (change a URL/params) — today it is Remove +
+      re-add; needs a native mutate or re-register helper.
+- [ ] **Enable/disable *toggle*** distinct from Remove (keep the row, stop/restart
+      the transport) — depends on **PR3**'s reconnect/backoff so a re-enable has a
+      clean start path.
+- [ ] **Stop/remove for core-owned TCP/UDP** — they show no control today (honest,
+      not a dead button); a clean core-side stop for a specific TCP/UDP iface would
+      let them be removable too.
+- [ ] **Device QA** — add/stop/remove/re-add round-trip on hardware — **PR6**.
 
 ---
 
