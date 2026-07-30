@@ -328,8 +328,7 @@ impl Answer {
 /// candidate or the reason none fit: `Throughput` when candidates existed but all
 /// were too slow/small, `NoMedium` when none overlapped the responder's set.
 pub fn choose<'a>(offer: &'a Offer, willing: &[Medium]) -> Result<&'a Candidate, Reject> {
-    let overlap: Vec<&Candidate> =
-        offer.candidates.iter().filter(|c| willing.contains(&c.medium)).collect();
+    let overlap: Vec<&Candidate> = offer.candidates.iter().filter(|c| willing.contains(&c.medium)).collect();
     if overlap.is_empty() {
         return Err(Reject::NoMedium);
     }
@@ -442,12 +441,7 @@ impl<P: DatagramPort> Pipe<P> {
     /// candidate, derive keys, and open our end over `port` (built for the chosen
     /// medium). Returns the ANSWER bytes to send back and our live [`Pipe`]. On no
     /// fit, returns the ANSWER bytes carrying the reject and no pipe.
-    pub fn answer(
-        offer: &Offer,
-        me: Addr,
-        willing: &[Medium],
-        port: P,
-    ) -> (Vec<u8>, Option<Pipe<P>>) {
+    pub fn answer(offer: &Offer, me: Addr, willing: &[Medium], port: P) -> (Vec<u8>, Option<Pipe<P>>) {
         let chosen = match choose(offer, willing) {
             Ok(c) => c.clone(),
             Err(reason) => {
@@ -474,21 +468,12 @@ impl<P: DatagramPort> Pipe<P> {
     /// was a reject, was for a different pipe, or was malformed.
     pub fn finish(pending: Pending, answer: &Answer, port: P) -> Option<Pipe<P>> {
         let (eph_pub, chosen) = match answer {
-            Answer::Ok { pipe_id, eph_pub, chosen } if *pipe_id == pending.pipe_id => {
-                (eph_pub, chosen)
-            }
+            Answer::Ok { pipe_id, eph_pub, chosen } if *pipe_id == pending.pipe_id => (eph_pub, chosen),
             _ => return None,
         };
         let shared = dh(&pending.eph_sec, eph_pub);
-        let (init_tx, init_rx) =
-            derive(&shared, &pending.pipe_id, &pending.from, &pending.to, chosen.medium);
-        Some(Pipe {
-            tx_key: init_tx,
-            rx_key: init_rx,
-            pipe_id: pending.pipe_id,
-            tx_seq: 0,
-            port,
-        })
+        let (init_tx, init_rx) = derive(&shared, &pending.pipe_id, &pending.from, &pending.to, chosen.medium);
+        Some(Pipe { tx_key: init_tx, rx_key: init_rx, pipe_id: pending.pipe_id, tx_seq: 0, port })
     }
 
     /// Seal `payload` as one record and hand it to the transport. The record's
@@ -598,8 +583,20 @@ mod tests {
             need: Need { min_bps: 5_000, mtu_needed: 64, max_latency_ms: Some(150) },
             eph_pub: [9u8; 32],
             candidates: vec![
-                Candidate { medium: Medium::Udp, locator: b"10.0.0.1:7000".to_vec(), est_bps: 1_000_000, mtu: 1200, rtt_hint_ms: 20 },
-                Candidate { medium: Medium::Ble, locator: b"aa:bb".to_vec(), est_bps: 100_000, mtu: 200, rtt_hint_ms: 40 },
+                Candidate {
+                    medium: Medium::Udp,
+                    locator: b"10.0.0.1:7000".to_vec(),
+                    est_bps: 1_000_000,
+                    mtu: 1200,
+                    rtt_hint_ms: 20,
+                },
+                Candidate {
+                    medium: Medium::Ble,
+                    locator: b"aa:bb".to_vec(),
+                    est_bps: 100_000,
+                    mtu: 200,
+                    rtt_hint_ms: 40,
+                },
             ],
         }
     }
@@ -620,7 +617,13 @@ mod tests {
         let ok = Answer::Ok {
             pipe_id: [3u8; 16],
             eph_pub: [4u8; 32],
-            chosen: Candidate { medium: Medium::Tcp, locator: b"host:9".to_vec(), est_bps: 9, mtu: 1400, rtt_hint_ms: 5 },
+            chosen: Candidate {
+                medium: Medium::Tcp,
+                locator: b"host:9".to_vec(),
+                est_bps: 9,
+                mtu: 1400,
+                rtt_hint_ms: 5,
+            },
         };
         match Answer::decode(&ok.encode()).unwrap() {
             Answer::Ok { chosen, .. } => assert_eq!(chosen.medium, Medium::Tcp),
@@ -672,7 +675,13 @@ mod tests {
             resp_addr,
             [42u8; 16],
             Need { min_bps: 5_000, mtu_needed: 64, max_latency_ms: None },
-            vec![Candidate { medium: Medium::Udp, locator: b"127.0.0.1:0".to_vec(), est_bps: 1_000_000, mtu: 1200, rtt_hint_ms: 10 }],
+            vec![Candidate {
+                medium: Medium::Udp,
+                locator: b"127.0.0.1:0".to_vec(),
+                est_bps: 1_000_000,
+                mtu: 1200,
+                rtt_hint_ms: 10,
+            }],
         );
 
         let offer = Offer::decode(&offer_bytes).unwrap();
@@ -682,10 +691,7 @@ mod tests {
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();
 
         init_pipe.send(RecordType::Data, b"north pier at midnight").unwrap();
-        assert_eq!(
-            resp_pipe.poll().unwrap(),
-            (RecordType::Data, b"north pier at midnight".to_vec())
-        );
+        assert_eq!(resp_pipe.poll().unwrap(), (RecordType::Data, b"north pier at midnight".to_vec()));
 
         resp_pipe.send(RecordType::Media, b"copy that").unwrap();
         assert_eq!(init_pipe.poll().unwrap(), (RecordType::Media, b"copy that".to_vec()));
@@ -695,7 +701,9 @@ mod tests {
     fn negotiate(from: Addr, to: Addr) -> (Pipe<Loopback>, Pipe<Loopback>) {
         let (ip, rp) = Loopback::pair(1200);
         let (ob, pending) = Pipe::<Loopback>::offer(
-            from, to, [1u8; 16], // same pipe id on purpose: keys must still differ by addr/eph
+            from,
+            to,
+            [1u8; 16], // same pipe id on purpose: keys must still differ by addr/eph
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
             vec![Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
@@ -722,7 +730,9 @@ mod tests {
     fn an_answer_for_a_different_pipe_id_does_not_finish() {
         let (_ip, rp) = Loopback::pair(1200);
         let (_ob, pending) = Pipe::<Loopback>::offer(
-            [1u8; 8], [2u8; 8], [0xAAu8; 16],
+            [1u8; 8],
+            [2u8; 8],
+            [0xAAu8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
             vec![Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
@@ -739,7 +749,9 @@ mod tests {
     fn a_flipped_header_byte_fails_the_mac() {
         let (ip, rp) = Loopback::pair(1200);
         let (ob, pending) = Pipe::<Loopback>::offer(
-            [1u8; 8], [2u8; 8], [5u8; 16],
+            [1u8; 8],
+            [2u8; 8],
+            [5u8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
             vec![Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
