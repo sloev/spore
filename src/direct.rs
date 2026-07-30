@@ -398,6 +398,17 @@ pub trait DatagramPort {
     fn try_recv(&mut self) -> Option<Vec<u8>>;
 }
 
+// Real socket adapters. Both use `std::net`, which does not exist on `wasm32`, so
+// they are gated off that target — the negotiation core above still compiles there.
+#[cfg(not(target_arch = "wasm32"))]
+mod udp;
+#[cfg(not(target_arch = "wasm32"))]
+pub use udp::UdpPort;
+#[cfg(not(target_arch = "wasm32"))]
+mod tcp;
+#[cfg(not(target_arch = "wasm32"))]
+pub use tcp::TcpPort;
+
 // ---- the pipe ----------------------------------------------------------------
 
 /// An open direct pipe: the two directional keys, per-direction sequence numbers,

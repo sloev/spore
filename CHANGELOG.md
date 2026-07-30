@@ -34,6 +34,18 @@ Two conventions specific to this project:
   compiles everywhere the core does, wasm included. Real socket adapters (UDP/TCP/BLE)
   and the mesh signalling glue are follow-ups — transport, not protocol.
 
+- **SPORE Direct: real UDP and TCP socket adapters.** `direct/udp.rs` and
+  `direct/tcp.rs` implement `DatagramPort` over `std::net` (gated
+  `#[cfg(not(target_arch = "wasm32"))]`, so the negotiation core still builds for the
+  web). UDP maps one datagram to one sealed record over a *connected* socket; TCP adds
+  4-byte length-prefixed framing to restore that shape over a byte stream, disables
+  Nagle for latency, and refuses an over-length prefix rather than buffer toward it
+  (an unbounded-buffering DoS guard). Both stay best-effort at the record layer — no
+  ordered stream leaks up to reintroduce head-of-line blocking. Tested against real
+  kernel sockets, including a genuine **two-process** UDP round-trip that re-execs the
+  test binary and negotiates a live pipe across the process boundary. **Wire
+  unchanged** — application profile only; golden vectors byte-identical.
+
 - **Android: the JNI audio-output queue is bounded.** The demodulator's completed
   frames sat in an unbounded queue — the mic thread fills it continuously while the
   poll loop drains one frame per tick, so a stalled consumer (or a fast/hostile
