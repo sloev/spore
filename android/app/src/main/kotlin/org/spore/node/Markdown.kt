@@ -141,4 +141,38 @@ object Markdown {
 
     /** The post body with the image marker taken out, for display. */
     fun stripImage(body: String): String = IMAGE.replace(body, "").trim()
+
+    // -- chat attachments ---------------------------------------------------
+
+    /**
+     * A chat attachment, parsed from a message body.
+     *
+     * Chat carries the mime type as well as the magnet, because a chat bubble
+     * decides whether to render an inline image or a file chip and the feed's
+     * `![](spore:…)` form has nowhere to put it. This is a strictly richer marker,
+     * kept distinct from the feed's image form on purpose (§ UX-ISSUES).
+     */
+    data class Attach(val name: String, val magnet: String, val mime: String)
+
+    // Canonical marker, always the last line of the body:
+    //   📎 <filename> | spore:<hex-magnet> | <mime>
+    // Application convention only — relays see opaque UTF-8. `(?m)` so `$` matches
+    // the end of that line rather than only the end of the whole body.
+    private val ATTACH = Regex("""(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$""")
+
+    /** Build the marker line for a published attachment. */
+    fun attachMarker(name: String, magnet: String, mime: String): String =
+        "📎 $name | spore:$magnet | $mime"
+
+    /**
+     * Split a body into its human text and its attachment, if it carries one.
+     * The text has the marker line removed and is trimmed; a body that is only a
+     * marker yields empty text. A body with no marker yields `(body, null)`.
+     */
+    fun parseAttach(body: String): Pair<String, Attach?> {
+        val m = ATTACH.find(body) ?: return body to null
+        val att = Attach(m.groupValues[1], m.groupValues[2], m.groupValues[3])
+        val text = body.replace(m.value, "").trim()
+        return text to att
+    }
 }

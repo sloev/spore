@@ -55,5 +55,18 @@
             android:name=".NodeService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Hands received/sent attachments to other apps as content:// URIs with a
+             one-shot read grant. Never exported, never a file:// path — the private
+             store must not become world-readable to open a photo. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

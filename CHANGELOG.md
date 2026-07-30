@@ -18,6 +18,17 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: chat attachments stage until Send, then arrive as one bubble.** Picking
+  a file no longer publishes it immediately — it stages in the composer with a
+  remove (✕) affordance, and Send produces a single bubble carrying the text and the
+  attachment, identical for sender and receiver (a canonical
+  `📎 name | spore:<magnet> | mime` marker, documented in `android/UX-ISSUES.md`).
+  Images preview inline (decoded off the main thread, sampled to 1080 px); any file
+  opens through a `FileProvider` `content://` chooser that vends only a reclaimable
+  cache copy, never the private store. The sealed-to-a-known-peer publish path
+  (contents and filename) is unchanged. Not yet device-verified — the `apk` job
+  compiles it; manual QA is a PR6 device-matrix item.
+
 - **S-024a:** the Double Ratchet's skipped-key cache is now age-bounded (seven days,
   `SKIP_TTL_SECS = PREKEY_LIFETIME_SECS`) and zeroized on drop, closing the last
   forward-secrecy gap in core crypto. `decrypt`/`skip` take `now`; expired keys are
