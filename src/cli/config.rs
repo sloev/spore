@@ -50,6 +50,11 @@ pub(crate) enum Spec {
     Audio,
     Reticulum,
     Ssb(std::path::PathBuf),
+    /// The optional iroh QUIC bridge. Held as the raw config string and parsed in
+    /// the runner under `#[cfg(feature = "bridge-iroh")]`, so this file needs no
+    /// iroh types and the variant compiles whether or not the feature is on. Empty
+    /// = listen; otherwise `<endpoint-id>[@addr[,addr]]` = dial.
+    Iroh(String),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -145,6 +150,7 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             } else {
                 Spec::Ax25Tcp(v.to_string())
             }),
+            "iroh" if !v.is_empty() => Ok(Spec::Iroh(v.to_string())),
             "tor" | "onion" if !v.is_empty() => Ok(Spec::Tor(v.to_string())),
             "reticulum-tcp" | "rns-tcp" if !v.is_empty() => Ok(Spec::ReticulumTcp(v.to_string())),
             "reticulum-udp" | "rns-udp" if v.contains("->") => {
@@ -185,6 +191,8 @@ fn parse_bridge(s: &str) -> Result<Spec, String> {
             "http" => Ok(Spec::Http(7373)),
             "audio" | "sound" => Ok(Spec::Audio),
             "reticulum" | "rns" => Ok(Spec::Reticulum),
+            "iroh" => Ok(Spec::Iroh(String::new())), // bare `iroh` = listen for a peer
+            "iroh-listen" => Ok(Spec::Iroh(String::new())),
             "ax25" | "kiss" => Err("`ax25` needs a TNC (ax25: HOST:PORT, or a /dev path)".into()),
             "tor" | "onion" => Err("`tor` needs an onion (tor: abc…xyz.onion[:port])".into()),
             "i2p" => Err("`i2p` needs a destination (i2p: <b32>.b32.i2p)".into()),

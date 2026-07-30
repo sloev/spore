@@ -1,11 +1,16 @@
 name: MSRV
 
-# Cargo.toml declares `rust-version = "1.75"`, and CONTINUITY.md promises a rebuild
-# on whatever machine survives. Neither is worth anything unless something checks
-# it: the previous claim was a comment on a dependency pin, and it had been false
-# for a while in two independent ways — a `Cargo.lock` at version 4, which 1.75
-# cannot even parse, and `zeroize_derive` 1.5 moving to edition2024 behind a pin
-# that only constrained the `zeroize` facade.
+# Cargo.toml declares `rust-version` (1.85 as of the iroh bridge), and CONTINUITY.md
+# promises a rebuild on whatever machine survives. Neither is worth anything unless
+# something checks it, so this job installs exactly that toolchain and builds+tests
+# the default features on it — iroh is off by default, so the floor is the core
+# crypto tree, not iroh's 1.91.
+#
+# The floor was 1.75 until `bridge-iroh` landed: `iroh-base` requires `zeroize ≥1.9`,
+# and Cargo resolves optional deps too, so `zeroize` 1.9 (+ its edition-2024
+# `zeroize_derive` 1.5) is pulled into the *core* build via chacha20poly1305 —
+# both need 1.85. `Cargo.lock` is version 4 (needs Cargo ≥1.78, under the 1.85 floor);
+# the last step here proves this toolchain still parses it.
 #
 # A separate workflow rather than a job in ci.yml, because ci.yml is inside the
 # freeze guard's regex and this does not need to be.

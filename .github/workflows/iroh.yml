@@ -1,0 +1,33 @@
+name: iroh bridge
+
+# The optional `bridge-iroh` feature is off the default and MSRV matrices — it needs
+# a newer toolchain (iroh is edition 2024, rust-version 1.91) and pulls a large async
+# tree, so nothing else compiles it. This job is its real green signal: build the
+# feature and run its two-endpoint QUIC round-trip on stable.
+#
+# A separate workflow because ci.yml is inside the freeze guard's regex and the iroh
+# bridge is not part of the frozen v1 contract.
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  iroh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Compiles the lib + daemon with the feature on, which also type-checks the
+      # config parser and the runner's spawn arm.
+      - name: Build with the iroh bridge
+        run: cargo build --features bridge-iroh
+      # The round-trip: two real iroh endpoints on localhost (relay and discovery
+      # disabled) negotiate a pipe and carry a sealed envelope end to end.
+      - name: Two-endpoint QUIC round-trip
+        run: cargo test --features bridge-iroh --lib bridge::iroh -- --nocapture

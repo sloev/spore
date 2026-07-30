@@ -48,6 +48,9 @@ pub mod stream_link;
 pub mod driver;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hub;
+// The iroh QUIC bridge is an optional, async, native-only feature (`bridge-iroh`).
+#[cfg(all(not(target_arch = "wasm32"), feature = "bridge-iroh"))]
+pub mod iroh;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tcp;
 #[cfg(not(target_arch = "wasm32"))]

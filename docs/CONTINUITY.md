@@ -106,12 +106,17 @@ the network:
 ./scripts/make-offline-bundle.sh --tar  # ...and a tarball + sha256 to carry
 ```
 
-The toolchain floor is **Rust 1.75**, declared as `rust-version` in `Cargo.toml`
+The toolchain floor is **Rust 1.85**, declared as `rust-version` in `Cargo.toml`
 and checked by CI on every push, because an offline rebuild is exactly the
 situation where you cannot go and fetch a newer Cargo. That floor had been claimed
 in a comment and was false in two ways at once — see S-014 in
 [`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) — which is why it is now enforced by
-something that runs rather than something that reads well.
+something that runs rather than something that reads well. It was **1.75** until the
+optional `bridge-iroh` feature landed: iroh pulls `zeroize` 1.9 (edition-2024
+`zeroize_derive`) into the core build, which needs 1.85, so admitting iroh moved the
+floor deliberately. iroh itself needs 1.91 and is built only by the dedicated `iroh`
+CI job on stable — the default offline rebuild, and every non-iroh bridge, still
+build on 1.85.
 
 Be precise about what a clone does and does not carry. `Cargo.lock` is committed,
 so the *versions* are pinned and a rebuild resolves identically — but a lockfile

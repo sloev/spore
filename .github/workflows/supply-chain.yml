@@ -29,7 +29,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-audit
       - name: Known vulnerabilities in the dependency tree
-        run: cargo audit --deny warnings
+        # RUSTSEC-2024-0436: `paste` is unmaintained (not a vulnerability). It is a
+        # compile-time-only proc-macro helper and enters the tree *only* through the
+        # optional `bridge-iroh` feature, which is off by default and off the shipped
+        # binary — the default supply chain never sees it. cargo-deny already exempts
+        # it (`unmaintained = "workspace"`); this keeps cargo-audit consistent.
+        run: cargo audit --deny warnings --ignore RUSTSEC-2024-0436
 
   policy:
     name: cargo-deny

@@ -18,6 +18,26 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **iroh QUIC bridge (`bridge-iroh`, experimental 🧪).** A new optional bridge that
+  carries SPORE envelopes over [iroh](https://github.com/n0-computer/iroh) QUIC —
+  peer-to-peer by public key, with hole punching and relay fallback for reach that LAN
+  UDP and Tor/I2P don't cover. It is a normal stream bridge: KISS-framed on one bi
+  stream, same best-effort store-and-forward. The one novelty is async — iroh is
+  tokio-based while the rest of SPORE is synchronous, so the bridge runs a private
+  runtime and wraps the QUIC stream halves as blocking `Read`/`Write` for the shared
+  pump. Config: `iroh` (listen), `iroh: <id>` (dial via relay), or `iroh: <id>@<addr>`
+  (dial direct, relay/discovery off). Tested by a two-endpoint localhost QUIC
+  round-trip in a dedicated `iroh` CI job. Trust notes (relay phone-home, `EndpointId`
+  ≠ SPORE address) are in [`BRIDGES.md`](docs/BRIDGES.md). **Wire unchanged** — an
+  underlay, not a protocol change; golden vectors byte-identical.
+- **MSRV floor raised 1.75 → 1.85.** Admitting iroh pulls `zeroize` ≥1.9 (and its
+  edition-2024 `zeroize_derive`) into the *core* build via chacha20poly1305/crypto_box,
+  which needs Rust 1.85. A deliberate trade, documented in `Cargo.toml`, `CONTINUITY.md`
+  and the MSRV CI job; iroh itself needs 1.91 and is built only by its own CI job on
+  stable. The default offline rebuild and every non-iroh bridge still build on 1.85.
+  `Cargo.lock` moves to version 4 (needs Cargo ≥1.78) — the v3 pin only ever existed
+  to stay parseable by the retired 1.75 floor.
+
 - **SPORE Direct: a negotiated, non-routed, end-to-end encrypted datagram pipe for
   low-latency media.** Store-and-forward is the wrong plane for voice or a live
   terminal, where holding a frame for relay adds exactly the latency you're avoiding.

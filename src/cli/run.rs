@@ -115,6 +115,30 @@ pub(crate) fn run_config(cfg: Config) {
                     }
                 })
             }
+            Spec::Iroh(v) => {
+                // The iroh bridge is optional and async; only spawn it when the
+                // `bridge-iroh` feature is compiled in. Without it, a config that
+                // names `iroh` gets a clear message rather than a silent no-op.
+                #[cfg(feature = "bridge-iroh")]
+                {
+                    let (iface, rx) = hub.register();
+                    thread::spawn(move || match spore::bridge::iroh::parse_config(&v) {
+                        Ok(cfg) => {
+                            if let Err(e) = spore::bridge::iroh::run(h, iface, rx, cfg) {
+                                eprintln!("  [iroh] {e}");
+                            }
+                        }
+                        Err(e) => eprintln!("  [iroh] bad config `{v}`: {e}"),
+                    })
+                }
+                #[cfg(not(feature = "bridge-iroh"))]
+                {
+                    let _ = &h;
+                    thread::spawn(move || {
+                        eprintln!("  [iroh] built without the `bridge-iroh` feature; ignoring `{v}`");
+                    })
+                }
+            }
             Spec::ReticulumTcp(target) => {
                 let (iface, rx) = hub.register_limited(spore::bridge::reticulum::BULK_BYTES_PER_SEC);
                 thread::spawn(move || {

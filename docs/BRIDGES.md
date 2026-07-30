@@ -351,6 +351,7 @@ unchanged** — point it at the right address on the overlay's interface.
 | [Thread 🧪](#thread) | dgram | `Ipv6Addr` | 1280 | 6LoWPAN mesh; `udp::run_group` on the mesh iface |
 | [Tor (onion service) 🧪](#tor) | stream | `.onion` | 64 K | hidden-service rendezvous via SOCKS5 |
 | [I2P 🧪](#i2p) | stream | b32 dest | 1200 | garlic-routed streams via SAM v3 |
+| [iroh (QUIC) 🧪](#iroh) | stream | EndpointId | var | QUIC p2p by public key; hole-punch + relay fallback (`bridge-iroh` feature) |
 | [Veilid ⚪](#veilid) | dgram | node id | var | private-routed DHT |
 | [libp2p (gossipsub) ⚪](#libp2p) | stream | PeerId | var | pub/sub overlay; IPFS swarm |
 | [WebSocket ✅](#websocket) | stream | conn | 64 K | binary frames to a relay or peer |
@@ -1466,6 +1467,63 @@ Fountain-fragment above ~1200 bytes.
 
 **References.** [I2P SAM v3](https://geti2p.net/en/docs/api/samv3);
 [I2P datagrams](https://geti2p.net/en/docs/api/datagrams).
+</details>
+
+<a id="iroh"></a>
+## iroh (QUIC) 🧪
+
+**Summary.** [iroh](https://github.com/n0-computer/iroh) gives QUIC connections
+between endpoints identified by a public key, with hole punching and **relay
+fallback** when a direct path can't be found. That fills the gap between LAN UDP and
+Tor/I2P: internet-reachable peer paths without a stable public IP. Envelopes are
+KISS-framed on one bi-directional QUIC stream, exactly like the TCP/serial bridges.
+
+| Field | Value |
+|---|---|
+| Driver form | `stream` (KISS over a QUIC bi stream) |
+| `U` | iroh `EndpointId` (a public key) |
+| MTU | large (QUIC stream); fountain-fragment applies as everywhere |
+| State | stateful (endpoint + connection, reconnecting) |
+| Status | 🧪 implemented — two-endpoint localhost round-trip in CI (`iroh` workflow); real NAT paths not yet exercised |
+| Code | `bridge::iroh`, behind the `bridge-iroh` Cargo feature |
+
+**Enable it.** Off by default. Build with `--features bridge-iroh` (needs Rust ≥ 1.91;
+it is off the MSRV and default matrices and has its own CI job). Config lines:
+
+```yaml
+bridges:
+  - iroh                              # listen; relay + discovery on, so NATed peers reach you
+  - iroh: <endpoint-id>               # dial that peer, letting relay/discovery find it
+  - iroh: <endpoint-id>@127.0.0.1:5000  # dial with an explicit address, relay+discovery OFF (LAN)
+```
+
+The endpoint id is printed on start.
+
+<details><summary>Deep dive</summary>
+
+**SPORE bridge mapping.** An iroh `Endpoint` is bound once; the dialer opens a bi
+stream to the peer's id, the listener accepts one, and the same
+[`stream_link`](#the-three-driver-forms) KISS framing and best-effort store-and-forward
+semantics apply as on TCP. iroh is async (tokio); the seam is a private multi-thread
+runtime whose stream halves are wrapped as blocking `Read`/`Write`, so the shared pump
+drives them without knowing they are async. A dropped link reconnects with backoff; the
+outbound queue drains when it returns.
+
+**Trust — read before pointing this at the internet.**
+- **`EndpointId` is not a SPORE address.** iroh authenticates the *transport* peer;
+  SPORE's own seal/sign authenticates the *message*. Keep the layers separate — do not
+  derive one identity from the other.
+- **Relays are a phone-home.** In the default (non–direct-only) mode the endpoint uses
+  the n0 relay + discovery infrastructure to hole-punch and to fall back to relaying.
+  A relay sees **ciphertext only** (envelopes are already sealed) but still sees your
+  IP, your peer's, and traffic timing. If that metadata matters, use `Tor`/`I2P`
+  instead, run your own relay, or use the direct-only `id@addr` form on a trusted LAN.
+- **Not a substitute for the mesh.** iroh is for when *both* ends can reach the
+  network. Offline peers still use store-and-forward; iroh just injects envelopes into
+  the same hub once a path exists.
+
+**References.** [iroh](https://github.com/n0-computer/iroh);
+[iroh discovery & relays](https://www.iroh.computer/docs).
 </details>
 
 <a id="veilid"></a>

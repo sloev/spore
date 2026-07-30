@@ -3,12 +3,20 @@ name = "spore"
 version = "0.6.0"
 edition = "2021"
 # The oldest toolchain that builds this, verified rather than asserted: `cargo
-# +1.75 test` passes. It matters because CONTINUITY.md promises a rebuild on
-# whatever machine survives, and that is not a promise you can keep on a toolchain
-# you never tried. `Cargo.lock` is kept at version 3 for the same reason — a v4
-# lockfile cannot even be *parsed* by 1.75, which silently defeated the dependency
-# pins below.
-rust-version = "1.75"
+# +1.85 test` passes (the MSRV CI job runs exactly that). It matters because
+# CONTINUITY.md promises a rebuild on whatever machine survives, and that is not a
+# promise you can keep on a toolchain you never tried.
+#
+# The floor was 1.75 until the optional `bridge-iroh` feature landed: `iroh-base`
+# requires `zeroize ≥1.9`, and because Cargo resolves optional deps too, that pulls
+# `zeroize` (and its edition-2024 `zeroize_derive` 1.5) into the *core* build via
+# chacha20poly1305/crypto_box — both need Rust 1.85. Raising the floor to 1.85 was a
+# deliberate decision to admit iroh; the default build and every non-iroh bridge
+# still build offline on 1.85. `iroh` itself needs 1.91 and is exercised only by the
+# dedicated `iroh` CI job on stable, never on the MSRV toolchain. `Cargo.lock` is at
+# version 4 (needs Cargo ≥1.78, well under the 1.85 floor); it was pinned to v3 only
+# to stay parseable by the old 1.75 floor, a constraint the bump retires.
+rust-version = "1.85"
 description = "SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope: a reference implementation"
 license = "Unlicense"
 
@@ -26,16 +34,26 @@ chacha20poly1305 = "0.10"
 sha2 = "0.10"
 blake2 = "0.10"
 rand = "0.8"
-# Pin transitive deps to versions compatible with Rust 1.75 (no edition2024).
-zeroize = "=1.7.0"
 base64ct = "=1.6.0"
-# `zeroize` is a facade; the derive macro is a *separate* crate that the pin above
-# does not constrain, and zeroize_derive 1.5 moved to edition2024 — which needs a
-# far newer Cargo than 1.75 and so defeated the pin it sits behind. Nothing here
-# uses `#[derive(Zeroize)]`; it arrives via chacha20poly1305/crypto_box enabling
-# the feature. Pinned rather than disabled because the feature belongs to those
-# crates, not to us.
-zeroize_derive = "=1.4.2"
+# `zeroize` is bumped to 1.x (≥1.9) to satisfy the optional iroh bridge's
+# `iroh-base`, which pulls it into the *core* build via chacha20poly1305/crypto_box.
+# That is what moved the MSRV floor off 1.75 (see rust-version above): zeroize 1.9's
+# derive pulls `zeroize_derive` 1.5, which is edition2024. Nothing here uses
+# `#[derive(Zeroize)]`; the feature belongs to those crypto crates, not to us.
+zeroize = "1"
+
+# Optional: the iroh QUIC peer-to-peer bridge (feature `bridge-iroh`). A large async
+# tree, off by default and off the default/MSRV CI matrix — exercised only by the
+# dedicated `iroh` CI job on stable. `dep:` gating keeps every other build lean.
+# Marked experimental (🧪) in BRIDGES.md.
+iroh = { version = "1", optional = true }
+tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net", "io-util", "sync", "time"] }
+
+[features]
+# QUIC peer-to-peer envelope bridge over iroh (hole punch + relay fallback). iroh's
+# default `tls-ring` feature selects the rustls `ring` crypto provider, which the
+# `Minimal`/`N0` presets install on the endpoint builder — no direct rustls dep here.
+bridge-iroh = ["dep:iroh", "dep:tokio"]
 
 # On the web (wasm32) OsRng needs a randomness source. We use getrandom's
 # `custom` backend and route it to a JS import (`spore_fill_random`) so the wasm
