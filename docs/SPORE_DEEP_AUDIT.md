@@ -31,7 +31,7 @@ Wire format and C ABI stay frozen. No `allow-frozen-change` required for this se
 | **PR5** | Store spilled id verify | Medium hardening | ✅ merged (#47) | — | PR0–PR2 |
 | **PR6** | Device matrix + HARDWARE honesty | Process | 🟡 docs in review; on-device runs deferred to hardware QA | PR0–PR3 ideally | — |
 | **PR7** | Polish batch | Low | 🟡 demod_out cap in review; a11y/intervals already met; UI features remain | PR4 | — |
-| **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | ⬜ todo | — (no core freeze) | PR0–PR7 |
+| **PR8** | SPORE Direct: negotiated E2E pipe (general) | Feature / product | 🟡 core in review (codec+key schedule+record+Pipe+Loopback, tested); UDP/TCP adapters + mesh glue to follow | — (no core freeze) | PR0–PR7 |
 | **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | ⬜ todo | — | PR2 helpful for stop/unregister |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
@@ -1004,11 +1004,33 @@ pipe.close()?;
 - Optional: TCP framing round-trip
 - Document ESP-NOW as 🧪 until hardware procedure exists (same honesty as bridges)
 
+## Status (increment 1 — the pure protocol core)
+
+Landed in `src/direct.rs` (+ `docs/DIRECT.md`, `examples/direct_loopback.rs`), a new
+`pub mod direct` — additive, no envelope/store/hub/wire change, vectors byte-identical,
+compiles on wasm:
+- `SPDR` OFFER/ANSWER codec (bounds-checked reader; truncated/alien → `None`).
+- Key schedule: X25519 (reusing `ratchet::keypair`) + BLAKE2b KDF binding both addrs,
+  pipe id and medium; directional tx/rx keys; media keys never on the wire.
+- AEAD record `ver·type·seq·pipe_id[..4]·ChaCha20-Poly1305`, header authenticated as AAD.
+- `choose()` medium selection (throughput/MTU filter → latency-then-capacity rank →
+  `NoMedium`/`Throughput`).
+- `DatagramPort` trait + in-memory `Loopback`; `Pipe` (`offer`/`answer`/`finish`/
+  `send`/`poll`).
+- 8 unit tests: offer/answer round-trips, malformed→None, candidate filter, full
+  negotiate→data round-trip both ways, a record only opens on the pipe that
+  negotiated it, an AAD tamper fails the MAC, wrong pipe-id doesn't finish.
+
+**Deferred to increment 2 (transport, not protocol):** real `direct/udp.rs` +
+`direct/tcp.rs` adapters and the two-process socket integration test; the mesh
+signalling glue that carries `SPDR` over `send_direct`; `CLOSE`/`REKEY`; ESP-NOW
+adapter documented 🧪 until a hardware procedure exists.
+
 ## Acceptance
-- [ ] Negotiation selects a medium that meets `min_bps` + MTU or rejects clearly
-- [ ] Keys derived; records authenticate; no media in SPORE store
-- [ ] Same record bytes work on ≥2 adapters (UDP + TCP framing minimum)
-- [ ] General `DATA` path works without any audio codec in tree
+- [x] Negotiation selects a medium that meets `min_bps` + MTU or rejects clearly (`choose`)
+- [x] Keys derived; records authenticate; no media in the SPORE store (records ride the underlay)
+- [ ] Same record bytes work on ≥2 real adapters (UDP + TCP framing) — increment 2
+- [x] General `DATA` path works without any audio codec in tree
 - [ ] Zero changes to frozen contract / envelope layout
 - [ ] `docs/DIRECT.md` states threat model (underlay can drop/delay/record ciphertext)
 

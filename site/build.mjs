@@ -28,6 +28,7 @@ const pages = [
   ['docs/APPS.md', 'apps.html', 'Apps'],
   ['docs/DESIGN.md', 'design.html', 'Design'],
   ['docs/BRIDGES.md', 'bridges.html', 'Bridges'],
+  ['docs/DIRECT.md', 'direct.html', null],
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
   // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
@@ -76,6 +77,7 @@ const titles = new Map([
   ['changelog.html', 'SPORE — changelog'],
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
+  ['direct.html', 'SPORE — Direct: low-latency E2E pipes'],
   ['design-language.html', 'SPORE — visual design language'],
   ['android-audit.html', 'SPORE — Android production audit'],
   ['bindings.html', 'SPORE — language bindings'],
