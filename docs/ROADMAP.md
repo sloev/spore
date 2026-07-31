@@ -73,7 +73,7 @@ name · **14** Freeze impact (almost always None).
 | **B3** | Empty states + PUBLIC/broadcast confirm | High UX | ✅ merged (#62) 🧪 | — | B-series |
 | **B4** | Notifications + transfers overflow | High UX | 🟢 in review (#66) 🧪 | — | B-series |
 | **B5** | Advanced: ring health + cautious export | Medium | 🟢 in review (#67) 🧪 | — | B-series |
-| **B6** | Bridges: status enum + permission recovery | High UX | ⬜ todo | — | B-series |
+| **B6** | Bridges: status enum + permission recovery | High UX | 🟢 in review (#68) 🧪 | — | B-series |
 | **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
@@ -1288,13 +1288,41 @@ has no Android SDK (network-restricted — `sdkmanager` can't reach `dl.google.c
 with B4, CI's `apk` job is the only place it actually compiles; reviewed by hand against the
 real `RingHealth`/`Caption`/`ConfirmDialog` signatures instead.
 
-## B6 — Bridges: status enum + permission recovery (no fake toggle) — ⬜ todo
+## B6 — Bridges: status enum + permission recovery (no fake toggle) — 🟢 in review (#68)
 **Why:** the LED uses brittle substring matching on status strings; a denied permission
 dead-ends. **Files:** `NodeScreens` (BridgeRow), bridge classes, manifest flows.
 **Steps:** map status → `up/connecting/down/error`; deep-link to app settings when
 mic/BT/nearby is denied; **Remove stays the control** — no Start/Stop `Switch` until
 start/stop is real for that row. **Acceptance:** no fake switch; denied permission has a
 recovery path.
+
+**Shipped (`feat/android-b6-bridge-status-permission-recovery`).** A new
+`classifyBridgeStatus` (private, `NodeScreens.kt`) maps every bridge's free-text status to
+a `BridgeStatus` (`Up/Connecting/Down/Error`) enum by **exact match** over the small, known
+vocabulary every source actually emits (`NodeController`'s own literals, `BleBridge`,
+`WifiDirectBridge`, `WebBridgeHost`'s JS-side events) — not the blind substring `in` checks
+it replaces. Those checks were real, live bugs, not hypothetical: `"disconnected"` contains
+`"connect"`, so a genuinely dropped BLE link read as *connecting*; `"unsupported"` contains
+`"up"`, so an unsupported Wi-Fi Direct device read as *up* — both found by tracing every
+status string each bridge class actually emits, not by trusting the old substring list.
+`Error` now gets its own treatment (pink + a `⚠` icon, never colour alone per
+VISUALDESIGN) instead of fading into the same "down" kevlar as an idle bridge.
+
+Permission recovery: `BridgesList`'s `withPerms` now takes a label, and a denial (rather
+than dead-ending silently, as before) opens a `ConfirmDialog` naming what needs the
+permission with an "Open settings" action that deep-links to
+`ACTION_APPLICATION_DETAILS_SETTINGS` for this app. Covers Audio modem (RECORD_AUDIO),
+Meshtastic/RNode BLE (BLUETOOTH_CONNECT ≥31), and Wi-Fi Direct (NEARBY_WIFI_DEVICES ≥33 /
+ACCESS_FINE_LOCATION below).
+
+**Remove stays the control** — confirmed unchanged: no Start/Stop `Switch` was added or
+exists; `canStop` still gates the one real control per row.
+
+Not build-verified in this environment (no Android SDK, network-restricted — same
+limitation as B4/B5); CI's `apk` job is the compile check. Reviewed by hand: traced every
+status string each bridge source (`BleBridges.kt`, `WifiDirectBridge.kt`,
+`WebBridgeHost.kt`, `NodeController.kt`) can actually produce against
+`classifyBridgeStatus`'s cases, rather than assuming the vocabulary.
 
 ## B7 — Accessibility + density pass — ⬜ todo (depends B1–B6)
 **Why:** icon-only 📎, LEDs/chips without descriptions, sub-48 dp targets, no way back to
