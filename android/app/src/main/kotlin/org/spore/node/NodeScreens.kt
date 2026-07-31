@@ -382,6 +382,14 @@ internal fun BridgesList() {
                 else -> "Other"
             }
         }
+        if (bridges.isEmpty()) {
+            item {
+                Caption(
+                    "no bridges yet 🍄\nadd one below — SPORE only reaches as far as its bridges do",
+                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                )
+            }
+        }
         listOf("Radio", "Network", "Web", "Other").forEach { name ->
             val rows = groups[name].orEmpty()
             if (rows.isNotEmpty()) {

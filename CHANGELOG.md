@@ -18,6 +18,14 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: empty states + a PUBLIC send confirm (B3).** Chats, Bridges, and Feed
+  (already had one) now say something plain when there's nothing there yet, instead of
+  a blank list — no unread badges anywhere, since there's still no read tracking to back
+  one. Sending to **PUBLIC** — unlike a DM, signed but never sealed, and reaching every
+  node in range rather than just the open thread — now asks first, via a new
+  `ConfirmDialog` shared component (pink CTA, void ink; Cancel is the quiet default).
+  🧪 Compiles in the `apk` CI; on-device QA is PR6. Wire unchanged.
+
 - **Android: send/post feedback (B2).** The plain-text chat send and the feed post used to
   clear the composer even when nothing went out — the node not being started yet was a
   silent no-op that looked like a sent message. `NodeController.send`/`post` now return a

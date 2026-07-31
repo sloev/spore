@@ -114,6 +114,17 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
             }
 
             item { SectionLabel("Conversations") }
+            // `threads` always contains PUBLIC (added above), so it is never
+            // literally empty — the honest "nothing here" case is no *real*
+            // conversation yet, i.e. nothing besides the PUBLIC row.
+            if (threads.size <= 1) {
+                item {
+                    Caption(
+                        "no conversations yet 🍄\nopen one by address below, or wait for someone nearby",
+                        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    )
+                }
+            }
             items(threads) { peer ->
                 val last = messages.lastOrNull { it.peer == peer }
                 // The mock shows an unread count here. There is no read tracking in
@@ -186,6 +197,28 @@ internal fun ChatDetail(peer: String) {
         }
     }
 
+    // A PUBLIC send reaches every node in range rather than just this thread, and —
+    // unlike a DM — is signed but never sealed, so it's readable by anyone carrying
+    // it. That and "can't be unsent" earn it a confirm dialog rather than a single
+    // tap. The actual send (attachment or plain text, with its own failure feedback
+    // from B2) lives here so both the direct tap and the confirmed broadcast reuse it.
+    var confirmPublic by remember { mutableStateOf(false) }
+    val performSend = {
+        val s = staged
+        if (s != null) {
+            if (NodeController.sendTextWithAttachment(peer, text, s.name, s.bytes, s.mime)) {
+                staged = null
+                text = ""
+            } else {
+                confirm("Attachment too large for this node's store — send it smaller")
+            }
+        } else if (NodeController.send(peer, text)) {
+            text = ""
+        } else {
+            confirm("Node not started yet — not sent")
+        }
+    }
+
     Column(Modifier.padding(horizontal = 12.dp).fillMaxSize().imePadding()) {
         if (peer != Petnames.PUBLIC) {
             val saved = names[peer] ?: ""
@@ -243,21 +276,7 @@ internal fun ChatDetail(peer: String) {
             HGap()
             CrateButton(
                 "Send",
-                {
-                    val s = staged
-                    if (s != null) {
-                        if (NodeController.sendTextWithAttachment(peer, text, s.name, s.bytes, s.mime)) {
-                            staged = null
-                            text = ""
-                        } else {
-                            confirm("Attachment too large for this node's store — send it smaller")
-                        }
-                    } else if (NodeController.send(peer, text)) {
-                        text = ""
-                    } else {
-                        confirm("Node not started yet — not sent")
-                    }
-                },
+                { if (peer == Petnames.PUBLIC) confirmPublic = true else performSend() },
                 // Send is live with either text or an attachment.
                 enabled = text.isNotBlank() || staged != null,
                 face = Palette.Pink,
@@ -266,6 +285,17 @@ internal fun ChatDetail(peer: String) {
                 ink = Palette.Void,
             )
         }
+    }
+
+    if (confirmPublic) {
+        ConfirmDialog(
+            title = "Send to everyone?",
+            body = "PUBLIC reaches every node in range, not just this conversation — " +
+                "signed, but never sealed, so anyone carrying it can read it. This can't be unsent.",
+            confirmLabel = "Send to PUBLIC",
+            onConfirm = { confirmPublic = false; performSend() },
+            onDismiss = { confirmPublic = false },
+        )
     }
 }
 
