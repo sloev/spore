@@ -1,204 +1,158 @@
 # Continuity — SPORE as a seed
 
 <p align="center">
-  <a href="spore-continuity.png"><img src="spore-continuity.png" alt="SPORE continuity on one page: what a seed is today, cold-start playbooks for a browser / radios / paper / one offline laptop, trust without infrastructure, and how one copy propagates into many" width="820" /></a>
+  <a href="spore-continuity.png"><img src="spore-continuity.png" alt="SPORE continuity on one page" width="820" /></a>
 </p>
 
-<p align="center"><em>The whole continuity story on one page — <a href="spore-continuity.png">open full size</a>.
-The <a href="#roadmap">roadmap below</a> is authoritative for what is actually done;
-the poster is a summary and can lag it.</em></p>
+<p align="center"><em>Poster summary —
+<a href="spore-continuity.png">full size</a>. The story cards and sections below
+are the living text; the poster can lag.</em></p>
 
-SPORE is named for a reason. A spore is a small, hardy, self-contained capsule
-that can lie dormant and later **regrow the whole organism** from a single
-survivor. This document is about making the *software* behave the same way: so
-that any one copy — a repository clone, a single HTML file, a printed booklet, a
-scanned code, a message typed off paper — carries enough to understand the
-system, prove it's authentic, rebuild a running node, and reproduce the other
-copies. No step here needs a server or a working internet — with one honest
-exception, called out where it applies: building the Rust daemon needs its
-dependencies vendored first, which is one command run while you still have a
-registry (see "Only one laptop, no internet").
+A **spore** is a small capsule that can regrow the whole organism from one
+survivor. This page is about the *software* doing the same: one HTML file, one
+printout, or one offline bundle is enough to understand, verify, and run a node —
+without depending on the same infrastructure the mesh is meant to outlast.
 
-Three properties we design for:
+<div class="story story-continuity" role="list">
 
-- **Readable** — a person can understand it from the artifact in hand.
-- **Reconstructable** — a person can rebuild a working node from that artifact.
-- **Self-propagating** — the network can carry its own code, tools, and manuals.
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-seed" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <ellipse class="seed-body" cx="140" cy="64" rx="36" ry="48"/>
+      <path class="seed-seam" d="M140 20 Q155 64 140 108"/>
+      <g class="seed-sprout">
+        <path d="M140 28 Q130 10 120 18" fill="none"/>
+        <path d="M140 28 Q150 8 160 16" fill="none"/>
+      </g>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>Three properties</strong>
+    <span class="story-lead">Readable · Reconstructable · Self-propagating</span>
+  </figcaption>
+  <details>
+    <summary>Why “every copy is a seed” is a constraint</summary>
+    <p>Most software assumes a registry, CDN, or app store. SPORE’s job is moving
+    messages when that infrastructure is degraded — so getting SPORE must not depend
+    on it. Understanding, verifying, and rebuilding travel <em>with</em> the node:
+    dependency-light core, a spec independent of Rust, paper-friendly formats, and
+    the network able to carry its own installer.</p>
+  </details>
+</figure>
 
-<details>
-<summary>Why "every copy is a seed" is a design constraint, not a slogan</summary>
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-seeds-row" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <g class="chip" transform="translate(30,40)"><rect width="50" height="40" rx="3"/><text x="25" y="25" text-anchor="middle">HTML</text></g>
+      <g class="chip" transform="translate(90,40)"><rect width="50" height="40" rx="3"/><text x="25" y="25" text-anchor="middle">QR</text></g>
+      <g class="chip" transform="translate(150,40)"><rect width="50" height="40" rx="3"/><text x="25" y="25" text-anchor="middle">repo</text></g>
+      <g class="chip" transform="translate(210,40)"><rect width="50" height="40" rx="3"/><text x="25" y="25" text-anchor="middle">spec</text></g>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>What’s a seed today</strong>
+    <span class="story-lead">From one browser file to paper QR to a vendored offline build.</span>
+  </figcaption>
+  <details>
+    <summary>Artifact table</summary>
+    <table>
+      <thead><tr><th>Seed</th><th>Assumes</th><th>Gets you</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Single-file HTML</strong></td><td>a browser</td><td>full node offline, zero network</td></tr>
+        <tr><td><strong>Seed Sheet</strong></td><td>camera + patience</td><td>any ~K of N QR → reimplementation guide</td></tr>
+        <tr><td><strong>Repo + vendor/</strong></td><td>Rust toolchain</td><td>daemon + bridges offline after one online vendor step</td></tr>
+        <tr><td><strong>SPEC + by-hand examples</strong></td><td>pen, paper</td><td>reimplement in any language</td></tr>
+        <tr><td><strong>Pure-Python T0</strong></td><td>Python 3</td><td>receive + verify public mail, no packages</td></tr>
+        <tr><td><strong>Armored envelope</strong></td><td>typing</td><td>inject one message from paper or voice</td></tr>
+      </tbody>
+    </table>
+    <p>Links and build commands: <a href="apps.html">Apps &amp; daemons</a>.</p>
+  </details>
+</figure>
 
-Most software assumes a supply chain: a registry to install from, a CDN to load
-from, a build farm, an app store, an always-on network to bootstrap trust. Each of
-those is a single point of failure over a long enough horizon. SPORE's job — moving
-messages when the usual infrastructure is degraded or gone — is undermined if
-*getting* SPORE depends on that same infrastructure. So the constraint is: the
-means of understanding, verifying, and rebuilding SPORE must travel *with* SPORE,
-in forms that outlive any one host. That pushes specific engineering choices —
-a dependency-light core, a spec independent of the Rust code, reproducible builds,
-paper-friendly formats, and the network distributing its own installer.
-</details>
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-cold" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <circle class="cold-core" cx="140" cy="60" r="18"/>
+      <g class="cold-rings">
+        <circle cx="140" cy="60" r="32" fill="none"/>
+        <circle cx="140" cy="60" r="46" fill="none"/>
+      </g>
+      <text class="cold-label" x="140" y="64" text-anchor="middle">go</text>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>Cold-start playbooks</strong>
+    <span class="story-lead">Only a browser · only radios · only paper · only one laptop offline.</span>
+  </figcaption>
+  <details>
+    <summary>Only a browser</summary>
+    <p>Open <code>spore-standalone.html</code>. Add a bridge from the page (WebSocket, WebRTC,
+    Nostr, WebTorrent) or the <strong>audio modem</strong> so two laptops pair with no network.
+    Get the file from <a href="apps.html">Apps</a>.</p>
+  </details>
+  <details>
+    <summary>Only radios</summary>
+    <p>Daemon + matching bridge (<a href="bridges.html">BRIDGES</a>). Router and fragmentation
+    are medium-independent; the radio is a thin send/recv shim.</p>
+  </details>
+  <details>
+    <summary>Only paper (and voice)</summary>
+    <p>Armor form <code>~S1.&lt;base32&gt;.&lt;checksum&gt;~</code> survives SMS, handwriting, or a
+    read-aloud. Seed Sheet fountain QR recovers bulk guides from a partial print.</p>
+  </details>
+  <details>
+    <summary>Only one laptop, no internet</summary>
+    <p>Clone + toolchain rebuild offline <strong>after</strong> you vendor while still online:</p>
+    <pre><code>./scripts/make-offline-bundle.sh
+./scripts/make-offline-bundle.sh --tar</code></pre>
+    <p>MSRV is enforced by CI (see Cargo.toml / security findings for the floor).
+    <code>Cargo.lock</code> pins versions; <code>vendor/</code> carries the sources. HTML node, printed
+    spec, and Seed Sheet need no vendor step.</p>
+  </details>
+</figure>
 
-## What's a seed today
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-trust" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <path class="shield" d="M140 20 L180 36 V68 Q140 100 100 68 V36 Z"/>
+      <path class="shield-check" d="M124 62 L136 74 L160 48" fill="none"/>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>Trust without infrastructure</strong>
+    <span class="story-lead">Hash is identity. Signatures bind path learning. Seed ≠ full inbox backup.</span>
+  </figcaption>
+  <details>
+    <summary>Anchors</summary>
+    <ul>
+      <li><strong>Content addressing</strong> — envelope ID is the hash of its bytes; node address is the hash of its key.</li>
+      <li><strong>Signed everything</strong> — path learning from signed frames; releases as signed manifests.</li>
+      <li><strong>Seed restores identity, not the prekey ring</strong> — carrying the ring keeps old sealed mail readable and lengthens the theft window. Continuity of identity and forward secrecy of content pull opposite ways; you choose.</li>
+      <li><strong>Reproducible builds</strong> — compare hashes offline; the single-file node prints the wasm SHA-256 in its footer.</li>
+    </ul>
+  </details>
+</figure>
 
-Concrete artifacts that already carry the node, ranked by how little they assume:
-
-| Seed | Assumes | Gets you |
-|---|---|---|
-| **Single-file HTML node** (`web/spore-standalone.html`) | a browser | a full node, offline, from one file — no install, no network |
-| **Seed Sheet** (`web/spore-seedsheet.html`, printed) | a camera + patience | scan any ~K of N QR codes to recover the reimplementation guide; a torn sheet still works |
-| **Repo clone** | a Rust toolchain + `vendor/` (one command, while online) | build the daemon + all bridges + bindings, offline |
-| **The spec** (`docs/SPEC.md`) + by-hand examples | pen, paper, patience | reimplement a compatible node in any language |
-| **Pure-Python T0 node** (`reference/spore_t0.py`) | Python 3 | receive + verify public messages, no packages, no toolchain |
-| **An armored envelope** (`~S1.…~`) | a human who can type | inject one message into a node from paper or voice |
-
-The single-file node is the flagship: `node web/build-standalone.mjs` inlines the
-wasm and every script into one `.html` that runs from a USB stick or an email
-attachment and makes **zero network requests** (CI asserts this). Save it, copy it,
-carry it — a copy is enough to rejoin or restart a mesh. The page can even
-re-serialize itself ("Download a copy"), so one seed makes the next.
-
-Every one of these is a download or a `cargo build` away —
-[**Apps & daemons**](APPS.md) has the links and the build commands.
-
-## Cold-start playbooks
-
-What to do when you have less than the usual everything.
-
-<details>
-<summary>Only a browser</summary>
-
-Open `spore-standalone.html`. You have a full node. To reach others, add a bridge
-from the page: a WebSocket relay URL, WebRTC, Nostr, WebTorrent — or the **audio
-modem**, so two laptops with mics and speakers pair with no network and no cables
-at all. Where to get the file: [`APPS.md`](APPS.md).
-</details>
-
-<details>
-<summary>Only radios (LoRa, ham, Meshtastic)</summary>
-
-Run the daemon with the matching bridge (see `docs/BRIDGES.md`). The router,
-address resolution, and fragmentation are medium-independent; a radio bridge is a
-thin `recv`/`send` shim. A Meshtastic WiFi-UDP node, an RNode over serial, or an
-AX.25 TNC all carry SPORE envelopes unchanged.
-</details>
-
-<details>
-<summary>Only paper (and voice)</summary>
-
-Envelopes have a text **armor** form: `~S1.<base32>.<checksum>~`. It survives SMS,
-handwriting, a read-aloud phone call, or a photograph. Type an armored envelope
-into any node and it enters the mesh; the checksum catches transcription errors.
-For bulk (source, manuals) the **Seed Sheet** carries fountain-coded QR, so a
-*partial* printout still rebuilds the whole — SPORE's own erasure coding, turned
-on itself.
-</details>
-
-<details>
-<summary>Only one laptop, no internet</summary>
-
-A repo clone plus a Rust toolchain rebuilds everything offline — **once you have
-vendored the dependencies**, which is one command you must run *before* you lose
-the network:
-
-```sh
-./scripts/make-offline-bundle.sh        # writes vendor/ + .cargo/config.toml
-./scripts/make-offline-bundle.sh --tar  # ...and a tarball + sha256 to carry
-```
-
-The toolchain floor is **Rust 1.85**, declared as `rust-version` in `Cargo.toml`
-and checked by CI on every push, because an offline rebuild is exactly the
-situation where you cannot go and fetch a newer Cargo. That floor had been claimed
-in a comment and was false in two ways at once — see S-014 in
-[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) — which is why it is now enforced by
-something that runs rather than something that reads well. It was **1.75** until the
-optional `bridge-iroh` feature landed: iroh pulls `zeroize` 1.9 (edition-2024
-`zeroize_derive`) into the core build, which needs 1.85, so admitting iroh moved the
-floor deliberately. iroh itself needs 1.91 and is built only by the dedicated `iroh`
-CI job on stable — the default offline rebuild, and every non-iroh bridge, still
-build on 1.85.
-
-Be precise about what a clone does and does not carry. `Cargo.lock` is committed,
-so the *versions* are pinned and a rebuild resolves identically — but a lockfile
-names crates, it does not contain them. Without `vendor/`, `cargo build` on a
-machine that has never fetched these crates fails at the first dependency, and it
-fails at resolution, before anything compiles. The vendor directory is ~30 MB of
-third-party source and is deliberately **not** committed, so the repo stays small
-enough for the media described above; the script is how you convert a clone into
-an offline-buildable one while you still can. After it, `cargo build --offline`
-succeeds with an empty `CARGO_HOME`.
-
-The other three artefacts in the table have no such step: the single-file HTML
-node, the printed spec and the Seed Sheet are self-contained as they stand.
-
-Verify what you rebuilt against the printed / signed hashes (below). One machine can then seed others by folder sync (a USB
-stick is a bridge), by sound, or by handing over the single-file node.
-</details>
-
-## Trust without infrastructure
-
-Authenticity can't depend on a live server either. The anchors:
-
-- **Content addressing.** An envelope's ID *is* the hash of its bytes, and a node's
-  address *is* the hash of its key. Nothing is trusted for being in the right place
-  — only for hashing/verifying correctly.
-- **Signed everything.** Path learning binds only from signed frames; releases are
-  signed manifests; the manual can carry the maintainers' public keys.
-- **A seed is not a whole backup any more.** The 32-byte identity seed restores the
-  address and signing key — that is what makes an identity portable across paper,
-  a QR code, or a memorised mnemonic. It deliberately does **not** restore the
-  prekey ring (§7), whose secrets are random so that deleting them means something.
-  Carry `Node::prekey_ring()` alongside the seed if you want to keep reading mail
-  already sealed to you, and understand the trade: a copy of the ring on a spare
-  disk is a copy of your inbox key for as long as it exists, which is precisely the
-  seven-day window the ring is there to close. Continuity of *identity* and
-  forward secrecy of *content* pull in opposite directions here, and this is the
-  one place in SPORE where you have to choose.
-- **Reproducible builds.** A rebuilt binary should hash to a published value, so a
-  copy is verifiable offline against a number you can print, sign, or memorize. The
-  single-file node prints the SHA-256 of its embedded wasm in its own footer.
+</div>
 
 ## Roadmap
 
-What exists and what's next, from the fuller design discussion.
+What exists and what’s next:
 
-- [x] **Single-file browser node** — one self-contained HTML file, tested to use
-      zero network.
-- [x] **Config-driven daemon + bridge matrix** — one binary, many media
-      (`docs/BRIDGES.md`).
-- [x] **Language bindings** — Python / Go / JS from one C ABI (`bindings/`).
-- [x] **This continuity guide** with cold-start playbooks.
-- [x] **Reimplementation guide** ([`REBUILD.md`](REBUILD.md)) — the wire format
-      with worked-by-hand examples (address, envelope bytes, signature, armor)
-      generated from the real code, so any language can rebuild a compatible node.
-- [x] **Printable Seed Sheet** (`site/seed/build-seedsheet.mjs`) — a two-sided A4:
-      the wire format by hand on one side, the full reimplementation guide as
-      fountain-coded QR on the other, with the payload's SHA-256 printed on it.
-- [x] **Fountain-coded print** — a random-linear code over GF(256)
-      (`site/seed/fountain.mjs`, the paper twin of §3) where *any ~K of N* QR codes
-      reconstruct the whole; a reference decoder (`decode-seedsheet.mjs`) and a
-      full drop-a-third round-trip test ship with it.
-- [ ] **Codex** — the complete source as a hash-stamped booklet (the Seed Sheet
-      scaled up), for machines with no toolchain to retype or rescan from.
-- [◑] **The network carries its own genome** — done: a bootstrap bundle publishes
-      on a well-known topic (`bundle::BOOTSTRAP_TOPIC`) as a signed,
-      content-addressed file any holder can serve and a newcomer verifies
-      (`Node::publish_bundle` / `bundles` / `latest_bundle`), and seed-vault nodes
-      `Node::pin` it so it's never evicted. Still open: signed self-update (a node
-      adopting a newer bundle as its own binary).
-- [ ] **Trust roots on paper** — maintainer keys and a mnemonic-encoded release
-      hash you can carry in memory; multi-signature releases so no single custodian
-      is a point of failure.
-- [x] **Tiny reference decoders** ([`reference/`](../reference/)) — dependency-free
-      Tier-0 nodes (parse + address + ID + Ed25519 verify) in **Python**, **C**
-      (its own SHA-256/512 + curve arithmetic, zero deps), and **shell** (`openssl`
-      + coreutils), for machines without a Rust toolchain. All three reproduce the
-      Rust vectors and are checked in CI.
+- [x] **Single-file browser node** — zero network, CI-checked
+- [x] **Config-driven daemon + bridge matrix**
+- [x] **Language bindings** — Python / Go / JS from one C ABI
+- [x] **This continuity guide** with cold-start playbooks
+- [x] **Reimplementation guide** ([Rebuild](rebuild.html))
+- [x] **Printable Seed Sheet** + fountain-coded QR
+- [x] **Tiny reference decoders** (Python, C, shell)
+- [◑] **Network carries its own genome** — bootstrap bundle on a well-known topic; still open: signed self-update of the binary
+- [ ] **Codex** — full source as hash-stamped booklet
+- [ ] **Trust roots on paper** — multi-signature release anchors
 
 ## Help re-seed
 
-The most useful thing anyone can do is **keep a copy somewhere the others aren't**:
-a clone on an offline disk, the single-file node on a phone, a printed spec on a
-shelf, a mirror on a different host. Continuity is just redundancy that outlives its
-sources — and it only works if the copies are already scattered before they're
-needed.
+Keep a copy somewhere the others aren’t: offline disk, phone HTML, printed sheet,
+another host. Continuity is redundancy that outlives its sources — and it only
+works if the copies are already scattered before they’re needed.

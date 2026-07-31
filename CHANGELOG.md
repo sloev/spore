@@ -18,6 +18,15 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Site: Home, Apps, and Continuity use illustrated story cards.** A first-time visitor
+  landed on a wall of text; these three pages now open with a grid of small self-hosted
+  inline-SVG illustrations (CSS/tokens only, no rasters) and a one-line caption, with the
+  full prose moved into `<details>`. Builder/reference docs (Spec, Design, Bridges, Direct,
+  Rebuild, Security Findings, Hardware, Testing, VisualDesign, Roadmap, Changelog,
+  Contributing, Bindings, Reference, Web guide) are unchanged. Reduced-motion disables the
+  SVG animations (verified via computed style); no pink-on-olive; decorative art is
+  `aria-hidden`. First increment of the ROADMAP "site" track — a contrast/readability pass
+  and a docs-index card grid remain open. Wire unchanged.
 - **Android: empty states + a PUBLIC send confirm (B3).** Chats, Bridges, and Feed
   (already had one) now say something plain when there's nothing there yet, instead of
   a blank list — no unread badges anywhere, since there's still no read tracking to back
