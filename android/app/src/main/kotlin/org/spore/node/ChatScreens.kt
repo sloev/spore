@@ -252,9 +252,10 @@ internal fun ChatDetail(peer: String) {
                         } else {
                             confirm("Attachment too large for this node's store — send it smaller")
                         }
-                    } else {
-                        NodeController.send(peer, text)
+                    } else if (NodeController.send(peer, text)) {
                         text = ""
+                    } else {
+                        confirm("Node not started yet — not sent")
                     }
                 },
                 // Send is live with either text or an attachment.

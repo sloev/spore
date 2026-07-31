@@ -18,6 +18,13 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: send/post feedback (B2).** The plain-text chat send and the feed post used to
+  clear the composer even when nothing went out — the node not being started yet was a
+  silent no-op that looked like a sent message. `NodeController.send`/`post` now return a
+  result (false when the node isn't up); the composer only clears on success and otherwise
+  keeps your text and shows "Node not started yet — not sent/posted" — the same pattern the
+  petname Save already used. 🧪 Compiles in the `apk` CI; on-device QA is PR6. Wire unchanged.
+
 - **Android: chat navigation (B1).** System **Back** now follows the screen hierarchy
   instead of leaving the app from a nested screen — a thread falls to the chats list, a
   draft post to the feed, everything else to Chats, and only Chats itself backgrounds the
