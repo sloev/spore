@@ -30,6 +30,18 @@ impl Node {
     }
 
     fn build_announce_at_hops(&mut self, now: u32, hops: u8) -> Vec<Forward> {
+        // Settle any due rotation *before* advertising, not after (PR0b). Without
+        // this, a fresh node could announce its bootstrap prekey, then rotate as
+        // a side effect of the next `on_rx` (any node's first-ever `on_rx`
+        // unconditionally rotates its born=0 bootstrap entry — see
+        // `maybe_rotate_prekey`), and bootstrap its own §7 ratchet session
+        // against that *new* prekey while every peer still believes the old one
+        // is current — a permanent, silent session mismatch, since a session is
+        // never re-seeded once bootstrapped. Calling this here and in
+        // `absorb_announce` before either reads `self.prekey_pub`/`ring.last()`
+        // means both "what I just told the world" and "what I use for myself"
+        // are always the same settled value, regardless of send/receive order.
+        self.maybe_rotate_prekey(now);
         let mut p = Vec::new();
         p.extend_from_slice(&self.prekey_pub);
         p.push(self.busy()); // §5.4c backpressure
@@ -52,7 +64,7 @@ impl Node {
         self.forward_intents(&e, NO_IFACE, now)
     }
 
-    fn absorb_announce(&mut self, e: &Envelope) {
+    fn absorb_announce(&mut self, e: &Envelope, now: u32) {
         if !e.verify() {
             return;
         }
@@ -65,6 +77,33 @@ impl Node {
         prekey.copy_from_slice(&e.payload[..32]);
         self.peer_prekeys.insert(src_addr, prekey);
         self.peer_busy.insert(src_addr, e.payload[32]); // §5.4c busy byte
+
+        // §7 Double Ratchet (PR0b): the moment both sides know each other's
+        // current prekey, both can derive the same session root independently
+        // via a static-static X25519 DH — no message exchange needed. The
+        // lower address is always Alice for a pair, decided identically on
+        // both ends regardless of who sends first, so two peers who each
+        // message the other before hearing back still converge on one
+        // session rather than two dangling halves. Never re-seeded from a
+        // later ANNOUNCE (prekeys rotate daily) — once bootstrapped, the
+        // ratchet's own evolution is what's trusted, exactly like a
+        // Signal-style session decouples from identity keys after X3DH.
+        //
+        // Settled defensively here too (see `build_announce_at_hops`'s comment)
+        // even though `ingest`'s `enforce_bounds` already ran this call above —
+        // this function must never read `ring.last()`/`prekey_pub` for the
+        // bootstrap without knowing rotation has already settled for `now`.
+        self.maybe_rotate_prekey(now);
+        if !self.sessions.contains_key(&src_addr) {
+            if let Some(my_sec) = self.ring.last().map(|pk| pk.secret) {
+                let session = if self.addr < src_addr {
+                    ratchet::Ratchet::init_alice(my_sec, prekey)
+                } else {
+                    ratchet::Ratchet::init_bob(my_sec, self.prekey_pub, prekey)
+                };
+                self.sessions.insert(src_addr, session);
+            }
+        }
 
         // The rest is `ntopics · topics[8×n] · np · petname`. The petname is the
         // name the peer *claims*; it is a display hint only — never identity.
@@ -158,6 +197,7 @@ impl Node {
         trim_map(&mut self.peer_prekeys, MAX_PEERS);
         trim_map(&mut self.peer_busy, MAX_PEERS);
         trim_map(&mut self.peer_names, MAX_PEERS);
+        trim_map(&mut self.sessions, MAX_PEERS);
         trim_map(&mut self.manifests, MAX_MANIFESTS);
         trim_set(&mut self.acked, MAX_ACKED);
 
@@ -225,7 +265,7 @@ impl Node {
         let mut rx = Rx::default();
 
         if e.typ == ty::ANNOUNCE {
-            self.absorb_announce(e);
+            self.absorb_announce(e, now);
         }
 
         let deliverable =

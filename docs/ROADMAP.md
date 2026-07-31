@@ -57,7 +57,7 @@ name · **14** Freeze impact (almost always None).
 
 | PR | Title | Urgency | Status | Depends | Parallel with |
 |----|-------|---------|--------|---------|---------------|
-| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | 🟡 **partial** — Part A merged (#40); Part B carried forward | — | PR1, PR5 |
+| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | 🟡 **partial** — Part A merged (#40); PR0b (ratchet wired into real DM traffic) merged (#70); Part B's UI/config knobs still carried forward | — | PR1, PR5 |
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — merged (#42); items carried forward | — | PR0, PR1 |
 | **PR3** | Service / Audio / BLE lifecycle | High reliability | ✅ merged (#44) | **PR2** | — |
@@ -110,13 +110,40 @@ offline-lifetime knobs and UI — did not**, and is the larger remaining piece:
       it," shown on a failed open of expired sealed mail.
 - [ ] **Raise-above-default warning** — a longer window means a stolen device reads
       more history.
-- **Why deferred:** the Double Ratchet is a tested primitive **not yet wired into
-      any production send/receive path** (`decrypt` is called only from tests), so a
-      runtime TTL knob would configure dead code, and the Android sliders can't be
-      device-verified here — shipping them would break Principle #2 (no fake UI).
-- **Unblocked by:** wiring the ratchet into the DM/session path. Until then the
-      code-level anti-drift move is done (`SKIP_TTL_SECS = PREKEY_LIFETIME_SECS`, one
-      shared window). **Suggest a dedicated PR0b** once the ratchet is integrated.
+- **Why deferred (was):** the Double Ratchet was a tested primitive **not yet wired
+      into any production send/receive path** (`decrypt` was called only from tests),
+      so a runtime TTL knob would have configured dead code, and the Android sliders
+      couldn't be device-verified here — shipping them would break Principle #2 (no
+      fake UI).
+- **✅ PR0b shipped (#70, `feat/pr0b-ratchet-sessions`): the ratchet is wired into
+      real DM traffic.** `Node::send_direct`/`open_dm` now use the §7 Double Ratchet
+      once a session exists, falling back to the one-shot prekey seal otherwise.
+      Sessions bootstrap from ANNOUNCE (a static-static X25519 DH both sides derive
+      independently the moment they know each other's current prekey — no message
+      exchange needed), with the numerically-lower address always the pair's
+      deterministic initiator so two peers who each message the other before hearing
+      back still converge on one session. Wire discriminator: new envelope flag
+      `fl::RATCHET` (bit 64, previously unused — forward/backward compatible, `decode`
+      already copies flags verbatim). Sessions are in-memory only, like
+      `peer_prekeys`/`peer_busy`/`peer_names` — not persisted, self-heal from the next
+      ANNOUNCE after a restart. Bounded via the existing `trim_map`/`MAX_PEERS`.
+      A real, load-bearing bug was found and fixed along the way: a fresh node's
+      bootstrap prekey (`born=0`) rotates unconditionally on its *own* very first
+      `on_rx` (an existing, deliberate "upgrade onto the ring" behaviour) — if that
+      happened *after* the node had already sent its first ANNOUNCE but *before* it
+      processed a peer's, the node would bootstrap its own session using its
+      just-rotated prekey while the peer still believed the pre-rotation one was
+      current, permanently desyncing that session (never re-seeded by design). Fixed
+      by settling any due rotation (`maybe_rotate_prekey`) before *both* building an
+      ANNOUNCE and bootstrapping a session from one, so "what I just told the world"
+      and "what I use for myself" can never disagree. Found by a flaky test (~50% fail
+      rate, tied exactly to which peer's address happened to sort lower) rather than
+      assumed away — traced with temporary instrumentation comparing both sides'
+      derived keys byte-for-byte before landing on the real cause.
+      This unblocks (but does not itself implement) the rest of Part B below —
+      still a separate PR, one concern at a time.
+- **Unblocked, not yet done:** the daemon/Android UI-and-config items below now sit on
+      real, live crypto rather than dead code.
 - [ ] **Field-verify the 7-day window end to end** on a device — already tracked in
       **PR6**; unit tests prove the deadline logic, not a real node's clock/delivery.
 

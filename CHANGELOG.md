@@ -18,6 +18,25 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The §7 Double Ratchet is now wired into real DM traffic (PR0b).** Direct
+  messages were always sealed with a fresh one-shot key against the recipient's
+  current prekey; the tested Double Ratchet primitive existed but was never
+  actually used for send/receive. `Node::send_direct`/a new `Node::open_dm` now
+  use it once a session exists (falling back to the one-shot seal otherwise).
+  Sessions bootstrap from ANNOUNCE — both sides derive the same root
+  independently via a static-static X25519 DH, with the numerically-lower
+  address always the pair's deterministic initiator, so two peers who each
+  message the other before hearing back still converge on one session. New
+  envelope flag `RATCHET` (bit 64, previously unused) marks a ratchet-shaped
+  payload; sessions are in-memory only (like the existing peer tables) and
+  bounded the same way. Along the way, fixed a real bug this surfaced: a fresh
+  node's bootstrap prekey rotates on its own first `on_rx`, and if that raced
+  against its first ANNOUNCE exchange, two peers could permanently derive
+  different session roots — now settled consistently before either announcing
+  or bootstrapping a session. This unblocks (but doesn't itself add) PR0 Part
+  B's offline-lifetime UI/config knobs. Wire format additive/unchanged for
+  existing traffic.
+
 - **Android: accessibility + density pass (B7).** Icon-only buttons (attach, remove
   attachment, Feed's Bold/Italic/Code/link/image, the top bar's back/connect/settings
   icons) now announce a real name to TalkBack instead of the raw glyph or letter. Topic

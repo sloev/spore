@@ -35,6 +35,11 @@ pub mod fl {
     pub const ACKREQ: u8 = 8;
     pub const FLOOD: u8 = 16; // multicast / topic / public / route-discovery
     pub const SRC8: u8 = 32; // src carried as 8-byte address, not 32-byte key
+    /// §7: an ENCRYPTED DATA payload is ratchet-encrypted (`Ratchet::encrypt`),
+    /// not a one-shot prekey seal. Bits 64/128 were unused; `decode` copies
+    /// flags verbatim with no known-bit validation, so this is a forward- and
+    /// backward-compatible addition — older code simply never reads it.
+    pub const RATCHET: u8 = 64;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

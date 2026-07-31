@@ -302,6 +302,11 @@ pub struct Node {
     peer_prekeys: HashMap<Addr, [u8; 32]>,
     peer_busy: HashMap<Addr, u8>,
     peer_names: HashMap<Addr, String>, // the display name a peer announces (a hint, not identity)
+    // §7 Double Ratchet sessions (PR0b), keyed by peer. In-memory only, like
+    // the three maps above — rebuilt from the next ANNOUNCE exchange after a
+    // restart rather than persisted, so there is no second place a session
+    // secret lives to drift from the prekey ring's own accessor.
+    sessions: HashMap<Addr, ratchet::Ratchet>,
 
     max_store_bytes: usize,
     seq: u64,
@@ -1255,6 +1260,9 @@ mod tests {
             n.peer_prekeys.insert(a, [0u8; 32]);
             n.peer_busy.insert(a, 0);
             n.peer_names.insert(a, "x".into());
+            // §7 ratchet sessions (PR0b) are peer-keyed exactly like the three
+            // tables above, and must be bounded the same way.
+            n.sessions.insert(a, ratchet::Ratchet::init_bob([0u8; 32], [0u8; 32], [0u8; 32]));
         }
         for i in 0..(MAX_ACKED + 500) as u32 {
             let mut id = [0u8; 16];
@@ -1275,6 +1283,7 @@ mod tests {
         assert!(n.peer_prekeys.len() <= MAX_PEERS, "prekeys {}", n.peer_prekeys.len());
         assert!(n.peer_busy.len() <= MAX_PEERS);
         assert!(n.peer_names.len() <= MAX_PEERS);
+        assert!(n.sessions.len() <= MAX_PEERS, "sessions {}", n.sessions.len());
         assert!(n.acked.len() <= MAX_ACKED, "acked {}", n.acked.len());
         assert!(n.seen.len() <= MAX_SEEN, "seen {}", n.seen.len());
         assert_eq!(n.feed_inbox.len(), MAX_INBOX, "inbox trimmed to the cap");
@@ -1794,10 +1803,13 @@ mod tests {
         assert!(e.flags & fl::ACKREQ != 0, "marked ACKREQ");
         assert!(!e.payload.windows(4).any(|w| w == b"meet"), "the plaintext must never appear on the wire");
 
-        // B opens it with its prekey secret, and answers with a receipt.
+        // B opens it — via the ratchet session if PR0b ratcheted this one
+        // (whichever of a/b sorted lower did), via the prekey ring otherwise —
+        // and answers with a receipt.
         assert!(!a.acked(&id));
         let brx = b.on_rx(&wire, 0, Some(a.addr), now);
-        let opened = brx.delivered.iter().find_map(|d| b.open(&d.payload));
+        let opened =
+            brx.delivered.iter().find_map(|d| b.open_dm(a.addr, &d.payload, d.flags & fl::RATCHET != 0, now));
         assert_eq!(opened.expect("B decrypts"), b"meet at the north pier");
         let receipt = brx.forwards.first().map(fwd_bytes).expect("B emitted a receipt");
         a.on_rx(&receipt, 0, Some(b.addr), now);
@@ -1807,6 +1819,107 @@ mod tests {
         let c = Node::new("c", &[]);
         let (_, _, enc2) = a.send_direct(c.addr, b"hello stranger", now);
         assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
+    }
+
+    // -- §7 Double Ratchet sessions (PR0b) ----------------------------------
+
+    #[test]
+    fn ratchet_session_roles_are_deterministic_regardless_of_announce_order() {
+        // Whichever address sorts lower is always Alice for a pair, decided
+        // independently by each side — so the order the two ANNOUNCEs happen
+        // to be processed in must not matter. Run it both ways.
+        let now = 1_700_000_000;
+
+        let mut a1 = Node::new("a", &[]);
+        let mut b1 = Node::new("b", &[]);
+        for f in a1.build_announce(now) {
+            b1.on_rx(&fwd_bytes(&f), 0, Some(a1.addr), now);
+        }
+        for f in b1.build_announce(now) {
+            a1.on_rx(&fwd_bytes(&f), 0, Some(b1.addr), now);
+        }
+
+        let mut a2 = Node::from_seed("a", &[], &a1.seed());
+        let mut b2 = Node::from_seed("b", &[], &b1.seed());
+        // Same two identities, opposite processing order.
+        for f in b2.build_announce(now) {
+            a2.on_rx(&fwd_bytes(&f), 0, Some(b2.addr), now);
+        }
+        for f in a2.build_announce(now) {
+            b2.on_rx(&fwd_bytes(&f), 0, Some(a2.addr), now);
+        }
+
+        // Whichever side is "Alice" (lower address) can ratchet-encrypt
+        // immediately in both runs; whichever is "Bob" cannot yet. If order
+        // flipped who plays which role, one of these two pairs would disagree
+        // with the other about which side that is.
+        let a_is_alice_1 = a1.addr < b1.addr;
+        let a_is_alice_2 = a2.addr < b2.addr;
+        assert_eq!(a_is_alice_1, a_is_alice_2, "identity, not order, decides the role");
+
+        let (_, fwds1, enc1) = a1.send_direct(b1.addr, b"hello", now);
+        let (_, fwds2, enc2) = a2.send_direct(b2.addr, b"hello", now);
+        assert_eq!(enc1, enc2);
+        let ratcheted1 = Envelope::decode(&fwd_bytes(&fwds1[0])).unwrap().0.flags & fl::RATCHET != 0;
+        let ratcheted2 = Envelope::decode(&fwd_bytes(&fwds2[0])).unwrap().0.flags & fl::RATCHET != 0;
+        assert_eq!(ratcheted1, ratcheted2, "same identities, same role, regardless of ANNOUNCE order");
+        assert_eq!(ratcheted1, a_is_alice_1, "ratcheted from message one iff this side is Alice");
+    }
+
+    #[test]
+    fn ratchet_session_is_independent_of_a_later_prekey_rotation() {
+        // A session, once bootstrapped, is never re-seeded from a later
+        // ANNOUNCE — its own ratchet evolution is what's trusted from then on.
+        // Prove it survives the *unrelated* identity-layer prekey rotating.
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        // Get both sides past their first (necessarily plain-sealed, for
+        // whichever side is "Bob") message, so both can ratchet from here.
+        let (_, fwds, _) = a.send_direct(b.addr, b"first", now);
+        let e = Envelope::decode(&fwd_bytes(&fwds[0])).unwrap().0;
+        let brx = b.on_rx(&fwd_bytes(&fwds[0]), 0, Some(a.addr), now);
+        assert!(brx
+            .delivered
+            .iter()
+            .any(|d| b.open_dm(a.addr, &d.payload, e.flags & fl::RATCHET != 0, now).is_some()));
+
+        // B rotates its identity prekey — a completely unrelated event.
+        b.rotate_prekey(now + 100);
+        assert_ne!(b.peer_prekey(&a.addr), None); // sanity: a's own view is untouched by b's rotation
+
+        // The session between a and b must still work, using the ratchet's own
+        // evolving state rather than either side's (possibly stale) prekey.
+        let (_, fwds2, enc2) = b.send_direct(a.addr, b"after rotation", now + 100);
+        assert!(enc2);
+        let e2 = Envelope::decode(&fwd_bytes(&fwds2[0])).unwrap().0;
+        let arx = a.on_rx(&fwd_bytes(&fwds2[0]), 0, Some(b.addr), now + 100);
+        let opened = arx
+            .delivered
+            .iter()
+            .find_map(|d| a.open_dm(b.addr, &d.payload, e2.flags & fl::RATCHET != 0, now + 100));
+        assert_eq!(opened.as_deref(), Some(&b"after rotation"[..]));
+    }
+
+    #[test]
+    fn open_dm_falls_back_to_the_prekey_ring_with_no_session() {
+        // No ANNOUNCE exchange has happened, so no session exists for the
+        // claimed sender — `open_dm` with `ratcheted=false` must still open a
+        // plain seal via the prekey ring, exactly like `open` always has. This
+        // is what keeps a peer who never gets a session (or restarted and
+        // lost one) interoperating rather than silently locked out.
+        let now = 1_700_000_000;
+        let mut b = Node::new("b", &[]);
+        let sealed = seal(b"no session here", &b.prekey_pub);
+        let claimed_sender = Node::new("stranger", &[]).addr;
+        let opened = b.open_dm(claimed_sender, &sealed, false, now);
+        assert_eq!(opened.as_deref(), Some(&b"no session here"[..]));
+
+        // And a RATCHET-flagged message with no matching session simply
+        // doesn't open — there is nothing to fall back to for that branch.
+        assert_eq!(b.open_dm(claimed_sender, &sealed, true, now), None);
     }
 
     // -- §7 prekey ring (S-022) --------------------------------------------

@@ -169,8 +169,18 @@ impl Ratchet {
         }
     }
 
+    /// Whether [`Ratchet::encrypt`] can be called right now — false for a
+    /// freshly-`init_bob`'d responder that hasn't yet received anything from
+    /// the initiator, since it has no sending chain until it does. A caller
+    /// that originates messages (rather than only replying) should check this
+    /// before `encrypt`, and fall back to another path when it's false.
+    pub fn can_send(&self) -> bool {
+        self.cks.is_some()
+    }
+
     /// Encrypt `plaintext` into a ratchet message. Panics only if called on a
-    /// responder before it has received the first message.
+    /// responder before it has received the first message — check
+    /// [`Ratchet::can_send`] first if that's possible for the caller.
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Vec<u8> {
         let cks = self.cks.expect("no sending chain yet (responder must receive first)");
         let (nck, mk) = kdf_ck(&cks);

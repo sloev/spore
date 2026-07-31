@@ -829,8 +829,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeResendUnacked(
 }
 
 /// The readable payload of a delivered envelope: decrypted with our prekey
-/// secret when it is ENCRYPTED, otherwise the payload as-is. Null if it is
-/// sealed to someone else (or malformed).
+/// secret (or, once a §7 ratchet session exists with the sender, via that
+/// session — PR0b) when it is ENCRYPTED, otherwise the payload as-is. Null if
+/// it is sealed to someone else, RATCHET-flagged with no matching session, or
+/// malformed.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvPlaintext(
     env: JNIEnv,
@@ -846,7 +848,20 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeEnvPlaintext(
         return std::ptr::null_mut();
     };
     let out = if e.flags & spore::fl::ENCRYPTED != 0 {
-        match r.hub.with_node(|n| n.open(&e.payload)) {
+        let sender = match &e.src {
+            Src::Full(pk) => Some(addr_of(pk)),
+            Src::Short(a) => Some(*a),
+            Src::None => None,
+        };
+        let ratcheted = e.flags & spore::fl::RATCHET != 0;
+        let now = spore::bridge::hub::now();
+        let opened = match sender {
+            Some(sender) => r.hub.with_node(|n| n.open_dm(sender, &e.payload, ratcheted, now)),
+            // No authenticated sender to pick a session by — the prekey ring
+            // is the only thing that was ever going to work here anyway.
+            None => r.hub.with_node(|n| n.open(&e.payload)),
+        };
+        match opened {
             Some(p) => p,
             None => return std::ptr::null_mut(),
         }
