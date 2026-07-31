@@ -466,9 +466,11 @@ object NodeController {
      * A direct message is sealed to the peer's prekey when we've heard their
      * ANNOUNCE, and asks for a delivery receipt; a broadcast can be neither.
      */
-    fun send(peer: String, text: String) {
-        if (text.isEmpty()) return
-        sendBody(peer, text, magnet = null, mime = null)
+    /** Returns false if nothing was sent — the node isn't up yet, or the text is
+     *  empty — so the composer can say why and keep the text instead of clearing it. */
+    fun send(peer: String, text: String): Boolean {
+        if (text.isEmpty()) return false
+        return sendBody(peer, text, magnet = null, mime = null)
     }
 
     /**
@@ -477,19 +479,20 @@ object NodeController {
      * so an attachment bubble previews and shows chunk status, and are null for
      * ordinary text. A public post floods; a DM is sealed and receipted.
      */
-    private fun sendBody(peer: String, body: String, magnet: String?, mime: String?) {
-        if (ptr == 0L || body.isEmpty()) return
-        val dest = destOf(peer) ?: return
+    private fun sendBody(peer: String, body: String, magnet: String?, mime: String?): Boolean {
+        if (ptr == 0L || body.isEmpty()) return false
+        val dest = destOf(peer) ?: return false
         val bytes = body.toByteArray(Charsets.UTF_8)
         if (peer == Petnames.PUBLIC) {
             val n = SporeNative.nativeSendCounted(ptr, dest, bytes)
             append(Msg(peer, body, mine = true, verified = true, fragments = n, magnet = magnet, mime = mime))
-            return
+            return true
         }
         val res = SporeNative.nativeSendDirect(ptr, dest, bytes)?.split(':')
         val id = res?.getOrNull(0)
         val enc = res?.getOrNull(1) == "1"
         append(Msg(peer, body, mine = true, verified = true, encrypted = enc, id = id, magnet = magnet, mime = mime))
+        return true
     }
 
     /**
@@ -516,8 +519,7 @@ object NodeController {
         val magnet = publishAttachment(peer, name, data) ?: return false
         val marker = Markdown.attachMarker(name, magnet, mime)
         val body = if (text.isBlank()) marker else "$text\n\n$marker"
-        sendBody(peer, body, magnet, mime)
-        return true
+        return sendBody(peer, body, magnet, mime)
     }
 
     /**
@@ -635,11 +637,14 @@ object NodeController {
         }
     }
 
-    fun post(topic: String, text: String) {
-        if (ptr == 0L || text.isEmpty()) return
-        val dest = SporeNative.nativeTopicAddr(topic) ?: return
+    /** Returns false if nothing was posted — node not up, empty text, or unknown
+     *  topic — so the composer can say why and keep the draft. */
+    fun post(topic: String, text: String): Boolean {
+        if (ptr == 0L || text.isEmpty()) return false
+        val dest = SporeNative.nativeTopicAddr(topic) ?: return false
         SporeNative.nativeSendCounted(ptr, dest, text.toByteArray(Charsets.UTF_8))
         posts.value = (posts.value + Post(topic, address.value, text, verified = true)).takeLast(500)
+        return true
     }
 
     /**

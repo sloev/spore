@@ -266,11 +266,12 @@ internal fun ComposePost(topic: String, done: () -> Unit) {
                 {
                     val img = image
                     val ok = if (img == null) {
-                        NodeController.post(target, body.text); true
+                        NodeController.post(target, body.text)
                     } else {
                         NodeController.postWithImage(target, body.text, img.first, img.second)
                     }
                     if (ok) { confirm("Posted to #$target"); done() }
+                    else if (img == null) confirm("Node not started yet — not posted")
                     else confirm("Image too large for this node's store — post it smaller")
                 },
                 enabled = body.text.isNotBlank() || image != null,
