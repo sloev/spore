@@ -16,6 +16,11 @@
   --panel: var(--asphalt);
   --edge: #2a2f1c;      /* olive shifted dark — machined metal */
   --ink: var(--amber);
+  /* Long-form body copy only (site pages). Not a contrast fix — --ink already
+     clears 10.80:1 — but full-saturation amber glowing on near-black is tiring
+     across paragraphs, so this is the same hue at ~60% saturation, still well
+     past 7:1 (AAA). See docs/VISUALDESIGN.md §1. */
+  --prose: #d6af5c;
   --dim: #8a7a4a;       /* amber desaturated, 4.68:1 on void */
   --accent: var(--pink);
   --accent2: var(--cyan);
@@ -34,6 +39,9 @@
     --bg: #f4f1e8; --panel: #fff; --edge: #d8d2c0; --ink: #1a1c20; --dim: #5b5647;
     --amber: #8a5f00; --phosphor: #1f7a0c; --pink: #c2185b; --cyan: #00707a;
     --accent: var(--pink); --accent2: var(--cyan); --ok: var(--phosphor);
+    /* Dark ink on paper is already the comfortable-reading pairing; nothing to
+       desaturate the way glowing amber-on-void needs. */
+    --prose: var(--ink);
   }
 }
 * { box-sizing: border-box; }
@@ -58,7 +66,7 @@ main.doc h1 { font-size: 30px; letter-spacing: -0.02em; margin: 8px 0 16px; }
 main.doc h2 { font-size: 22px; margin: 34px 0 12px; padding-bottom: 6px;
   border-bottom: 1px solid var(--edge); }
 main.doc h3 { font-size: 18px; margin: 26px 0 10px; }
-main.doc p, main.doc li { color: var(--ink); }
+main.doc p, main.doc li, main.doc td { color: var(--prose); }
 main.doc a { color: var(--accent2); }
 main.doc code { font-family: var(--mono); font-size: 0.88em;
   background: var(--panel); border: 1px solid var(--edge);
@@ -153,7 +161,7 @@ body.page-index main.doc > h1 { font-size: clamp(30px, 5.5vw, 46px); line-height
   border: 0; padding: 0; margin: 8px 0 18px; letter-spacing: -0.02em; }
 /* The paragraph straight after the title is the pitch — it carries the page. */
 body.page-index main.doc > h1 + p { font-size: 18.5px; line-height: 1.55;
-  color: var(--ink); max-width: 40em; }
+  color: var(--prose); max-width: 40em; }
 body.page-index main.doc > ul:first-of-type { max-width: 40em; }
 body.page-index main.doc > ul:first-of-type li { margin: 9px 0; }
 
@@ -333,7 +341,7 @@ body.page-index .story-card > details summary {
 body.page-index .story-card > details p {
   font-size: 0.92rem;
   line-height: 1.55;
-  color: var(--ink);
+  color: var(--prose);
 }
 
 /* ---- SVG illustration styles (currentColor + tokens via CSS) ---- */

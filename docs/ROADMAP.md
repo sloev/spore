@@ -77,7 +77,7 @@ name · **14** Freeze impact (almost always None).
 | **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
-| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 first increment in review — story cards on Home/Apps/Continuity | — | C1 |
+| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 story cards ✅ (#63); contrast pass in review | — | C1 |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
@@ -1384,6 +1384,29 @@ keyframe animations (checked via computed style, not just the media-query source
 and dark themes both render coherently; no pink-on-olive; decorative art is `aria-hidden`.
 Contrast pass on body copy (step 1) and the docs-index card grid (rest of step 3) remain
 open for a follow-up increment.
+
+## Second increment — a calmer body-copy tone (step 1: readability)
+
+**Shipped (`feat/site-readability-contrast`).** Step 1 above. `--amber` on `--void` already
+clears 10.80:1 — nowhere near a WCAG failure — but a fully saturated, high-luminance colour
+glowing on near-black is tiring across paragraphs in a way a bare contrast ratio doesn't
+capture. New semantic token **`--prose`** (`#d6af5c`, the same hue at ~60% saturation,
+still 9.56:1 on void / 8.24:1 on asphalt — comfortably past 7:1/AAA) now colours every
+long-form `<p>`, `<li>`, and `<td>` inside `main.doc` — every doc page, not just the three
+story-card ones, so the dense reference pages (Bridges, Spec, Security Findings, …) get the
+same relief. Headings, code, buttons, LEDs, and badges are untouched (still full `--ink`) —
+short bursts of text don't cause the fatigue this addresses, so they keep their punch. Light
+mode aliases `--prose` straight back to `--ink`: dark ink on cream paper is already the
+comfortable pairing, so there's nothing to desaturate there. Documented in
+`docs/VISUALDESIGN.md` §1 before the CSS changed, per this project's own convention.
+Android's `Chrome.kt` Palette is **not** touched here — noted as a candidate for the C1
+token-parity pass, not assumed done.
+
+Verified by rendering, not just reading the CSS: candidate desaturation levels were
+computed (WCAG relative-luminance formula) and rendered side by side before picking one,
+then the actual built pages (Home, Apps, Continuity, Bridges) were screenshotted in both
+themes to confirm headings stayed vivid while body copy visibly calmed down, and that light
+mode was untouched.
 
 ---
 
