@@ -235,9 +235,16 @@ impl Node {
     /// rather than a made-up duration.
     pub fn prekey_health(&self, now: u32) -> (usize, Option<u32>, u32) {
         let count = self.ring.len();
-        let oldest_age = self.ring.first().and_then(|pk| {
-            if pk.born == 0 { None } else { Some(now.saturating_sub(pk.born)) }
-        });
+        let oldest_age =
+            self.ring.first().and_then(
+                |pk| {
+                    if pk.born == 0 {
+                        None
+                    } else {
+                        Some(now.saturating_sub(pk.born))
+                    }
+                },
+            );
         let newest_born = self.ring.last().map(|pk| pk.born).unwrap_or(0);
         let next_mint_in =
             if newest_born == 0 { 0 } else { (newest_born + PREKEY_PERIOD_SECS).saturating_sub(now) };
