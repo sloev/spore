@@ -18,6 +18,17 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Site: a calmer tone for long-form body copy (dark mode).** `--amber` on `--void`
+  clears 10.80:1 — nowhere near a contrast failure — but a fully saturated colour glowing
+  on near-black is tiring across paragraphs in a way the ratio alone doesn't capture. New
+  token `--prose` (`#d6af5c`, same hue at ~60% saturation, still 9.56:1/8.24:1 — past
+  7:1/AAA) now colours every long-form paragraph, list item, and table cell across **all**
+  doc pages, not just the three story-card ones — so dense reference pages (Bridges, Spec,
+  Security Findings) get the relief too. Headings, code, buttons, and badges keep full
+  `--ink`. Light mode is untouched (`--prose` aliases to `--ink` there; dark ink on paper
+  needed no desaturating). Documented in `docs/VISUALDESIGN.md` §1 before the CSS changed.
+  Wire unchanged.
+
 - **Site: Home, Apps, and Continuity use illustrated story cards.** A first-time visitor
   landed on a wall of text; these three pages now open with a grid of small self-hosted
   inline-SVG illustrations (CSS/tokens only, no rasters) and a one-line caption, with the

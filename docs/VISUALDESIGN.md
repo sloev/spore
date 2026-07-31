@@ -90,12 +90,24 @@ text and UI chrome only; **XX** = fails both.
 | `--phosphor` | **OK** 14.59 | **OK** 12.58 | **OK** 6.06 |
 | `--pink` | **OK** 5.58 | **OK** 4.81 | **XX** 2.32 |
 | `--cyan` | **OK** 15.78 | **OK** 13.61 | **OK** 6.55 |
+| `--prose` `#d6af5c` | **OK** 9.56 | **OK** 8.24 | lg 3.97 |
 
 **Never put pink on olive.** 2.32:1 is unreadable, and it is the one combination the
 palette invites — hot pink stickers on an ammo crate. Put the sticker on a `--void`
 or `--asphalt` patch instead, or outline it.
 
 Amber on olive is large-text only: headings and buttons, never body copy.
+
+**`--prose` is not a contrast fix — `--amber` already clears 10.80:1, well past the
+4.5:1 floor.** It exists because a WCAG ratio doesn't capture *comfort* over a long
+read: a fully saturated, high-luminance amber on near-black is fine for a heading or
+a button glanced at once, but tiring across paragraphs — the kind of glare a real CRT
+didn't have to contend with because nobody read a novel off one. `--prose` is the
+same hue at roughly 60% saturation (`hsl(41, 60%, 60%)`), still comfortably clearing
+7:1 (AAA) on both `--void` and `--asphalt`, so nothing is traded for the calmer read.
+Site-only for now (`site/style.css`, long-form `<p>`/`<li>`/`<td>` inside `main.doc`);
+Android's `Chrome.kt` Palette keeps full amber for its (much shorter) body text,
+noted as a candidate for the C1 token-parity pass rather than assumed done here.
 
 ### Semantic mapping
 
@@ -105,7 +117,8 @@ Surfaces name their *role*, so a screen can be re-skinned without hunting hex co
 --bg          = --void        page
 --panel       = --asphalt     cards, crates, inputs
 --edge        = #2a2f1c       borders — olive shifted dark, reads as machined metal
---ink         = --amber       body text
+--ink         = --amber       headings, UI chrome, code, LEDs, badges — short text
+--prose       = #d6af5c       long-form body copy (site only) — amber at ~60% saturation
 --dim         = #8a7a4a       de-emphasised text — amber desaturated, 4.6:1 on void
 --accent      = --pink        primary action, cursor, the kawaii
 --accent2     = --cyan        focus, selection, secondary action
@@ -126,6 +139,11 @@ paper base `#f4f1e8`, ink `#1a1c20`, and the same four accents darkened to hold 
 (`--amber` → `#8a5f00`, `--phosphor` → `#1f7a0c`, `--pink` → `#c2185b`, `--cyan` →
 `#00707a`). No scanlines, no vignette. It reads as the printed manual rather than
 the terminal, which is a coherent second voice for the same project.
+
+`--prose` aliases straight back to `--ink` in light mode. The fatigue it exists to
+avoid is specific to a saturated light color glowing on near-black — dark ink
+(`#1a1c20`) on cream paper is already the most conventional, comfortable reading
+pairing there is, so there is nothing to desaturate there.
 
 ## 2. Typography
 
