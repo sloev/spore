@@ -168,23 +168,38 @@ impl Node {
         self.acked.contains(id)
     }
 
-    /// Send a **direct message**: sealed to the peer's prekey when we know it
-    /// (§7), and flagged `ACKREQ` so the recipient returns a delivery receipt
-    /// (§8). Returns the envelope id — poll [`Node::acked`] for delivery — and
+    /// Send a **direct message**: through the established §7 ratchet session
+    /// when we have one (PR0b), sealed to the peer's prekey otherwise, and
+    /// flagged `ACKREQ` so the recipient returns a delivery receipt (§8).
+    /// Returns the envelope id — poll [`Node::acked`] for delivery — and
     /// whether it actually went out encrypted.
     ///
-    /// A peer's prekey arrives with their ANNOUNCE, so the first message to a
-    /// stranger may go as signed cleartext; once we've heard them, everything
-    /// after is sealed. This is the one call a messenger UI needs.
+    /// A peer's prekey arrives with their ANNOUNCE, at which point a session
+    /// is already bootstrapped (see `absorb_announce`). Whichever address
+    /// sorts lower is always that pair's ratchet initiator and can ratchet
+    /// immediately; the other side's session has no sending chain until it
+    /// actually receives the initiator's first message ([`ratchet::Ratchet`]'s
+    /// own documented constraint), so *its* first send here still falls back
+    /// to a plain seal — and every send after that first receive is
+    /// ratcheted. The plain-seal branch also remains the fallback for a
+    /// session-less peer, and the cleartext branch the last resort for a
+    /// total stranger; all three mirror this function's own shape before
+    /// PR0b, just demoted a rung. This is the one call a messenger UI needs.
     pub fn send_direct(&mut self, dest: Addr, plaintext: &[u8], now: u32) -> (Id, Vec<Forward>, bool) {
-        let (payload, encrypted) = match self.peer_prekey(&dest) {
-            Some(pk) => (seal(plaintext, &pk), true),
-            None => (plaintext.to_vec(), false),
+        let (payload, encrypted, ratcheted) = if self.sessions.get(&dest).is_some_and(|s| s.can_send()) {
+            (self.sessions.get_mut(&dest).unwrap().encrypt(plaintext), true, true)
+        } else if let Some(pk) = self.peer_prekey(&dest) {
+            (seal(plaintext, &pk), true, false)
+        } else {
+            (plaintext.to_vec(), false, false)
         };
         let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
         e.flags |= fl::ACKREQ;
         if encrypted {
             e.flags |= fl::ENCRYPTED;
+        }
+        if ratcheted {
+            e.flags |= fl::RATCHET;
         }
         e.sign(&self.sk);
         // Unicast with no known path: flood to discover it (§5.6).

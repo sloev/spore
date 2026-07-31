@@ -65,6 +65,7 @@ impl Node {
             peer_prekeys: HashMap::new(),
             peer_busy: HashMap::new(),
             peer_names: HashMap::new(),
+            sessions: HashMap::new(),
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
@@ -336,6 +337,24 @@ impl Node {
             }
         }
         None
+    }
+
+    /// Open a direct message (PR0b): via the established §7 ratchet session
+    /// when the envelope was flagged `RATCHET`, otherwise via the prekey ring
+    /// exactly as [`Node::open`] always has. `sender` is the envelope's
+    /// authenticated source address — which session (if any) to use.
+    ///
+    /// A `RATCHET`-flagged message with no matching session simply doesn't
+    /// open (`None`) — this is the case where the sender's session state
+    /// outlived ours (e.g. we restarted and haven't re-bootstrapped from
+    /// their next ANNOUNCE yet). It self-heals from there; this call does not
+    /// retry or fall back on their behalf.
+    pub fn open_dm(&mut self, sender: Addr, sealed: &[u8], ratcheted: bool, now: u32) -> Option<Vec<u8>> {
+        if ratcheted {
+            self.sessions.get_mut(&sender)?.decrypt(sealed, now)
+        } else {
+            self.open(sealed)
+        }
     }
 
     // ---- origination -----------------------------------------------------
