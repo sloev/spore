@@ -46,6 +46,13 @@ data class Transfer(val magnet: String, val name: String, val totalBytes: Long, 
 /** A parsed invite awaiting the user's confirmation. */
 data class ScannedInvite(val addr: String, val suggestedName: String, val bridges: List<String>)
 
+/**
+ * Prekey-ring health for the Advanced screen (B5). `oldestAgeSecs` is `null`
+ * when the oldest secret is an unstamped bootstrap entry whose true age is
+ * unknowable (SPEC §7) — shown as "unknown", not a made-up number.
+ */
+data class RingHealth(val count: Int, val oldestAgeSecs: Int?, val nextMintInSecs: Int)
+
 /** One microblog post on a followed topic. */
 data class Post(val topic: String, val author: String, val text: String, val verified: Boolean, val ts: Long = System.currentTimeMillis())
 
@@ -83,6 +90,7 @@ object NodeController {
     val peers = MutableStateFlow<List<Peer>>(emptyList()) // nodes we've heard from
     val storeCount = MutableStateFlow(0) // envelopes held for the mesh
     val resumed = MutableStateFlow(0) // envelopes adopted from disk at startup
+    val ringHealth = MutableStateFlow<RingHealth?>(null) // prekey-ring status (B5)
     val transfers = MutableStateFlow<List<Transfer>>(emptyList()) // files in flight
     // magnet -> where the completed file landed on disk. The Feed needs this to
     // render an attached image; without it a post can only say a file exists.
@@ -237,6 +245,24 @@ object NodeController {
             ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
             ?.joinToString("") { b -> "%02x".format(b) }
 
+    /**
+     * The persisted prekey ring as hex, for the Advanced screen's gated export (B5).
+     *
+     * Mirrors [seedHex]: exactly one place reads secrets out of the encrypted
+     * store, so this can't drift into a second copy of that logic (the S-015
+     * class of bug the ring-restore path above already had to learn from). This
+     * is what [saveRing] last wrote — the same small staleness window every
+     * other persisted secret here already lives with, not a live re-read of the
+     * running ring.
+     *
+     * The caller is responsible for warning that any copy of this defeats the
+     * seven-day forward-secrecy window (§7, S-022) before showing it.
+     */
+    fun prekeyRingHex(): String? =
+        secretPrefs(appCtx).getString("prekeyRing", null)
+            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
+            ?.joinToString("") { b -> "%02x".format(b) }
+
     fun start(ctx: Context) {
         if (ptr != 0L) return
         appCtx = ctx.applicationContext
@@ -338,6 +364,7 @@ object NodeController {
                         } else null
                     }
                 storeCount.value = SporeNative.nativeStoreLen(ptr)
+                refreshRingHealth()
                 refreshDelivery()
                 pumpFiles()
                 pumpProfiles()
@@ -396,6 +423,16 @@ object NodeController {
         val nowDelivered = pending.filter { SporeNative.nativeAcked(ptr, it.id!!) }.map { it.id }.toSet()
         if (nowDelivered.isEmpty()) return
         messages.value = messages.value.map { if (it.id in nowDelivered) it.copy(delivered = true) else it }
+    }
+
+    /** Parse `nativePrekeyHealth`'s `"count:oldestAge:nextMintIn"` into [RingHealth]. */
+    private fun refreshRingHealth() {
+        val parts = SporeNative.nativePrekeyHealth(ptr).split(':')
+        if (parts.size != 3) return
+        val count = parts[0].toIntOrNull() ?: return
+        val oldest = parts[1].toIntOrNull() ?: return
+        val nextMint = parts[2].toIntOrNull() ?: return
+        ringHealth.value = RingHealth(count, oldest.takeIf { it >= 0 }, nextMint)
     }
 
     /** Classify a delivered envelope: feed post, file, or plain message. */

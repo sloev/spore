@@ -185,6 +185,9 @@ internal fun ConnectScreen() {
 internal fun AdvancedScreen(addr: String) {
     val topics by NodeController.topics.collectAsState()
     var showSeed by remember { mutableStateOf(false) }
+    var showRingExport by remember { mutableStateOf(false) }
+    var confirmRingExport by remember { mutableStateOf(false) }
+    val ringHealth by NodeController.ringHealth.collectAsState()
     val confirm = rememberConfirm()
     val myName by NodeController.myName.collectAsState()
     var editName by remember(myName) { mutableStateOf(myName) }
@@ -314,6 +317,35 @@ internal fun AdvancedScreen(addr: String) {
         item {
             Crate(Modifier.fillMaxWidth()) {
                 Column {
+                    DisplayHeading("Prekey ring", size = 15)
+                    Caption("The keys others seal mail to, so it can be read only until they rotate. A copy of the ring undoes that for whatever it still holds.")
+                    VGap()
+                    val h = ringHealth
+                    if (h == null) {
+                        Caption("unavailable — node not started yet")
+                    } else {
+                        Caption("held: ${h.count} · oldest: ${h.oldestAgeSecs?.let { formatDuration(it) } ?: "unknown"}")
+                        Caption(
+                            if (h.nextMintInSecs <= 0) "next rotation: due"
+                            else "next rotation: in ${formatDuration(h.nextMintInSecs)}"
+                        )
+                    }
+                    VGap()
+                    if (!showRingExport) {
+                        CrateButton("Export ring", { confirmRingExport = true })
+                    } else {
+                        val ringHex = remember { NodeController.prekeyRingHex() ?: "unavailable" }
+                        Text(ringHex, color = Palette.Amber)
+                        VGap(4.dp)
+                        CrateButton("Hide", { showRingExport = false })
+                    }
+                }
+            }
+        }
+
+        item {
+            Crate(Modifier.fillMaxWidth()) {
+                Column {
                     DisplayHeading("About", size = 15)
                     Caption("SPORE — store-and-forward planetary opportunistic relay envelope. This phone is a full node: it signs, relays, and delivers across every enabled bridge. Public domain. 🍄")
                     VGap(6.dp)
@@ -322,6 +354,26 @@ internal fun AdvancedScreen(addr: String) {
             }
         }
     }
+
+    if (confirmRingExport) {
+        ConfirmDialog(
+            title = "Export the prekey ring?",
+            body = "This defeats the 7-day forward-secrecy window for whatever a copy still " +
+                "holds — anyone with it can read old mail sealed to those keys for as long as " +
+                "the copy exists, even after the live ring has rotated past them.",
+            confirmLabel = "Show ring",
+            onConfirm = { confirmRingExport = false; showRingExport = true },
+            onDismiss = { confirmRingExport = false },
+        )
+    }
+}
+
+/** Render a duration in the largest whole unit that keeps it short (B5 ring health). */
+private fun formatDuration(seconds: Int): String = when {
+    seconds < 60 -> "${seconds}s"
+    seconds < 3600 -> "${seconds / 60}m"
+    seconds < 86400 -> "${seconds / 3600}h"
+    else -> "${seconds / 86400}d"
 }
 
 @Composable

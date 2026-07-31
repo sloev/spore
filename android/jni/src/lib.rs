@@ -185,6 +185,24 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeRestorePrekeyRing(
     }
 }
 
+/// Ring health for the Advanced screen's status readout: `"count:oldestAge:nextMintIn"`,
+/// all in seconds — `oldestAge` is `-1` when the oldest secret is an unstamped
+/// bootstrap entry whose true age is unknowable (SPORE §7).
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativePrekeyHealth(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let now = spore::bridge::hub::now();
+    let (count, oldest_age, next_mint_in) = r.hub.with_node(|n| n.prekey_health(now));
+    let s = format!("{count}:{}:{next_mint_in}", oldest_age.map(|a| a as i64).unwrap_or(-1));
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
 /// Follow a topic so its traffic is delivered to us.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeSubscribe(

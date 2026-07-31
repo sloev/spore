@@ -72,7 +72,7 @@ name · **14** Freeze impact (almost always None).
 | **B2** | Send/error feedback (no silent no-op) | Critical UX | ✅ merged (#61) 🧪 | — | B-series |
 | **B3** | Empty states + PUBLIC/broadcast confirm | High UX | ✅ merged (#62) 🧪 | — | B-series |
 | **B4** | Notifications + transfers overflow | High UX | 🟢 in review (#66) 🧪 | — | B-series |
-| **B5** | Advanced: ring health + cautious export | Medium | ⬜ todo | — | B-series |
+| **B5** | Advanced: ring health + cautious export | Medium | 🟢 in review (#67) 🧪 | — | B-series |
 | **B6** | Bridges: status enum + permission recovery | High UX | ⬜ todo | — | B-series |
 | **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
@@ -1254,13 +1254,39 @@ manual review instead: existing imports/signatures cross-checked against `NodeCo
 actual `StateFlow` types, `Caption`'s real signature, and the already-granted
 `POST_NOTIFICATIONS` manifest permission + runtime request in `MainActivity`.
 
-## B5 — Advanced: ring health + cautious export — ⬜ todo
+## B5 — Advanced: ring health + cautious export — 🟢 in review (#67)
 **Why:** the audit asked for prekey-ring health; any export defeats the 7-day window.
 **Files:** `NodeScreens` (Advanced), `NodeController` (`secretPrefs` accessor only).
 **Steps:** show live count / oldest age / next mint (thin JNI read, no widened freeze);
 Export only behind a "this defeats the 7-day window" modal; single accessor, no second
 seed copy (S-015 class). **Non-goals:** adjustable lifetime sliders (PR0b gate — dead-code
 UI forbidden). **Acceptance:** health readout; export gated + warned.
+
+**Shipped (`feat/android-b5-ring-health-export`).** The "thin JNI read" turned out to need
+a small new core method, not just a wrapper: `Node::prekey_health(now)` (new,
+`src/node/identity.rs`) returns `(count, oldest secret's age, seconds to next rotation)` —
+`None` for the age when the oldest entry is an unstamped bootstrap key whose true age is
+unknowable (§7), and `0` for "next rotation" when it's already due, never an underflowed
+giant number. A new `android/jni` export (`nativePrekeyHealth`, additive over the frozen
+core, not the `bindings/` C/Python/Go/JS surface) serialises it as
+`"count:oldestAge:nextMintIn"`; `NodeController` parses it into a `RingHealth` each
+housekeeping tick, same cadence as peers/storeCount. The Advanced screen shows it plainly
+("held: N · oldest: Xh", "next rotation: due" / "in Xh"). Export reuses the existing
+`ConfirmDialog` (the same component B3 added for the PUBLIC-send confirm) warning that a
+copy defeats the 7-day window, and only then reveals the ring hex — read through a new
+`NodeController.prekeyRingHex()` accessor that mirrors `seedHex()` exactly (reads the
+persisted ring out of the same encrypted `secretPrefs`, so there's no second path into that
+store to drift from it, the S-015-class mistake this asked to avoid). No lifetime sliders
+or other dead-code UI (PR0b gate respected).
+
+Verified: `cargo test --lib` (175 passed, including a new
+`prekey_health_reports_unknowable_age_and_due_rotation_honestly` covering the fresh-node,
+just-rotated, and overdue cases), `cargo clippy -- -D warnings` clean on both the core crate
+and `android/jni`, `python3 bindings/generate.py` produces no diff (this is additive JNI,
+not the frozen C surface). The Kotlin UI itself is **not** build-verified: this environment
+has no Android SDK (network-restricted — `sdkmanager` can't reach `dl.google.com`), so as
+with B4, CI's `apk` job is the only place it actually compiles; reviewed by hand against the
+real `RingHealth`/`Caption`/`ConfirmDialog` signatures instead.
 
 ## B6 — Bridges: status enum + permission recovery (no fake toggle) — ⬜ todo
 **Why:** the LED uses brittle substring matching on status strings; a denied permission

@@ -517,7 +517,6 @@ dependencies = [
  "sha2",
  "x25519-dalek",
  "zeroize",
- "zeroize_derive",
 ]
 
 [[package]]
