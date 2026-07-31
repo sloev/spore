@@ -18,6 +18,14 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: Advanced screen shows prekey-ring health, and export is gated (B5).**
+  A new core method, `Node::prekey_health`, reports how many prekey secrets are held,
+  how old the oldest is (honestly `None`/"unknown" for an unstamped bootstrap entry),
+  and seconds to the next scheduled rotation — exposed through a new, additive
+  `android/jni` export (not the frozen C/Python/Go/JS bindings surface). The Advanced
+  screen shows the readout live and gates "Export ring" behind a confirm dialog warning
+  that a copy defeats the 7-day forward-secrecy window. Wire format unchanged.
+
 - **Android: informative node notification + transfers overflow (B4).** The
   foreground-service notification said "node running" forever; it now shows the
   address's first 8 hex chars, live peer count, and "relaying" once the node is

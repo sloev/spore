@@ -37,6 +37,13 @@ object SporeNative {
     /** Restore a ring from [nativePrekeyRing]; false leaves the node untouched. */
     external fun nativeRestorePrekeyRing(ptr: Long, blob: ByteArray): Boolean
 
+    /**
+     * Ring health for the Advanced screen: `"count:oldestAgeSecs:nextMintInSecs"`.
+     * `oldestAgeSecs` is `-1` when the oldest secret is an unstamped bootstrap
+     * entry whose true age is unknowable (SPEC §7).
+     */
+    external fun nativePrekeyHealth(ptr: Long): String
+
     /** Follow a topic so its traffic is delivered to us. */
     external fun nativeSubscribe(ptr: Long, topic: String)
 

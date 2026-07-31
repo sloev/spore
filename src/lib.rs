@@ -1918,6 +1918,33 @@ mod tests {
     }
 
     #[test]
+    fn prekey_health_reports_unknowable_age_and_due_rotation_honestly() {
+        let t0 = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+
+        // A fresh node: one unstamped bootstrap entry. Its age is unknowable, and
+        // since it has never rotated, the next rotation is due right now.
+        let (count, oldest_age, next_mint_in) = n.prekey_health(t0);
+        assert_eq!(count, 1);
+        assert_eq!(oldest_age, None, "bootstrap entry's true age is unknowable");
+        assert_eq!(next_mint_in, 0, "never rotated => due now, not a made-up wait");
+
+        // After a rotation the bootstrap entry gets stamped (identity.rs:
+        // `rotate_prekey` backfills `born` on any zero entry) and a fresh newest
+        // lands beside it, so both halves of the readout become concrete.
+        n.rotate_prekey(t0);
+        let (count2, oldest_age2, next_mint_in2) = n.prekey_health(t0 + 100);
+        assert_eq!(count2, 2);
+        assert_eq!(oldest_age2, Some(100), "the now-stamped bootstrap entry ages normally");
+        assert_eq!(next_mint_in2, PREKEY_PERIOD_SECS - 100, "counts down to the next rotation");
+
+        // Past the scheduled rotation, it reports zero rather than an underflowed
+        // giant number — the UI should say "due", not lie with an enormous count.
+        let (_, _, overdue) = n.prekey_health(t0 + PREKEY_PERIOD_SECS + 500);
+        assert_eq!(overdue, 0);
+    }
+
+    #[test]
     fn rotation_happens_by_operating_not_by_being_asked() {
         let t0 = 1_700_000_000;
         let mut a = Node::new("a", &[]);

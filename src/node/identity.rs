@@ -225,6 +225,25 @@ impl Node {
         self.ring.len()
     }
 
+    /// A snapshot for a ring-health status UI: `(count, oldest secret's age in
+    /// seconds, seconds until the next scheduled rotation)`.
+    ///
+    /// The oldest age is `None` for an unstamped bootstrap entry (`born == 0`) —
+    /// its true age is unknowable, exactly as [`Node::sweep_prekeys`] treats it.
+    /// "Next rotation" mirrors [`Node::maybe_rotate_prekey`]'s own test — an
+    /// unrotated ring (newest `born == 0`) is due immediately, reported as `0`
+    /// rather than a made-up duration.
+    pub fn prekey_health(&self, now: u32) -> (usize, Option<u32>, u32) {
+        let count = self.ring.len();
+        let oldest_age = self.ring.first().and_then(|pk| {
+            if pk.born == 0 { None } else { Some(now.saturating_sub(pk.born)) }
+        });
+        let newest_born = self.ring.last().map(|pk| pk.born).unwrap_or(0);
+        let next_mint_in =
+            if newest_born == 0 { 0 } else { (newest_born + PREKEY_PERIOD_SECS).saturating_sub(now) };
+        (count, oldest_age, next_mint_in)
+    }
+
     /// Serialise the ring so a restart keeps it: `[0x01][n:1][(pub:32, sec:32, born:4 BE)]×n`.
     ///
     /// **This is secret material** — every byte of it opens mail. Store it where
