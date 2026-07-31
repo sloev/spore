@@ -33,16 +33,21 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.compose.ui.unit.dp
@@ -180,6 +185,12 @@ internal fun ChatDetail(peer: String) {
     val thread = remember(messages, peer) { messages.filter { it.peer == peer } }
     val confirm = rememberConfirm()
 
+    // The petname field sits above the thread and would otherwise be the first
+    // stop for a keyboard/TalkBack user entering a chat, ahead of the actual
+    // reason they're here. Route initial focus to the composer instead (B7).
+    val composerFocus = remember { FocusRequester() }
+    LaunchedEffect(peer) { runCatching { composerFocus.requestFocus() } }
+
     // Staged, not sent: picking a file only fills this. Nothing goes on the wire
     // or into the thread until Send — the file reads as attached to the message
     // being composed, which is the whole point of the change.
@@ -245,15 +256,43 @@ internal fun ChatDetail(peer: String) {
         // subscription, and every file row is guaranteed to show the same poll.
         val transfers by NodeController.transfers.collectAsState()
         val listState = rememberLazyListState()
-        // Pin the thread to its newest message — on first open and whenever one
-        // arrives — so the latest is visible without a manual scroll. A jump-to-
-        // bottom affordance for a reader who has deliberately scrolled up is B7.
-        LaunchedEffect(thread.size) {
-            if (thread.isNotEmpty()) listState.scrollToItem(thread.lastIndex)
+        val scope = rememberCoroutineScope()
+        val still = reducedMotion()
+        // Whether the reader is already at (or near) the bottom. A new message
+        // only pulls the view down automatically when they are — otherwise a
+        // deliberate scroll into history is left alone, with the jump-to-bottom
+        // button below as the manual way back (B7; this used to yank anyone
+        // reading older messages straight back down on every new arrival).
+        val atBottom by remember {
+            derivedStateOf {
+                val info = listState.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull()?.index
+                last == null || last >= info.totalItemsCount - 1
+            }
         }
-        LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(thread) { m ->
-                Bubble(m, m.magnet?.let { mg -> transfers.firstOrNull { it.magnet == mg } })
+        LaunchedEffect(thread.size) {
+            if (thread.isNotEmpty() && atBottom) listState.scrollToItem(thread.lastIndex)
+        }
+        Box(Modifier.weight(1f)) {
+            LazyColumn(
+                Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(thread) { m ->
+                    Bubble(m, m.magnet?.let { mg -> transfers.firstOrNull { it.magnet == mg } })
+                }
+            }
+            if (!atBottom && thread.isNotEmpty()) {
+                CrateButton(
+                    "↓ new",
+                    {
+                        scope.launch {
+                            if (still) listState.scrollToItem(thread.lastIndex)
+                            else listState.animateScrollToItem(thread.lastIndex)
+                        }
+                    },
+                    Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                    contentDescription = "Jump to latest message",
+                )
             }
         }
         // The staged attachment, if any: a chip above the composer with a clear
@@ -266,13 +305,15 @@ internal fun ChatDetail(peer: String) {
                         Text(s.name, color = Palette.Amber, fontWeight = FontWeight.Bold, maxLines = 1)
                         Caption("${s.bytes.size / 1024} KB · staged, not sent")
                     }
-                    CrateButton("✕", { staged = null })
+                    CrateButton("✕", { staged = null }, contentDescription = "Remove staged attachment")
                 }
             }
         }
         Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            CrateButton("📎", { pickFile.launch("*/*") })
-            ToughbookField(text, { text = it }, Modifier.weight(1f), placeholder = "message…")
+            CrateButton("📎", { pickFile.launch("*/*") }, contentDescription = "Attach file")
+            ToughbookField(
+                text, { text = it }, Modifier.weight(1f).focusRequester(composerFocus), placeholder = "message…",
+            )
             HGap()
             CrateButton(
                 "Send",

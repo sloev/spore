@@ -74,7 +74,7 @@ name · **14** Freeze impact (almost always None).
 | **B4** | Notifications + transfers overflow | High UX | 🟢 in review (#66) 🧪 | — | B-series |
 | **B5** | Advanced: ring health + cautious export | Medium | 🟢 in review (#67) 🧪 | — | B-series |
 | **B6** | Bridges: status enum + permission recovery | High UX | 🟢 in review (#68) 🧪 | — | B-series |
-| **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
+| **B7** | Accessibility + density pass | High UX | 🟢 in review (#69) 🧪 | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 story cards ✅ (#63); contrast pass ✅ (#64); copy-code buttons in review | — | C1 |
@@ -1324,13 +1324,56 @@ status string each bridge source (`BleBridges.kt`, `WifiDirectBridge.kt`,
 `WebBridgeHost.kt`, `NodeController.kt`) can actually produce against
 `classifyBridgeStatus`'s cases, rather than assuming the vocabulary.
 
-## B7 — Accessibility + density pass — ⬜ todo (depends B1–B6)
+## B7 — Accessibility + density pass — 🟢 in review (#69) (depends B1–B6)
 **Why:** icon-only 📎, LEDs/chips without descriptions, sub-48 dp targets, no way back to
 the bottom of a scrolled chat. **Files:** `Chrome.kt`, `ChatScreens`, `FeedScreens`,
 `MainActivity` (bottom nav). **Steps:** `contentDescription` on LEDs/chips/Baud/nav/📎; 48
 dp targets; focus order → composer; jump-to-bottom FAB when scrolled up; verify
 reduced-motion is fully static. **Acceptance:** TalkBack usable for send/attach/open; no
 pink-on-olive.
+
+**Shipped (`feat/android-b7-accessibility-density`).**
+- **Icon-only controls now announce a real name, not the raw glyph.** `CrateButton` gained
+  an optional `contentDescription` param (default `null`, so every word-labelled button —
+  the overwhelming majority — is unchanged); when set, it overrides the merged accessible
+  name and clears the label `Text`'s own semantics so TalkBack doesn't read both. Applied to
+  every icon/symbol-only button traced across the app: Attach file (📎) and Remove staged
+  attachment (✕) in `ChatScreens`, and Bold/Italic/Code/Insert link/Add image in the Feed
+  composer's formatting row (`B`/`i`/`</>`/`🔗`/`🖼`) — TalkBack previously read these as
+  literally "B" or "slash" or the bare emoji. `MainActivity`'s TopBar icons (←/👋/⚙, via a
+  new small `IconTap` helper) get the same treatment.
+- **Chips and bottom-nav tabs now announce selection, not just colour.** `TopicChip` and
+  `BottomNav`'s three tabs switched from `.clickable` to `.selectable` (`role = Role.Tab`),
+  which reports selected/unselected to TalkBack — the pink-vs-amber colour swap alone never
+  did. LEDs (`BridgeRow`'s dot) were checked too: already invisible to the accessibility tree
+  (no semantics of their own) and always paired with adjacent status text, so nothing was
+  silently unlabelled there to begin with. "Baud" (the roadmap's original mascot name) is now
+  the 🍄 emoji prefixed onto the screen-title heading — decorative flourish on real heading
+  text, not an isolated control, so left as-is.
+- **48dp touch targets.** Every `CrateButton` was under the floor (~36dp tall from its own
+  padding); it now carries `Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)` directly —
+  a real bigger button, not an invisible hitbox extending past a small-looking one. Bottom-nav
+  tabs (~33dp) got `heightIn(min = 48.dp)`.
+- **Focus order → composer.** A chat's petname-edit field sat above the thread and would
+  otherwise be a keyboard/TalkBack user's first stop on entering a conversation, ahead of the
+  actual reason they're there. `ChatDetail` now requests focus for the message composer on
+  entry via `FocusRequester`.
+- **Jump-to-bottom when scrolled up.** The B1 auto-scroll unconditionally yanked the thread
+  back to its newest message on every arrival, even for a reader who had deliberately scrolled
+  into history — the exact gap B1's own PR flagged and deferred to B7. It now only
+  auto-follows when the reader is already at the bottom (tracked via `derivedStateOf` over
+  `LazyListState.layoutInfo`); otherwise a "↓ new" button appears to jump back manually,
+  animated normally or instantly under reduced motion.
+- **Reduced-motion re-verified, not just re-declared.** Grepped every animation API
+  (`animate*`, `Animatable`, `AnimatedVisibility`, `rememberInfiniteTransition`) across the
+  Android sources: only the mascot sparkle and the CRT scanlines use motion, and both were
+  already gated on `reducedMotion()`. No new gap found; the new jump-to-bottom button also
+  respects it (`scrollToItem` instead of `animateScrollToItem`).
+- **No pink-on-olive** — checked every new/changed element; none put pink on kevlar.
+
+Not build-verified in this environment (no Android SDK, network-restricted — same
+limitation as B4–B6); CI's `apk` job is the compile check. Reviewed by hand instead,
+including a brace/paren balance pass on every changed file.
 
 ## B8 — Feed polish — ⬜ todo
 **Why:** follow-topic fails quietly; image decode can blank; links are untappable by
