@@ -16,6 +16,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -130,6 +131,18 @@ fun App() {
         // Scanlines only in the dark theme: Field Notes is the printed-manual
         // voice and a CRT artefact on paper is nonsense (§1 light mode).
         val scan = dark && !reducedMotion()
+
+        // System Back mirrors the ← arrow's hierarchy instead of leaving the app
+        // from a nested screen: a thread falls to the chats list, a draft post to
+        // the feed, everything else to Chats. Only Chats itself lets Back through
+        // to background the app.
+        BackHandler(enabled = screen != Chats) {
+            screen = when (screen) {
+                is Chat -> Chats
+                is Compose -> Feed
+                else -> Chats
+            }
+        }
 
         Scaffold(
             snackbarHost = { SnackbarHost(snackbar) },
