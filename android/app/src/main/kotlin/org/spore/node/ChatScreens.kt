@@ -23,12 +23,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -183,7 +186,7 @@ internal fun ChatDetail(peer: String) {
         }
     }
 
-    Column(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
+    Column(Modifier.padding(horizontal = 12.dp).fillMaxSize().imePadding()) {
         if (peer != Petnames.PUBLIC) {
             val saved = names[peer] ?: ""
             // What `Petnames.set` will actually store. Compared rather than the
@@ -208,7 +211,14 @@ internal fun ChatDetail(peer: String) {
         // Collected once for the whole thread rather than per bubble: one
         // subscription, and every file row is guaranteed to show the same poll.
         val transfers by NodeController.transfers.collectAsState()
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val listState = rememberLazyListState()
+        // Pin the thread to its newest message — on first open and whenever one
+        // arrives — so the latest is visible without a manual scroll. A jump-to-
+        // bottom affordance for a reader who has deliberately scrolled up is B7.
+        LaunchedEffect(thread.size) {
+            if (thread.isNotEmpty()) listState.scrollToItem(thread.lastIndex)
+        }
+        LazyColumn(Modifier.weight(1f), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(thread) { m ->
                 Bubble(m, m.magnet?.let { mg -> transfers.firstOrNull { it.magnet == mg } })
             }
