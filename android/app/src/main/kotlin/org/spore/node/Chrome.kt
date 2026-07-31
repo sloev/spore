@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -592,6 +593,29 @@ internal fun Caption(text: String, modifier: Modifier = Modifier, color: Color =
         modifier,
         color = color,
         style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+    )
+}
+
+/**
+ * A modal yes/no for an action that can't be taken back — a PUBLIC broadcast, say.
+ * The confirm button carries the pink CTA (pink face, void ink — never pink on
+ * kevlar); Cancel is the quiet default and dismissing the dialog also cancels.
+ */
+@Composable
+internal fun ConfirmDialog(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { DisplayHeading(title, size = 15) },
+        text = { Caption(body) },
+        confirmButton = { CrateButton(confirmLabel, onConfirm, face = Palette.Pink, ink = Palette.Void) },
+        dismissButton = { CrateButton("Cancel", onDismiss) },
+        containerColor = Palette.Asphalt,
     )
 }
 

@@ -27,6 +27,13 @@ Two conventions specific to this project:
   SVG animations (verified via computed style); no pink-on-olive; decorative art is
   `aria-hidden`. First increment of the ROADMAP "site" track — a contrast/readability pass
   and a docs-index card grid remain open. Wire unchanged.
+- **Android: empty states + a PUBLIC send confirm (B3).** Chats, Bridges, and Feed
+  (already had one) now say something plain when there's nothing there yet, instead of
+  a blank list — no unread badges anywhere, since there's still no read tracking to back
+  one. Sending to **PUBLIC** — unlike a DM, signed but never sealed, and reaching every
+  node in range rather than just the open thread — now asks first, via a new
+  `ConfirmDialog` shared component (pink CTA, void ink; Cancel is the quiet default).
+  🧪 Compiles in the `apk` CI; on-device QA is PR6. Wire unchanged.
 
 - **Android: send/post feedback (B2).** The plain-text chat send and the feed post used to
   clear the composer even when nothing went out — the node not being started yet was a
