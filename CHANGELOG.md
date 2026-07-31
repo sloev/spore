@@ -18,6 +18,13 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Docs: `ANDROID_AUDIT.md` retired into ROADMAP + TESTING.md.** The Android production
+  audit's status table had drifted (it still listed shipped work as open); its status now
+  lives only in the ROADMAP, its still-open engineering items (received-file
+  `FileProvider`, the JNI local-ref soak, WebView battery + Lite mode, permission-at-enable,
+  loop lifecycle gating) are captured there, and its device checks stay in
+  `android/TESTING.md`. The Verified fixes it described are already shipped and in this
+  CHANGELOG. Deleted, not just unlinked — no second status surface. Wire unchanged.
 - **Docs: one living plan, `docs/ROADMAP.md`.** The multi-PR plan that was hiding in a
   misleadingly named `SPORE_DEEP_AUDIT.md` is now `ROADMAP.md` — the single
   forward-looking surface (PR map + status, principles, still-open work, and the
@@ -87,7 +94,7 @@ Two conventions specific to this project:
   because they need a real device — fresh install, upgrade, seed reveal, that the
   identity is **absent** from a cloud/adb backup and a device transfer, a 24–48 h
   soak with no native abort, and the 7-day forward-secrecy window — each with a
-  History section to record runs. `docs/ANDROID_AUDIT.md` links it as §6. The app's
+  History section to record runs. The app's
   About card now states the forward-secrecy model in plain terms (prekeys rotate on
   a 7-day window; conversation keys ratchet forward; skipped keys drop after 7 days;
   the seed is in encrypted prefs and excluded from backup). The radio air-interface
