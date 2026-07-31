@@ -400,7 +400,7 @@ fn a_meshtastic_length_varint_cannot_overflow_the_offset() {
             let mut f = vec![tag];
             f.extend_from_slice(&[0xff; 9]); // a varint at the u64 ceiling
             f.push(0x01);
-            f.extend(std::iter::repeat(0xAB).take(pad));
+            f.extend(std::iter::repeat_n(0xAB, pad));
             let _ = crate::bridge::meshtastic::decode(&f);
         }
     }
