@@ -32,6 +32,7 @@ const pages = [
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
   // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
+  ['docs/ROADMAP.md', 'roadmap.html', null],
   // The findings register belongs on the site — anyone evaluating whether to trust
   // this with their mail should be able to read what was found and fixed without
   // cloning the repo — but households do not need it in the top bar.
@@ -75,6 +76,7 @@ const titles = new Map([
   ['security-policy.html', 'SPORE — reporting a vulnerability'],
   ['security.html', 'SPORE — security findings'],
   ['changelog.html', 'SPORE — changelog'],
+  ['roadmap.html', 'SPORE — engineering roadmap'],
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
   ['direct.html', 'SPORE — Direct: low-latency E2E pipes'],
