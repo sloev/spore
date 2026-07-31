@@ -69,8 +69,8 @@ name · **14** Freeze impact (almost always None).
 | **PR9** | Iroh bridge (QUIC p2p + relay fallback) | Feature / networking | ✅ merged (#53) — `bridge-iroh`, MSRV→1.85, dedicated iroh CI job | — | PR2 helpful for stop/unregister |
 | **Docs-1/2/3** | Docs cull → ROADMAP; retire deep-audit + ANDROID_AUDIT; absorb PLAN/UX-ISSUES | Process | ✅ merged (#55/#56/#57) | — | — |
 | **B1** | Chat nav: Back + scroll-to-latest + IME insets | Critical UX | ✅ merged (#58) 🧪 | — | B2–B8, C1 |
-| **B2** | Send/error feedback (no silent no-op) | Critical UX | 🟢 in review (🧪) (#61) | — | B-series |
-| **B3** | Empty states + PUBLIC/broadcast confirm | High UX | ⬜ todo | — | B-series |
+| **B2** | Send/error feedback (no silent no-op) | Critical UX | ✅ merged (#61) 🧪 | — | B-series |
+| **B3** | Empty states + PUBLIC/broadcast confirm | High UX | 🟢 in review (🧪) | — | B-series |
 | **B4** | Notifications + transfers overflow | High UX | ⬜ todo | — | B-series |
 | **B5** | Advanced: ring health + cautious export | Medium | ⬜ todo | — | B-series |
 | **B6** | Bridges: status enum + permission recovery | High UX | ⬜ todo | — | B-series |
