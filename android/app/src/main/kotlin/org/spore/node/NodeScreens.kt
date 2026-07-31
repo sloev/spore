@@ -188,6 +188,11 @@ internal fun AdvancedScreen(addr: String) {
     var showRingExport by remember { mutableStateOf(false) }
     var confirmRingExport by remember { mutableStateOf(false) }
     val ringHealth by NodeController.ringHealth.collectAsState()
+    val offlineWindowSecs by NodeController.offlineWindowSecs.collectAsState()
+    var customOfflineDays by remember { mutableStateOf("") }
+    // A raise above the default goes through a confirm first (PR0 Part B) —
+    // this holds the pending value while that dialog is up, null otherwise.
+    var pendingOfflineWindowSecs by remember { mutableStateOf<Int?>(null) }
     val confirm = rememberConfirm()
     val myName by NodeController.myName.collectAsState()
     var editName by remember(myName) { mutableStateOf(myName) }
@@ -209,6 +214,19 @@ internal fun AdvancedScreen(addr: String) {
                 if (small != null && NodeController.setAvatar(small)) confirmAvatar("Photo updated")
                 else confirmAvatar("Could not read that image")
             }
+        }
+    }
+
+    // Below the core's own default: takes effect immediately. Above it: gated
+    // behind the raise-above-default confirm, since a longer window trades
+    // convenience for how much a stolen device could still read (PR0 Part B).
+    fun requestOfflineWindow(days: Int) {
+        val secs = days * 86_400
+        if (secs > NodeController.DEFAULT_OFFLINE_WINDOW_SECS) {
+            pendingOfflineWindowSecs = secs
+        } else {
+            val ok = NodeController.setOfflineWindowSecs(secs)
+            confirm(if (ok) "Offline window set to ${days}d" else "Node not started yet — not saved")
         }
     }
 
@@ -346,11 +364,45 @@ internal fun AdvancedScreen(addr: String) {
         item {
             Crate(Modifier.fillMaxWidth()) {
                 Column {
+                    DisplayHeading("Offline window", size = 15)
+                    Caption("How long a device can be offline and still read mail sealed before it left — and how far back a lost or stolen device could read. Longer trades security for convenience.")
+                    VGap()
+                    Caption("current: ${formatDuration(offlineWindowSecs)}")
+                    VGap()
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(7, 14, 30).forEach { d ->
+                            CrateButton("${d}d", { requestOfflineWindow(d) }, enabled = offlineWindowSecs != d * 86_400)
+                        }
+                    }
+                    VGap()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ToughbookField(
+                            customOfflineDays, { customOfflineDays = it }, Modifier.weight(1f),
+                            placeholder = "custom days",
+                        )
+                        HGap()
+                        CrateButton(
+                            "Set",
+                            {
+                                val d = customOfflineDays.toIntOrNull()
+                                if (d != null && d > 0) requestOfflineWindow(d)
+                                else confirm("Enter a whole number of days")
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Crate(Modifier.fillMaxWidth()) {
+                Column {
                     DisplayHeading("About", size = 15)
                     Caption("SPORE — store-and-forward planetary opportunistic relay envelope. This phone is a full node: it signs, relays, and delivers across every enabled bridge. Public domain. 🍄")
                     VGap(6.dp)
-                    Caption("Forward secrecy: the keys others seal mail to (prekeys) rotate on a 7-day window, and a conversation's keys ratchet forward per message — a key kept to decrypt an out-of-order message is dropped after 7 days too. Losing today's device doesn't expose messages older than that window. Your seed is stored in Android's encrypted preferences and excluded from cloud/adb backup.")
-}
+                    val offlineDays = offlineWindowSecs / 86_400
+                    Caption("Forward secrecy: the keys others seal mail to (prekeys) rotate on a $offlineDays-day window, and a conversation's keys ratchet forward per message — a key kept to decrypt an out-of-order message is dropped after $offlineDays days too. Losing today's device doesn't expose messages older than that window. Your seed is stored in Android's encrypted preferences and excluded from cloud/adb backup.")
+                }
             }
         }
     }
@@ -364,6 +416,23 @@ internal fun AdvancedScreen(addr: String) {
             confirmLabel = "Show ring",
             onConfirm = { confirmRingExport = false; showRingExport = true },
             onDismiss = { confirmRingExport = false },
+        )
+    }
+
+    pendingOfflineWindowSecs?.let { secs ->
+        val days = secs / 86_400
+        ConfirmDialog(
+            title = "Raise the offline window to ${days}d?",
+            body = "A longer window means a lost or stolen device — or a copy of the prekey " +
+                "ring — can still read that much more mail after the fact. Only raise this if " +
+                "you need to be offline that long and accept the trade.",
+            confirmLabel = "Set ${days}d",
+            onConfirm = {
+                val ok = NodeController.setOfflineWindowSecs(secs)
+                confirm(if (ok) "Offline window set to ${days}d" else "Node not started yet — not saved")
+                pendingOfflineWindowSecs = null
+            },
+            onDismiss = { pendingOfflineWindowSecs = null },
         )
     }
 }

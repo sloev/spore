@@ -91,6 +91,9 @@ object NodeController {
     val storeCount = MutableStateFlow(0) // envelopes held for the mesh
     val resumed = MutableStateFlow(0) // envelopes adopted from disk at startup
     val ringHealth = MutableStateFlow<RingHealth?>(null) // prekey-ring status (B5)
+    // "Offline window" (PR0 Part B): how long a prekey/ratchet session skip
+    // TTL survives. Seconds; 604800 (7 days) is the core's own default.
+    val offlineWindowSecs = MutableStateFlow(DEFAULT_OFFLINE_WINDOW_SECS)
     val transfers = MutableStateFlow<List<Transfer>>(emptyList()) // files in flight
     // magnet -> where the completed file landed on disk. The Feed needs this to
     // render an attached image; without it a post can only say a file exists.
@@ -126,6 +129,9 @@ object NodeController {
 
     /** SPEC §5.4b: the mesh-wide ANNOUNCE flood is held to about one an hour. */
     private const val ANNOUNCE_FLOOD_INTERVAL_MS = 3_600_000L
+
+    /** The core's own default offline window (PR0 Part B) — 7 days, in seconds. */
+    const val DEFAULT_OFFLINE_WINDOW_SECS = 604_800
     private var lastFileSender: String = Petnames.PUBLIC   // thread for the next completed file
     private val savedMagnets = mutableSetOf<String>()      // don't save the same file twice
 
@@ -305,6 +311,12 @@ object NodeController {
         // The name we announce; peers offer it as the default petname for us.
         myName.value = prefs.getString("myname", "") ?: ""
         if (myName.value.isNotEmpty()) SporeNative.nativeSetName(ptr, myName.value)
+        // Offline window (PR0 Part B) — same secretPrefs accessor as the seed
+        // and ring, even though this value isn't itself secret, so there's one
+        // place settings live rather than a second store to keep in sync.
+        val offlineWindow = prefs.getInt("offlineWindowSecs", DEFAULT_OFFLINE_WINDOW_SECS)
+        SporeNative.nativeSetOfflineWindowSecs(ptr, offlineWindow)
+        offlineWindowSecs.value = SporeNative.nativeOfflineWindowSecs(ptr)
         myAvatarPath.value = avatarFile().takeIf { it.exists() && it.length() > 0 }?.absolutePath
         // Serve and change-notify our own profile (peers pull it over /profile).
         watchOwnProfileTopic()
@@ -443,7 +455,25 @@ object NodeController {
         val sealed = SporeNative.nativeEnvEncrypted(wire)
         // Sealed envelopes are opened with our prekey secret; one addressed to
         // someone else simply won't open, and we relay it without reading it.
-        val payload = SporeNative.nativeEnvPlaintext(ptr, wire) ?: return
+        val payload = SporeNative.nativeEnvPlaintext(ptr, wire)
+        if (payload == null) {
+            // Failing to open is the normal, silent case for mesh traffic
+            // that simply wasn't for us. But a *verified* envelope from
+            // someone we already have a petname for (a real contact, not
+            // just anyone we've heard an ANNOUNCE from) is worth surfacing
+            // (PR0 Part B) — most likely their offline window and ours no
+            // longer overlap for whichever key or session they used.
+            if (sealed && ok && Petnames.map.value.containsKey(src)) {
+                append(
+                    Msg(
+                        src,
+                        "⚠ couldn't decrypt this — the key may have expired, or ask them to resend",
+                        mine = false, verified = true,
+                    )
+                )
+            }
+            return
+        }
 
         // A broadcast (all-zero dest) belongs in the shared "everyone" thread, not
         // in a private conversation with whoever happened to send it.
@@ -872,6 +902,22 @@ object NodeController {
         secretPrefs(appCtx).edit().putString("myname", n).apply()
         SporeNative.nativeBeacon(ptr) // let peers see the new announced name right away
         notifyProfileChanged()        // and re-advertise the fuller profile record
+        return true
+    }
+
+    /**
+     * Set the offline window (PR0 Part B): how long a prekey secret — and a
+     * newly-bootstrapped §7 ratchet session's skip TTL — survives before
+     * deletion. The core clamps to a sane range; this reads back whatever it
+     * actually settled on, so the UI shows the real value rather than
+     * whatever was requested. Returns false if the node isn't up yet.
+     */
+    fun setOfflineWindowSecs(secs: Int): Boolean {
+        if (ptr == 0L) return false
+        SporeNative.nativeSetOfflineWindowSecs(ptr, secs)
+        val settled = SporeNative.nativeOfflineWindowSecs(ptr)
+        offlineWindowSecs.value = settled
+        secretPrefs(appCtx).edit().putInt("offlineWindowSecs", settled).apply()
         return true
     }
 

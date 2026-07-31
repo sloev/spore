@@ -57,7 +57,7 @@ name · **14** Freeze impact (almost always None).
 
 | PR | Title | Urgency | Status | Depends | Parallel with |
 |----|-------|---------|--------|---------|---------------|
-| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | 🟡 **partial** — Part A merged (#40); PR0b (ratchet wired into real DM traffic) merged (#70); Part B's UI/config knobs still carried forward | — | PR1, PR5 |
+| **PR0** | Ratchet TTL + zeroize **and** offline crypto lifetime knobs | **P0 security + honesty** | ✅ **shipped** — Part A (#40); PR0b ratchet wired into real DM traffic (#70); Part B offline-window knob + Android UI (#71); device field-verify carried to PR6 | — | PR1, PR5 |
 | **PR1** | Chat stage/attach/preview/FileProvider | **Critical UX** | 🟡 **partial** — merged (#41); items carried forward | — | PR0, PR5 |
 | **PR2** | Hub unregister + bridge stop/remove | **High UX** | 🟡 **partial** — merged (#42); items carried forward | — | PR0, PR1 |
 | **PR3** | Service / Audio / BLE lifecycle | High reliability | ✅ merged (#44) | **PR2** | — |
@@ -98,18 +98,26 @@ did not claim to cover.
 
 ### From PR0 — ratchet TTL + zeroize (merged #40, `fix/ratchet-skip-ttl`)
 
-Only **Part A** (the crypto: age-bound + zeroize on drop) shipped. **Part B —
-offline-lifetime knobs and UI — did not**, and is the larger remaining piece:
+Only **Part A** (the crypto: age-bound + zeroize on drop) shipped at first. **Part
+B — offline-lifetime knobs and UI** was deferred, then unblocked by PR0b, then
+shipped:
 
-- [ ] **Daemon config knobs** `prekey_lifetime_secs` / `ratchet_skip_ttl_secs`
-      (default `604800`), read from **one policy object**, not scattered consts.
-- [ ] **Android Advanced presets** — 7 d (default) / 14 d / 30 d / custom, persisted
-      via the single secret-accessor pattern.
-- [ ] **About / security blurb** stating the active window in plain language.
-- [ ] **Decrypt-failure UI** — "key expired for offline window; ask resend or raise
-      it," shown on a failed open of expired sealed mail.
-- [ ] **Raise-above-default warning** — a longer window means a stolen device reads
-      more history.
+- [x] **Daemon config knob** `Node.prekey_lifetime_secs` (default `604800`), a
+      single field read by both `sweep_prekeys` (the seal-layer ring) and session
+      bootstrap (the ratchet's `skip_ttl_secs`) — one value, not two consts that
+      could drift apart. `Node::offline_window_secs()` / `set_offline_window_secs()`
+      (clamped to `[PREKEY_PERIOD_SECS, 365 d]`) are the read/write API.
+- [x] **Android Advanced presets** — 7 d (default) / 14 d / 30 d / custom, persisted
+      via the single secret-accessor pattern (same `secretPrefs()` the seed/ring use).
+- [x] **About / security blurb** stating the active window in plain language —
+      interpolates the live value instead of a hard-coded "7-day".
+- [x] **Decrypt-failure UI** — a failed open of an ENCRYPTED, verified envelope from
+      a known contact appends "couldn't decrypt this — the key may have expired, or
+      ask them to resend" to that thread, rather than silently dropping it. Mesh
+      noise from an unrecognized address still drops silently, as before.
+- [x] **Raise-above-default warning** — any preset or custom value above the 7-day
+      default routes through the existing `ConfirmDialog` (same component B3/B5 use)
+      before taking effect.
 - **Why deferred (was):** the Double Ratchet was a tested primitive **not yet wired
       into any production send/receive path** (`decrypt` was called only from tests),
       so a runtime TTL knob would have configured dead code, and the Android sliders
@@ -140,12 +148,11 @@ offline-lifetime knobs and UI — did not**, and is the larger remaining piece:
       rate, tied exactly to which peer's address happened to sort lower) rather than
       assumed away — traced with temporary instrumentation comparing both sides'
       derived keys byte-for-byte before landing on the real cause.
-      This unblocks (but does not itself implement) the rest of Part B below —
-      still a separate PR, one concern at a time.
-- **Unblocked, not yet done:** the daemon/Android UI-and-config items below now sit on
-      real, live crypto rather than dead code.
-- [ ] **Field-verify the 7-day window end to end** on a device — already tracked in
-      **PR6**; unit tests prove the deadline logic, not a real node's clock/delivery.
+      This unblocked the rest of Part B above.
+- **✅ Part B shipped (#71, `feat/pr0-partb-offline-window`).**
+- [ ] **Field-verify the offline window end to end** on a device — already tracked in
+      **PR6**; unit tests prove the deadline/clamping logic, not a real node's
+      clock/delivery.
 
 ### From PR1 — chat attachments (merged #41, `feat/android-attachments`)
 
@@ -357,12 +364,12 @@ Sneakernet can deliver ciphertext weeks late; default prekey + ratchet skip TTL 
 - Seed restore must **not** resurrect deleted prekey secrets; only a ring backup does (label that separately).
 - Topic/group key rotation (S-020) is **out of scope** for the slider; copy should say sealed DMs / ratchet sessions only.
 
-### Extra acceptance (Part B)
-- [ ] Default remains ~7 days for prekey + ratchet skip TTL
-- [ ] User/daemon can raise lifetime; value survives restart
-- [ ] Warning shown when raising above default
-- [ ] About/Advanced states the active window in plain language
-- [ ] Failed open of expired sealed mail shows actionable message
+### Extra acceptance (Part B) — ✅ shipped (#71, `feat/pr0-partb-offline-window`)
+- [x] Default remains ~7 days for prekey + ratchet skip TTL
+- [x] User/daemon can raise lifetime; value survives restart
+- [x] Warning shown when raising above default
+- [x] About/Advanced states the active window in plain language
+- [x] Failed open of expired sealed mail shows actionable message
 
 ### CHANGELOG (single bullet set for PR0)
 ```markdown
@@ -1620,7 +1627,7 @@ feat/bridge-iroh
 
 ## Definition of done — credible phone node
 
-- [ ] PR0 merged — FS claim matches code **and** offline window disclosed + configurable
+- [x] PR0 merged — FS claim matches code **and** offline window disclosed + configurable
 - [ ] PR1 merged — attachments usable end-to-end
 - [ ] PR2 merged — bridges stoppable/removable
 - [ ] >=1 device-matrix pass (backup exclusion + migration)

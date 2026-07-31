@@ -7,20 +7,6 @@ use zeroize::Zeroize;
 const HEADER: usize = 36; // dh_pub(32) + n(2) + pn(2)
 const MAX_SKIP: u16 = 512; // cap out-of-order gap we'll pre-compute keys for
 
-/// How long a skipped message key is retained before it is purged and zeroized.
-///
-/// SPEC §7 promises a seven-day forward-secrecy window, and until now the skipped
-/// cache honoured only a *count* bound ([`MAX_SKIPPED_KEYS`]) — a held key never
-/// expired, so a session that skipped a message and then went quiet kept that key
-/// live indefinitely, which is exactly the material a later device seizure wants.
-///
-/// This is the same seven days as [`crate::PREKEY_LIFETIME_SECS`], and deliberately
-/// so: the seal layer (prekeys) and the session layer (this ratchet) are the two
-/// places offline sealed mail can outlive its key, and they must promise the same
-/// window or the spec is lying about one of them. If that window ever becomes a
-/// runtime knob, both must read it from one policy value rather than drift apart.
-const SKIP_TTL_SECS: u32 = crate::PREKEY_LIFETIME_SECS; // 7 days, matches SPEC §7
-
 /// Most skipped message keys held at once, across all receiving chains.
 ///
 /// [`MAX_SKIP`] bounds a single gap; this bounds the *total*, which is a different
@@ -114,6 +100,13 @@ pub struct Ratchet {
     nr: u16,
     pn: u16,
     skipped: HashMap<([u8; 32], u16), SkippedKey>,
+    /// How long a skipped message key is retained before [`Ratchet::purge_skipped`]
+    /// drops and zeroizes it (PR0 Part B: was a fixed `SKIP_TTL_SECS` const equal
+    /// to `crate::PREKEY_LIFETIME_SECS`; now the caller-supplied value — the
+    /// session bootstrap in `absorb_announce` passes `Node`'s own
+    /// `prekey_lifetime_secs`, so the seal layer and this session layer keep
+    /// promising the same window rather than drifting apart).
+    skip_ttl_secs: u32,
 }
 
 impl Drop for Ratchet {
@@ -131,8 +124,11 @@ impl Drop for Ratchet {
 impl Ratchet {
     /// Initiator. `my_sec` is our identity/prekey X25519 secret; `peer_pub`
     /// is the responder's prekey public. Root bootstraps from their static
-    /// DH, then an immediate ratchet gives us a sending chain.
-    pub fn init_alice(my_sec: [u8; 32], peer_pub: [u8; 32]) -> Self {
+    /// DH, then an immediate ratchet gives us a sending chain. `skip_ttl_secs`
+    /// is how long a skipped message key survives (PR0 Part B) — pass the
+    /// same value both sides use for their prekey ring, or the two "offline
+    /// window" promises drift apart.
+    pub fn init_alice(my_sec: [u8; 32], peer_pub: [u8; 32], skip_ttl_secs: u32) -> Self {
         let sk = dh(&my_sec, &peer_pub);
         let (dhs_sec, dhs_pub) = keypair();
         let (rk, cks) = kdf_rk(&sk, &dh(&dhs_sec, &peer_pub));
@@ -147,13 +143,15 @@ impl Ratchet {
             nr: 0,
             pn: 0,
             skipped: HashMap::new(),
+            skip_ttl_secs,
         }
     }
 
     /// Responder. Our ratchet key starts as our prekey `(my_sec, my_pub)`;
     /// `peer_pub` is the initiator's prekey public. No sending chain yet — it
-    /// appears after we receive the initiator's first message.
-    pub fn init_bob(my_sec: [u8; 32], my_pub: [u8; 32], peer_pub: [u8; 32]) -> Self {
+    /// appears after we receive the initiator's first message. `skip_ttl_secs`:
+    /// see [`Ratchet::init_alice`].
+    pub fn init_bob(my_sec: [u8; 32], my_pub: [u8; 32], peer_pub: [u8; 32], skip_ttl_secs: u32) -> Self {
         let sk = dh(&my_sec, &peer_pub);
         Ratchet {
             dhs_sec: my_sec,
@@ -166,6 +164,7 @@ impl Ratchet {
             nr: 0,
             pn: 0,
             skipped: HashMap::new(),
+            skip_ttl_secs,
         }
     }
 
@@ -205,10 +204,10 @@ impl Ratchet {
     /// replay, or falls outside the skip window.
     ///
     /// `now` is the caller's clock (unix seconds); it expires skipped keys older
-    /// than [`SKIP_TTL_SECS`] before doing anything else, so a key banked for an
-    /// out-of-order message that never came does not outlive the forward-secrecy
-    /// window. Pass the same `now` the rest of the node runs on — do not invent a
-    /// second clock.
+    /// than this session's configured skip TTL before doing anything else, so a
+    /// key banked for an out-of-order message that never came does not outlive
+    /// the forward-secrecy window. Pass the same `now` the rest of the node runs
+    /// on — do not invent a second clock.
     pub fn decrypt(&mut self, msg: &[u8], now: u32) -> Option<Vec<u8>> {
         self.purge_skipped(now);
         if msg.len() < HEADER {
@@ -242,13 +241,13 @@ impl Ratchet {
         Self::open(&mk, n, header, ct)
     }
 
-    /// Drop and zeroize skipped keys older than [`SKIP_TTL_SECS`].
+    /// Drop and zeroize skipped keys older than this session's skip TTL.
     ///
     /// `saturating_sub` so a clock that went backwards between bank and read keeps
     /// the key rather than treating it as infinitely old and dropping it early.
     /// Removed entries zeroize through [`SkippedKey`]'s `Drop`.
     fn purge_skipped(&mut self, now: u32) {
-        self.skipped.retain(|_, sk| now.saturating_sub(sk.inserted_at) < SKIP_TTL_SECS);
+        self.skipped.retain(|_, sk| now.saturating_sub(sk.inserted_at) < self.skip_ttl_secs);
     }
 
     fn open(mk: &[u8; 32], n: u16, header: &[u8], ct: &[u8]) -> Option<Vec<u8>> {
@@ -316,17 +315,20 @@ mod tests {
     use super::*;
 
     const T0: u32 = 1_700_000_000;
+    // PR0 Part B: skip_ttl_secs is now a caller-supplied value rather than a
+    // fixed const; these tests just want the historical 7-day default.
+    const TEST_SKIP_TTL: u32 = 7 * 24 * 3600;
 
     #[test]
     fn skipped_keys_expire_after_ttl() {
         // Alice sends 0,1,2,3; Bob receives 3 first, which banks skipped keys for
-        // 0..3. If more than SKIP_TTL_SECS passes before the stragglers arrive,
+        // 0..3. If more than TEST_SKIP_TTL passes before the stragglers arrive,
         // their keys are gone and they no longer open — the forward-secrecy window
         // has closed, which is the whole point.
         let (a_sec, a_pub) = keypair();
         let (b_sec, b_pub) = keypair();
-        let mut alice = Ratchet::init_alice(a_sec, b_pub);
-        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let mut alice = Ratchet::init_alice(a_sec, b_pub, TEST_SKIP_TTL);
+        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub, TEST_SKIP_TTL);
         let m0 = alice.encrypt(b"zero");
         let m1 = alice.encrypt(b"one");
         let _m2 = alice.encrypt(b"two");
@@ -336,7 +338,7 @@ mod tests {
         assert!(!bob.skipped.is_empty(), "0..3 should be banked as skipped");
 
         // The stragglers arrive one second past the window.
-        let expired = T0 + SKIP_TTL_SECS + 1;
+        let expired = T0 + TEST_SKIP_TTL + 1;
         assert!(bob.decrypt(&m0, expired).is_none(), "expired skipped key must not open");
         assert!(bob.decrypt(&m1, expired).is_none(), "expired skipped key must not open");
         assert!(bob.skipped.is_empty(), "purge must have emptied the cache");
@@ -348,14 +350,14 @@ mod tests {
         // still open. Forward secrecy is a deadline, not a hair trigger.
         let (a_sec, a_pub) = keypair();
         let (b_sec, b_pub) = keypair();
-        let mut alice = Ratchet::init_alice(a_sec, b_pub);
-        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let mut alice = Ratchet::init_alice(a_sec, b_pub, TEST_SKIP_TTL);
+        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub, TEST_SKIP_TTL);
         let m0 = alice.encrypt(b"zero");
         let _m1 = alice.encrypt(b"one");
         let m2 = alice.encrypt(b"two");
 
         assert_eq!(bob.decrypt(&m2, T0).as_deref(), Some(&b"two"[..]));
-        let still_inside = T0 + SKIP_TTL_SECS - 60;
+        let still_inside = T0 + TEST_SKIP_TTL - 60;
         assert_eq!(
             bob.decrypt(&m0, still_inside).as_deref(),
             Some(&b"zero"[..]),
@@ -375,7 +377,7 @@ mod tests {
         // much memory you spend.
         let (a_sec, a_pub) = keypair();
         let (b_sec, b_pub) = keypair();
-        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub, TEST_SKIP_TTL);
         let _ = a_sec;
 
         // Drive many receiving chains, each leaving a large unclaimed gap.
@@ -398,7 +400,7 @@ mod tests {
         // request for an enormous jump is refused rather than pre-computed.
         let (_a_sec, a_pub) = keypair();
         let (b_sec, b_pub) = keypair();
-        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub, TEST_SKIP_TTL);
         let (_, fresh) = keypair();
         bob.dh_ratchet(&fresh);
         assert!(bob.skip(MAX_SKIP + 1, T0).is_none(), "a gap past MAX_SKIP must be refused");

@@ -18,6 +18,21 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The offline window is now a configurable knob, end to end (PR0 Part B).**
+  Prekey lifetime and the §7 ratchet's skip-key TTL were separate hard-coded
+  7-day constants; they're now one field, `Node.prekey_lifetime_secs`, read by
+  both `sweep_prekeys` and session bootstrap, so they can't silently drift
+  apart. New `Node::offline_window_secs()`/`set_offline_window_secs()` (clamped
+  to a day..365-day range) expose it. Android's Advanced screen gets a matching
+  "Offline window" card (7d/14d/30d presets + custom days, persisted like the
+  seed/ring), the About blurb states the active window instead of a hard-coded
+  "7-day," raising above the 7-day default requires the same confirm dialog
+  used for prekey-ring export, and a failed decrypt of a verified message from
+  a known contact now surfaces "couldn't decrypt this — the key may have
+  expired, or ask them to resend" instead of dropping silently. Wire format
+  unchanged; this is local policy only. Field-verifying the window on real
+  hardware stays tracked under PR6.
+
 - **The §7 Double Ratchet is now wired into real DM traffic (PR0b).** Direct
   messages were always sealed with a fresh one-shot key against the recipient's
   current prekey; the tested Double Ratchet primitive existed but was never

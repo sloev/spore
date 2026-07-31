@@ -1018,6 +1018,37 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetStoreBudget(
     }
 }
 
+/// The current "offline window" in seconds (PR0 Part B) — how long a prekey
+/// secret (and a bootstrapped §7 ratchet session's skip TTL) survives before
+/// deletion. Defaults to 604800 (7 days). 0 if the node isn't up yet.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeOfflineWindowSecs(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jint {
+    let Some(r) = rt(ptr) else { return 0 };
+    r.hub.with_node(|n| n.offline_window_secs()) as jint
+}
+
+/// Set the offline window. `Node::set_offline_window_secs` clamps it to a
+/// sane range; a non-positive value is refused outright rather than clamped
+/// to the floor, so a UI bug that sends 0/negative doesn't silently coerce
+/// into "the shortest allowed window" and get read back as if the user chose
+/// it.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeSetOfflineWindowSecs(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    secs: jint,
+) {
+    let Some(r) = rt(ptr) else { return };
+    if secs > 0 {
+        r.hub.with_node(|n| n.set_offline_window_secs(secs as u32));
+    }
+}
+
 /// Files we hold a manifest for, one per line:
 /// `magnethex:totalBytes:chunksHeld:chunksTotal:advertisedName`.
 #[no_mangle]
