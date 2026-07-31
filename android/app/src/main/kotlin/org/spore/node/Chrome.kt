@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +40,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -411,6 +415,10 @@ private fun ToughbookFace(
  * until the user enables it and there is no such setting yet, so neither is wired
  * here rather than being wired on-by-default — §7's "sound off by default" is not
  * something to get wrong once and ship.
+ *
+ * @param contentDescription Overrides the accessible name for an icon/symbol-only
+ * [label] (e.g. "📎") that TalkBack can't otherwise read meaningfully — leave null
+ * for a word label, where [label] itself is already the right thing to announce.
  */
 @Composable
 internal fun CrateButton(
@@ -420,6 +428,7 @@ internal fun CrateButton(
     enabled: Boolean = true,
     face: Color = Palette.Kevlar,
     ink: Color = Palette.Amber,
+    contentDescription: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -439,14 +448,25 @@ internal fun CrateButton(
                     )
                 }
             }
+            // A real touch target, not an invisible hitbox around a smaller-looking
+            // button (B7) — every CrateButton was under the 48dp floor before this.
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .background(if (enabled) face else Palette.Asphalt, CrateShape)
             .border(2.dp, Palette.Edge, CrateShape)
             .radioClickable(interaction, enabled, onClick)
+            .then(
+                if (contentDescription != null) {
+                    Modifier.semantics { this.contentDescription = contentDescription }
+                } else Modifier
+            )
             .padding(horizontal = 14.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label.uppercase(),
+            // The description above replaces this text as the accessible name —
+            // without clearing it, TalkBack would merge and read both (B7).
+            modifier = if (contentDescription != null) Modifier.clearAndSetSemantics {} else Modifier,
             color = if (enabled) ink else Palette.Dim,
             style = TextStyle(
                 fontFamily = FontFamily.Monospace,

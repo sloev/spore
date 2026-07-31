@@ -14,7 +14,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -100,7 +101,9 @@ private fun TopicChip(label: String, selected: Boolean, onClick: () -> Unit) {
     // mock reached for — is 2.32:1 and never used.
     StickerBadge(
         label,
-        Modifier.clickable(onClick = onClick).padding(vertical = 2.dp),
+        // .selectable (not .clickable) announces selected/unselected to TalkBack —
+        // colour alone (pink vs amber) doesn't (B7).
+        Modifier.selectable(selected = selected, onClick = onClick, role = Role.Tab).padding(vertical = 2.dp),
         ink = if (selected) Palette.Pink else Palette.Amber,
         bg = if (selected) Palette.Void else Palette.Kevlar,
         edge = if (selected) Palette.Pink else Palette.Edge,
@@ -228,11 +231,11 @@ internal fun ComposePost(topic: String, done: () -> Unit) {
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            CrateButton("B", { body = Markdown.wrap(body, "**") })
-            CrateButton("i", { body = Markdown.wrap(body, "_") })
-            CrateButton("</>", { body = Markdown.wrap(body, "`") })
-            CrateButton("🔗", { body = Markdown.link(body) })
-            CrateButton("🖼", { pickImage.launch("image/*") })
+            CrateButton("B", { body = Markdown.wrap(body, "**") }, contentDescription = "Bold")
+            CrateButton("i", { body = Markdown.wrap(body, "_") }, contentDescription = "Italic")
+            CrateButton("</>", { body = Markdown.wrap(body, "`") }, contentDescription = "Code")
+            CrateButton("🔗", { body = Markdown.link(body) }, contentDescription = "Insert link")
+            CrateButton("🖼", { pickImage.launch("image/*") }, contentDescription = "Add image")
         }
 
         ToughbookField(

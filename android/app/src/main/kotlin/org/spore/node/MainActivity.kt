@@ -28,9 +28,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -48,7 +51,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
@@ -202,13 +210,7 @@ private fun TopBar(screen: Screen, go: (Screen) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!screen.showsNav()) {
-            Text(
-                "←",
-                Modifier
-                    .clickable { go(if (screen is Compose) Feed else Chats) }
-                    .padding(end = 10.dp),
-                color = Palette.Amber,
-            )
+            IconTap("←", "Back", color = Palette.Amber) { go(if (screen is Compose) Feed else Chats) }
         }
         Column(Modifier.weight(1f)) {
             DisplayHeading("$m ${screen.title()}")
@@ -226,9 +228,26 @@ private fun TopBar(screen: Screen, go: (Screen) -> Unit) {
         if (screen.showsNav()) {
             StickerBadge("${peers.size} peers", ink = Palette.Phosphor)
             HGap(6.dp)
-            Text("👋", Modifier.clickable { go(Connect) }.padding(4.dp))
-            Text("⚙", Modifier.clickable { go(Advanced) }.padding(4.dp))
+            IconTap("👋", "Connect") { go(Connect) }
+            IconTap("⚙", "Advanced settings") { go(Advanced) }
         }
+    }
+}
+
+/**
+ * A minimal icon/emoji-only tap target: a real 48dp-minimum touch area with an
+ * accessible name — TalkBack otherwise reads only the raw glyph (B7).
+ */
+@Composable
+private fun IconTap(glyph: String, description: String, color: Color = Color.Unspecified, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, color = color, modifier = Modifier.clearAndSetSemantics {})
     }
 }
 
@@ -245,7 +264,12 @@ private fun BottomNav(screen: Screen, go: (Screen) -> Unit) {
             .forEach { (label, target) ->
                 val on = screen == target
                 Column(
-                    Modifier.weight(1f).clickable { go(target) },
+                    Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp) // was ~33dp — under the floor (B7)
+                        // Announces the selected tab to TalkBack, which colour
+                        // alone (the pink dot) does not (B7).
+                        .selectable(selected = on, onClick = { go(target) }, role = Role.Tab),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(

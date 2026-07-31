@@ -18,6 +18,17 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: accessibility + density pass (B7).** Icon-only buttons (attach, remove
+  attachment, Feed's Bold/Italic/Code/link/image, the top bar's back/connect/settings
+  icons) now announce a real name to TalkBack instead of the raw glyph or letter. Topic
+  chips and bottom-nav tabs announce selection instead of relying on colour alone. Every
+  button now meets the 48dp touch-target floor (most were ~36dp). A chat's message
+  composer gets initial focus instead of the petname field above it. The thread view no
+  longer yanks a reader who scrolled into history back to the bottom on every new
+  message — it only auto-follows when they're already there, with a "↓ new" button to
+  jump back manually otherwise. Reduced-motion re-verified: no new animation gaps found.
+  Wire unchanged.
+
 - **Android: bridge status is an exact-matched enum, and a denied permission has a
   recovery path (B6).** The bridge LED used to classify status by blind substring —
   `"disconnected"` read as *connecting* (it contains "connect"), `"unsupported"` read
