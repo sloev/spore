@@ -31,14 +31,14 @@ const pages = [
   ['docs/DIRECT.md', 'direct.html', null],
   ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
   ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
+  ['docs/ROADMAP.md', 'roadmap.html', 'Roadmap'],
   // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
-  ['docs/ROADMAP.md', 'roadmap.html', null],
   // The findings register belongs on the site — anyone evaluating whether to trust
   // this with their mail should be able to read what was found and fixed without
   // cloning the repo — but households do not need it in the top bar.
   ['SECURITY.md', 'security-policy.html', null],
   ['docs/SECURITY_FINDINGS.md', 'security.html', null],
-  ['CHANGELOG.md', 'changelog.html', null],
+  ['CHANGELOG.md', 'changelog.html', 'Changelog'],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
   ['docs/VISUALDESIGN.md', 'design-language.html', null],

@@ -24,6 +24,10 @@ Two conventions specific to this project:
   app (mirroring the existing `←` arrow). The chat now **pins to its newest message** on
   open and whenever one arrives, and the **composer lifts above the soft keyboard**
   (`imePadding`). 🧪 Compiles in the `apk` CI; on-device QA is PR6. Wire unchanged.
+- **Site: the Roadmap and Changelog are in the top navbar.** Both pages were already
+  rendered and linkable but kept off the nav; they're now first-class nav items
+  (Home · Spec · Apps · Design · Bridges · Rebuild · Continuity · **Roadmap · Changelog**),
+  so "what's planned" and "what shipped" are one click from any page. Wire unchanged.
 
 - **Docs: `android/PLAN.md` and `UX-ISSUES.md` absorbed; docs cull complete.** The
   M0–M5 milestones move to a "shipped milestones" paragraph in `android/README.md`, and
