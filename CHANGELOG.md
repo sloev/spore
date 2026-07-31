@@ -18,6 +18,13 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: informative node notification + transfers overflow (B4).** The
+  foreground-service notification said "node running" forever; it now shows the
+  address's first 8 hex chars, live peer count, and "relaying" once the node is
+  actually holding envelopes for the mesh, refreshed as those change, and opens the
+  app when tapped. `TransfersBar` now says `+N more` instead of silently dropping
+  transfers past the first 3. Wire unchanged (app-shell only).
+
 - **Site: copy-to-clipboard on every code block.** A small "Copy" button now sits
   top-right on every `<pre>` across every doc page (not just the front page — the share
   bar stays `index.html`-only, but code blocks appear everywhere). Uses existing tokens

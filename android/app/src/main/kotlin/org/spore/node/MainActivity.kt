@@ -279,6 +279,8 @@ private fun TransfersBar() {
                 Caption("${t.have}/${t.count}")
             }
         }
+        val rest = active.size - 3
+        if (rest > 0) Caption("+$rest more", color = Palette.Dim)
     }
 }
 
