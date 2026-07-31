@@ -1,7 +1,7 @@
 # Android UX issues & conventions
 
 Running notes on Android-app UX decisions that aren't obvious from the code, so a
-later change doesn't undo them by accident. Paired with `docs/ANDROID_AUDIT.md`
+later change doesn't undo them by accident. Paired with `docs/ROADMAP.md`
 (which tracks status) and `docs/VISUALDESIGN.md` (which is normative for look).
 
 ## Chat attachments (PR1)
