@@ -71,7 +71,7 @@ name · **14** Freeze impact (almost always None).
 | **B1** | Chat nav: Back + scroll-to-latest + IME insets | Critical UX | ✅ merged (#58) 🧪 | — | B2–B8, C1 |
 | **B2** | Send/error feedback (no silent no-op) | Critical UX | ✅ merged (#61) 🧪 | — | B-series |
 | **B3** | Empty states + PUBLIC/broadcast confirm | High UX | ✅ merged (#62) 🧪 | — | B-series |
-| **B4** | Notifications + transfers overflow | High UX | ⬜ todo | — | B-series |
+| **B4** | Notifications + transfers overflow | High UX | 🟢 in review (#66) 🧪 | — | B-series |
 | **B5** | Advanced: ring health + cautious export | Medium | ⬜ todo | — | B-series |
 | **B6** | Bridges: status enum + permission recovery | High UX | ⬜ todo | — | B-series |
 | **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
@@ -1205,7 +1205,7 @@ The M0–M5 app works but the shell is weak. Each of these is 🧪 until PR6 run
 `FeedScreens.kt`, `NodeScreens.kt`, `MainActivity.kt`, `Chrome.kt`, `NodeController.kt`,
 `NodeService.kt`, the bridge classes, and the manifest.
 
-## B1 — Chat navigation: BackHandler + scroll-to-latest + IME insets — 🟢 in review (#58)
+## B1 — Chat navigation: BackHandler + scroll-to-latest + IME insets — ✅ merged (#58)
 **Why:** single `var screen` stack, so system Back leaves the app from a nested screen;
 the chat list doesn't stay on the latest message; the keyboard covers the composer.
 **Files:** `MainActivity.kt`, `ChatScreens.kt`, maybe `Chrome.kt`.
@@ -1215,7 +1215,7 @@ backgrounds); `rememberLazyListState` + `LaunchedEffect(thread.size) { scrollToI
 **Non-goals:** full Navigation-Compose rewrite. **Acceptance:** Back never exits from a
 nested chat; new message visible; composer usable with the keyboard open.
 
-## B2 — Send/error feedback — ⬜ todo
+## B2 — Send/error feedback — ✅ merged (#61)
 **Why:** the plain-text `send` path clears the composer even when `ptr==0` or the native
 call fails — silent data loss.
 **Files:** `ChatScreens.kt`, `NodeController.kt`, the Feed compose send path.
@@ -1223,19 +1223,36 @@ call fails — silent data loss.
 clear the composer only on success; mirror the existing "Node not started" path from
 `setMyName`. **Acceptance:** a failed send keeps the text and says why.
 
-## B3 — Empty states + PUBLIC/broadcast confirm — ⬜ todo
+## B3 — Empty states + PUBLIC/broadcast confirm — ✅ merged (#62)
 **Why:** empty chat/feed/bridge lists give no guidance; PUBLIC is a mis-tap from
 everyone. **Files:** `ChatScreens`, `FeedScreens`, `NodeScreens`, `Chrome` (Baud).
 **Steps:** one plain-language empty line + a decorative `aria-hidden` Baud; a confirm
 dialog before a PUBLIC/broadcast send; **no** unread badges (no read tracking → would be
 fake). **Acceptance:** first-run comprehensible; PUBLIC requires confirm.
 
-## B4 — Notifications + transfers overflow — ⬜ todo
+## B4 — Notifications + transfers overflow — 🟢 in review (#66)
 **Why:** the foreground-service notification is static; `TransfersBar` shows only the
 first few. **Files:** `NodeService.kt`, `MainActivity.kt` (Transfers/ReceivingBar).
 **Steps:** notification text with short address / peer count / "relaying"; tap opens
 MainActivity; transfers show `+N more`. **Non-goals:** per-message notification privacy
 design. **Acceptance:** notification informative; no crash at zero peers.
+
+**Shipped (`feat/android-b4-notifications-overflow`).** `NodeService.buildNotification()`
+now shows the address's first 8 hex chars (or "starting…" before the node is up), a
+peer count, and "relaying" once `storeCount` shows we're holding envelopes for the mesh
+— refreshed via a coroutine that collects `NodeController.address`/`peers`/`storeCount`
+and re-notifies on change (`NotificationManagerCompat.notify` silently no-ops without
+`POST_NOTIFICATIONS` rather than throwing, so a pre-permission cold start or zero peers
+can't crash it). Tapping the notification opens `MainActivity` via a `PendingIntent`.
+`TransfersBar` now shows `+N more` once active transfers exceed the 3 it already
+displayed, instead of silently dropping the rest.
+
+Not verified by an actual build: this environment has no Android SDK (network-restricted
+— `sdkmanager` can't reach `dl.google.com`), and CI's `apk` job is the only place this
+compiles, matching the established pattern for the earlier B1–B3 PRs. Verified by careful
+manual review instead: existing imports/signatures cross-checked against `NodeController`'s
+actual `StateFlow` types, `Caption`'s real signature, and the already-granted
+`POST_NOTIFICATIONS` manifest permission + runtime request in `MainActivity`.
 
 ## B5 — Advanced: ring health + cautious export — ⬜ todo
 **Why:** the audit asked for prekey-ring health; any export defeats the 7-day window.
