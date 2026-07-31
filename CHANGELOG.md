@@ -18,6 +18,11 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Site: the Roadmap and Changelog are in the top navbar.** Both pages were already
+  rendered and linkable but kept off the nav; they're now first-class nav items
+  (Home · Spec · Apps · Design · Bridges · Rebuild · Continuity · **Roadmap · Changelog**),
+  so "what's planned" and "what shipped" are one click from any page. Wire unchanged.
+
 - **Docs: `android/PLAN.md` and `UX-ISSUES.md` absorbed; docs cull complete.** The
   M0–M5 milestones move to a "shipped milestones" paragraph in `android/README.md`, and
   the chat-attachment convention (the `📎 name | spore:<magnet> | mime` marker and its
