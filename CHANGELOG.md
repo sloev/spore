@@ -18,6 +18,16 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: bridge status is an exact-matched enum, and a denied permission has a
+  recovery path (B6).** The bridge LED used to classify status by blind substring —
+  `"disconnected"` read as *connecting* (it contains "connect"), `"unsupported"` read
+  as *up* (it contains "up"). Both were live bugs, now fixed by matching the small,
+  known vocabulary every bridge source emits exactly instead. A connection error also
+  gets its own pink-plus-icon treatment rather than fading into the same look as an
+  idle bridge. A denied permission (Audio modem, Meshtastic/RNode BLE, Wi-Fi Direct)
+  no longer dead-ends silently — it now offers a dialog that deep-links to the app's
+  system settings. Wire unchanged.
+
 - **Android: Advanced screen shows prekey-ring health, and export is gated (B5).**
   A new core method, `Node::prekey_health`, reports how many prekey secrets are held,
   how old the oldest is (honestly `None`/"unknown" for an unstamped bootstrap entry),

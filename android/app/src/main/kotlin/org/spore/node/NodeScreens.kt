@@ -382,19 +382,24 @@ internal fun BridgesList() {
     val bridges by NodeController.bridges.collectAsState()
     var tcp by remember { mutableStateOf("") }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingLabel by remember { mutableStateOf("") }
+    // A denial used to just dead-end silently — no row, no message, nothing to
+    // do about it. This names what needs the permission and offers the one real
+    // recovery: Android's own per-app settings screen.
+    var deniedFor by remember { mutableStateOf<String?>(null) }
     val askPerms = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
-        if (granted.values.all { it }) pendingAction?.invoke()
+        if (granted.values.all { it }) pendingAction?.invoke() else deniedFor = pendingLabel
         pendingAction = null
     }
 
-    fun withPerms(perms: List<String>, action: () -> Unit) {
+    fun withPerms(label: String, perms: List<String>, action: () -> Unit) {
         val missing = perms.filter {
             ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isEmpty()) action()
-        else { pendingAction = action; askPerms.launch(missing.toTypedArray()) }
+        else { pendingAction = action; pendingLabel = label; askPerms.launch(missing.toTypedArray()) }
     }
 
     fun bonded(): List<android.bluetooth.BluetoothDevice> = try {
@@ -460,12 +465,12 @@ internal fun BridgesList() {
         }
         item {
             CrateButton("Audio modem", {
-                withPerms(listOf(Manifest.permission.RECORD_AUDIO)) { NodeController.enableAudio() }
+                withPerms("Audio modem", listOf(Manifest.permission.RECORD_AUDIO)) { NodeController.enableAudio() }
             }, Modifier.padding(vertical = 4.dp))
         }
         item {
             CrateButton("Meshtastic (paired BLE)", {
-                withPerms(blePerms) { showMeshPick = !showMeshPick }
+                withPerms("Meshtastic BLE", blePerms) { showMeshPick = !showMeshPick }
             }, Modifier.padding(vertical = 4.dp))
         }
         if (showMeshPick) {
@@ -477,7 +482,7 @@ internal fun BridgesList() {
         }
         item {
             CrateButton("Reticulum RNode (paired BLE)", {
-                withPerms(blePerms) { showRnodePick = !showRnodePick }
+                withPerms("Reticulum RNode", blePerms) { showRnodePick = !showRnodePick }
             }, Modifier.padding(vertical = 4.dp))
         }
         if (showRnodePick) {
@@ -503,7 +508,7 @@ internal fun BridgesList() {
         }
         item {
             CrateButton("Wi-Fi Direct group", {
-                withPerms(wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
+                withPerms("Wi-Fi Direct", wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
             }, Modifier.padding(vertical = 4.dp))
         }
         item {
@@ -531,6 +536,53 @@ internal fun BridgesList() {
             }
         }
     }
+
+    deniedFor?.let { label ->
+        ConfirmDialog(
+            title = "$label needs a permission",
+            body = "Android reported it as denied, so this can't start. Open the app's " +
+                "system settings to grant it, then try again.",
+            confirmLabel = "Open settings",
+            onConfirm = {
+                deniedFor = null
+                ctx.startActivity(
+                    Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.fromParts("package", ctx.packageName, null),
+                    )
+                )
+            },
+            onDismiss = { deniedFor = null },
+        )
+    }
+}
+
+/** The four states a bridge row's LED actually distinguishes (B6). */
+private enum class BridgeStatus { Up, Connecting, Down, Error }
+
+/**
+ * Map a bridge's free-text status to [BridgeStatus] — an exact match over the
+ * small, known vocabulary every source emits (`NodeController`'s own literals,
+ * `BleBridge`, `WifiDirectBridge`, `WebBridgeHost`'s events), not the blind
+ * substring `in` checks this replaces.
+ *
+ * Those substring checks were silently wrong in exactly the cases a status LED
+ * exists to get right: `"disconnected"` contains `"connect"`, so it read as
+ * *connecting*; `"unsupported"` contains `"up"`, so it read as *up*. An unknown
+ * string (an error message we haven't enumerated) falls to `Connecting` rather
+ * than guessing green or red.
+ */
+private fun classifyBridgeStatus(status: String): BridgeStatus {
+    val s = status.lowercase()
+    return when {
+        s.contains("error") -> BridgeStatus.Error
+        s == "unsupported" || s == "disconnected" || s == "stopped" -> BridgeStatus.Down
+        s == "connecting" || s == "discovering" || s == "reconnecting" ||
+            s == "starting" || s == "group requested" || s == "joining existing" -> BridgeStatus.Connecting
+        s == "on" || s == "open" || s == "up" || s == "group up" ||
+            s.endsWith(" up") || s.contains("peer(") -> BridgeStatus.Up
+        else -> BridgeStatus.Connecting
+    }
 }
 
 /**
@@ -544,11 +596,12 @@ internal fun BridgesList() {
  */
 @Composable
 private fun BridgeRow(b: BridgeState) {
-    val s = b.status.lowercase()
-    val (dot, label) = when {
-        "up" in s || "connected" in s || "listening" in s || "ok" in s -> Palette.Phosphor to b.status
-        "connect" in s || "start" in s -> Palette.Amber to b.status
-        else -> Palette.Kevlar to b.status
+    val (dot, label) = when (classifyBridgeStatus(b.status)) {
+        BridgeStatus.Up -> Palette.Phosphor to b.status
+        BridgeStatus.Connecting -> Palette.Amber to b.status
+        BridgeStatus.Down -> Palette.Kevlar to b.status
+        // Never signal failure by colour alone (§ VISUALDESIGN): pair pink with an icon.
+        BridgeStatus.Error -> Palette.Pink to "⚠ ${b.status}"
     }
     Crate(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
