@@ -1,136 +1,133 @@
 # Apps & daemons — get a node
 
-Four ways to run SPORE. They are the same node: one Rust core, one wire format,
+Four ways to run SPORE. **Same node** everywhere: one Rust core, one wire format,
 one router. Pick by what the machine in front of you has.
 
-| | Needs | Get it |
-|---|---|---|
-| **📱 SPORE Communicator** (Android) | a phone | [**⬇ spore-android.apk**][apk] — direct download ([release notes][apk-rolling]) |
-| **🌐 Single-file web node** | a browser | [`spore-standalone.html`][standalone] — one file, works offline |
-| **🖥 Desktop daemon** | Rust toolchain | `cargo build --release` → `target/release/spore` |
-| **🖨 Seed Sheet** | a printer | [`spore-seedsheet.html`][seedsheet] — print it; QR codes rebuild the guide |
+No app store, no account, no server. Two copies on the same Wi-Fi find each other
+in seconds; with a radio or a speaker they don't even need that.
 
-[apk]: https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
-[apk-rolling]: https://github.com/sloev/spore/releases/tag/rolling
-[apk-stable]: https://github.com/sloev/spore/releases/latest/download/spore-android.apk
-[standalone]: https://sloev.github.io/spore/demo/spore-standalone.html
-[seedsheet]: https://sloev.github.io/spore/demo/spore-seedsheet.html
+<div class="story story-apps" role="list">
 
-No app store, no account, no server. Two copies of any of these on the same
-Wi-Fi find each other in seconds; with a radio or a speaker they don't even need
-that.
-
-## 📱 SPORE Communicator (Android)
-
-A real node in a background service — not a client talking to one. Instant
-messages with petnames, a microblog feed, and file sharing, over every bridge at
-once: UDP and Wi-Fi Direct, the audio modem, Bluetooth Meshtastic and Reticulum
-radios, and WebSocket / Nostr / WebTorrent through a headless WebView.
-
-Built to feel familiar to Meshtastic users: simple by default, advanced options
-one tap away, a little kawaii.
-
-**[⬇ Download spore-android.apk][apk]** — a permanent link that always serves the
-newest build. Rebuilt on every merge to `master` and versioned
-`<major>.<minor>.<YYYYMMDDHHMM>+<short sha>`; the
-[release notes][apk-rolling] name the version and carry its SHA-256. Verify before
-installing if you care to:
-
-```sh
-curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-phone" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <rect class="phone-body" x="108" y="12" width="64" height="96" rx="8"/>
+      <rect class="phone-screen" x="116" y="28" width="48" height="68" rx="2"/>
+      <circle class="phone-dot" cx="140" cy="22" r="2"/>
+      <g class="phone-wave">
+        <path d="M178 50 Q195 60 178 70" fill="none"/>
+        <path d="M186 42 Q212 60 186 78" fill="none"/>
+      </g>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>📱 SPORE Communicator</strong>
+    <span class="story-lead">Android phone — full node in a background service, not a thin client.</span>
+  </figcaption>
+  <p class="story-cta"><a class="cta-primary" href="https://github.com/sloev/spore/releases/download/rolling/spore-android.apk">⬇ Download APK</a>
+  <a class="cta-secondary" href="https://github.com/sloev/spore/releases/tag/rolling">Release notes</a></p>
+  <details>
+    <summary>Install, verify, what it does</summary>
+    <p>Permanent rolling link; rebuilt on every merge. Version
+    <code>&lt;major&gt;.&lt;minor&gt;.&lt;stamp&gt;+&lt;sha&gt;</code>. Verify if you care:</p>
+    <pre><code>curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
 curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk.sha256
-sha256sum -c spore-android.apk.sha256
-```
+sha256sum -c spore-android.apk.sha256</code></pre>
+    <p>Allow installs from the browser/files app. Builds are debug-signed until a
+    release keystore is configured — Android will warn about an unknown developer.</p>
+    <p><strong>Rollback:</strong> <code>nightly-YYYY.MM.DD</code> keeps the last five dated
+    builds. <strong>Stable:</strong>
+    <a href="https://github.com/sloev/spore/releases/latest/download/spore-android.apk">/releases/latest/download/spore-android.apk</a>
+    — only as good as the last tagged build that actually has assets.</p>
+    <p>Messages, petnames, feed, files over UDP, Wi-Fi Direct, audio modem, BLE radios,
+    and WebView bridges. Radios remain honest templates until
+    <a href="hardware.html">HARDWARE</a> runs. Build notes in the Android README.</p>
+  </details>
+</figure>
 
-Install it as you would any APK; you may need to allow installs from your browser
-or files app. Builds are debug-signed until a release keystore is configured, so
-Android will warn about an unknown developer.
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-html" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <rect class="doc" x="90" y="20" width="100" height="80" rx="3"/>
+      <text class="doc-tag" x="140" y="48" text-anchor="middle">&lt;/&gt;</text>
+      <path class="doc-line" d="M110 62 H170 M110 72 H155"/>
+      <g class="doc-spark">
+        <circle cx="200" cy="40" r="3"/>
+        <circle cx="210" cy="55" r="2"/>
+        <circle cx="198" cy="68" r="2.5"/>
+      </g>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>🌐 Single-file web node</strong>
+    <span class="story-lead">One HTML file — wasm + UI + transports. Zero network until you add a bridge.</span>
+  </figcaption>
+  <p class="story-cta"><a class="cta-primary" href="spore-standalone.html">Open standalone</a>
+  <a class="cta-secondary" href="demo/">Live demo</a></p>
+  <details>
+    <summary>Offline, USB, self-copy</summary>
+    <p>Save it, mail it, put it on a stick. CI asserts <strong>zero</strong> external requests, so
+    <code>file://</code> works with no internet. “Download a copy” re-serializes the page so one
+    seed makes the next. Identity and bridges live in <code>localStorage</code>.</p>
+    <p>Add WebSocket, WebRTC, Nostr, WebTorrent, Serial, Bluetooth, or the audio modem
+    from the page. Web Serial / Web Bluetooth need desktop Chromium-family browsers.</p>
+  </details>
+</figure>
 
-**Going back a version.** `rolling` is a moving pointer and holds only the current
-APK, which is no help when a build breaks something. The `nightly-<date>` releases
-keep the **last five dated builds** for exactly that — pick one and install it over
-the top. Older nightlies are pruned automatically, so this is a rollback window,
-not an archive.
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-daemon" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <rect class="term" x="40" y="24" width="200" height="72" rx="4"/>
+      <text class="term-prompt" x="56" y="56">$</text>
+      <text class="term-cmd" x="72" y="56">spore node.yaml</text>
+      <rect class="term-cursor" x="200" y="46" width="8" height="14"/>
+      <circle class="term-led" cx="56" cy="36" r="3"/>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>🖥 Desktop daemon</strong>
+    <span class="story-lead">One binary, many bridges — LAN + USB folder + radio in one process.</span>
+  </figcaption>
+  <details>
+    <summary>Build &amp; run</summary>
+    <pre><code>cargo build --release        # → target/release/spore
+cargo run                    # in-memory mesh demo
+cargo run -- node.yaml       # bridges from a config file</code></pre>
+    <p>Config examples in the GitHub README; what each link speaks is in
+    <a href="bridges.html">Bridges</a>. Targets Linux, macOS, Windows; core also wasm and esp-idf.</p>
+  </details>
+</figure>
 
-**Stable releases** are tagged `vX.Y.Z` (either case), and their permanent link is
-[`/releases/latest/download/spore-android.apk`][apk-stable].
+<figure class="story-card crate" role="listitem">
+  <div class="story-art" aria-hidden="true">
+    <svg class="ill ill-sheet" viewBox="0 0 280 120" xmlns="http://www.w3.org/2000/svg">
+      <rect class="paper" x="70" y="16" width="70" height="90" rx="2"/>
+      <rect class="paper paper2" x="140" y="16" width="70" height="90" rx="2"/>
+      <g class="qr">
+        <rect x="150" y="28" width="50" height="50"/>
+        <rect class="qr-hole" x="158" y="36" width="12" height="12"/>
+        <rect class="qr-hole" x="180" y="36" width="12" height="12"/>
+        <rect class="qr-hole" x="158" y="58" width="12" height="12"/>
+      </g>
+      <path class="paper-lines" d="M82 36 H128 M82 48 H120 M82 60 H124"/>
+    </svg>
+  </div>
+  <figcaption>
+    <strong>🖨 Seed Sheet</strong>
+    <span class="story-lead">Printable A4 — any ~K of N fountain QR codes rebuild the guide.</span>
+  </figcaption>
+  <p class="story-cta"><a class="cta-primary" href="spore-seedsheet.html">Open Seed Sheet</a>
+  <a class="cta-secondary" href="continuity.html">Why continuity</a></p>
+  <details>
+    <summary>Torn sheet still works</summary>
+    <p>One side: wire format by hand. Other side: reimplementation guide as
+    fountain-coded QR. A stained or partial print can still recover the payload —
+    SPORE’s own erasure coding turned on itself. Build it with
+    <code>node site/seed/build-seedsheet.mjs</code> after wasm is available.</p>
+  </details>
+</figure>
 
-Be warned that this link is only as good as the last tagged *build*. A tag with no
-build behind it produces a release page that looks real and serves nothing — which
-is exactly what `V0.1.0` and `V0.2.0` did, because the workflow matched `v*` and
-those tags start with a capital. Fixed, but the lesson stands: check the release has
-assets before pointing anyone at it. `curl -fsI` on the link above is the check.
-
-<details>
-<summary>What it does, and what still needs your hardware</summary>
-
-**Connect (👋)** shows an invite QR carrying your address, the name you announce,
-and the relay/swarm bridges you are on. A friend scans it, confirms a petname —
-prefilled with your announced name, shown as a *claim*, since anyone may announce
-anything — and can opt in to your bridges with a tick.
-
-**Messages** to a peer are sealed to their key once you have heard their announce
-(🔒) and ask for a delivery receipt (✓). Broadcasts and topic posts are signed but
-public by nature, and the UI says so rather than implying otherwise.
-
-**Files** ride the protocol's own manifest + chunk layer, so a transfer resumes
-rather than restarts, survives the app being killed, and to a known peer is
-sealed — contents *and* filename. Bounded by storage (256 MB by default, ~120 MB
-per file), not by the wire format or the heap.
-
-The radios, BLE, mic and live-peer paths are honest templates — the codecs are
-tested, the hardware loop is not. Verify with [`HARDWARE.md`](HARDWARE.md).
-Build instructions: [`android/README.md`](../android/README.md).
-</details>
-
-## 🌐 Single-file web node
-
-[`spore-standalone.html`][standalone] is a complete node in one file: the wasm
-core, every transport, the UI. Save it to a USB stick or mail it as an
-attachment. It makes **zero network requests** — CI asserts that — so it runs
-from `file://` with no internet at all.
-
-It can also re-serialize itself ("Download a copy"), so one seed makes the next.
-
-<details>
-<summary>Reaching other copies</summary>
-
-Add bridges at runtime from the page itself: WebSocket, WebRTC, Nostr,
-WebTorrent, Web Serial and Web Bluetooth (Meshtastic radios, Reticulum RNodes,
-generic KISS TNCs), and the audio modem. Settings and bridges persist in
-`localStorage`, so a reopened tab is the same node with the same address.
-
-Browser support varies — Web Serial and Web Bluetooth are desktop
-Chromium-family only. Details in [`web/README.md`](../web/README.md).
-</details>
-
-## 🖥 Desktop daemon
-
-One binary, every bridge, any mix at once — so one process is a gateway between
-a LAN, a USB stick, and a radio mesh.
-
-```sh
-cargo build --release        # -> target/release/spore
-cargo run                    # in-memory mesh demo (A — B — C — D)
-cargo run -- node.yaml       # a real node with the bridges in a config file
-```
-
-Configuration and the bridge list are in the
-[README](https://github.com/sloev/spore#build--run);
-what each bridge speaks is in [`BRIDGES.md`](BRIDGES.md).
-
-Plain `std`, so one source targets Linux, macOS, Windows and Android; the core
-also builds for `wasm32` and `esp-idf`.
-
-## 🖨 Seed Sheet
-
-A two-sided A4 you can print and put on a shelf: the wire format worked by hand
-on one side, the whole reimplementation guide as fountain-coded QR on the other.
-**Any ~K of N codes** rebuild the payload, so a torn or stained sheet still
-works — SPORE's own erasure coding, turned on itself.
-
-Why that matters, and the other cold-start paths, is
-[`CONTINUITY.md`](CONTINUITY.md).
+</div>
 
 ## Building the seeds yourself
 
@@ -144,4 +141,4 @@ cd site && npm install && node seed/build-seedsheet.mjs   # -> web/spore-seedshe
 ```
 
 Language bindings (Python / Go / JS over one C ABI) are in
-[`bindings/`](../bindings/README.md).
+[bindings](bindings.html).

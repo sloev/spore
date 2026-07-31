@@ -77,7 +77,7 @@ name · **14** Freeze impact (almost always None).
 | **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
-| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ⬜ todo | — | C1 |
+| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 first increment in review — story cards on Home/Apps/Continuity | — | C1 |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
@@ -1353,6 +1353,37 @@ job); touching the zero-network `spore-standalone.html` guarantee.
 as *SPORE*, not a generic template; a card-grid docs index + at least one new reusable UI
 element (e.g. copy-code) shipped; `node site/build.mjs` → "links OK"; no external request
 added (grep clean).
+
+## First increment — illustrated story cards on Home, Apps, Continuity
+
+**Shipped (this PR, `feat/site-story-cards-user-pages`).** Step 2 above, scoped to the three
+pages a first-time visitor actually lands on. `site/home.md`, `docs/APPS.md`, and
+`docs/CONTINUITY.md` now open with a grid of `<figure class="story-card">` — a small
+self-hosted inline-SVG illustration (CSS/tokens only, no rasters), a one-line caption, and
+the full prose moved into `<details>` so the page reads as a scan-then-dive layout instead
+of a wall of text. Reference/dense pages (Spec, Design, Bridges, Direct, Rebuild, Security
+Findings, Hardware, Testing, VisualDesign, Roadmap itself, Changelog, Contributing,
+Bindings, Reference, Web guide) are deliberately untouched — a story-card treatment would
+work against their job.
+
+Two real bugs found by actually building and screenshotting the pages (Chromium via
+Playwright, not just reading the CSS) rather than trusting the source as given:
+- Two CTA links pointed at `demo/spore-standalone.html` / `demo/spore-seedsheet.html`,
+  which never exist at those paths — the Pages workflow (`pages.yml`) copies the built
+  files to `spore-standalone.html`, `demo/` (index), and `spore-seedsheet.html` as
+  siblings, never nested under `demo/`. Fixed to the real paths.
+- The art column's `grid-row` span (a fixed guess) didn't match every card's actual row
+  count, so Continuity's 4-`<details>` "cold-start" card had its last row fall out from
+  beside the art. Fixed to the true max row count across all cards (5), after an
+  intermediate `1 / -1` attempt turned out to resolve against the *explicit* grid (which
+  this layout has none of) and silently reshuffled sibling placement instead — caught by
+  re-screenshotting, not assumed fixed.
+
+Verified: `node site/build.mjs` → "links OK"; reduced-motion actually disables the SVG
+keyframe animations (checked via computed style, not just the media-query source); light
+and dark themes both render coherently; no pink-on-olive; decorative art is `aria-hidden`.
+Contrast pass on body copy (step 1) and the docs-index card grid (rest of step 3) remain
+open for a follow-up increment.
 
 ---
 

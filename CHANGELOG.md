@@ -18,6 +18,16 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Site: Home, Apps, and Continuity use illustrated story cards.** A first-time visitor
+  landed on a wall of text; these three pages now open with a grid of small self-hosted
+  inline-SVG illustrations (CSS/tokens only, no rasters) and a one-line caption, with the
+  full prose moved into `<details>`. Builder/reference docs (Spec, Design, Bridges, Direct,
+  Rebuild, Security Findings, Hardware, Testing, VisualDesign, Roadmap, Changelog,
+  Contributing, Bindings, Reference, Web guide) are unchanged. Reduced-motion disables the
+  SVG animations (verified via computed style); no pink-on-olive; decorative art is
+  `aria-hidden`. First increment of the ROADMAP "site" track — a contrast/readability pass
+  and a docs-index card grid remain open. Wire unchanged.
+
 - **Android: send/post feedback (B2).** The plain-text chat send and the feed post used to
   clear the composer even when nothing went out — the node not being started yet was a
   silent no-op that looked like a sent message. `NodeController.send`/`post` now return a

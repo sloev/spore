@@ -230,3 +230,543 @@ main.doc a:focus-visible, .share-btn:focus-visible, header.site nav a:focus-visi
   main.doc h1, main.doc h2 { text-shadow: none; }
   main.doc pre, main.doc table { box-shadow: none; }
 }
+/* ---------------------------------------------------------------------------
+   Front-page story cards + CSS/SVG illustrations.
+   Append to site/style.css (or @import). Scoped to body.page-index.
+   VISUALDESIGN: tokens only; motion gated; no pink-on-olive; aria-hidden art.
+   --------------------------------------------------------------------------- */
+
+body.page-index .story {
+  display: grid;
+  gap: 18px;
+  margin: 22px 0 28px;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 720px) {
+  body.page-index .story {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Ammo-crate card */
+body.page-index .story-card {
+  margin: 0;
+  padding: 14px 16px 12px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  body.page-index .story-card {
+    grid-template-columns: minmax(160px, 220px) 1fr;
+    grid-template-rows: auto auto;
+    align-items: center;
+  }
+  body.page-index .story-art {
+    grid-row: 1 / span 2;
+  }
+  body.page-index .story-card > details {
+    grid-column: 2;
+  }
+}
+
+body.page-index .story-art {
+  background: var(--void);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+body.page-index .story-art .ill {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  display: block;
+}
+
+body.page-index .story-card figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+body.page-index .story-card figcaption strong {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-shadow: 0 0 2px currentColor;
+}
+
+body.page-index .story-lead {
+  color: var(--dim);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+/* details already styled in style.css; tighten for story cards */
+body.page-index .story-card > details {
+  margin: 0;
+  background: transparent;
+  border: 1px dashed var(--edge);
+  border-radius: 2px;
+  padding: 2px 12px;
+}
+
+body.page-index .story-card > details summary {
+  color: var(--accent2);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+body.page-index .story-card > details p {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+/* ---- SVG illustration styles (currentColor + tokens via CSS) ---- */
+
+.ill .node {
+  fill: var(--kevlar);
+  stroke: var(--phosphor);
+  stroke-width: 2;
+}
+.ill .path {
+  stroke: var(--dim);
+  stroke-width: 1.5;
+}
+.ill .postcard rect {
+  fill: var(--asphalt);
+  stroke: var(--amber);
+  stroke-width: 1.5;
+}
+.ill .postcard line {
+  stroke: var(--amber);
+  stroke-width: 1.2;
+  opacity: 0.85;
+}
+.ill .postcard {
+  transform-origin: 0 0;
+}
+
+.ill .env {
+  fill: var(--asphalt);
+  stroke: var(--cyan);
+  stroke-width: 1.5;
+}
+.ill .env-flap {
+  stroke: var(--cyan);
+  stroke-width: 1.5;
+}
+.ill .m circle,
+.ill .m rect {
+  fill: var(--void);
+  stroke: var(--phosphor);
+  stroke-width: 1.5;
+}
+.ill .m path {
+  stroke: var(--phosphor);
+  stroke-width: 1.5;
+}
+
+.ill .lock-body {
+  fill: var(--asphalt);
+  stroke: var(--phosphor);
+  stroke-width: 1.5;
+}
+.ill .lock-shackle {
+  stroke: var(--phosphor);
+  stroke-width: 2;
+}
+.ill .lock-key {
+  fill: var(--phosphor);
+}
+.ill .board {
+  fill: var(--void);
+  stroke: var(--amber);
+  stroke-width: 1.5;
+}
+.ill .board line {
+  stroke: var(--dim);
+  stroke-width: 1.2;
+}
+.ill .label-priv,
+.ill .label-pub {
+  fill: var(--dim);
+  font-size: 11px;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+
+/* ---- Animations (disabled under prefers-reduced-motion) ---- */
+
+@keyframes hop-postcard {
+  0%   { transform: translate(40px, 60px); }
+  45%  { transform: translate(140px, 60px); }
+  55%  { transform: translate(140px, 60px); }
+  100% { transform: translate(240px, 60px); }
+}
+
+@keyframes node-pulse {
+  0%, 100% { filter: none; }
+  50% { filter: drop-shadow(0 0 4px var(--phosphor)); }
+}
+
+@keyframes orbit-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes lock-breathe {
+  0%, 100% { transform: translate(70px, 60px) scale(1); }
+  50%      { transform: translate(70px, 60px) scale(1.04); }
+}
+
+@keyframes board-shimmer {
+  0%, 100% { opacity: 0.75; }
+  50%      { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ill-hop .postcard {
+    animation: hop-postcard 4.5s ease-in-out infinite alternate;
+  }
+  .ill-hop .n2 {
+    animation: node-pulse 4.5s ease-in-out infinite;
+  }
+  .ill-media .orbit {
+    transform-origin: 140px 60px;
+    animation: orbit-spin 18s linear infinite;
+  }
+  /* keep icons upright while parent rotates */
+  .ill-media .m {
+    animation: orbit-spin 18s linear infinite reverse;
+  }
+  .ill-privacy .private {
+    animation: lock-breathe 3.2s ease-in-out infinite;
+  }
+  .ill-privacy .board line {
+    animation: board-shimmer 2.8s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ill-hop .postcard {
+    transform: translate(140px, 60px); /* rest mid-path, static */
+  }
+}
+
+@media print {
+  body.page-index .story-art { display: none; }
+  body.page-index .story-card {
+    box-shadow: none;
+    border: 1px solid #999;
+    break-inside: avoid;
+  }
+  body.page-index .story-card > details { border: 0; }
+  body.page-index .story-card > details[open] summary { font-weight: 700; }
+}
+
+/* ---- Page-agnostic story grid (home, apps, continuity) ---- */
+main.doc .story {
+  display: grid;
+  gap: 18px;
+  margin: 22px 0 28px;
+  padding: 0;
+  list-style: none;
+}
+
+main.doc .story-card {
+  margin: 0;
+  padding: 14px 16px 12px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  main.doc .story-card {
+    grid-template-columns: minmax(140px, 200px) 1fr;
+    align-items: center;
+  }
+  /* A card's row count varies with how many <details> it holds (Apps:
+     figcaption+cta+1 detail = 3; Continuity's "cold-start" card:
+     figcaption+4 details = 5 — the current max across every story card).
+     `span 4` clipped that card's last detail out from beside the art.
+     `grid-row: 1 / -1` looked like the fix but resolves against the
+     *explicit* grid, which this layout has none of (no grid-template-rows)
+     — it silently reshuffled sibling placement instead of spanning. An
+     oversized span (tried 12) is well-behaved for placement but forces
+     that many implicit row tracks to exist, adding visible empty
+     row-gaps below shorter cards — so this is the real row count, not a
+     safety margin; bump it if a card ever needs more rows. */
+  main.doc .story-art { grid-row: 1 / span 5; align-self: stretch; }
+}
+
+main.doc .story-art {
+  background: var(--void);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  min-height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+main.doc .story-art .ill {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  display: block;
+}
+
+main.doc .story-card figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+main.doc .story-card figcaption strong {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-shadow: 0 0 2px currentColor;
+}
+
+main.doc .story-lead {
+  color: var(--dim);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+main.doc .story-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+main.doc .story-cta a {
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+}
+
+main.doc .story-cta a.cta-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08130c;
+  font-weight: 650;
+}
+
+main.doc .story-cta a.cta-secondary {
+  color: var(--ink);
+  background: var(--void);
+}
+
+main.doc .story-card > details {
+  margin: 0;
+  background: transparent;
+  border: 1px dashed var(--edge);
+  border-radius: 2px;
+  padding: 2px 12px;
+}
+
+main.doc .story-card > details summary {
+  color: var(--accent2);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Apps illustrations */
+.ill-phone .phone-body {
+  fill: var(--asphalt);
+  stroke: var(--cyan);
+  stroke-width: 2;
+}
+.ill-phone .phone-screen {
+  fill: var(--void);
+  stroke: var(--edge);
+}
+.ill-phone .phone-dot { fill: var(--phosphor); }
+.ill-phone .phone-wave path {
+  stroke: var(--phosphor);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.ill-html .doc {
+  fill: var(--asphalt);
+  stroke: var(--amber);
+  stroke-width: 1.5;
+}
+.ill-html .doc-tag {
+  fill: var(--phosphor);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 22px;
+  font-weight: 700;
+}
+.ill-html .doc-line {
+  stroke: var(--dim);
+  stroke-width: 1.5;
+}
+.ill-html .doc-spark circle { fill: var(--pink); }
+
+.ill-daemon .term {
+  fill: var(--void);
+  stroke: var(--edge);
+  stroke-width: 2;
+}
+.ill-daemon .term-prompt { fill: var(--phosphor); font-family: var(--mono, monospace); font-size: 14px; }
+.ill-daemon .term-cmd { fill: var(--amber); font-family: var(--mono, monospace); font-size: 14px; }
+.ill-daemon .term-cursor { fill: var(--pink); }
+.ill-daemon .term-led { fill: var(--phosphor); }
+
+.ill-sheet .paper {
+  fill: var(--asphalt);
+  stroke: var(--amber);
+  stroke-width: 1.5;
+}
+.ill-sheet .paper2 { fill: var(--void); }
+.ill-sheet .qr { fill: var(--phosphor); opacity: 0.85; }
+.ill-sheet .qr-hole { fill: var(--void); }
+.ill-sheet .paper-lines {
+  stroke: var(--dim);
+  stroke-width: 1.2;
+  fill: none;
+}
+
+/* Continuity illustrations */
+.ill-seed .seed-body {
+  fill: var(--asphalt);
+  stroke: var(--phosphor);
+  stroke-width: 2;
+}
+.ill-seed .seed-seam {
+  stroke: var(--dim);
+  stroke-width: 1.2;
+  fill: none;
+}
+.ill-seed .seed-sprout path {
+  stroke: var(--phosphor);
+  stroke-width: 2;
+  fill: none;
+}
+
+.ill-seeds-row .chip rect {
+  fill: var(--void);
+  stroke: var(--cyan);
+  stroke-width: 1.5;
+}
+.ill-seeds-row .chip text {
+  fill: var(--amber);
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+}
+
+.ill-cold .cold-core {
+  fill: var(--asphalt);
+  stroke: var(--phosphor);
+  stroke-width: 2;
+}
+.ill-cold .cold-rings circle {
+  stroke: var(--dim);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+}
+.ill-cold .cold-label {
+  fill: var(--phosphor);
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+  font-weight: 700;
+}
+
+.ill-trust .shield {
+  fill: var(--asphalt);
+  stroke: var(--cyan);
+  stroke-width: 2;
+}
+.ill-trust .shield-check {
+  stroke: var(--phosphor);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes wave-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@keyframes cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes spark-twinkle {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+@keyframes sprout-grow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes ring-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ill-phone .phone-wave path {
+    animation: wave-pulse 2.4s ease-in-out infinite;
+  }
+  .ill-phone .phone-wave path:nth-child(2) {
+    animation-delay: 0.3s;
+  }
+  .ill-daemon .term-cursor {
+    animation: cursor-blink 1.06s step-end infinite;
+  }
+  .ill-html .doc-spark circle {
+    animation: spark-twinkle 2s ease-in-out infinite;
+  }
+  .ill-html .doc-spark circle:nth-child(2) { animation-delay: 0.4s; }
+  .ill-html .doc-spark circle:nth-child(3) { animation-delay: 0.8s; }
+  .ill-seed .seed-sprout {
+    transform-origin: 140px 28px;
+    animation: sprout-grow 3s ease-in-out infinite;
+  }
+  .ill-cold .cold-rings {
+    transform-origin: 140px 60px;
+    animation: ring-spin 24s linear infinite;
+  }
+  .ill-sheet .qr {
+    animation: wave-pulse 3s ease-in-out infinite;
+  }
+}
+
+@media print {
+  main.doc .story-art { display: none; }
+  main.doc .story-card {
+    box-shadow: none;
+    border: 1px solid #999;
+    break-inside: avoid;
+  }
+}
