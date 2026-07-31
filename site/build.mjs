@@ -323,6 +323,36 @@ ${bodyHtml}
 <footer class="site">
   <span>SPORE — store-and-forward planetary opportunistic relay envelope · public domain (Unlicense)</span>
 </footer>
+<script>
+(function () {
+  // One "Copy" button per code block, on every page — added here rather than in
+  // shareBar() because that script only ever runs on index.html, and every doc
+  // page with a <pre> should get this, not just the front page.
+  document.querySelectorAll('main.doc pre').forEach(function (pre) {
+    var code = pre.querySelector('code');
+    if (!code) return;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code to clipboard');
+    btn.addEventListener('click', function () {
+      var text = code.textContent;
+      var was = btn.textContent;
+      var flash = function (msg) {
+        btn.textContent = msg;
+        setTimeout(function () { btn.textContent = was; }, 1600);
+      };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function () { flash('Copied ✓'); }, function () { flash('Select + copy'); });
+      } else {
+        flash('Select + copy');
+      }
+    });
+    pre.insertBefore(btn, pre.firstChild);
+  });
+})();
+</script>
 </body>
 </html>`;
 }

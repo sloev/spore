@@ -77,7 +77,7 @@ name · **14** Freeze impact (almost always None).
 | **B7** | Accessibility + density pass | High UX | ⬜ todo | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
-| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 story cards ✅ (#63); contrast pass in review | — | C1 |
+| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 story cards ✅ (#63); contrast pass ✅ (#64); copy-code buttons in review | — | C1 |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
@@ -1407,6 +1407,27 @@ computed (WCAG relative-luminance formula) and rendered side by side before pick
 then the actual built pages (Home, Apps, Continuity, Bridges) were screenshotted in both
 themes to confirm headings stayed vivid while body copy visibly calmed down, and that light
 mode was untouched.
+
+## Third increment — copy-to-clipboard on every code block
+
+**Shipped (`feat/site-copy-code-buttons`).** First of step 3's "more UI elements" list. A
+small "Copy" button now sits top-right on every `<pre>` across every doc page (not just
+Home/Apps/Continuity), injected by a page-wide script in `build.mjs`'s shared `page()`
+template — unlike the existing share bar, which is `index.html`-only and stayed that way,
+this needed every page with a code block. Styled with existing tokens only (`--void` face,
+`--dim` label, `--edge` border, `--ink` hover, `--accent2` focus ring); click copies via
+`navigator.clipboard.writeText`, flashes "Copied ✓" for 1.6s, and falls back to a
+"Select + copy" message rather than throwing if the Clipboard API is unavailable. Hidden
+under `@media print`, same as the share bar. Documented in `docs/VISUALDESIGN.md` §3 before
+shipping, per convention.
+
+Verified functionally, not just visually: a genuine Playwright clipboard test (granted
+`clipboard-read`/`clipboard-write` permissions) confirmed `navigator.clipboard.readText()`
+matches the code block's text for both an always-visible button and one nested inside a
+collapsed `<details>` (opened first, as a real user would), and that the label flashes and
+reverts on schedule. Both themes screenshotted, including the hover state. Remaining step-3
+items (docs-index card grid, sticky table of contents, status/🧪 badges) are open for a
+follow-up increment.
 
 ---
 

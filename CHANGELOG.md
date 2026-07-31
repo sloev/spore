@@ -18,6 +18,13 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Site: copy-to-clipboard on every code block.** A small "Copy" button now sits
+  top-right on every `<pre>` across every doc page (not just the front page — the share
+  bar stays `index.html`-only, but code blocks appear everywhere). Uses existing tokens
+  only, flashes "Copied ✓" on success, falls back to "Select + copy" rather than throwing
+  if the Clipboard API is unavailable. Verified with a real Playwright clipboard test, not
+  just visually. Documented in `docs/VISUALDESIGN.md` §3. Wire unchanged.
+
 - **Site: a calmer tone for long-form body copy (dark mode).** `--amber` on `--void`
   clears 10.80:1 — nowhere near a contrast failure — but a fully saturated colour glowing
   on near-black is tiring across paragraphs in a way the ratio alone doesn't capture. New
