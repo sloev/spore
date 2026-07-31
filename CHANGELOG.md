@@ -43,13 +43,14 @@ Two conventions specific to this project:
   loop lifecycle gating) are captured there, and its device checks stay in
   `android/TESTING.md`. The Verified fixes it described are already shipped and in this
   CHANGELOG. Deleted, not just unlinked — no second status surface. Wire unchanged.
-- **Docs: one living plan, `docs/ROADMAP.md`.** The multi-PR plan that was hiding in a
-  misleadingly named `SPORE_DEEP_AUDIT.md` is now `ROADMAP.md` — the single
-  forward-looking surface (PR map + status, principles, still-open work, and the
-  docs/UX/palette tracks). "What shipped" stays in just two places, the CHANGELOG and
-  the ROADMAP status column, so no third progress table can drift. `SPORE_DEEP_AUDIT.md`
-  is a redirect stub; the full historical PR0–PR9 bodies remain in git history. Wire
-  unchanged.
+- **Docs: `ROADMAP.md` carries the full plan; `SPORE_DEEP_AUDIT.md` deleted.** The
+  multi-PR plan that was hiding in a misleadingly named `SPORE_DEEP_AUDIT.md` is now
+  `ROADMAP.md` — the single forward-looking surface: the PR map with status, the **full
+  detailed PR0–PR9 bodies** (files, code sketches, tests, acceptance — kept, not
+  summarised away), the hard rules and PR template, and the docs / Android-UX / palette /
+  **site** / web tracks. An earlier pass over-culled this into a summary behind a redirect
+  stub; the detail is restored and the stub is gone (no redirect docs). "What shipped"
+  stays in just two places — the CHANGELOG and the ROADMAP status column. Wire unchanged.
 
 - **iroh QUIC bridge (`bridge-iroh`, experimental 🧪).** A new optional bridge that
   carries SPORE envelopes over [iroh](https://github.com/n0-computer/iroh) QUIC —
