@@ -207,6 +207,14 @@ empty. Never a smooth bar; this machine counts. Long operations may show the 8-b
 cyber-kitty chewing files into blocks — decorative, `aria-hidden`, with the real
 percentage in text beside it.
 
+**Code-copy button.** Every `<pre>` in the docs gets a small top-right "Copy"
+button, injected by a page-wide script (not just on the front page, unlike the
+share bar). `--void` face, `--dim` label, `--edge` border; hover brightens to
+`--ink`/`--ink`, focus draws a `--accent2` ring. On click the label flashes
+"Copied ✓" for 1.6s, or "Select + copy" if the Clipboard API is unavailable —
+no dialogs, no external requests. Hidden under `@media print`, same as the
+share bar.
+
 ## 4. Ambient VFX
 
 - **Scanlines:** `repeating-linear-gradient` 2px period, ≤6% black, fixed overlay,
