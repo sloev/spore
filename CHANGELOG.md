@@ -18,6 +18,12 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: chat navigation (B1).** System **Back** now follows the screen hierarchy
+  instead of leaving the app from a nested screen — a thread falls to the chats list, a
+  draft post to the feed, everything else to Chats, and only Chats itself backgrounds the
+  app (mirroring the existing `←` arrow). The chat now **pins to its newest message** on
+  open and whenever one arrives, and the **composer lifts above the soft keyboard**
+  (`imePadding`). 🧪 Compiles in the `apk` CI; on-device QA is PR6. Wire unchanged.
 - **Site: the Roadmap and Changelog are in the top navbar.** Both pages were already
   rendered and linkable but kept off the nav; they're now first-class nav items
   (Home · Spec · Apps · Design · Bridges · Rebuild · Continuity · **Roadmap · Changelog**),

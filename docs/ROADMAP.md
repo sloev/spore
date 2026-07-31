@@ -34,7 +34,7 @@ work, and the new tracks.
 | **Docs-1** | Introduce this file; migrate plan; stub deep-audit | Process | 🟢 **in progress** |
 | **Docs-2** | Retire `ANDROID_AUDIT.md`; fix Progress drift | Process | 🟢 in progress |
 | **Docs-3** | Absorb `android/PLAN.md` + `UX-ISSUES.md` | Process | 🟢 in progress |
-| **B1** | Chat nav: Back + scroll-to-latest + IME insets | Critical UX | todo |
+| **B1** | Chat nav: Back + scroll-to-latest + IME insets | Critical UX | 🟢 in review (🧪) |
 | **B2** | Send/error feedback (no silent no-op) | Critical UX | todo |
 | **B3** | Empty states + PUBLIC/broadcast confirm | High UX | todo |
 | **B4** | Notifications + transfers overflow | High UX | todo |
