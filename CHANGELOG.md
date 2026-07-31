@@ -18,6 +18,13 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Docs: `android/PLAN.md` and `UX-ISSUES.md` absorbed; docs cull complete.** The
+  M0–M5 milestones move to a "shipped milestones" paragraph in `android/README.md`, and
+  the chat-attachment convention (the `📎 name | spore:<magnet> | mime` marker and its
+  parser regex, verbatim) becomes Appendix A of `docs/VISUALDESIGN.md`. Both files are
+  deleted; references repointed. The `docs/` footprint is now its canonical set (SPEC,
+  DESIGN, BRIDGES, SECURITY_FINDINGS, VISUALDESIGN, APPS, CONTINUITY, HARDWARE, DIRECT,
+  ROADMAP). Wire unchanged.
 - **Docs: `ANDROID_AUDIT.md` retired into ROADMAP + TESTING.md.** The Android production
   audit's status table had drifted (it still listed shipped work as open); its status now
   lives only in the ROADMAP, its still-open engineering items (received-file
@@ -161,7 +168,7 @@ Two conventions specific to this project:
   a file no longer publishes it immediately — it stages in the composer with a
   remove (✕) affordance, and Send produces a single bubble carrying the text and the
   attachment, identical for sender and receiver (a canonical
-  `📎 name | spore:<magnet> | mime` marker, documented in `android/UX-ISSUES.md`).
+  `📎 name | spore:<magnet> | mime` marker, documented in `docs/VISUALDESIGN.md` Appendix A).
   Images preview inline (decoded off the main thread, sampled to 1080 px); any file
   opens through a `FileProvider` `content://` chooser that vends only a reclaimable
   cache copy, never the private store. The sealed-to-a-known-peer publish path

@@ -1,6 +1,7 @@
 # SPORE Communicator (Android)
 
-A native SPORE node in your pocket. See [`PLAN.md`](PLAN.md) for the full design.
+A native SPORE node in your pocket. See [`docs/DESIGN.md`](../docs/DESIGN.md) for the
+architecture and [`docs/ROADMAP.md`](../docs/ROADMAP.md) for what's next.
 
 **Downloads and what the app does:** [`docs/APPS.md`](../docs/APPS.md). This file
 is about building it.
@@ -12,11 +13,21 @@ is about building it.
 > BLE, mic, live peers) are honest templates — verify them with
 > [`docs/HARDWARE.md`](../docs/HARDWARE.md).
 
+**Shipped milestones.** **M0** skeleton — Compose app + `android/jni` via cargo-ndk,
+node in a foreground service, identity persisted, UDP broadcast, CI debug APK. **M1**
+messaging — DM-by-petname + address book + bridges screen + TCP + the Kotlin-driven
+bridge poll API. **M2** radios — audio modem, BT-Meshtastic, BT-Reticulum (RNode),
+Wi-Fi Direct, `MulticastLock`. **M3** web bridges — headless WebView carrying
+WebSocket / Nostr / WebTorrent (WebRTC data channels under WebTorrent). **M4** feed +
+files — topic microblog + composer, file send/receive with two-way fragment status
+(`Node::frag_progress`). **M5** polish + release — theme + mascot, an Advanced
+(identity/seed) screen, date-versioned APK signing. Everything since is tracked in the
+[ROADMAP](../docs/ROADMAP.md); device verification is [`TESTING.md`](TESTING.md).
+
 ## Layout
 
 ```
 android/
-  PLAN.md      # design + milestones
   jni/         # Rust crate: `spore` + `jni` → libspore_jni.so (built by cargo-ndk)
   app/         # Kotlin + Jetpack Compose app (foreground service, UI)
 ```

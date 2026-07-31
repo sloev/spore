@@ -33,7 +33,7 @@ work, and the new tracks.
 | PR9 | iroh QUIC bridge (`bridge-iroh`); MSRV → 1.85 | Feature | ✅ merged (#53) |
 | **Docs-1** | Introduce this file; migrate plan; stub deep-audit | Process | 🟢 **in progress** |
 | **Docs-2** | Retire `ANDROID_AUDIT.md`; fix Progress drift | Process | 🟢 in progress |
-| **Docs-3** | Absorb `android/PLAN.md` + `UX-ISSUES.md` | Process | todo |
+| **Docs-3** | Absorb `android/PLAN.md` + `UX-ISSUES.md` | Process | 🟢 in progress |
 | **B1** | Chat nav: Back + scroll-to-latest + IME insets | Critical UX | todo |
 | **B2** | Send/error feedback (no silent no-op) | Critical UX | todo |
 | **B3** | Empty states + PUBLIC/broadcast confirm | High UX | todo |
@@ -85,10 +85,9 @@ Cull overlapping status/plan docs down to canonical roles. Target `docs/` footpr
 `SPEC`, `DESIGN`, `BRIDGES`, `SECURITY_FINDINGS`, `VISUALDESIGN`, `APPS`, `CONTINUITY`,
 `HARDWARE`, `DIRECT`, **`ROADMAP`**. Retired: `SPORE_DEEP_AUDIT.md` (Docs-1) and
 `ANDROID_AUDIT.md` (Docs-2 — its still-open items are in the Android sections above, its
-device checks in `TESTING.md`). Still to do: absorb `android/PLAN.md` (→ README "shipped
-milestones") and `android/UX-ISSUES.md` (→ `VISUALDESIGN.md` appendix) in Docs-3 —
-**preserving the attachment-marker regex verbatim**:
-`(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$`.
+device checks in `TESTING.md`). Docs-3 absorbed `android/PLAN.md` (→ README "shipped
+milestones") and `android/UX-ISSUES.md` (→ `VISUALDESIGN.md` Appendix A), **preserving the
+attachment-marker regex verbatim**: `(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$`.
 
 ## Track: Android UX (all 🧪 until PR6 runs on a device)
 
