@@ -36,6 +36,20 @@ Two conventions specific to this project:
   cheap now, since until the daemon wiring below nothing could start a pipe at all.
   The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
 
+- **A node can declare extra locators it is reachable at — typically its address
+  on an IP-layer overlay.** Yggdrasil, cjdns, a VPN: each hands a node an address
+  that already routes, so a pipe over one needs no hole punch and no relay. None
+  was ever offered as a Direct candidate. `direct-also:` declares them and they
+  are offered as ordinary `udp` candidates, ranked between the global-IPv6 locator
+  and the reflexive one — already routing, but usually several hops of someone
+  else's network, so not ahead of a direct v6 path. Declared rather than
+  discovered on purpose: a routing probe follows the default route and so never
+  picks an overlay's source address, and cjdns addresses sit in `fc00::/8`, which
+  a public-internet check rightly rejects — auto-discovery would be guessing.
+  **Tor and I2P are deliberately not covered:** a `.onion` or `.b32` is a stream
+  rendezvous name with no UDP beneath it, so Direct over them needs its own medium
+  and adapter rather than a locator.
+
 - **Direct now offers a global IPv6 address when the host has one — the WAN path
   that needs no traversal at all.** Candidates were IPv4-only, so a node with a
   global v6 from its ISP — which is most of them — advertised only a LAN address

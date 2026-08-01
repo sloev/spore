@@ -66,7 +66,7 @@ pub(crate) fn run_config(cfg: Config) {
             let (tx, rx) = std::sync::mpsc::channel();
             hub.set_delivery_sink(tx);
             println!("  [direct] reachable at {advertise} (UDP)");
-            let mut d = super::direct::Direct::new(hub.addr(), advertise, bind_port);
+            let mut d = super::direct::Direct::new(hub.addr(), advertise, bind_port, cfg.direct_also.clone());
             // Ask where we appear from outside, if an echo was named. Best
             // effort and non-fatal: a node that cannot reach one simply offers
             // its LAN locator, which is exactly what it did before.
