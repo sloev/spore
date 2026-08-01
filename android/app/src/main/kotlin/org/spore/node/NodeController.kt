@@ -692,9 +692,17 @@ object NodeController {
 
     // -- feed (microblogging on topics) ----------------------------------------
 
-    fun follow(topic: String, persist: Boolean = true) {
+    /**
+     * Subscribe to a topic. [FollowResult] lets the caller tell the user what
+     * happened (B8) instead of a follow tap silently doing nothing.
+     */
+    enum class FollowResult { SUBSCRIBED, ALREADY_FOLLOWING, NOT_STARTED, EMPTY }
+
+    fun follow(topic: String, persist: Boolean = true): FollowResult {
         val t = topic.trim()
-        if (t.isEmpty() || ptr == 0L || topics.value.contains(t)) return
+        if (t.isEmpty()) return FollowResult.EMPTY
+        if (ptr == 0L) return FollowResult.NOT_STARTED
+        if (topics.value.contains(t)) return FollowResult.ALREADY_FOLLOWING
         SporeNative.nativeSubscribe(ptr, t)
         SporeNative.nativeTopicAddr(t)?.let { topicAddrToName[it.toHex()] = t }
         topics.value = topics.value + t
@@ -702,6 +710,7 @@ object NodeController {
             val prefs = secretPrefs(appCtx)
             prefs.edit().putStringSet("topics", topics.value.toSet()).apply()
         }
+        return FollowResult.SUBSCRIBED
     }
 
     /** Returns false if nothing was posted — node not up, empty text, or unknown

@@ -18,6 +18,16 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: Feed polish (B8).** Following a topic now says so — "Following
+  #x", "Already following #x", or "Node not started yet" — instead of the
+  Follow button silently doing nothing or nothing visible happening on a
+  duplicate tap. A corrupted or truncated attached image now shows "couldn't
+  load this image" instead of "decoding image…" forever, which previously
+  looked identical to an image that just hadn't finished loading. A post's
+  `[text](url)` links stay inert on tap (a link in a signed-but-public post is
+  attacker-controlled text — no drive-by opens), but a long-press now copies
+  the URL to the clipboard so a real link is still usable.
+
 - **The offline window is now a configurable knob, end to end (PR0 Part B).**
   Prekey lifetime and the §7 ratchet's skip-key TTL were separate hard-coded
   7-day constants; they're now one field, `Node.prekey_lifetime_secs`, read by
