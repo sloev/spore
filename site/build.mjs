@@ -46,6 +46,7 @@ const pages = [
   ['reference/README.md', 'reference.html', null],
   ['web/README.md', 'webguide.html', null],
   ['CONTRIBUTING.md', 'contributing.html', null],
+  ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
 ];
 
 // Map a source .md path (as written in links) to its output page.
@@ -84,6 +85,7 @@ const titles = new Map([
   ['reference.html', 'SPORE — reference decoders'],
   ['webguide.html', 'SPORE — the browser node'],
   ['contributing.html', 'SPORE — contributing'],
+  ['dev-guide.html', 'SPORE — developer guide'],
 ]);
 
 const descriptions = new Map([

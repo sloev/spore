@@ -12,6 +12,9 @@ Wire format and C ABI stay frozen; no `allow-frozen-change` is required for this
 Derived from a static audit of the 0.6.0 tree; update as PRs land and hardware results
 arrive.
 
+New here and want the repo map — what lives where, how to build and test each
+part — rather than the plan? See [`DEV_GUIDE.md`](DEV_GUIDE.md).
+
 ---
 
 ## Hard rules (do not violate)
@@ -78,6 +81,9 @@ name · **14** Freeze impact (almost always None).
 | **B8** | Feed polish | Medium | ✅ merged (#72) 🧪 | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ✅ merged (#73) | — | B7 |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
+| **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking — **top of priority compass** | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
+| **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
+| **P-Group-Roster** | Signal-style membership (signed roster, add/remove epochs, sender binding) | Feature / protocol — **not v1, do not fake in UI** | ⬜ future — sealed-topic + honest UX is the shippable answer today | — | — |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
@@ -1741,8 +1747,86 @@ feat/bridge-iroh
 
 ---
 
+## Product decisions (2026-08-01 audit tour) — locked, not proposals
+
+Explicit human direction, recorded here per this doc's own rule that status
+lives in exactly one place. Full source reasoning: the audit-tour handoff and
+its addendum (not committed to the repo — these are the durable conclusions).
+
+### Non-goals (locked)
+
+| Item | Decision |
+|---|---|
+| **iOS** | Not a target, ever, for this project's roadmap. Android, desktop, browser, and ESP/daemon only. State this on `docs/APPS.md` / the Uses material so the expectation dies early rather than getting asked repeatedly. |
+| **Instant delivery with no path** | Impossible under a store-and-forward substrate by definition. The UI must say "no path yet" / fail closed for anything live-media-shaped, never spin as if it's an online chat app. An async fallback (e.g. a voice-note file) is fine; a live call promise is not. |
+| **Group membership consensus protocol** | Already out of scope above — restated here because it's the crux of §"Family / group" below: a *shared-key sealed topic* is real and shippable now; a Signal-style roster (signed member list, add/remove epochs, sender binding, split-brain-proof transcripts) is a deliberate future protocol project, not a UI feature to fake. |
+
+### Anonymity — an explicit, non-default toggle
+
+Not implicit, not silent, not claimed to be Tor:
+
+| Mode | Behaviour |
+|---|---|
+| Normal (default) | Seal/ratchet content as today; Direct allowed; underlay metadata as today |
+| Mix-preferred | Prefer `mix` onions when mixes are known; warn if none are; discourage Direct for that send (a Direct locator leaks to the peer by design) |
+| Mix-only | Refuse to send unless an onion path is available |
+
+The primitives exist (`src/mix.rs`: onion wrap/peel, size-class padding,
+`Batch` min-size + delay) and are already opt-in per-send, not a blanket
+"anonymous mode." Defeating a *global passive adversary* the way Tor aims to
+needs cover traffic and multiple operational mixes — SPORE's mix layer makes
+who-talked-to-whom harder for *some* observers, and every surface that
+mentions it must say that plainly, never "like Tor" or "anonymous." Tracked as
+**P-Mix-Runner** (an example mix operator, so the anonymity path is actually
+operable by someone besides the person who wrote it) + the app-level toggle
+above. Clearnet exit (a peer relaying your traffic to the open internet,
+tracked separately) is not part of this and stays off by default — it is a
+convenience feature, not an anonymity one, and must never be described as such.
+
+### Direct NAT traversal — staged plan
+
+`docs/DIRECT.md` and the carried-forward notes elsewhere already say Direct
+has no ICE/STUN/TURN/punch state machine yet — connecting assumes a usable
+locator exists after ANSWER. This is the staged plan to close that, signaling
+still entirely inside SPORE envelopes (SPDR offer/answer on the mesh), media
+still on whatever underlay was negotiated:
+
+1. Candidates in SPDR — already shipped.
+2. Reflexive locators via STUN (or equivalent) — new.
+3. Coordinated UDP hole-punch after ANSWER: simultaneous probes on the
+   negotiated underlay, timed from the signaling exchange, not guessed.
+4. Optional UPnP/NAT-PMP/PCP on desktop/daemon, where a device actually offers it.
+5. An explicit relay candidate (a friend/home node, or iroh used purely as a
+   relay medium) — offered as a real, visible candidate, never a silent
+   fallback the user didn't choose.
+6. Preference order when several candidates work: LAN → reflexive punch →
+   relay → fail honestly (say there's no path, per the non-goals above).
+
+**Hard limit to document, not paper over:** CGNAT-to-CGNAT with no relay
+candidate available still fails sometimes. A relay is the permanent escape
+hatch here, not a cleverer punch algorithm — don't claim arbitrary NAT
+traversal once this ships; claim what steps 1–6 actually cover.
+
+Engineering pattern: one shared helper (something like `spore_direct_nat`)
+used identically by the daemon, desktop, and Android — façades only ever call
+the Direct API, never reimplement punch logic per platform. Tracked as
+**P-Direct-NAT**.
+
+### Priority compass
+
+In order, per explicit human direction — later roadmap grooming should read
+top-to-bottom here before picking up new discretionary work:
+
+1. **P-Direct-NAT** — ends the single most repeated pain (Direct usually not
+   actually connecting on a real WAN).
+2. **Family** — sealed-topic + honest UX is buildable now; full roster only if
+   the product genuinely demands it (see non-goals above).
+3. **Anonymity toggle** — mix-preferred + a runnable **P-Mix-Runner** example;
+   do not block this on being Tor-complete, which is explicitly not the goal.
+4. **iOS** — non-goal, documented, not revisited absent new direction.
 
 ---
+
 
 ## Plan health check (review)
 
