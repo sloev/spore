@@ -1,10 +1,13 @@
 # Apps & daemons — get a node
 
-Four ways to run SPORE. **Same node** everywhere: one Rust core, one wire format,
-one router. Pick by what the machine in front of you has.
+Four ways to run the same node. Pick by what the machine in front of you has.
 
-No app store, no account, no server. Two copies on the same Wi-Fi find each other
-in seconds; with a radio or a speaker they don't even need that.
+| | Runs on | Distinguishing property |
+|---|---|---|
+| **Communicator** | Android | Full node in a background service, not a thin client |
+| **Web node** | Any browser | One HTML file, zero network requests until you add a bridge |
+| **Daemon** | Linux, macOS, Windows | Many bridges in one process |
+| **Seed Sheet** | Paper | Rebuilds the guide from any ~K of N fountain QR codes |
 
 <div class="story story-apps" role="list">
 
@@ -39,9 +42,9 @@ sha256sum -c spore-android.apk.sha256</code></pre>
     builds. <strong>Stable:</strong>
     <a href="https://github.com/sloev/spore/releases/latest/download/spore-android.apk">/releases/latest/download/spore-android.apk</a>
     — only as good as the last tagged build that actually has assets.</p>
-    <p>Messages, petnames, feed, files over UDP, Wi-Fi Direct, audio modem, BLE radios,
-    and WebView bridges. Radios remain honest templates until
-    <a href="hardware.html">HARDWARE</a> runs. Build notes in the Android README.</p>
+    <p>Messages, petnames, feed and files over UDP, Wi-Fi Direct, the audio modem,
+    BLE and WebView bridges. Radios stay 🧪 until <a href="hardware.html">HARDWARE</a>
+    records a device run.</p>
   </details>
 </figure>
 
@@ -71,11 +74,10 @@ sha256sum -c spore-android.apk.sha256</code></pre>
     seed makes the next. Identity and bridges live in <code>localStorage</code>.</p>
     <p>Add WebSocket, WebRTC, Nostr, WebTorrent, Serial, Bluetooth, or the audio modem
     from the page. Web Serial / Web Bluetooth need desktop Chromium-family browsers.</p>
-    <p>The page above is served by GitHub Pages; every
-    <a href="https://github.com/sloev/spore/releases/tag/rolling">release</a> also carries the
-    exact same file as a permanent asset
-    (<a href="https://github.com/sloev/spore/releases/latest/download/spore-standalone.html">latest</a>) —
-    a copy that doesn't depend on this site staying up.</p>
+    <p>Every <a href="https://github.com/sloev/spore/releases/tag/rolling">release</a> carries
+    the same file as a permanent asset
+    (<a href="https://github.com/sloev/spore/releases/latest/download/spore-standalone.html">latest</a>),
+    so a copy need not depend on this site.</p>
   </details>
 </figure>
 
@@ -98,8 +100,7 @@ sha256sum -c spore-android.apk.sha256</code></pre>
     <pre><code>cargo build --release        # → target/release/spore
 cargo run                    # in-memory mesh demo
 cargo run -- node.yaml       # bridges from a config file</code></pre>
-    <p>Config examples in the GitHub README; what each link speaks is in
-    <a href="bridges.html">Bridges</a>. Targets Linux, macOS, Windows; core also wasm and esp-idf.</p>
+    <p>Per-bridge reference: <a href="bridges.html">Bridges</a>.</p>
     <p><strong>No network to reach crates.io?</strong> Every
     <a href="https://github.com/sloev/spore/releases/latest/download/spore-offline-bundle.tar.gz">release</a>
     also carries this whole source tree with every dependency already vendored in
