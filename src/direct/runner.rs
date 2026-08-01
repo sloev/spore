@@ -271,6 +271,12 @@ impl UdpRunner {
         self.extra = extra;
     }
 
+    /// The iroh endpoint id being offered as a candidate, if any.
+    #[cfg(feature = "bridge-iroh")]
+    pub fn iroh_id(&self) -> Option<String> {
+        self.iroh.as_ref().map(|(_, ep)| ep.id().to_string())
+    }
+
     /// The extra locators currently being offered.
     pub fn extra(&self) -> &[String] {
         &self.extra

@@ -45,8 +45,14 @@ pub const MAGIC: &[u8; 4] = b"SPDR";
 /// the KDF binds the name.
 ///
 /// Both were bumped rather than finessed, since a peer on the older version
-/// mis-parses rather than politely failing. Cheap while no release has shipped a
-/// usable Direct; that stops being true at the next one.
+/// mis-parses rather than politely failing.
+///
+/// Bumping this stays acceptable: the project is explicitly unstable before
+/// 1.0, so an SPDR encoding change needs no migration story yet. Note what that
+/// does **not** relax — the v1 *envelope* wire is frozen independently of any
+/// version number (`reference/vectors.json`, `tests/api_freeze.rs`), and SPDR is
+/// opaque payload riding on it. Changing SPDR never touches that promise; the
+/// freedom here is not freedom there.
 pub const VERSION: u8 = 3;
 
 /// A transport-capable medium, named by **convention rather than by code**.

@@ -18,6 +18,22 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The daemon can switch Direct-over-iroh on, and the relay posture is an
+  explicit choice.** 0.7.0 shipped `IrohPort` with nothing turning it on;
+  `direct-iroh:` now stands up an endpoint and offers the medium. Its value —
+  `direct-only` or `n0` — is the relay trust posture and is **never defaulted**:
+  an unrecognised value is a config error rather than a fallback, because
+  inheriting a third party is the kind of silent choice the honesty contract
+  exists to prevent. `direct-only` runs with no relay and no discovery. `n0` opts
+  into n0's public relay, and the daemon prints — at the moment it takes effect —
+  that this is a third party which sees ciphertext, volume and timing when a path
+  is relayed. iroh supports self-hosted relays, so needing a relay never has to
+  mean needing n0's. A build without the `bridge-iroh` feature says the key was
+  ignored rather than accepting it and silently doing nothing. The offering line
+  now lists the iroh candidate too: it did not, while `candidates()` already
+  included it — a mismatch between what the operator is told and what is offered,
+  which is exactly what that line exists to prevent.
+
 ## 0.7.0 — 2026-08-01
 
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
@@ -37,9 +53,10 @@ Two conventions specific to this project:
   offer of only unknown mediums answers `no_medium` — a reason rather than silence.
   The name is bound into the KDF, so a record still cannot be replayed onto a
   different medium. The SPDR profile is `VERSION = 2` for the encoding change,
-  bumped rather than finessed because a v1 peer would mis-parse every candidate —
-  cheap now, since until the daemon wiring below nothing could start a pipe at all.
-  The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
+  bumped rather than finessed because a v1 peer would mis-parse every candidate,
+  which is acceptable while the project is explicitly unstable before 1.0. The
+  frozen v1 envelope wire is untouched either way — SPDR is opaque payload riding
+  on it, and pre-1.0 freedom over the profile was never freedom over that.
 
 - **Direct can run over an iroh QUIC connection — the last rung of the NAT
   ladder.** `IrohPort` wraps an established iroh connection as a `DatagramPort`,
