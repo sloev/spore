@@ -20,6 +20,6 @@ jobs:
   decoders:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: C + shell decoders reproduce the vectors and verify signatures
         run: bash reference/test_decoders.sh
