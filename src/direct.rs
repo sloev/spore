@@ -557,6 +557,11 @@ pub use tcp::TcpPort;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stun;
 
+// P-Direct-NAT step 5: Direct over an iroh QUIC connection — the last rung,
+// compiled in only where the iroh bridge is.
+#[cfg(all(feature = "bridge-iroh", not(target_arch = "wasm32")))]
+pub mod iroh;
+
 // P-Direct-NAT step 3: the coordinated punch that makes a reflexive locator
 // reachable rather than merely known.
 #[cfg(not(target_arch = "wasm32"))]
