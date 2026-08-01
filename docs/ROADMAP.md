@@ -1713,7 +1713,8 @@ feat/bridge-iroh
 
 - [x] PR0 merged — FS claim matches code **and** offline window disclosed + configurable
 - [ ] PR1 merged — attachments usable end-to-end
-- [ ] PR2 merged — bridges stoppable/removable
+- [x] PR2 merged — bridges stoppable/removable (real for every kind as of #75:
+      Audio, BLE, Wi-Fi Direct, Web, and now the core-owned UDP/TCP bridges too)
 - [ ] >=1 device-matrix pass (backup exclusion + migration)
 - [ ] One radio path checked in HARDWARE.md **or** marketing demoted
 
@@ -1825,8 +1826,66 @@ top-to-bottom here before picking up new discretionary work:
    do not block this on being Tor-complete, which is explicitly not the goal.
 4. **iOS** — non-goal, documented, not revisited absent new direction.
 
----
+### North star — what these tracks add up to
 
+One line: **personal offline infrastructure.** Devices you control carry
+signed messages, files, and — when a path exists — live media, through apps
+people already use, with honest limits: no iOS, no pretend anonymity, no
+pretend "online."
+
+What that means once PR6, P-Direct-NAT, P-Mix-Runner, and the family/roster
+line above are actually done, not just planned:
+
+- **A credible multi-path network.** Phones (Android), browsers, desktops,
+  daemons, and small ESP/home nodes speak the same postcards over Wi-Fi, USB,
+  radio, relays — backed by PR6's device evidence, not only CI passing.
+- **Two planes, taught clearly, not blurred.** Mesh is store-and-forward:
+  works hours or days later, sneakernet-native. Direct is the multi-transport
+  low-latency pipe: signaling rides in ordinary envelopes, and P-Direct-NAT is
+  what stops a WAN call or stream from being a permanent special case.
+- **Familiar doors, not a walled garden.** One node on a device or home
+  server, reached through a browser, `spore://`, a mail client pointed at
+  `@spore.local`, the OS share sheet, plain folders and magnets, and
+  optionally a SIP softphone or XMPP client — not a requirement to live inside
+  one custom chat UI.
+- **Family that matches what the protocol actually offers.** A household
+  board and a shared sealed channel, now, with honest copy: holding the key
+  means being able to write, not "verified membership." Not a fake Signal
+  group until P-Group-Roster (or an app-level equivalent) does the real
+  membership/roster work.
+- **Anonymity as an opt-in, not a default story.** Confidentiality is the
+  default and it's strong. The mix-preferred/mix-only toggle is there when
+  wanted — never presented as "anonymous internet," never confused with Tor
+  or with the separate, off-by-default clearnet exit.
+- **Live vs. async, told honestly.** No path means no instant delivery — the
+  UI says so and offers an async fallback (a voice note, not a spinner
+  pretending to dial). Users learn the real model instead of a chat illusion
+  that occasionally breaks.
+- **A findable project.** SPORE stays the protocol name; a public
+  subtitle/name (still open — see `docs/ROADMAP.md`'s open product choices)
+  keeps search results from being only the EA game, and the Uses material
+  explains the patterns above in plain language.
+- **What this deliberately does not carry:** iOS, instant messaging with zero
+  connectivity, Tor-level anonymity as the default story, or magic groups with
+  no membership cryptography behind them. Each of these is a *choice*,
+  recorded above, not a gap nobody noticed.
+
+A normal day, once this is real: someone installs the Android app or opens the
+standalone HTML, pairs with a QR, and leaves a home node or ESP device up.
+Notes and photos move sealed or as magnets; a mail client works against
+`@spore.local`; a call rides Direct when NAT and an available relay allow it;
+when the mesh is genuinely slow, the UI says so instead of spinning. No
+account, no vendor inbox, no iOS-roadmap guilt.
+
+| Today | With these tracks done |
+|---|---|
+| Strong core, thin proof | A believable daily-driver path |
+| Chat-shaped entry point | A platform with many familiar clients |
+| Direct mostly LAN-shaped | WAN-capable Direct (punch + explicit relay) |
+| Anonymity easy to over-claim | An explicit toggle with an honest ceiling |
+| Group-feature pressure | A clear now (sealed topic) vs. later (roster) line |
+
+---
 
 ## Plan health check (review)
 
