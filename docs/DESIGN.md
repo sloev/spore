@@ -8,37 +8,32 @@
 <a href="spore-design.png">full size</a>. The sections below are the living text;
 the poster can lag.</em></p>
 
-SPORE's envelope is a dumb pipe: you hand it bytes and it moves them, and the
-16-byte header on the wire never changes no matter what carries it. This document
-is about everything you'd actually *build* on that pipe — file sharing, web-style
-services, live feeds, interactive sessions — and how to do it so that people who
-already know the web don't have to learn anything new. The golden rule: none of it
-touches relays. Every feature here is just a convention about what goes *inside* a
-payload, plus a little bookkeeping at the two endpoints.
+**The one rule this document is built on: nothing here touches relays.** Every
+feature below is a payload convention plus endpoint state — never a change to what
+a relay must understand.
 
-<details>
-<summary>Deep dive: why "endpoint-only" matters</summary>
+That is what keeps a 200-byte LoRa packet, a QR code, or a human reading armor
+aloud a first-class peer: a relay parses the fixed header, dedups, stores and
+forwards, and nothing else. A feature requiring relay support would have to be
+rolled out to every medium in lockstep.
 
-The spec freezes the envelope layout and states that "endpoint extras never change
-relays." That's what lets a 200-byte LoRa packet, a QR code, or a human reading
-armor aloud stay a first-class peer: a relay only ever parses the fixed header,
-dedups, stores, and forwards. If a feature required relays to understand it, every
-one of those media would have to be upgraded in lockstep — the opposite of the
-design. So the entire application layer is built from two ingredients only:
+So the application layer has exactly two ingredients:
 
-1. **payload conventions** — bytes the destination knows how to interpret, and
-2. **endpoint state** — tables and buffers kept by the sender and receiver.
+1. **payload conventions** — bytes the destination knows how to interpret;
+2. **endpoint state** — tables and buffers kept by sender and receiver.
 
-The guiding mantra for the whole layer: **URLs and `fetch()`, over sneakernet.**
-</details>
+The wire format itself is [`SPEC.md`](SPEC.md); it is frozen, and nothing here
+changes it.
+
+**Parts of this document.** §§ "four patterns" through "congestion control" are
+the application layers. "The spore and the soil" onward is a different concern —
+where the core runs, and what a host owes it.
 
 ## Every service is one of four patterns
 
-Almost every service you'd want maps onto one of four familiar **patterns**, and
-each one corresponds to a mechanism SPORE already has or can express as a payload
-convention. If you've built web apps, you already know all four. (These are
-application *patterns* — distinct from the five medium *shapes* a bridge binds to,
-below.)
+Every service maps onto one of four patterns, each already a mechanism or a
+payload convention. Distinct from the five medium *shapes* a bridge binds to,
+below.
 
 <details>
 <summary>Deep dive: the four service patterns and their web analogues</summary>
@@ -60,10 +55,8 @@ without the network knowing.
 
 ## How endpoints tell payloads apart: the app tag
 
-Because the header is frozen, there's no "port" or "content-type" field on the
-wire. Instead the destination looks at the very first byte of the payload — the
-**app tag** — to know what it's holding. Relays never look at it; only the endpoint
-that the message is addressed to.
+The frozen header has no port or content-type field. The first payload byte is
+the **app tag**, read only by the destination.
 
 <details>
 <summary>Deep dive: the tag registry</summary>
@@ -89,11 +82,9 @@ fragmentation compose cleanly.
 
 ## Layer 1 — objects: send anything, any size  ✅ implemented
 
-You call `send(dest, data)` and it just works, whether `data` is 10 bytes or
-50 KB. Small things go as a single message; big things are automatically split
-into chunks, sent, and reassembled on the far side — and the receiver checks the
-signature before your app ever sees it. You never think about packet sizes, loss,
-or ordering.
+`send(dest, data)` takes any size. Under the MTU it is one envelope; over it,
+fountain-fragmented and reassembled by the destination, signature-checked before
+the app sees it.
 
 <details>
 <summary>Deep dive: fountain coding and relay behaviour</summary>
@@ -117,12 +108,10 @@ fragment/reassembly, and relay-forwards-without-reassembling.
 
 ## Layer 2 — files: magnet links, torrents, and folder sync  ✅ implemented
 
-To share a file you publish a tiny **manifest** — a signed note that says "this
-file is called X, it's this big, and here are the fingerprints of its pieces." The
-manifest's ID is a shareable link (think magnet link or QR code). Anyone who has
-that link can then collect the pieces from *whoever happens to have them*, and each
-piece verifies itself as it arrives. Point the same machinery at a folder and you
-have Syncthing; aim it at a popular file and you have BitTorrent.
+A **manifest** is a signed envelope naming a file's size and its chunks' content
+IDs. Its own ID is the shareable magnet. Chunks are fetched from whoever has them
+and each verifies itself on arrival. The same machinery over a folder is folder
+sync.
 
 <details>
 <summary>Deep dive: content-addressed chunks, swarming, and folders</summary>
