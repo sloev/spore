@@ -62,6 +62,9 @@ pub struct UdpRunner {
     /// Where a STUN echo last said we appear to be, as `ip:port`. `None` until
     /// asked — a node never guesses its own reflexive address.
     reflexive: Option<String>,
+    /// This host's global IPv6, if it has one — an address with no NAT in front
+    /// of it, so it needs neither discovery nor a punch.
+    global_v6: Option<String>,
     /// The pipe id currently being punched for. Probes are demultiplexed by it,
     /// so it has to be in hand before [`Self::open`] runs.
     punching: [u8; 16],
@@ -75,6 +78,7 @@ impl UdpRunner {
             advertise: advertise.into(),
             bind_port,
             reflexive: None,
+            global_v6: crate::bridge::udp::primary_ipv6().map(|a| a.to_string()),
             punching: [0u8; 16],
         }
     }
@@ -94,9 +98,27 @@ impl UdpRunner {
             mtu: UDP_MTU,
             rtt_hint_ms: 15,
         }];
-        // The reflexive locator goes second, and is ranked worse on purpose: a
-        // LAN path that works is always preferable to one that has to survive a
-        // NAT, and `choose` breaks ties by latency hint.
+        // A global IPv6 goes second: it has no NAT in front of it, so unlike the
+        // reflexive locator it is already the address a peer dials — no discovery,
+        // no punch, no relay. Ranked just behind the LAN path (which is still
+        // fewer hops when both ends are on one network) and well ahead of
+        // reflexive, because `choose` breaks ties by latency hint and this is the
+        // one WAN path that needs nothing built to work.
+        //
+        // Only offered if the host actually has one. A firewall may still drop
+        // unsolicited inbound, which is a pinhole a punch can open rather than a
+        // mapping that must first be discovered — better odds, not a promise.
+        if let Some(v6) = &self.global_v6 {
+            out.push(Candidate {
+                medium: Medium::udp(),
+                locator: format!("[{v6}]:{}", self.bind_port).into_bytes(),
+                est_bps: 2_000_000,
+                mtu: UDP_MTU,
+                rtt_hint_ms: 25,
+            });
+        }
+        // The reflexive locator goes last, and is ranked worst on purpose: it is
+        // the only one that needs a hole punched before it can carry anything.
         if let Some(r) = &self.reflexive {
             out.push(Candidate {
                 medium: Medium::udp(),
@@ -128,6 +150,21 @@ impl UdpRunner {
     /// known, since that is the address a peer outside the LAN has to dial.
     fn local_locator(&self) -> String {
         self.reflexive.clone().unwrap_or_else(|| self.advertise.clone())
+    }
+
+    /// Override the global IPv6 this node offers.
+    ///
+    /// Discovered from the host at construction, but a runtime may know better —
+    /// Android learns its addresses from the connectivity manager — and a test
+    /// must be able to pin it, since otherwise what a node offers depends on
+    /// whether the machine running the suite happens to have IPv6.
+    pub fn set_global_v6(&mut self, v6: Option<std::net::Ipv6Addr>) {
+        self.global_v6 = v6.map(|a| a.to_string());
+    }
+
+    /// The global IPv6 currently being offered, if any.
+    pub fn global_v6(&self) -> Option<&str> {
+        self.global_v6.as_deref()
     }
 
     /// The reflexive locator currently being offered, if any.
@@ -256,6 +293,9 @@ mod tests {
     #[test]
     fn a_reflexive_locator_is_offered_but_ranked_below_the_lan_one() {
         let mut r = UdpRunner::new([1u8; 8], "192.168.1.10:7500", 7500);
+        // Pin it: otherwise this asserts something about the machine running the
+        // suite rather than about the code.
+        r.set_global_v6(None);
         assert_eq!(r.candidates().len(), 1, "only the configured locator until we ask");
         assert_eq!(r.reflexive(), None, "never guessed");
 
@@ -300,6 +340,41 @@ mod carriage_tests {
     ///
     /// Two runners over real sockets, the SPDR bytes carried between them by
     /// hand the way a runtime carries them over the mesh.
+    /// A global IPv6 has no NAT in front of it, so it must outrank the reflexive
+    /// locator — that one needs a hole punched before it carries anything.
+    #[test]
+    fn a_global_ipv6_outranks_the_reflexive_locator() {
+        let mut r = UdpRunner::new([1u8; 8], "192.168.1.10:7500", 7500);
+        r.set_global_v6(Some("2001:db8::42".parse().unwrap()));
+        r.set_reflexive(Some("203.0.113.9:41234".parse().unwrap()));
+
+        let c = r.candidates();
+        assert_eq!(c.len(), 3);
+        assert_eq!(c[0].locator, b"192.168.1.10:7500".to_vec(), "LAN first");
+        assert_eq!(c[1].locator, b"[2001:db8::42]:7500".to_vec(), "then v6, bracketed for a port");
+        assert_eq!(c[2].locator, b"203.0.113.9:41234".to_vec(), "reflexive last");
+        assert!(
+            c[1].rtt_hint_ms < c[2].rtt_hint_ms,
+            "an address needing no punch must outrank one that does"
+        );
+
+        // `choose` ranks by that hint, so a peer that can use both picks v6 over
+        // a locator whose path does not exist yet.
+        let offer = super::super::Offer {
+            pipe_id: [0u8; 16],
+            from: [1u8; 8],
+            to: [2u8; 8],
+            need: Need { min_bps: 1_000, mtu_needed: 64, max_latency_ms: None },
+            eph_pub: [0u8; 32],
+            candidates: vec![c[2].clone(), c[1].clone()], // reflexive offered first
+        };
+        let picked = super::super::choose(&offer, &[Medium::udp()]).unwrap();
+        assert_eq!(picked.locator, b"[2001:db8::42]:7500".to_vec(), "order offered must not decide it");
+
+        r.set_global_v6(None);
+        assert_eq!(r.candidates().len(), 2, "a host without global v6 offers none");
+    }
+
     #[test]
     fn a_record_crosses_between_two_runners_over_real_sockets() {
         let (a_addr, b_addr) = ([0xA1u8; 8], [0xB2u8; 8]);

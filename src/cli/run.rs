@@ -76,9 +76,14 @@ pub(crate) fn run_config(cfg: Config) {
                     None => eprintln!("  [direct] {server} did not answer — offering the LAN locator only"),
                 }
             }
+            println!("  [direct] offering {}", d.offering());
             // Said once, plainly: knowing the outside address is not the same as
-            // being reachable at it. The punch is step 3 and is not built.
-            eprintln!("  [direct] note: no hole-punch yet — a pipe across NAT will usually still fail");
+            // being reachable at it, and the punch as wired cannot land (see the
+            // ROADMAP). A global IPv6, where one exists, is the path that needs
+            // neither.
+            eprintln!(
+                "  [direct] note: the punch does not land yet — across NAT, IPv6 is the path that works"
+            );
             let dial = match cfg.direct_to.as_deref() {
                 None => None,
                 Some(s) => match super::direct::peer_addr(s) {

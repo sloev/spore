@@ -36,6 +36,20 @@ Two conventions specific to this project:
   cheap now, since until the daemon wiring below nothing could start a pipe at all.
   The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
 
+- **Direct now offers a global IPv6 address when the host has one — the WAN path
+  that needs no traversal at all.** Candidates were IPv4-only, so a node with a
+  global v6 from its ISP — which is most of them — advertised only a LAN address
+  and a reflexive one that needs a hole punch to work. A global v6 has **no NAT in
+  front of it**: it is already the address a peer dials. It is ranked between the
+  LAN locator and the reflexive one, so `choose` prefers it over a path that does
+  not exist yet, and it is offered only when the host actually has one —
+  link-local, unique-local, loopback and multicast are all rejected, since
+  advertising any of those is a candidate that can never connect. A path firewall
+  may still drop unsolicited inbound; that is a pinhole a punch can open rather
+  than a mapping that must first be discovered, so it is better odds and not a
+  promise. The daemon now prints which locators it is offering and what each one
+  needs, so "why did it not connect" is answerable without a packet capture.
+
 - **A node can now discover the address the outside world sees, and answer that
   question for other nodes (P-Direct-NAT step 2).** Direct could only ever offer
   the address a node was *told* it had, so it worked on a LAN and nowhere else.
