@@ -41,6 +41,20 @@ Two conventions specific to this project:
   cheap now, since until the daemon wiring below nothing could start a pipe at all.
   The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
 
+- **A Direct pipe now says how it was established, instead of hiding it.**
+  `UdpRunner::open` fell back to a plain connect whenever the hole punch failed,
+  which made "traversal worked" and "traversal never ran" produce an identical
+  result — a working pipe, because on a LAN the fallback is correct anyway. That
+  indistinguishability is what hid two bugs. `Event::PipeUp` now carries
+  `Via::Punched` or `Via::FellBack`, shown in the daemon log and in Android's
+  status line, so a phone shows it too rather than only the surface where the
+  problem was already known. Falling back is not automatically a failure: for a
+  candidate that already routes there was nothing to punch. On a reflexive
+  candidate it means there is no path, however healthy the pipe looks — and two
+  daemons today report *"no punch, plain connect"* on both ends, which is the
+  known disjoint-window bug becoming visible at runtime rather than staying a note
+  in the roadmap.
+
 - **A node can declare extra locators it is reachable at — typically its address
   on an IP-layer overlay.** Yggdrasil, cjdns, a VPN: each hands a node an address
   that already routes, so a pipe over one needs no hole punch and no relay. None

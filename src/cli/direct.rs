@@ -116,8 +116,8 @@ impl Direct {
         }
         match &event {
             Event::NotSignal => return false,
-            Event::PipeUp { peer, pipe_id } => {
-                eprintln!("  [direct] pipe {} up with {}", hex4(pipe_id), hex8(peer))
+            Event::PipeUp { peer, pipe_id, via } => {
+                eprintln!("  [direct] pipe {} up with {} ({via})", hex4(pipe_id), hex8(peer))
             }
             Event::Declined { peer } => {
                 eprintln!("  [direct] declined an offer from {} — no medium in common", hex8(peer))

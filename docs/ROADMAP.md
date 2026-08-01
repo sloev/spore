@@ -2309,14 +2309,17 @@ Direct over them needs its own medium and adapter, not a locator. That is a
 separate piece of work and is not scoped here — but after the medium-by-convention
 change it is additive, with no core edit and no allocation from anyone.
 
-**Prerequisite for any of it: make the fallback loud.** `UdpRunner::open` silently
-falls back to a plain connect when the punch fails, which makes "traversal worked"
-and "traversal never ran" indistinguishable — on a LAN both produce a working
-pipe. That is a control with nothing behind it, and it is the direct cause of both
-bugs above. Either report it (`Event::PunchFailed { fell_back }`, surfaced in the
-daemon log and Android status) or fail closed when the chosen candidate was a
-reflexive one. Small, and it makes every later P-Direct-NAT change
-self-diagnosing.
+**Prerequisite: make the fallback loud — done.** `Event::PipeUp` now carries
+`Via::Punched` or `Via::FellBack`, surfaced in the daemon log and in Android's
+status line. Two daemons on one host today print *"no punch, plain connect"* on
+both ends, so the disjoint-window bug is a runtime observable rather than a note
+in this file. `Via::FellBack` is not automatically a failure — for a candidate
+that already routes (LAN, IPv6, overlay) there was nothing to punch — but on a
+reflexive candidate it means there is no path, however healthy the pipe looks.
+
+The carriage test now asserts `Via::FellBack` explicitly, pinning today's
+behaviour rather than the intent: when the ordering is fixed that assertion fails
+loudly and in the right place, which is the point of writing it that way.
 
 **Design constraints for `IrohPort`, so they are not rediscovered the hard way.**
 The iroh connection *is* the medium — its punched path cannot be extracted and
