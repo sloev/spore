@@ -65,7 +65,9 @@ parses that blob back into arrays of `Uint8Array`.
 ## Transports
 
 A transport is any object with a `send(bytes)` method that calls `receive(bytes)`
-when a frame arrives. Ten are included; writing your own is a dozen lines.
+when a frame arrives. Eleven are included; writing your own is a dozen lines.
+The standalone build inlines ten of them — Web NFC is left out because it needs
+Chrome on Android over HTTPS, which a `file://` page is not.
 
 | Transport | File | Use |
 |---|---|---|
@@ -78,6 +80,7 @@ when a frame arrives. Ten are included; writing your own is a dozen lines.
 | **Web Serial** | `transports/webserial.mjs` | a generic USB KISS TNC/board; interops with the Rust serial bridge |
 | **Web Bluetooth** | `transports/webbluetooth.mjs` | a generic BLE radio over the Nordic UART Service; KISS-framed |
 | **Audio modem** | `transports/audio.mjs` | data-over-sound; a 16-FSK modem **bit-compatible** with the Rust `bridge::audio` |
+| **Web NFC** | `transports/webnfc.mjs` | tap-to-transfer at a few centimetres; one envelope per `application/x-spore` NDEF record. Chrome on Android over HTTPS only, so it is **not** inlined into the standalone build — import it from `transports/` |
 | **Loopback** | `transports/loopback.mjs` | in-memory link between two hubs, for tests and offline demos |
 
 The KISS framing shared by the serial and Bluetooth transports lives in

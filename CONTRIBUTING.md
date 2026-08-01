@@ -17,8 +17,12 @@ break a peer or a downstream build.
 
 - **`master`** is protected and always green. It only changes through reviewed
   pull requests; nobody pushes to it directly.
-- **`develop`** is where work happens. Branch from it, open a PR back into it or
-  into `master`.
+- **Work happens on a topic branch off `master`**, named for what it does —
+  `feat/…`, `fix/…`, `docs/…`, `ci/…` — and merges back into `master`, squashed.
+  There is no long-lived integration branch: `develop` does not exist, and every
+  branch in the repo is a topic branch. (The CI workflows still name `develop` in
+  their `push:` triggers, harmlessly, so one can be introduced without touching
+  them.)
 
 ## The checks a PR must pass
 
@@ -74,7 +78,14 @@ python3 scripts/check_docs_sync.py
 cargo build --release --lib --target wasm32-unknown-unknown && node web/test.mjs
 ( cd site && npm install && node seed/fountain.test.mjs && node seed/seedsheet.test.mjs )
 ( cd site && node build.mjs )        # also fails on a broken internal link or anchor
+python3 bindings/generate.py && git diff --exit-code bindings/
+python3 design/generate.py  && git diff --exit-code site/style.css web/build-standalone.mjs android docs/VISUALDESIGN.md
 ```
+
+The last two are the "bindings in sync" and "design tokens in sync" gates in
+`supply-chain.yml`: both directories are generated, so hand-editing one is a red
+PR rather than a merge conflict. They are listed here because omitting them was
+exactly the drift this section forbids.
 
 ## Cutting a release
 

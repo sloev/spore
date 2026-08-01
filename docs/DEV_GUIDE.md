@@ -111,7 +111,8 @@ which part:
   names which surfaces consume it. Keep that table honest.
 - **Docs MUST NOT drift from code.** Documented byte values live once, generated,
   in `reference/vectors.json`. CI enforces it.
-- **Branch model:** `master` is protected; work happens on `develop`.
+- **Branch model:** `master` is protected; work happens on a topic branch off it
+  (`feat/…`, `fix/…`, `docs/…`) and squash-merges back. No `develop`.
 
 ## Where to go deeper
 
