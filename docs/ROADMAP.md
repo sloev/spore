@@ -2186,11 +2186,35 @@ negotiated:
 in the [`DESIGN.md`](DESIGN.md) runtime vocabulary). Steps 2–5 are *supplies*, and
 not every runtime has them: iroh (step 5) is a native-only bridge, so a browser
 runtime's ladder ends at step 3 and it reaches a relay only through a peer that
-has one; UPnP/NAT-PMP (step 4) is desktop/daemon-only, as already noted. The
-preference order in step 6 is therefore **per-runtime, not global** — each runtime
-walks the subset it can actually supply, and says so rather than offering a
-candidate it has no way to try. Worth settling before implementation, since it
-decides whether the ladder is one shared table or a capability query.
+has one; UPnP/NAT-PMP (step 4) is desktop/daemon-only, as already noted. Each
+runtime therefore walks only the subset it can actually supply, and says so rather
+than offering a candidate it has no way to try.
+
+**Settled 2026-08-01 (third pass): the order is one shared table, and membership
+in it is a per-runtime capability query.** The question was posed as a choice
+between those two; the answer is that they are different layers, and keeping them
+apart is what makes the ladder honest without making the core aware of hosts.
+
+- **The order is global.** LAN → reflexive punch → UPnP-assisted → iroh → fail
+  honestly is a property of the protocol, not of any host. A per-runtime *order*
+  would let two runtimes disagree about what "best path" means — and a Direct pipe
+  has two ends, so they would be negotiating against different tables.
+- **Membership is queried.** A static per-runtime table would require the core to
+  know which runtimes exist, which is exactly what "the core holds no OS" forbids.
+  The runtime declares which rungs it can supply; the core walks the shared order
+  and skips the rest.
+
+The contract shape already exists: `SpillBackend` is the same bargain for storage
+— the runtime supplies an implementation or it does not, and the core degrades
+honestly instead of pretending. `MISSION.md`'s honesty clause ("a runtime declares
+what it cannot do … never a control with nothing behind it") is what makes the
+declaration user-visible rather than merely internal: a browser runtime says it has
+no relay of its own, instead of showing a candidate that can never connect.
+
+**This does not add a sixth nutrient.** Transport is still one nutrient and the
+list is still closed — a punch rung is a *supply* of it, exactly as a bridge is
+(see [`DESIGN.md`](DESIGN.md)'s legend). What is new is only that the supply set
+becomes something a runtime states, rather than something each façade infers.
 
 **Should a daemon help other people's NAT traversal by default?** Only the
 STUN-shaped echo is SPORE's own to decide — relay is now iroh's concern
