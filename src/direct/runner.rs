@@ -62,6 +62,11 @@ pub struct UdpRunner {
     /// Where a STUN echo last said we appear to be, as `ip:port`. `None` until
     /// asked — a node never guesses its own reflexive address.
     reflexive: Option<String>,
+    /// Locators the operator declared, e.g. an address on an IP-layer overlay.
+    /// Not discoverable: a routing probe follows the default route, so it never
+    /// picks an overlay's source address, and an overlay address may sit in a
+    /// range a public-internet check rightly rejects (cjdns uses `fc00::/8`).
+    extra: Vec<String>,
     /// This host's global IPv6, if it has one — an address with no NAT in front
     /// of it, so it needs neither discovery nor a punch.
     global_v6: Option<String>,
@@ -78,6 +83,7 @@ impl UdpRunner {
             advertise: advertise.into(),
             bind_port,
             reflexive: None,
+            extra: Vec::new(),
             global_v6: crate::bridge::udp::primary_ipv6().map(|a| a.to_string()),
             punching: [0u8; 16],
         }
@@ -115,6 +121,19 @@ impl UdpRunner {
                 est_bps: 2_000_000,
                 mtu: UDP_MTU,
                 rtt_hint_ms: 25,
+            });
+        }
+        // Declared locators sit between: an IP-layer overlay (Yggdrasil, cjdns, a
+        // VPN) already routes, so like v6 it needs no traversal — but it is
+        // usually several hops of someone else's network, so it should not
+        // outrank a v6 address that goes direct.
+        for e in &self.extra {
+            out.push(Candidate {
+                medium: Medium::udp(),
+                locator: e.clone().into_bytes(),
+                est_bps: 2_000_000,
+                mtu: UDP_MTU,
+                rtt_hint_ms: 40,
             });
         }
         // The reflexive locator goes last, and is ranked worst on purpose: it is
@@ -160,6 +179,21 @@ impl UdpRunner {
     /// whether the machine running the suite happens to have IPv6.
     pub fn set_global_v6(&mut self, v6: Option<std::net::Ipv6Addr>) {
         self.global_v6 = v6.map(|a| a.to_string());
+    }
+
+    /// Declare extra locators to offer — an overlay address, a VPN address, or
+    /// anything else this node is reachable at that cannot be discovered.
+    ///
+    /// They must be **UDP-dialable**: an IP-layer overlay qualifies, a Tor
+    /// `.onion` or I2P `.b32` does not, since those are stream rendezvous names
+    /// and would need their own medium and adapter rather than a locator.
+    pub fn set_extra(&mut self, extra: Vec<String>) {
+        self.extra = extra;
+    }
+
+    /// The extra locators currently being offered.
+    pub fn extra(&self) -> &[String] {
+        &self.extra
     }
 
     /// The global IPv6 currently being offered, if any.
@@ -373,6 +407,42 @@ mod carriage_tests {
 
         r.set_global_v6(None);
         assert_eq!(r.candidates().len(), 2, "a host without global v6 offers none");
+    }
+
+    /// The whole ladder, in the order `choose` will walk it: paths that already
+    /// route come before the one that still has to be punched open.
+    #[test]
+    fn declared_overlay_locators_rank_between_ipv6_and_reflexive() {
+        let mut r = UdpRunner::new([1u8; 8], "192.168.1.10:7500", 7500);
+        r.set_global_v6(Some("2001:db8::42".parse().unwrap()));
+        r.set_extra(vec!["[200:abcd::1]:7500".into(), "10.8.0.3:7500".into()]);
+        r.set_reflexive(Some("203.0.113.9:41234".parse().unwrap()));
+
+        let c = r.candidates();
+        let hints: Vec<u16> = c.iter().map(|x| x.rtt_hint_ms).collect();
+        assert_eq!(c.len(), 5, "LAN + v6 + two declared + reflexive");
+        assert!(hints.windows(2).all(|w| w[0] <= w[1]), "emitted worst-last: {hints:?}");
+        assert_eq!(c[2].locator, b"[200:abcd::1]:7500".to_vec());
+        assert_eq!(c[3].locator, b"10.8.0.3:7500".to_vec());
+        assert!(
+            c[2].rtt_hint_ms > c[1].rtt_hint_ms,
+            "an overlay is several hops of someone else's network; direct v6 wins"
+        );
+        assert!(c[2].rtt_hint_ms < c[4].rtt_hint_ms, "but it already routes, unlike the reflexive locator");
+
+        // Offered in reverse, `choose` still picks the LAN path.
+        let mut reversed = c.clone();
+        reversed.reverse();
+        let offer = super::super::Offer {
+            pipe_id: [0u8; 16],
+            from: [1u8; 8],
+            to: [2u8; 8],
+            need: Need { min_bps: 1_000, mtu_needed: 64, max_latency_ms: None },
+            eph_pub: [0u8; 32],
+            candidates: reversed,
+        };
+        let picked = super::super::choose(&offer, &[Medium::udp()]).unwrap();
+        assert_eq!(picked.locator, b"192.168.1.10:7500".to_vec());
     }
 
     #[test]

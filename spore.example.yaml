@@ -27,6 +27,17 @@ topics: [news, weather]
 # outside and offer that address too; any SPORE daemon running `stun:` is one,
 # and so is any public STUN server:
 #
+# Extra locators you are reachable at, comma-separated. Typically this node's
+# address on an IP-layer overlay — Yggdrasil, cjdns, a VPN — which already routes,
+# so it needs no punch and no relay. It cannot be discovered: a routing probe
+# follows the default route, and cjdns addresses sit in fc00::/8 which a
+# public-internet check rightly rejects. So you declare it:
+#
+#   direct-also: [200:abcd::1]:7500, 10.8.0.3:7500
+#
+# Must be UDP-dialable. A Tor .onion or I2P .b32 is not — those are stream
+# rendezvous names and would need their own medium and adapter, not a locator.
+#
 #   direct-stun: 203.0.113.9:7900
 #   stun: 7900                   # …and run the echo yourself, for other nodes
 #

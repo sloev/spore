@@ -2291,11 +2291,23 @@ discovered first: better odds, not a promise, and the daemon prints exactly whic
 locators it is offering so "why did it not connect" is answerable without a packet
 capture.
 
-**Still open: overlay addresses.** Reticulum, Yggdrasil, cjdns, WireGuard, Tor and
-I2P all hand a node a routable address, and none of them is offered as a candidate
-yet. Same argument as IPv6, same shape of fix — one more entry in `candidates()`
-sourced from whichever bridges are configured. Smaller and more certain than
-steps 3–5.
+**Overlay addresses: done for the ones it can be done for, and the split is the
+finding.** `direct-also:` declares extra locators, offered as ordinary candidates
+ranked between IPv6 and reflexive — an overlay already routes, so it needs no
+punch, but it is several hops of someone else's network so it should not outrank a
+direct v6 path.
+
+Declared rather than discovered, deliberately: a routing probe follows the default
+route so it never picks an overlay's source address, and cjdns sits in `fc00::/8`
+which a public-internet check rightly rejects. Auto-discovery here would be
+guessing.
+
+**Only IP-layer overlays are covered — Yggdrasil, cjdns, WireGuard, a VPN.** They
+hand out real, UDP-dialable addresses. **Tor and I2P are not, and cannot be**: a
+`.onion` or `.b32` is a stream rendezvous name with no UDP beneath it, so reaching
+Direct over them needs its own medium and adapter, not a locator. That is a
+separate piece of work and is not scoped here — but after the medium-by-convention
+change it is additive, with no core edit and no allocation from anyone.
 
 **Prerequisite for any of it: make the fallback loud.** `UdpRunner::open` silently
 falls back to a plain connect when the punch fails, which makes "traversal worked"

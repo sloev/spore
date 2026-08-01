@@ -32,8 +32,10 @@ pub(crate) struct Direct {
 }
 
 impl Direct {
-    pub(crate) fn new(me: Addr, advertise: String, bind_port: u16) -> Direct {
-        Direct { run: UdpRunner::new(me, advertise, bind_port), bind_port }
+    pub(crate) fn new(me: Addr, advertise: String, bind_port: u16, also: Vec<String>) -> Direct {
+        let mut run = UdpRunner::new(me, advertise, bind_port);
+        run.set_extra(also);
+        Direct { run, bind_port }
     }
 
     /// The locators this node is offering, for the operator to see. A path that
@@ -43,6 +45,9 @@ impl Direct {
         let mut v = vec![format!("{} (LAN)", self.run.advertise())];
         if let Some(v6) = self.run.global_v6() {
             v.push(format!("[{v6}]:{} (IPv6, no NAT)", self.bind_port));
+        }
+        for e in self.run.extra() {
+            v.push(format!("{e} (declared)"));
         }
         if let Some(r) = self.run.reflexive() {
             v.push(format!("{r} (reflexive, needs a punch)"));

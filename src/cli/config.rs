@@ -73,6 +73,10 @@ pub(crate) struct Config {
     pub(crate) direct_to: Option<String>,
     /// A reflexive echo to ask where we appear to be, as `host:port`. Any SPORE
     /// daemon running `stun:` is one; so is any public STUN server.
+    /// Extra locators to advertise, comma-separated — typically this node's
+    /// address on an IP-layer overlay (Yggdrasil, cjdns, a VPN). Not
+    /// discoverable, so it has to be declared.
+    pub(crate) direct_also: Vec<String>,
     pub(crate) direct_stun: Option<String>,
     /// Run a reflexive echo on this port for other nodes to ask. Default off —
     /// it is a service you choose to offer, though it costs one packet.
@@ -94,6 +98,7 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     let mut bridges: Vec<Spec> = Vec::new();
     let mut direct: Option<String> = None;
     let mut direct_to: Option<String> = None;
+    let mut direct_also: Vec<String> = Vec::new();
     let mut direct_stun: Option<String> = None;
     let mut stun: Option<u16> = None;
     let mut sec = Sec::None;
@@ -140,6 +145,13 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
                 }
                 sec = Sec::Bridges;
             }
+            "direct-also" => {
+                direct_also = v.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+                if direct_also.is_empty() {
+                    return Err(format!("line {ln}: `direct-also:` needs at least one locator"));
+                }
+                sec = Sec::None;
+            }
             "direct-stun" => {
                 if v.is_empty() {
                     return Err(format!("line {ln}: `direct-stun:` needs a host:port"));
@@ -171,7 +183,7 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     if bridges.is_empty() {
         return Err("no bridges configured".to_string());
     }
-    Ok(Config { petname, topics, bridges, direct, direct_to, direct_stun, stun })
+    Ok(Config { petname, topics, bridges, direct, direct_to, direct_also, direct_stun, stun })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
