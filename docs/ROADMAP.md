@@ -104,6 +104,23 @@ museum of what was.
 
 ---
 
+## Conformance gaps — SPEC rules with no implementation
+
+Found by checking [`SPEC.md`](SPEC.md) against the crate rather than against the
+other docs. Each is a rule this repo *specifies* and does not execute. They are
+recorded rather than deleted from SPEC, because the rule is right and the code is
+what is behind — the opposite of the usual drift.
+
+| SPEC | Rule | What the code does | Severity |
+|---|---|---|---|
+| §4 | Paths `purge 7 d` | `Paths` has `learn` and `fresh` only. Nothing purges, and `Paths` is the one peer-keyed map `enforce_bounds` does **not** trim — `MAX_PEERS` bounds `peer_prekeys`, `peer_busy`, `peer_names` and `sessions`, but not `paths`. Every signed envelope from a new source inserts an entry that is never removed. | **unbounded growth**; a long-lived relay on an open mesh grows `paths` without limit |
+| §2 | "stores clamp horizon to 30 d" | No clamp exists. Ingest checks only `e.expiry < now`; `SEEN_MIN_SECS` is a dedup *retain floor* (hold the id ≥ 30 d), which is the opposite operation. An envelope claiming expiry in 2099 is accepted and stored. | store pinning — eviction ranks "expired" first, and such an envelope is never expired |
+| Page 2 | Native nodes run WebRTC **ice-lite** with static ufrag/pwd/fingerprint | No native WebRTC bridge exists; WebRTC is browser-only (`web/transports/webrtc.mjs`). The 90-byte descriptor story has no native half. | planned, not a defect — but the page reads as though it ships |
+
+Fixing the first two is small and local: a cap plus an age filter in `Paths`, and
+one `min` on ingest. Both want a test that fails without them, per the verification
+rule below.
+
 ## Carried forward from shipped PRs (TODO)
 
 PR0–PR2 each shipped their core and **deliberately deferred** parts. Recorded here
@@ -450,7 +467,7 @@ Release APK: pick file publishes immediately; no stage; bubbles lack preview/Ope
 | `android/.../NodeController.kt` | Extract publish-only; add `sendTextWithAttachment` |
 | `android/app/src/main/AndroidManifest.xml` | FileProvider provider |
 | `android/app/src/main/res/xml/file_paths.xml` | **New** |
-| `android/UX-ISSUES.md` | **New** — problem, marker, acceptance |
+| `android/UX-ISSUES.md` | Was **new**; the convention was later absorbed into [`VISUALDESIGN.md`](VISUALDESIGN.md) Appendix A and the file retired |
 
 ## Current behaviour (broken UX)
 
@@ -602,7 +619,7 @@ ctx.startActivity(Intent.createChooser(intent, "Open"))
 - Keep "served from this node" / "fetching".
 
 ### 7. Docs
-Create `android/UX-ISSUES.md`: problem, current vs target, marker, acceptance, non-goals.
+Was: create `android/UX-ISSUES.md`. Shipped instead as [`VISUALDESIGN.md`](VISUALDESIGN.md) Appendix A — same content, one fewer file to keep in sync.
 
 ## Non-goals (v1)
 Multi-file per send; ExoPlayer; editing after send.
@@ -760,7 +777,7 @@ Still open: no field-verified 7-day FS; all radios 🧪; HARDWARE.md procedure o
 
 ## Deliverables
 
-### 1. Device matrix (`docs/ANDROID_AUDIT.md` / `android/TESTING.md`)
+### 1. Device matrix (`android/TESTING.md`)
 
 | # | Test | Pass criteria |
 |---|------|---------------|
@@ -779,7 +796,7 @@ Run procedure for one of Meshtastic BLE or RNode **or** demote README/APPS radio
 Docs site + app Advanced/About short FS blurb (prekey 7d; ratchet age-bounded after PR0).
 
 ## Acceptance
-- [x] Checklist exists (`android/TESTING.md`, 7 rows + History), linked from ANDROID_AUDIT §6
+- [x] Checklist exists (`android/TESTING.md`, 7 rows + History)
 - [ ] Backup + migration run once on hardware — **deferred to hardware QA** (no device in CI)
 - [x] Marketing already honest: README caveats radios ("need real hardware to test"),
       HARDWARE.md marks every radio 🧪 with a History section — no demotion needed
@@ -833,18 +850,23 @@ This milestone implements that as an **application-level profile** on top of exi
 - Guaranteeing latency on LoRa / duty-cycled radios (reject or PTT-fallback only)
 - Replacing SIP/Asterisk feature-complete PBX
 
-## Files (suggested layout — new code only)
+## Files — as shipped
 
-| Path | Action |
-|------|--------|
-| `direct/` or crate `spore-direct` | Offer/answer, HKDF, record AEAD, `Pipe` API |
-| `direct/port.rs` | `DatagramPort` trait: `mtu` / `send` / `try_recv` / `close` |
-| `direct/udp.rs` | UDP adapter (1 datagram = 1 record) |
-| `direct/tcp.rs` | TCP adapter (`u16be len ‖ record`) |
-| `direct/espnow.rs` | Optional / `cfg` — ESP-IDF or stub + docs |
-| `docs/DIRECT.md` | **New** — profile, threat model, candidate table |
-| `examples/direct_udp.rs` | Loopback or localhost two-peer smoke test |
-| Signaling only | Existing `Node::send` / `send_direct` with opaque `SPDR` payloads |
+The layout this track proposed and what it actually became. Kept accurate rather
+than as-proposed, because the proposal is now the thing people would go looking
+for.
+
+| Path | State |
+|------|-------|
+| `src/direct.rs` | ✅ offer/answer, BLAKE2b key schedule, record AEAD, `DatagramPort`, `Pipe`, `Signalling` — the trait lives here, not in a `port.rs` |
+| `src/direct/udp.rs` | ✅ UDP adapter (1 datagram = 1 record) |
+| `src/direct/tcp.rs` | ✅ TCP adapter — **`u32be len ‖ record`**, not the `u16be` this table originally proposed |
+| `src/direct/{stun,punch,iroh}.rs` | ✅ the P-Direct-NAT ladder; not foreseen here |
+| `src/direct/runner.rs` | ✅ the shared runner both native runtimes drive |
+| ESP-NOW adapter | ⬜ not built; would be `src/direct/espnow.rs` behind a `cfg` |
+| `docs/DIRECT.md` | ✅ profile, threat model, candidate table |
+| `examples/direct_loopback.rs` | ✅ the two-peer smoke test (named `direct_udp.rs` in the proposal) |
+| Signalling only | ✅ `Node::send_direct` with opaque `SPDR` payloads; the envelope never changed |
 
 Do **not** modify `src/envelope.rs`, `store.rs`, `hub.rs`, or frozen contract files.
 
@@ -904,9 +926,12 @@ Bind both SPORE addresses into `info`. Media keys never appear on the wire.
 
 ## Record format (same on every medium)
 
+Shipped, so [`DIRECT.md`](DIRECT.md) is the living copy — check it, not this, before
+implementing against the record.
+
 ```text
 offset  size  field
-0       1     ver = 1
+0       1     ver = direct::VERSION (3 today)
 1       1     type  (0=MEDIA 1=KEEPALIVE 2=CONTROL 3=DATA 4=STREAM …)
 2       2     seq   u16 BE
 4       4     pipe_id trunc
@@ -914,7 +939,7 @@ offset  size  field
 ```
 
 - **UDP / ESP-NOW:** one packet = one record  
-- **TCP / serial / BLE:** `u16be length ‖ record` (BLE may chunk further)
+- **TCP / serial / BLE:** `u32be length ‖ record` (BLE may chunk further)
 
 Pipe is **best-effort datagram**. Optional ordered `STREAM` or RPC retries live in the app library, not in the outer AEAD record (avoids HOL on voice).
 
@@ -1148,9 +1173,9 @@ bridges" item.
 
 **Steering:** `MISSION.md` pillar 3 (Façades) + pillar 4 (Nodes people can run —
 "Android, desktop, browser/wasm, daemon, ESP/home router") — the browser is a
-first-class node, not a demo toy. Source: an implementer plan
-(`SPORE_WEB_NODE_FULL_PLAN.md`) reviewed against the current tree; findings and
-scope below are from that review, not the plan verbatim.
+first-class node, not a demo toy. Source: an implementer plan (since retired,
+along with the other pre-ROADMAP planning docs) reviewed against the current tree;
+findings and scope below are from that review, not the plan verbatim.
 
 In the vocabulary of [`DESIGN.md`](DESIGN.md)'s "The spore and the soil": the
 browser is one **runtime** among several, and the communicator this track builds
@@ -1889,7 +1914,7 @@ PR8/PR9 (iroh) are growth tracks.
 ### Risks to watch
 1. **PR0 policy object** — one defaulted policy for prekey + skip TTL used by crypto and UI.
 2. **Iroh MSRV** — may force feature-gate + newer toolchain; keep default CI on 1.75.
-3. **PR1 marker format** — document as app convention in UX-ISSUES so Feed/chat stay consistent.
+3. **PR1 marker format** — document as app convention in [`VISUALDESIGN.md`](VISUALDESIGN.md) Appendix A so Feed/chat stay consistent.
 4. **PR2 iface holes** — never renumber; document for all bridges including iroh stop.
 
 ---

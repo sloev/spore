@@ -18,6 +18,37 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The docs were checked against the code rather than against each other, and
+  four of them were wrong.** Every file path, API name, constant and config key
+  the docs quote was resolved against the crate. SPEC's BLE service UUID named a
+  SPORE-specific value nothing uses — the actual binding is the Nordic UART
+  Service, as BRIDGES already said. DIRECT specified the record's version byte as
+  `1` (it is `direct::VERSION`, currently 3) and its stream framing as `u16be`
+  (it is `u32be`, contradicting DIRECT's own prose two sections later) — an
+  implementer following either would have built something incompatible.
+  VISUALDESIGN, which is normative for anything a person looks at, pointed the
+  Android surface at `Color.kt` and `SporeTheme`; neither exists — the generated
+  file is `Chrome.kt` and the schemes are `SporeLightColors` / `SporeDarkColors`.
+  ROADMAP's Direct file table still described the layout that was proposed rather
+  than the one that shipped. Wire unchanged; docs only.
+
+- **Three SPEC rules turned out to have no implementation, and are now recorded
+  instead of quietly deleted.** Path `purge 7 d` (§4) does not happen — and
+  `Paths` is the one peer-keyed map `enforce_bounds` never trims, so it grows
+  without bound on an open mesh. The "stores clamp horizon to 30 d" parenthetical
+  (§2) describes an operation the code does not perform; `SEEN_MIN_SECS` is a
+  dedup retain *floor*, which is the opposite. Native WebRTC ice-lite (Page 2) has
+  no native half at all. Each is marked in place and tracked under ROADMAP's new
+  *Conformance gaps* section, because in these three the rule is right and the
+  code is what is behind. Wire unchanged.
+
+- **SPEC now says which side of the transport boundary each scheduled duty falls
+  on.** It requires four duties on a timer; `Node::tick` runs three. The fourth,
+  Trickle beaconing, is not missing — emitting on an interface is across the
+  boundary the core is defined against, so it is the runtime's own timer
+  (`Hub::beacon` over `Node::build_announce`). A runtime that drives only the
+  core's tick never beacons, which the page now states. Wire unchanged.
+
 - **The daemon can switch Direct-over-iroh on, and the relay posture is an
   explicit choice.** 0.7.0 shipped `IrohPort` with nothing turning it on;
   `direct-iroh:` now stands up an endpoint and offers the medium. Its value —

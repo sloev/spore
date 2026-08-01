@@ -28,7 +28,7 @@ branches, releases). Read those once; this one is a lookup table.
 | `src/` | The core crate: router kernel, protocol layers, every bridge. Frozen wire format. Detail below. |
 | `src/main.rs` | Demo + YAML config loader (`spore.example.yaml`) running a daemon's bridges on one node. |
 | `bindings/` | Generated Python / Go / JS wrappers over the C ABI, plus the `spec.json` they generate from. |
-| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into all four surfaces and computes WCAG ratios rather than trusting typed ones. |
+| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into its three surfaces — `site/style.css`, `web/build-standalone.mjs`, `android/…/Chrome.kt` — plus the token table in `docs/VISUALDESIGN.md`, and computes WCAG ratios rather than trusting typed ones. |
 | `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
 | `site/` | The Pages generator (`build.mjs`), `site/seed/` (printable paper-seed tooling), and `site/style.css`, whose token block is generated. |
 | `android/` | `android/jni/` is an additive Rust crate exposing an opaque-handle C ABI to Kotlin — checkable with plain `cargo check`. `android/app/…/node/` is the Kotlin app, which needs the SDK/NDK. |
@@ -111,7 +111,8 @@ which part:
   names which surfaces consume it. Keep that table honest.
 - **Docs MUST NOT drift from code.** Documented byte values live once, generated,
   in `reference/vectors.json`. CI enforces it.
-- **Branch model:** `master` is protected; work happens on `develop`.
+- **Branch model:** `master` is protected; work happens on a topic branch off it
+  (`feat/…`, `fix/…`, `docs/…`) and squash-merges back. No `develop`.
 
 ## Where to go deeper
 
