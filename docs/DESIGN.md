@@ -673,10 +673,8 @@ The **core** is one implementation of the protocol — the same bytes on every
 machine, carrying nothing about where it landed. Anything that hosts it is a
 **runtime**: a language binding, a daemon, a browser worker, a microcontroller
 firmware. Runtimes vary enormously; what they have to provide does not. A runtime
-supplies **five nutrients**, and the core supplies everything else. Four of them
-are normative in [`SPEC.md`](SPEC.md)'s runtime contract, which counts transport
-separately as a bridge concern; *storage* there is called **custody**, the duty,
-where this names the mechanism.
+supplies **four nutrients**, and the core supplies everything else. The same four
+are normative in [`SPEC.md`](SPEC.md)'s runtime contract.
 
 *The image, once, because it is the whole idea: the core is a spore and a runtime
 is the soil it lands in. Past this paragraph the docs use the plain words —* core,
@@ -693,8 +691,8 @@ hosts the core" is six chances to think they are different things.
 | **core** | the protocol implementation (`src/`) — frozen wire, no OS in it | *seed*, *spore* (as a name for the code) |
 | **runtime** | anything that hosts a core and supplies its nutrients | *soil*, *vessel*, *platform* |
 | **daemon** | a runtime that is a long-running process | — a *kind* of runtime, not a synonym |
-| **nutrient** | one of the five things a runtime provides the core | *supply*, *capability* |
-| **bridge** | one transport implementation — how the transport nutrient is supplied | *transport* in prose |
+| **nutrient** | one of the four things a runtime provides the core | *supply*, *capability* |
+| **bridge** | one transport implementation — how bytes reach a core, and leave it | *transport* in prose |
 | **façade** | an app-protocol layer on top: communicator, IMAP, SIP, `spore://` (MISSION pillar 3) | *extension* |
 | **binding** | a language binding (`bindings/`) — the thinnest runtime there is | — |
 
@@ -707,25 +705,32 @@ Two words are reserved and mean something else in these docs:
 </details>
 
 <details>
-<summary>Deep dive: the five nutrients, the runtimes, and which ones already work this way</summary>
+<summary>Deep dive: the four nutrients, the runtimes, and which ones already work this way</summary>
 
 | Nutrient | What the core needs it for | How it gets it today |
 |---|---|---|
 | **Randomness** | keys, nonces | The wasm build's *single* import is `env.spore_fill_random`; native uses `OsRng`. Already a contract, not a call. |
 | **Time** | expiry, dedup windows, ratchet TTL | `now: u32` is a parameter on `send` / `on_rx` / `open_dm`. The protocol layers never read a clock — the host decides what time it is. |
-| **Transport** | bytes in, bytes out | Bridges (next section). The router never learns which medium carried it. |
-| **Storage** | spilling the envelope store past a memory budget | The `SpillBackend` trait; `FsSpill` is the filesystem implementation. A runtime with other storage supplies its own. |
+| **Storage** | spilling the envelope store past a memory budget | The `SpillBackend` trait; `FsSpill` is the filesystem implementation. A runtime with other storage supplies its own. [`SPEC.md`](SPEC.md) names this **custody**, after the duty rather than the mechanism. |
 | **Scheduling** | expiry sweep, prekey rotation, resend | `Node::tick`, called on a timer. Without it a node only maintains itself when traffic happens to arrive. |
 
-All five are now contracts rather than assumptions, which is why the same core
+All four are contracts rather than assumptions, which is why the same core
 compiles to a daemon, to a `.so` behind a Python import, and to a
 `wasm32-unknown-unknown` module with exactly one import. What a runtime owes the
 core is a closed list, and every item on it is something the core asks for rather
 than reaches for.
 
+**Transport is not a fifth nutrient — it is the boundary the other four are
+stated across.** The core takes bytes in (`on_rx`) and hands bytes out
+(`Forward`), tagging each with an opaque interface id it never interprets. It has
+no transport trait, opens nothing, and the library tests route between two nodes
+with no transport at all. So transport is not something a runtime *supplies to*
+the core; it is what a runtime does *with* the core's output, which is why the
+bridge list is open (anyone may add one) while the nutrient list is closed.
+
 **Runtimes vary; nutrients do not.** That is the whole discipline, and it is what
 keeps the platforms comparable. An ESP32 firmware, a desktop daemon and a browser
-worker are not three architectures — they are three runtimes filling the same five
+worker are not three architectures — they are three runtimes filling the same four
 holes, richly or thinly. Where a runtime cannot supply a nutrient it says so
 rather than pretending: no disk means no spill, and the honest consequence (a
 smaller store) is surfaced, not hidden.

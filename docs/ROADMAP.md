@@ -1078,11 +1078,10 @@ feat/bridge-iroh
 ## Runtime nutrients: storage and scheduling (P-Runtime)
 
 **Steering:** [`DESIGN.md`](DESIGN.md)'s "The spore and the soil" — the core asks
-its host for five things (randomness, time, transport, storage, scheduling) and
-supplies everything else. Three of the five are already contracts rather than
-assumptions. This track closes the remaining two, so "what does this runtime
-provide?" becomes something the code answers instead of a convention each runtime
-re-derives.
+its host for four things (randomness, time, storage, scheduling) and supplies
+everything else. Two of the four are already contracts rather than assumptions.
+This track closes the remaining two, so "what does this runtime provide?" becomes
+something the code answers instead of a convention each runtime re-derives.
 
 **Why it leads the compass:** every platform track is downstream of it. The
 W-series browser node stays memory-only until storage is a contract, a thin
@@ -1128,7 +1127,7 @@ the PR guard's refusal to modify `api_freeze.rs` is never triggered.
 Ticking sync, expiry and resend is driven by `bridge::hub` and `cli::run` by
 convention rather than through an interface, so each new runtime re-derives what
 "tick" means and how often. Smaller and less urgent than P-Runtime-1 — no feature is
-blocked on it — but it is the last of the five that is a habit rather than a
+blocked on it — but it is the last of the four that is a habit rather than a
 contract. After P-Runtime-1, or folded in if the same PR makes it natural.
 
 ### Explicitly not in this track
@@ -1686,10 +1685,11 @@ open. Step 5's relay candidate can therefore be added without stranding anything
 The SPDR profile went to `VERSION = 2` for the encoding change, which was cheap to
 do while no deployed build could start a pipe at all.
 
-**This does not add a sixth nutrient.** Transport is still one nutrient and the
-list is still closed — a punch rung is a *supply* of it, exactly as a bridge is
-(see [`DESIGN.md`](DESIGN.md)'s legend). What is new is only that the supply set
-becomes something a runtime states, rather than something each façade infers.
+**This does not add a nutrient.** Transport is not one — it is the boundary the
+four are stated across — and a punch rung is a bridge-side way of reaching that
+boundary, exactly as a bridge is (see [`DESIGN.md`](DESIGN.md)'s legend). What is
+new is only that the reachable set becomes something a runtime states, rather than
+something each façade infers.
 
 **Should a daemon help other people's NAT traversal by default?** Only the
 STUN-shaped echo is SPORE's own to decide — relay is now iroh's concern
