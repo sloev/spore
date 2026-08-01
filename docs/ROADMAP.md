@@ -2236,7 +2236,23 @@ negotiated:
    freshly re-confirmed reachability close together in time (Finding 2) —
    never timed off a possibly-stale OFFER/ANSWER round trip.
 4. Optional UPnP/NAT-PMP/PCP on desktop/daemon, where a device actually offers it.
-5. **iroh as the relay/NAT-fallback candidate** (Finding 3) instead of a new
+5. **Core landed.** `direct::iroh::IrohPort` wraps an established iroh connection
+   as a `DatagramPort`, and `UdpRunner` offers `iroh` as a candidate and dials it —
+   but **only when a runtime supplies an endpoint** via `set_iroh`. Without one the
+   medium is absent from both the offer and the willing set, so a peer offering it
+   is declined with a reason rather than accepted and found unopenable; there is a
+   test for exactly that. Ranked worst of the routable candidates, because it may
+   punch but may also relay.
+
+   To make this possible `Pipe`'s port is now boxed (`direct::AnyPort`): a UDP pipe
+   and an iroh pipe are different types and could not share one map. That is the
+   same bargain as `Box<dyn SpillBackend>`, and it is what medium-by-convention
+   already implied — an open medium list cannot be held by a closed type.
+
+   **Still to wire: the daemon.** Nothing constructs an endpoint and calls
+   `set_iroh` yet, so iroh is compiled-in-capable but not switched on anywhere.
+
+   *(original plan)* **iroh as the relay/NAT-fallback candidate** (Finding 3) instead of a new
    SPORE-native relay protocol — offered as a real, visible candidate, never a
    silent fallback the user didn't choose, and only where `bridge-iroh` is
    compiled in. iroh already supports a self-hosted relay, not only n0's

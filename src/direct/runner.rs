@@ -12,7 +12,7 @@
 //! same caller here. `std::net` means no wasm; a browser's ladder ends before UDP
 //! anyway (see the P-Direct-NAT track).
 
-use super::{Candidate, Medium, Need, Pipe, RecordType, Reject, Signal, Signalling, UdpPort};
+use super::{AnyPort, Candidate, Medium, Need, Pipe, RecordType, Reject, Signal, Signalling, UdpPort};
 use crate::Addr;
 use std::collections::HashMap;
 
@@ -81,7 +81,9 @@ pub enum Event {
 
 pub struct UdpRunner {
     sig: Signalling,
-    pipes: HashMap<[u8; 16], Pipe<UdpPort>>,
+    /// Boxed, so a UDP pipe and an iroh pipe can live in one map — the medium
+    /// list is open, so the type holding them cannot be closed.
+    pipes: HashMap<[u8; 16], Pipe<AnyPort>>,
     /// The LAN locator handed out in offers, as `ip:port`. Configured, not
     /// guessed — a node never invents an address for itself.
     advertise: String,
@@ -100,6 +102,13 @@ pub struct UdpRunner {
     /// This host's global IPv6, if it has one — an address with no NAT in front
     /// of it, so it needs neither discovery nor a punch.
     global_v6: Option<String>,
+    /// An iroh endpoint, if the runtime supplied one. The core does not build it:
+    /// creating an endpoint is async, needs a tokio runtime and talks to relays —
+    /// all things a runtime owns and the core does not. Supplying it is the same
+    /// bargain as `SpillBackend`, and a build without `bridge-iroh` simply never
+    /// has one to supply.
+    #[cfg(feature = "bridge-iroh")]
+    iroh: Option<(std::sync::Arc<tokio::runtime::Runtime>, ::iroh::Endpoint)>,
     /// How the most recent pipe was established. Kept so a runtime with only a
     /// status line — Android — can surface it too; loud only in the daemon log
     /// would be loud only where the problem was already known.
@@ -119,6 +128,8 @@ impl UdpRunner {
             reflexive: None,
             extra: Vec::new(),
             last_via: None,
+            #[cfg(feature = "bridge-iroh")]
+            iroh: None,
             global_v6: crate::bridge::udp::primary_ipv6().map(|a| a.to_string()),
             punching: [0u8; 16],
         }
@@ -127,8 +138,16 @@ impl UdpRunner {
     /// The mediums this runtime can open. UDP alone — neither native runtime has
     /// a BLE or ESP-NOW adapter behind `DatagramPort`, and declaring one would be
     /// a candidate the peer could never reach.
-    fn willing(&self) -> [Medium; 1] {
-        [Medium::udp()]
+    fn willing(&self) -> Vec<Medium> {
+        // `mut` is only used under `bridge-iroh`; without it this is a one-element
+        // list and the compiler is right to say so.
+        #[allow(unused_mut)]
+        let mut w = vec![Medium::udp()];
+        #[cfg(feature = "bridge-iroh")]
+        if self.iroh.is_some() {
+            w.push(Medium::new(super::iroh::MEDIUM));
+        }
+        w
     }
 
     fn candidates(&self) -> Vec<Candidate> {
@@ -169,6 +188,20 @@ impl UdpRunner {
                 est_bps: 2_000_000,
                 mtu: UDP_MTU,
                 rtt_hint_ms: 40,
+            });
+        }
+        // iroh goes last of the routable ones and worse than reflexive on the
+        // hint, because it is the fallback of fallbacks: it may punch, but it may
+        // also relay, and a relayed path is not one hop. Offered only when the
+        // runtime actually supplied an endpoint.
+        #[cfg(feature = "bridge-iroh")]
+        if let Some((_, ep)) = &self.iroh {
+            out.push(Candidate {
+                medium: Medium::new(super::iroh::MEDIUM),
+                locator: ep.id().to_string().into_bytes(),
+                est_bps: 2_000_000,
+                mtu: UDP_MTU,
+                rtt_hint_ms: 90,
             });
         }
         // The reflexive locator goes last, and is ranked worst on purpose: it is
@@ -216,6 +249,18 @@ impl UdpRunner {
         self.global_v6 = v6.map(|a| a.to_string());
     }
 
+    /// Supply an iroh endpoint, making `iroh` one of the mediums this node can
+    /// open — P-Direct-NAT's last rung, for when no LAN, IPv6 or overlay path
+    /// exists and both ends are behind NATs.
+    ///
+    /// Until this is called the medium is simply absent from `willing`, so a peer
+    /// offering an iroh candidate is declined honestly rather than accepted and
+    /// then found unopenable.
+    #[cfg(feature = "bridge-iroh")]
+    pub fn set_iroh(&mut self, rt: std::sync::Arc<tokio::runtime::Runtime>, ep: ::iroh::Endpoint) {
+        self.iroh = Some((rt, ep));
+    }
+
     /// Declare extra locators to offer — an overlay address, a VPN address, or
     /// anything else this node is reachable at that cannot be discovered.
     ///
@@ -254,18 +299,41 @@ impl UdpRunner {
     /// LAN there is no NAT to traverse and nothing was needed, and off a LAN the
     /// records will simply not arrive, which the caller reports honestly rather
     /// than the pipe pretending otherwise.
-    fn open(&self, chosen: &Candidate, target: &[u8], local_port: u16) -> Option<(UdpPort, Via)> {
+    fn open(&self, chosen: &Candidate, target: &[u8], local_port: u16) -> Option<(AnyPort, Via)> {
+        #[cfg(feature = "bridge-iroh")]
+        if chosen.medium == *super::iroh::MEDIUM {
+            return self.open_iroh(chosen, target);
+        }
         if chosen.medium != *Medium::UDP {
             return None;
         }
         let peer = String::from_utf8(target.to_vec()).ok()?;
         let mtu = chosen.mtu as usize;
+        let boxed = |p: UdpPort| Box::new(p) as AnyPort;
         match super::punch::punch(local_port, peer.as_str(), &self.punching, super::punch::WINDOW) {
-            Ok(sock) => UdpPort::from_socket(sock, mtu).ok().map(|p| (p, Via::Punched)),
-            Err(_) => {
-                UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), mtu).ok().map(|p| (p, Via::FellBack))
-            }
+            Ok(sock) => UdpPort::from_socket(sock, mtu).ok().map(|p| (boxed(p), Via::Punched)),
+            Err(_) => UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), mtu)
+                .ok()
+                .map(|p| (boxed(p), Via::FellBack)),
         }
+    }
+
+    /// Dial the peer's iroh endpoint and wrap the connection as a port.
+    ///
+    /// iroh does its own punching and, failing that, relays — which is the whole
+    /// reason this rung exists. `Via` reports which: a relayed path works but is
+    /// not one hop, and the relay sees ciphertext, volume and timing.
+    #[cfg(feature = "bridge-iroh")]
+    fn open_iroh(&self, chosen: &Candidate, target: &[u8]) -> Option<(AnyPort, Via)> {
+        let (rt, ep) = self.iroh.as_ref()?;
+        let id: ::iroh::EndpointId = String::from_utf8(target.to_vec()).ok()?.parse().ok()?;
+        let conn = rt.block_on(ep.connect(id, super::iroh::ALPN)).ok()?;
+        let port = super::iroh::IrohPort::new(rt.clone(), conn, chosen.mtu as usize);
+        // A relayed connection is reported as a fallback, not a punch: it carries
+        // traffic, but claiming "punched" for a path through someone else's relay
+        // is exactly the over-claim this type exists to prevent.
+        let via = if port.is_relayed() { Via::FellBack } else { Via::Punched };
+        Some((Box::new(port) as AnyPort, via))
     }
 
     /// Propose a pipe to `peer`. The caller sends the bytes over the mesh.
@@ -487,6 +555,37 @@ mod carriage_tests {
         };
         let picked = super::super::choose(&offer, &[Medium::udp()]).unwrap();
         assert_eq!(picked.locator, b"192.168.1.10:7500".to_vec());
+    }
+
+    /// A medium with nothing behind it must not be declared. Without an endpoint
+    /// supplied by the runtime, `iroh` is absent from both the offer and the
+    /// willing set — so a peer offering one is declined with a reason rather than
+    /// accepted and then found unopenable.
+    #[test]
+    fn iroh_is_absent_until_a_runtime_supplies_an_endpoint() {
+        let r = UdpRunner::new([1u8; 8], "192.168.1.10:7500", 7500);
+        assert!(!r.candidates().iter().any(|c| c.medium == *"iroh"), "no endpoint, no candidate");
+        assert!(!r.willing().iter().any(|m| *m == *"iroh"), "and nothing declared we cannot open");
+
+        // An offer of only iroh is therefore declined, not silently accepted.
+        let mut b = UdpRunner::new([2u8; 8], "192.168.1.11:7501", 7501);
+        let offer = super::super::Offer {
+            pipe_id: [1u8; 16],
+            from: [1u8; 8],
+            to: [2u8; 8],
+            need: Need { min_bps: 1_000, mtu_needed: 64, max_latency_ms: None },
+            eph_pub: [0u8; 32],
+            candidates: vec![Candidate {
+                medium: Medium::new("iroh"),
+                locator: b"some-endpoint-id".to_vec(),
+                est_bps: 1_000_000,
+                mtu: 1200,
+                rtt_hint_ms: 90,
+            }],
+        };
+        let (out, ev) = b.on_plaintext([1u8; 8], &offer.encode(), 1_700_000_000);
+        assert!(matches!(ev, Event::Declined { .. }), "declined honestly: {ev:?}");
+        assert!(out.is_some(), "and the peer is told why, rather than left waiting");
     }
 
     #[test]

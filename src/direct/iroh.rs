@@ -47,6 +47,10 @@ use tokio::runtime::Runtime;
 /// [`Medium`](super::Medium).
 pub const MEDIUM: &str = "iroh";
 
+/// The ALPN a Direct pipe negotiates, so an iroh endpoint carrying SPORE Direct
+/// is distinguishable from one carrying the mesh bridge or anything else.
+pub const ALPN: &[u8] = b"spore/direct/1";
+
 /// A `DatagramPort` over an established iroh connection.
 ///
 /// Holds the runtime alive: the receive pump and QUIC's own timers are tasks on
@@ -130,9 +134,7 @@ impl DatagramPort for IrohPort {
     }
 
     fn send(&mut self, frame: &[u8]) -> io::Result<()> {
-        self.conn
-            .send_datagram(bytes::Bytes::copy_from_slice(frame))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        self.conn.send_datagram(bytes::Bytes::copy_from_slice(frame)).map_err(io::Error::other)
     }
 
     fn try_recv(&mut self) -> Option<Vec<u8>> {

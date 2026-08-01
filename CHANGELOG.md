@@ -41,6 +41,23 @@ Two conventions specific to this project:
   cheap now, since until the daemon wiring below nothing could start a pipe at all.
   The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
 
+- **Direct can run over an iroh QUIC connection — the last rung of the NAT
+  ladder.** `IrohPort` wraps an established iroh connection as a `DatagramPort`,
+  using QUIC **datagrams** rather than streams so a lost media frame never
+  head-of-line-blocks, and keeping the record AEAD on top: the key schedule binds
+  the medium name, so dropping our own sealing would make a pipe's security depend
+  on its medium. The iroh endpoint key is deliberately not the SPORE signing key —
+  the candidate is already attested by riding inside a sealed, signed OFFER, and
+  reusing a signing key as a TLS static key is cross-protocol reuse. A relayed
+  connection is reported as `Via::FellBack` rather than a punch, because a relay is
+  not one hop and its operator sees ciphertext, volume and timing.
+  **Offered only when a runtime supplies an endpoint:** without one the medium is
+  absent from both the offer and the willing set, so a peer offering it hears an
+  honest decline. Making this possible, a pipe's port is now boxed
+  (`direct::AnyPort`) — a UDP pipe and an iroh pipe are different types and could
+  not share one map, the same bargain `SpillBackend` already makes. **No daemon
+  switches it on yet.**
+
 - **A Direct pipe now says how it was established, instead of hiding it.**
   `UdpRunner::open` fell back to a plain connect whenever the hole punch failed,
   which made "traversal worked" and "traversal never ran" produce an identical
