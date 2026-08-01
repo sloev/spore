@@ -18,6 +18,21 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The daemon can now bring a Direct pipe up.** The core seam below made
+  signalling possible; nothing called it, so Direct still could not be started
+  from anything you can run. `src/cli/direct.rs` is that consumer: `direct:` in
+  the config says where a node is reachable, `direct-to:` names a peer to keep a
+  pipe to (the daemon has no control surface to start one from, so without it
+  both ends would sit waiting to be offered a pipe), and the runner dispatches
+  delivered DMs through `Signalling`, opens a `UdpPort` for whichever candidate
+  won, and carries the reply back over `send_direct`. **Verified with two real
+  daemon processes** negotiating over a shared folder bridge and bringing up a
+  pipe, not only in a unit test. Honest limits, printed by the daemon itself:
+  **LAN only** — a node cannot yet discover its own reflexive address, so it
+  advertises what it was told and NAT traversal remains the unbuilt
+  P-Direct-NAT track; and there is no app above the pipe yet, so inbound records
+  are logged and dropped rather than routed somewhere that does not exist.
+
 - **Direct signalling can now reach a peer at all — `SPDR` rides `send_direct`.**
   The negotiation codec, key schedule and socket adapters were all built and
   tested, but nothing tied them to the mesh: no code anywhere outside
