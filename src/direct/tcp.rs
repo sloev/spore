@@ -209,7 +209,7 @@ mod tests {
             [7u8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
             vec![Candidate {
-                medium: Medium::Tcp,
+                medium: Medium::tcp(),
                 locator: b"127.0.0.1".to_vec(),
                 est_bps: 1_000_000,
                 mtu: 1200,
@@ -217,7 +217,7 @@ mod tests {
             }],
         );
         let offer = Offer::decode(&offer_bytes).unwrap();
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::Tcp], resp_port);
+        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::tcp()], resp_port);
         let mut resp_pipe = resp_pipe.unwrap();
         let answer = Answer::decode(&answer_bytes).unwrap();
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();

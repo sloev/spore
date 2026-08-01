@@ -1840,7 +1840,7 @@ mod tests {
 
     fn udp_candidate() -> direct::Candidate {
         direct::Candidate {
-            medium: direct::Medium::Udp,
+            medium: direct::Medium::udp(),
             locator: b"198.51.100.7:7373".to_vec(),
             est_bps: 2_000_000,
             mtu: 1200,
@@ -1890,11 +1890,11 @@ mod tests {
             .expect("B decrypts the signalling");
         assert!(direct::is_signal(&payload), "B can tell signalling from an app message");
 
-        let (answer_bytes, mut b_pipe) = match b_sig.on_signal(a.addr, &payload, &[direct::Medium::Udp]) {
+        let (answer_bytes, mut b_pipe) = match b_sig.on_signal(a.addr, &payload, &[direct::Medium::udp()]) {
             direct::Signal::Offer { peer, accepted } => {
                 assert_eq!(peer, a.addr);
                 assert_eq!(accepted.pipe_id(), pipe_id);
-                assert_eq!(accepted.chosen.medium, direct::Medium::Udp);
+                assert_eq!(accepted.chosen.medium, direct::Medium::udp());
                 direct::Pipe::answer_with(accepted, b.addr, b_port)
             }
             _ => panic!("B should be able to serve this offer"),
@@ -1910,9 +1910,9 @@ mod tests {
             .find_map(|d| a.open_dm(b.addr, &d.payload, d.flags & fl::RATCHET != 0, now))
             .expect("A decrypts the answer");
 
-        let mut a_pipe = match a_sig.on_signal(b.addr, &payload, &[direct::Medium::Udp]) {
+        let mut a_pipe = match a_sig.on_signal(b.addr, &payload, &[direct::Medium::udp()]) {
             direct::Signal::Answered { pending, answer, chosen, .. } => {
-                assert_eq!(chosen.medium, direct::Medium::Udp);
+                assert_eq!(chosen.medium, direct::Medium::udp());
                 direct::Pipe::finish(pending, &answer, a_port).expect("A finishes the pipe")
             }
             _ => panic!("A should see its own offer answered"),
@@ -1961,7 +1961,7 @@ mod tests {
             direct::Signal::Decline { reply, .. } => reply,
             _ => panic!("declined"),
         };
-        match a_sig.on_signal(b.addr, &reply, &[direct::Medium::Udp]) {
+        match a_sig.on_signal(b.addr, &reply, &[direct::Medium::udp()]) {
             direct::Signal::Refused { reason, .. } => assert_eq!(reason, direct::Reject::NoMedium),
             _ => panic!("A should see the refusal"),
         }
@@ -1978,26 +1978,29 @@ mod tests {
 
         // An ordinary app message is not signalling.
         assert!(matches!(
-            b_sig.on_signal(a.addr, b"meet at the north pier", &[direct::Medium::Udp]),
+            b_sig.on_signal(a.addr, b"meet at the north pier", &[direct::Medium::udp()]),
             direct::Signal::NotSignal
         ));
 
         // An offer addressed to C is not B's to answer, however it arrived.
         let (for_c, _) = a_sig.offer(c.addr, a_need(), vec![udp_candidate()], now);
-        assert!(matches!(b_sig.on_signal(a.addr, &for_c, &[direct::Medium::Udp]), direct::Signal::NotSignal));
+        assert!(matches!(
+            b_sig.on_signal(a.addr, &for_c, &[direct::Medium::udp()]),
+            direct::Signal::NotSignal
+        ));
 
         // An answer to an offer we never made has no ephemeral secret behind it,
         // so there is nothing to derive and nothing to act on.
         let (offer_bytes, _) = a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now);
         let (_, b_port) = direct::Loopback::pair(1200);
-        let accepted = match b_sig.on_signal(a.addr, &offer_bytes, &[direct::Medium::Udp]) {
+        let accepted = match b_sig.on_signal(a.addr, &offer_bytes, &[direct::Medium::udp()]) {
             direct::Signal::Offer { accepted, .. } => accepted,
             _ => panic!("served"),
         };
         let (answer_bytes, _) = direct::Pipe::answer_with(accepted, b.addr, b_port);
         let mut stranger = direct::Signalling::new(c.addr);
         assert!(matches!(
-            stranger.on_signal(b.addr, &answer_bytes, &[direct::Medium::Udp]),
+            stranger.on_signal(b.addr, &answer_bytes, &[direct::Medium::udp()]),
             direct::Signal::NotSignal
         ));
     }

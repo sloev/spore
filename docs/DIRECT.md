@@ -49,12 +49,28 @@ that meet the initiator's `min_bps` and `mtu_needed`, then ranks by latency hint
 (lower first), breaking ties by capacity. If candidates overlapped but none were
 big/fast enough it answers `throughput`; if none overlapped, `no_medium`.
 
+A medium is a **name, not a code** — convention rather than an enum in the core.
+The conventional ones:
+
 | medium | e2e? | est. bps | mtu | notes |
 |---|---|---|---|---|
-| UDP | yes | high | ≥1200 | one datagram = one record |
-| TCP | yes | high | ≥1400 | `u16be len ‖ record` framing |
-| BLE | yes | low–med | 20–200 | may chunk below the record |
-| ESP-NOW | yes | ~200–500 kb | ~250 | optional adapter |
+| `udp` | yes | high | ≥1200 | one datagram = one record |
+| `tcp` | yes | high | ≥1400 | `u16be len ‖ record` framing |
+| `ble` | yes | low–med | 20–200 | may chunk below the record |
+| `esp-now` | yes | ~200–500 kb | ~250 | no adapter in-tree yet |
+
+Nothing enforces that list, which is the point: SPORE Direct runs over a medium
+this codebase has never heard of, and the core does not need an edit or an
+allocation from anyone to allow it — the same reason `DESIGN.md` keeps the
+*bridge* list open while the nutrient list stays closed. Two implementations that
+spell a medium differently have two mediums, so use the conventional name where
+one exists and namespace anything new (`acme.lora-p2p`).
+
+**An unrecognised medium is skipped, never fatal.** It decodes fine, and is then
+simply a candidate nobody declared willingness for — so a peer offering one new
+path alongside three usable ones still gets a pipe. An offer of *only* unknown
+mediums answers `no_medium`, which is a reason rather than silence. The medium
+name is bound into the KDF, so a record cannot be replayed onto a different one.
 
 ## Key schedule
 

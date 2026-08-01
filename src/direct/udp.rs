@@ -137,7 +137,7 @@ mod tests {
             [7u8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
             vec![Candidate {
-                medium: Medium::Udp,
+                medium: Medium::udp(),
                 locator: b"127.0.0.1".to_vec(),
                 est_bps: 1_000_000,
                 mtu: 1200,
@@ -145,7 +145,7 @@ mod tests {
             }],
         );
         let offer = Offer::decode(&offer_bytes).unwrap();
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::Udp], resp_port);
+        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::udp()], resp_port);
         let mut resp_pipe = resp_pipe.unwrap();
         let answer = Answer::decode(&answer_bytes).unwrap();
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();
@@ -192,7 +192,7 @@ mod tests {
         // Lock the socket to the child, wrap it in a real UdpPort, and answer.
         sock.connect(child_addr).expect("connect to child");
         let port = UdpPort::from_socket(sock, 1200).expect("wrap responder socket");
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::Udp], port);
+        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::udp()], port);
         let mut resp_pipe = resp_pipe.expect("responder accepts the offer");
 
         // The answer rides back over the same (now connected) socket as a raw datagram.
@@ -230,7 +230,7 @@ mod tests {
             [0x5Au8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
             vec![Candidate {
-                medium: Medium::Udp,
+                medium: Medium::udp(),
                 locator: peer.into_bytes(),
                 est_bps: 1_000_000,
                 mtu: 1200,
