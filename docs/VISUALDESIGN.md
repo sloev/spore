@@ -258,7 +258,7 @@ One source of truth, three consumers.
 |---|---|
 | `site/style.css` | CSS custom properties on `:root`, names exactly as §1 |
 | `web/spore-standalone.html` | Same properties, inlined — no external stylesheet |
-| Android (Compose) | `Color.kt` mirroring the tokens; `SporeTheme` maps them to `ColorScheme`. `--edge` → `outline`, `--panel` → `surfaceVariant`, `--accent` → `primary`, `--accent2` → `secondary` |
+| Android (Compose) | [`Chrome.kt`](../android/app/src/main/kotlin/org/spore/node/Chrome.kt) — a generated `Palette` object, then `SporeLightColors` / `SporeDarkColors` mapping it onto Material 3. `--edge` → `outline`, `--panel` → `surfaceVariant`, `--accent` → `primary`, `--accent2` → `secondary` |
 
 When a token changes, it changes in all three or in none. A screenshot in one place
 and a hex code in another is how design languages rot.

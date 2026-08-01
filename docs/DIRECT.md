@@ -54,7 +54,7 @@ The conventional ones:
 | medium | e2e? | est. bps | mtu | notes |
 |---|---|---|---|---|
 | `udp` | yes | high | ≥1200 | one datagram = one record |
-| `tcp` | yes | high | ≥1400 | `u16be len ‖ record` framing |
+| `tcp` | yes | high | ≥1400 | `u32be len ‖ record` framing |
 | `ble` | yes | low–med | 20–200 | may chunk below the record |
 | `esp-now` | yes | ~200–500 kb | ~250 | no adapter in-tree yet |
 
@@ -91,7 +91,8 @@ pulling in a second — not the sketch's HKDF-SHA256.
 
 ```
 offset  size  field
-0       1     ver = 1
+0       1     ver = direct::VERSION (3 today — the record carries the same
+              profile version as the signalling, so one bump moves both)
 1       1     type  (0 MEDIA, 1 KEEPALIVE, 2 CONTROL, 3 DATA, 4 STREAM)
 2       2     seq   u16 BE   (the AEAD nonce)
 4       4     pipe_id[..4]   (demux hint; full binding is in the key)
@@ -105,7 +106,7 @@ retry lives *above* this record, so a lost media frame never head-of-line-blocks
 voice call.
 
 - **UDP / ESP-NOW:** one packet = one record.
-- **TCP / serial / BLE:** `u16be length ‖ record` (BLE may chunk further).
+- **TCP / serial / BLE:** `u32be length ‖ record` (BLE may chunk further).
 
 ## Threat model
 

@@ -18,7 +18,7 @@ The protocol is pure; it holds no OS. A conformant node needs four things from w
 - **Randomness.** A CSPRNG for the signing seed, prekey secrets, ratchet keys, mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and MUST NOT be derivable from the identity seed** (§7.2).
 - **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7 local days (§5.7). Time is supplied per call, never read by the protocol itself.
 - **Custody.** Received envelopes are held until expiry and served on WANT (§6). The bytes may live anywhere — memory, disk, flash, remote store. Custody is untrusted storage: **an entry read back MUST be re-verified against its ID before it is served**, and a mismatch MUST read as "not held" so the mesh re-fetches. An ID is the hash of its bytes, so this is always checkable and never needs a second authority.
-- **Scheduling.** Four duties MUST run on a timer, not only on arrival: expiry sweep, prekey rotation (§7.2), Trickle beacons (§5.4b), and ACKREQ resend backoff (§5.4d). **A node driven only by inbound traffic stalls all four** — it stops pruning, stops advancing forward secrecy, and never retries.
+- **Scheduling.** Four duties MUST run on a timer, not only on arrival: expiry sweep, prekey rotation (§7.2), Trickle beacons (§5.4b), and ACKREQ resend backoff (§5.4d). **A node driven only by inbound traffic stalls all four** — it stops pruning, stops advancing forward secrecy, and never retries. Three of them are pure and belong to the protocol, so a core can own them (here, `Node::tick`); **beaconing is the runtime's own timer**, because deciding to emit on an interface is the one duty that lives on the far side of the transport boundary. A runtime that drives only the core's tick is not conformant — it never beacons.
 
 ## 1. Identity & addressing
 Identity = one Ed25519 keypair. **Address** = first 8 B of SHA-256(pubkey). **Topic** = first 8 B of SHA-256(UTF-8 string). No global namespace; exchange keys by QR/paper/voice. Petnames are local.
@@ -31,7 +31,7 @@ off len field
 2   1   flags  b0 ENCRYPTED b1 SIGNED b2 FRAGMENT b3 ACKREQ b4 FLOOD b5 SRC8
                b6 RATCHET (0x40, §7)   b7 reserved, MUST be 0
 3   1   hops   remaining relays (default 16; relays clamp incoming to ≤ 16)
-4   4   expiry unix seconds u32 (stores clamp horizon to 30 d)
+4   4   expiry unix seconds u32 (stores clamp horizon to 30 d — unimplemented here, see ROADMAP)
 8   8   dest   address | topic | 0x00×8 = public
 -- if SIGNED: src = 32-B pubkey, or 8-B address if SRC8 --
     2   plen   u16
@@ -50,7 +50,7 @@ Receiver decodes when any received set reaches rank *count* (Gaussian eliminatio
 
 ## 4. Routing state (T2)
 - **Neighbors** (per interface): point-to-point peers + anyone heard via hops=0 ANNOUNCE.
-- **Paths**: `addr → up to 3 of (iface, neighbor, age)`. Learned: (a) the **first copy** of any new signed envelope raced every path and won — its src is reachable via what delivered it; (b) flooded ANNOUNCEs. On broadcast media the interface *is* the direction. Fresh < 3 h; purge 7 d (stale entries still guide custody).
+- **Paths**: `addr → up to 3 of (iface, neighbor, age)`. Learned: (a) the **first copy** of any new signed envelope raced every path and won — its src is reachable via what delivered it; (b) flooded ANNOUNCEs. On broadcast media the interface *is* the direction. Fresh < 3 h; purge 7 d (stale entries still guide custody). *Not implemented here — see [ROADMAP.md](ROADMAP.md) § Conformance gaps.*
 
 **ANNOUNCE** (type 3, signed): payload = `[prekey:32][nt:1][topic×8 ea][np:1][(addr:8, age_min:2) ea][petname…]` — your current encryption prekey (§7), topics you collect, freshest paths. Link HELLO = hops 0; flooded = hops 16.
 
@@ -131,8 +131,8 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 
 **Underlays with their own routing = ONE interface.** Meshtastic, Reticulum, Yggdrasil, cjdns, BATMAN/OLSR, Tor/I2P, WireGuard, plain IP — each already moves bytes across many physical hops. Hand it one frame and decrement `hops` **once** for the whole crossing; its internal hops are invisible and free. Point-to-point backbone links may *restore* the hop so long hauls don't burn the budget. SPORE hops therefore count **gateways between networks**, not hops inside them — exactly IP over Ethernet.
 
-**Numbers worth memorising.** Port **7373** (UDP/TCP/WS), the same value as EtherType `0x7373` and multicast `239.73.73.73` / `ff02::7373`. Meshtastic portnum **256**. BLE service `53504f52-4531-…`. Everything else: look it up.
+**Numbers worth memorising.** Port **7373** (UDP/TCP/WS), the same value as EtherType `0x7373` and multicast `239.73.73.73` / `ff02::7373`. Meshtastic portnum **256**. BLE rides the **Nordic UART Service** (`6e400001-…`, RX `…0002`, TX `…0003`) rather than a SPORE-specific UUID — it is what phones, hobby boards and RNodes already expose. Everything else: look it up.
 
 **Two address spaces.** *Who* = the SPORE address or topic — end-to-end, cryptographic, identical on every medium. *How* = the underlay's own naming (a node number, a destination hash, an `IP:port`, or nothing at all) — local to one link. A bridge owns exactly one interface and translates between them; the router never learns underlay addresses, the way an OS's ARP table maps IP→MAC. Bindings are learned by **snooping signed frames** — a signed envelope proves its own sender, so no handshake is needed — and a stale binding costs nothing, because flood-fallback (§5.6) routes around it.
 
-**Zero-rendezvous peering (browsers & phones).** A WebRTC session reduces to ufrag(4) + pwd(22) + DTLS fingerprint(32) + mDNS host candidate(16) ≈ **90 B**; both sides rebuild full SDP from a hardcoded template. Beep that descriptor over ultrasound or show it as a QR, answer, and the browser's own mDNS completes a direct DataChannel — no server, no typed IP, ≈15 s. Native nodes run **ice-lite with static ufrag/pwd/fingerprint**, so their descriptor is a constant you can print on the box. **App distribution:** every native node serves the PWA at `http://localhost:7373/` and to the LAN at its IP, with an HTTP bag API (`POST /spore/push`, `GET /spore/inv?since=`, `POST /spore/want`, MIME `application/x-spore`). The app store is every node.
+**Zero-rendezvous peering (browsers & phones).** A WebRTC session reduces to ufrag(4) + pwd(22) + DTLS fingerprint(32) + mDNS host candidate(16) ≈ **90 B**; both sides rebuild full SDP from a hardcoded template. Beep that descriptor over ultrasound or show it as a QR, answer, and the browser's own mDNS completes a direct DataChannel — no server, no typed IP, ≈15 s. Native nodes run **ice-lite with static ufrag/pwd/fingerprint**, so their descriptor is a constant you can print on the box — specified, not built: WebRTC here is browser-only ([`web/transports/webrtc.mjs`](../web/transports/webrtc.mjs)), so the native half of this is a [ROADMAP.md](ROADMAP.md) item. **App distribution:** a native node's HTTP bridge exposes the bag API — `POST /spore/push`, `GET /spore/inv`, `POST /spore/want`, MIME `application/x-spore` — on port 7373, to localhost and to the LAN at its IP. Serving the PWA itself from `/` is the intended end state (the app store is every node) but is **not implemented**: `bridge::bag` routes the three bag paths and 404s everything else.
