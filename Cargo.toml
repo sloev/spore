@@ -1,6 +1,6 @@
 [package]
 name = "spore"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 # The oldest toolchain that builds this, verified rather than asserted: `cargo
 # +1.85 test` passes (the MSRV CI job runs exactly that). It matters because
