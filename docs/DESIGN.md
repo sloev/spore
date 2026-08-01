@@ -668,14 +668,42 @@ lifetime, trading memory for CPU rather than trading away the check.
 
 ## The spore and the soil — where the core runs
 
-The core is the seed: one implementation of the protocol, the same bytes on every
-machine, carrying nothing about where it landed. Everything that hosts it — an OS
-process, a language binding, a browser worker, a microcontroller firmware — is
-soil. Soil varies enormously; what it has to provide does not. A runtime supplies
-**five nutrients**, and the core supplies everything else.
+The **core** is one implementation of the protocol — the same bytes on every
+machine, carrying nothing about where it landed. Anything that hosts it is a
+**runtime**: a language binding, a daemon, a browser worker, a microcontroller
+firmware. Runtimes vary enormously; what they have to provide does not. A runtime
+supplies **five nutrients**, and the core supplies everything else.
+
+*The image, once, because it is the whole idea: the core is a spore and a runtime
+is the soil it lands in. Past this paragraph the docs use the plain words —* core,
+runtime, nutrient *— per the legend below.*
 
 <details>
-<summary>Deep dive: the five nutrients, the vessels, and which ones already work this way</summary>
+<summary>Legend: the seven words, and the ones they replace</summary>
+
+One noun per concept. Synonyms were retired because six words for "the thing that
+hosts the core" is six chances to think they are different things.
+
+| Word | Means | Retired synonyms |
+|---|---|---|
+| **core** | the protocol implementation (`src/`) — frozen wire, no OS in it | *seed*, *spore* (as a name for the code) |
+| **runtime** | anything that hosts a core and supplies its nutrients | *soil*, *vessel*, *platform* |
+| **daemon** | a runtime that is a long-running process | — a *kind* of runtime, not a synonym |
+| **nutrient** | one of the five things a runtime provides the core | *supply*, *capability* |
+| **bridge** | one transport implementation — how the transport nutrient is supplied | *transport* in prose |
+| **façade** | an app-protocol layer on top: communicator, IMAP, SIP, `spore://` (MISSION pillar 3) | *extension* |
+| **binding** | a language binding (`bindings/`) — the thinnest runtime there is | — |
+
+Two words are reserved and mean something else in these docs:
+
+- **seed** always means the 32-byte signing seed (`Node::from_seed`, the Seed
+  Sheet, "seed → new device"). It never means the core.
+- **spore** is the protocol's name, and the metaphor above. `transports/` and the
+  `DatagramTransport` trait keep their names — those are code, not prose.
+</details>
+
+<details>
+<summary>Deep dive: the five nutrients, the runtimes, and which ones already work this way</summary>
 
 | Nutrient | What the core needs it for | How it gets it today |
 |---|---|---|
@@ -690,31 +718,31 @@ same core compiles to a daemon, to a `.so` behind a Python import, and to a
 `wasm32-unknown-unknown` module with exactly one import. The remaining gap is
 storage — a nutrient the core currently takes for granted instead of asking for.
 
-**Soil varies; nutrients do not.** That is the whole discipline, and it is what
+**Runtimes vary; nutrients do not.** That is the whole discipline, and it is what
 keeps the platforms comparable. An ESP32 firmware, a desktop daemon and a browser
-worker are not three architectures — they are three soils filling the same five
+worker are not three architectures — they are three runtimes filling the same five
 holes, richly or thinly. Where a runtime cannot supply a nutrient it says so
 rather than pretending: no disk means no spill, and the honest consequence (a
 smaller store) is surfaced, not hidden.
 
-A **vessel** is any host that carries the seed:
+The runtimes that exist or are planned:
 
-| Vessel | Soil it offers |
+| Runtime | What it supplies |
 |---|---|
 | **Language binding** | A Python or Go program using [`bindings/`](../bindings/README.md) *is* a runtime — the thinnest one there is. If the nutrient contract is awkward from Python, the contract is wrong. |
 | **CLI daemon** | `src/cli/` — config-driven bridges, disk store, OS clock |
 | **Desktop app** | The same daemon plus a UI surface |
 | **Android** | The same core under a foreground service |
 | **Browser / worker** | wasm; no disk, and no background life once the last tab closes |
-| **Embedded (ESP32)** | Thin soil: little memory, no filesystem, one or two transports |
+| **Embedded (ESP32)** | Little memory, no filesystem, one or two bridges |
 
-**Extensions grow in the soil, not in the seed.** A communicator — threads, rooms,
-feed, library, public folder — is an extension of the *runtime* that declares
-which nutrients it needs. It is one client of the core, never part of it. That is
-why the chat UI is replaceable and the protocol is not.
+**Façades attach to the runtime, not to the core.** A communicator — threads,
+rooms, feed, library, public folder — is a façade that declares which nutrients it
+needs. It is one client of the core, never part of it. That is why the chat UI is
+replaceable and the protocol is not.
 
 One place the metaphor lies, worth saying plainly: soil is passive and a runtime
-is not. The vessel owns `main()`, drives the tick, and decides when to flush. It
+is not. The runtime owns `main()`, drives the tick, and decides when to flush. It
 hosts the core; it does not merely surround it.
 </details>
 

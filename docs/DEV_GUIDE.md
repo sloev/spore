@@ -22,7 +22,7 @@ first PR; you shouldn't need to read this one again.
 | Check a security question | `docs/SECURITY_FINDINGS.md` (register of findings + fixes) and `SECURITY.md` (how to report one) |
 | Verify a "🧪 needs hardware" claim | `docs/HARDWARE.md` (device evidence log) and `android/TESTING.md` |
 | Add a language binding | `bindings/generate.py` + `bindings/spec.json` — bindings are generated, never hand-edited |
-| Work out whether code belongs in the core or a platform | `docs/DESIGN.md`'s "The spore and the soil" — the core is the seed, every runtime hosting it is soil supplying five nutrients. Platform-specific means it belongs in the vessel, not `src/`. |
+| Work out whether code belongs in the core or a runtime | `docs/DESIGN.md`'s "The spore and the soil" — one core, many runtimes, five nutrients, and the word legend these docs hold to. Platform-specific means it belongs in the runtime, not `src/`. |
 
 ## Repo map
 
@@ -144,7 +144,7 @@ list CI runs for the core crate; this is the map of *which* commands apply to
 | `MISSION.md` | What SPORE is for and the decision test a change is weighed against — read before proposing a feature. |
 | `docs/SPEC.md` | The wire format itself — the two-page normative spec. |
 | `docs/REBUILD.md` | Reimplementing SPORE in another language, with worked byte examples. |
-| `docs/DESIGN.md` | The application layers above transport: files, sessions, RPC, feeds, ratchet, mix — plus "The spore and the soil," the core-vs-runtime model every platform follows. |
+| `docs/DESIGN.md` | The application layers above transport: files, sessions, RPC, feeds, ratchet, mix — plus "The spore and the soil," the core-vs-runtime model and its word legend. |
 | `docs/BRIDGES.md` | Every bridge: wire format, SPORE mapping, security profile, spec links. |
 | `docs/DIRECT.md` | SPORE Direct — the negotiated non-routed E2E pipe. |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust. |

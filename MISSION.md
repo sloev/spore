@@ -41,12 +41,12 @@ company.
 3. **Façades** — localhost bridges so browsers, mail clients, softphones,
    XMPP, folders, and `spore://` keep working on top of SPORE.
 4. **Nodes people can run** — Android, desktop, browser/wasm, daemon,
-   ESP/home router. **Not iOS.** One core, many runtimes: the protocol is the
-   **seed**, every platform that hosts it is **soil** — a language binding, an
-   OS process, a browser worker, an MCU firmware — supplying the same few
-   nutrients (randomness, time, transport, storage, scheduling). Soil varies;
-   the nutrients do not. See [`docs/DESIGN.md`](docs/DESIGN.md)'s "The spore
-   and the soil."
+   ESP/home router. **Not iOS.** One **core**, many **runtimes** — a language
+   binding, an OS process, a browser worker, an MCU firmware — each supplying
+   the same five **nutrients** (randomness, time, transport, storage,
+   scheduling). Runtimes vary; the nutrients do not. See
+   [`docs/DESIGN.md`](docs/DESIGN.md)'s "The spore and the soil" for the model
+   and the word legend these docs hold to.
 5. **A holdable protocol story** — two-sided A4 / `spore-v1` one-pager that
    stays true to [`docs/SPEC.md`](docs/SPEC.md); not a 200-page religion to
    *use* the system.
@@ -94,8 +94,8 @@ Chat UI is **one client**, not the product definition.
 - **Continuity is tested** — seed → new device/browser paths are real, not
   brochure-only.
 - **A runtime declares what it cannot do.** No disk, no background life once
-  the tab closes, no radio — the vessel says so and the feature is absent,
-  never a control with nothing behind it. Thin soil is a profile, not a
+  the tab closes, no radio — the runtime says so and the feature is absent,
+  never a control with nothing behind it. A thin runtime is a profile, not a
   degraded build.
 - Freeze: wire, C ABI, vectors — change only with explicit process (see
   [`CONTRIBUTING.md`](CONTRIBUTING.md)).
