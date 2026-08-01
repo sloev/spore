@@ -36,6 +36,20 @@ Two conventions specific to this project:
   cheap now, since until the daemon wiring below nothing could start a pipe at all.
   The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
 
+- **Android can bring a Direct pipe up too — through the same code as the
+  daemon.** Wiring it separately would have meant two implementations of one
+  negotiation, which is exactly the per-platform punch logic the roadmap's
+  engineering pattern forbids, so the runner moved into the core as
+  `direct::UdpRunner` and both native runtimes became thin adapters over it: the
+  daemon supplies stderr and its config, the JNI layer supplies a handle and five
+  poll-driven calls. Kotlin never touches a Direct socket — it says where the
+  device is reachable, feeds delivered envelopes in (getting back whether each was
+  signalling, so an app message is never swallowed), and ticks. **Compile-checked
+  only:** there is no Android SDK in this environment, so the JNI symbols and
+  Kotlin declarations are verified symmetric in both directions and the crate
+  builds and lints clean, but no phone has run it. The daemon path is the one with
+  two-process evidence, and it was re-verified unchanged after the refactor.
+
 - **The daemon can now bring a Direct pipe up.** The core seam below made
   signalling possible; nothing called it, so Direct still could not be started
   from anything you can run. `src/cli/direct.rs` is that consumer: `direct:` in

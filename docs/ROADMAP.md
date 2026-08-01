@@ -2183,8 +2183,11 @@ negotiated:
    negotiation is tested over the real `send_direct`/`on_rx` path. **Daemon wired** — `src/cli/direct.rs`, with `direct:`/`direct-to:` config
    keys; two real daemon processes negotiate over the mesh and bring a UDP pipe
    up. LAN only, and the daemon says so: reflexive discovery is this track's own
-   step 2 and is not built. **Still to wire: Android**, whose behaviour cannot be
-   verified in this environment — that is the remainder of PR8c.
+   step 2 and is not built. **Android wired** — the JNI layer drives the *same* `direct::UdpRunner`, so the
+   daemon and the phone cannot drift into two negotiations of one protocol.
+   Compile-checked only: no SDK here, so the symbols are verified symmetric and
+   the crate builds, but no device has run it. **PR8c is complete**; Direct is
+   startable from both native runtimes, LAN-scoped until this track's own step 2.
 1. Candidates in SPDR — already shipped.
 2. Reflexive locators via a minimal, dependency-free STUN client (binding
    request/response only) — new, small, in-budget per Finding 4.

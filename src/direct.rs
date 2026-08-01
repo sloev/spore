@@ -529,6 +529,13 @@ mod tcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub use tcp::TcpPort;
 
+// The UDP runner both native runtimes drive. Shared so the daemon and Android
+// cannot drift into two different negotiations of the same protocol.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod runner;
+#[cfg(not(target_arch = "wasm32"))]
+pub use runner::{Event, Outbound, UdpRunner};
+
 // ---- the pipe ----------------------------------------------------------------
 
 /// An open direct pipe: the two directional keys, per-direction sequence numbers,
@@ -802,6 +809,11 @@ impl Signalling {
     /// How many offers are waiting for an answer.
     pub fn pending(&self) -> usize {
         self.pending.len()
+    }
+
+    /// This node's address — the one an ANSWER is derived against.
+    pub fn me(&self) -> Addr {
+        self.me
     }
 }
 

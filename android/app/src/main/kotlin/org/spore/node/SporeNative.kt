@@ -89,6 +89,44 @@ object SporeNative {
     /** Poll one delivered envelope's wire bytes, or null if the inbox is empty. */
     external fun nativePollDelivery(ptr: Long): ByteArray?
 
+    // -- SPORE Direct ---------------------------------------------------------
+    // The negotiation and the sockets are the core's (`direct::UdpRunner`, the
+    // same one the desktop daemon drives). Kotlin never touches a Direct socket;
+    // it says where the device is reachable, feeds delivered envelopes in, and
+    // ticks. LAN only until P-Direct-NAT: a node cannot yet discover its own
+    // reflexive address, so what you pass here is what peers are told.
+
+    /**
+     * Turn Direct on, advertising [locator] (`ip:port`) as where this device can
+     * be reached. False if it carries no port — a candidate nobody can dial is
+     * worse than no candidate. Calling again replaces the runner and drops any
+     * open pipe, which is what a changed address should do.
+     */
+    external fun nativeDirectEnable(ptr: Long, locator: String): Boolean
+
+    /**
+     * Offer a pipe to [dest]. False if Direct is off, the address is malformed,
+     * or a pipe or offer is already outstanding.
+     */
+    external fun nativeDirectOffer(ptr: Long, dest: ByteArray): Boolean
+
+    /**
+     * Feed one delivered envelope wire to Direct. True if it was signalling and
+     * has been handled — the caller must then **not** also render it as a
+     * message. Anything an app message could be returns false and is left alone.
+     */
+    external fun nativeDirectOnDelivered(ptr: Long, wire: ByteArray): Boolean
+
+    /**
+     * Drain open pipes and expire unanswered offers; returns records drained.
+     * Nothing consumes Direct traffic on Android yet, so they are counted and
+     * dropped rather than delivered somewhere that does not exist.
+     */
+    external fun nativeDirectTick(ptr: Long): Int
+
+    /** One line for the UI, or empty when Direct is off. */
+    external fun nativeDirectStatus(ptr: Long): String
+
     /** The payload of an envelope wire. */
     external fun nativeEnvPayload(wire: ByteArray): ByteArray?
 

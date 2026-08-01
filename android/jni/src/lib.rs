@@ -42,6 +42,12 @@ struct Runtime {
     // grow without limit. A demod backlog is stale audio, not data worth keeping,
     // so the oldest frames are dropped once it is full (see DEMOD_OUT_MAX).
     demod_out: Mutex<VecDeque<Vec<u8>>>,
+    // SPORE Direct, once Kotlin has said where this device is reachable. The
+    // *same* `direct::UdpRunner` the desktop daemon drives — the negotiation and
+    // the sockets live in the core so the phone and the laptop cannot end up
+    // running two different versions of the same protocol. `None` until enabled:
+    // a node that cannot say where it is has no candidate to offer.
+    direct: Mutex<Option<spore::direct::UdpRunner>>,
 }
 
 /// Most completed demod frames to hold before dropping the oldest. A frame is one
@@ -113,6 +119,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
         stream_stop: Mutex::new(HashMap::new()),
         demod: Mutex::new(spore::bridge::audio::Demod::new()),
         demod_out: Mutex::new(VecDeque::new()),
+        direct: Mutex::new(None),
     })) as jlong;
     if let Ok(mut set) = live().lock() {
         set.insert(ptr);
@@ -1402,4 +1409,195 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeRpcTakeResponse(
     out.extend_from_slice(&resp.status.to_be_bytes());
     out.extend_from_slice(&resp.body);
     env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+// ---- SPORE Direct -------------------------------------------------------------
+//
+// Android drives the same `direct::UdpRunner` as the desktop daemon: the core
+// owns the negotiation and the sockets, and each runtime supplies only the mesh
+// send and its own way of reporting. Kotlin never touches a Direct socket.
+//
+// Poll-driven like everything else here — no Rust→Kotlin callbacks. Kotlin
+// already drains delivered envelopes; it hands each one to
+// `nativeDirectOnDelivered` first, which returns whether it was signalling (and
+// so must not be rendered as a message).
+
+/// Turn Direct on, advertising `locator` (`ip:port`) as where this device can be
+/// reached. Idempotent-ish: calling again replaces the runner, dropping any open
+/// pipe, which is what a changed address should do anyway.
+///
+/// Returns false if the locator has no port — a candidate nobody can dial is
+/// worse than no candidate, so it is refused rather than advertised.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectEnable(
+    mut env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    locator: JString,
+) -> jboolean {
+    let Some(r) = rt(ptr) else {
+        return JNI_FALSE;
+    };
+    let Ok(loc) = env.get_string(&locator) else {
+        return JNI_FALSE;
+    };
+    let loc: String = loc.into();
+    let Some(port) = loc.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok()) else {
+        return JNI_FALSE;
+    };
+    let me = r.hub.addr();
+    *r.direct.lock().unwrap() = Some(spore::direct::UdpRunner::new(me, loc, port));
+    JNI_TRUE
+}
+
+/// Offer a pipe to `dest`. False if Direct is off, the address is malformed, or a
+/// pipe or offer is already outstanding — re-offering over a live pipe would just
+/// churn ephemeral keys.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectOffer(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    dest: JByteArray,
+) -> jboolean {
+    let Some(r) = rt(ptr) else {
+        return JNI_FALSE;
+    };
+    let d = env.convert_byte_array(&dest).unwrap_or_default();
+    if d.len() != 8 {
+        return JNI_FALSE;
+    }
+    let mut peer = [0u8; 8];
+    peer.copy_from_slice(&d);
+
+    let mut guard = r.direct.lock().unwrap();
+    let Some(run) = guard.as_mut() else {
+        return JNI_FALSE;
+    };
+    let (pipes, pending) = run.status();
+    if pipes > 0 || pending > 0 {
+        return JNI_FALSE;
+    }
+    let (out, _) = run.offer(peer, spore::bridge::hub::now());
+    let forwards = r.hub.with_node(|n| {
+        let (_, f, _) = n.send_direct(out.peer, &out.bytes, spore::bridge::hub::now());
+        f
+    });
+    r.hub.originate(forwards);
+    JNI_TRUE
+}
+
+/// Feed one delivered envelope wire to Direct. Returns true if it was signalling
+/// and has been handled, so Kotlin must **not** also render it as a message.
+///
+/// Everything an app message could be is left alone: a wrong type, an unsigned
+/// or unverifiable sender, a payload that will not open, or plaintext that is not
+/// SPDR all return false and the caller proceeds exactly as before.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectOnDelivered(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    wire: JByteArray,
+) -> jboolean {
+    let Some(r) = rt(ptr) else {
+        return JNI_FALSE;
+    };
+    if r.direct.lock().unwrap().is_none() {
+        return JNI_FALSE;
+    }
+    let w = env.convert_byte_array(&wire).unwrap_or_default();
+    let Ok((e, _)) = Envelope::decode(&w) else {
+        return JNI_FALSE;
+    };
+    if e.typ != spore::ty::DATA {
+        return JNI_FALSE;
+    }
+    // An unsigned `src` is a claim, not a peer, and the negotiation binds to the
+    // sender's identity — so only a verified signature names one.
+    let Src::Full(pk) = &e.src else {
+        return JNI_FALSE;
+    };
+    if e.flags & spore::fl::SIGNED == 0 || !e.verify() {
+        return JNI_FALSE;
+    }
+    let peer = addr_of(pk);
+    let now = spore::bridge::hub::now();
+
+    let plaintext = if e.flags & spore::fl::ENCRYPTED != 0 {
+        let ratcheted = e.flags & spore::fl::RATCHET != 0;
+        match r.hub.with_node(|n| n.open_dm(peer, &e.payload, ratcheted, now)) {
+            Some(p) => p,
+            None => return JNI_FALSE,
+        }
+    } else {
+        e.payload.clone()
+    };
+
+    let (out, event) = {
+        let mut guard = r.direct.lock().unwrap();
+        let Some(run) = guard.as_mut() else {
+            return JNI_FALSE;
+        };
+        run.on_plaintext(peer, &plaintext, now)
+    };
+    // The mesh send happens outside the Direct lock: `send_direct` takes the node
+    // lock, and holding both in one order here and the other order anywhere else
+    // is how a deadlock gets built.
+    if let Some(o) = out {
+        let forwards = r.hub.with_node(|n| {
+            let (_, f, _) = n.send_direct(o.peer, &o.bytes, now);
+            f
+        });
+        r.hub.originate(forwards);
+    }
+    if event == spore::direct::Event::NotSignal {
+        JNI_FALSE
+    } else {
+        JNI_TRUE
+    }
+}
+
+/// Drain open pipes and expire unanswered offers. Called from the app's existing
+/// housekeeping tick. Returns the number of records drained — nothing consumes
+/// Direct traffic on Android yet, so they are counted and dropped rather than
+/// delivered somewhere that does not exist.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectTick(
+    _env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jint {
+    let Some(r) = rt(ptr) else {
+        return 0;
+    };
+    let mut guard = r.direct.lock().unwrap();
+    let Some(run) = guard.as_mut() else {
+        return 0;
+    };
+    let drained = run.poll().len() as jint;
+    run.expire(spore::bridge::hub::now());
+    drained
+}
+
+/// A one-line status for the UI: where we advertise, how many pipes are up, and
+/// how many offers are still waiting. Empty string when Direct is off, so the app
+/// shows nothing rather than a control with nothing behind it.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectStatus(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+) -> jni::sys::jstring {
+    let empty = |env: JNIEnv| env.new_string("").map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut());
+    let Some(r) = rt(ptr) else {
+        return empty(env);
+    };
+    let guard = r.direct.lock().unwrap();
+    let Some(run) = guard.as_ref() else {
+        return empty(env);
+    };
+    let (pipes, pending) = run.status();
+    let s = format!("{} · {pipes} pipe(s), {pending} offer(s) pending", run.advertise());
+    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
