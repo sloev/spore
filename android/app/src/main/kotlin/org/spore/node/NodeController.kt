@@ -127,6 +127,36 @@ object NodeController {
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
     val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
 
+    /**
+     * SPORE Direct, one line, or "" when it is off — and off is the default.
+     *
+     * Empty means there is nothing to show, not "unknown": a runtime declares
+     * what it cannot do rather than offering a control with nothing behind it.
+     */
+    val directStatus = MutableStateFlow("")
+
+    /**
+     * Turn Direct on, advertising [locator] (`ip:port`) as where this device can
+     * be reached.
+     *
+     * The address is the caller's to supply and is advertised verbatim: a node
+     * cannot yet discover its own reflexive address, so this is **LAN only**
+     * until the P-Direct-NAT track lands. Returns false if the locator carries
+     * no port, in which case nothing is enabled.
+     */
+    fun enableDirect(locator: String): Boolean {
+        val ok = SporeNative.nativeDirectEnable(ptr, locator)
+        if (ok) directStatus.value = SporeNative.nativeDirectStatus(ptr)
+        return ok
+    }
+
+    /**
+     * Offer a Direct pipe to a peer. False if Direct is off, the address is not
+     * eight bytes, or a pipe or offer is already outstanding — re-offering over a
+     * live pipe would only churn ephemeral keys.
+     */
+    fun offerDirect(dest: ByteArray): Boolean = SporeNative.nativeDirectOffer(ptr, dest)
+
     // Files ride the protocol's own manifest + chunk layer: a signed manifest
     // (magnet) names fountain-coded chunks that any relay can carry and serve.
     // First payload byte of a manifest: a leaf one names chunks, an interior one
@@ -354,7 +384,14 @@ object NodeController {
                 val wire = SporeNative.nativePollDelivery(ptr)
                 if (wire != null) {
                     idle = false
-                    route(wire)
+                    // Direct signalling arrives as an ordinary sealed DM, so it
+                    // has to be sorted from app traffic before anything renders
+                    // it. The native side answers offers and opens pipes itself;
+                    // a false here means "not signalling", and the message takes
+                    // exactly the path it always did.
+                    if (!SporeNative.nativeDirectOnDelivered(ptr, wire)) {
+                        route(wire)
+                    }
                     relayTick.value = System.currentTimeMillis()
                 }
                 val frag = SporeNative.nativeFragStatus(ptr)
@@ -395,6 +432,11 @@ object NodeController {
                         } else null
                     }
                 storeCount.value = SporeNative.nativeStoreLen(ptr)
+                // Direct's own housekeeping: drain any open pipe and drop offers
+                // nobody answered, so an offer to an unreachable peer does not
+                // hold its ephemeral secret forever. A no-op while Direct is off.
+                SporeNative.nativeDirectTick(ptr)
+                directStatus.value = SporeNative.nativeDirectStatus(ptr)
                 refreshRingHealth()
                 refreshDelivery()
                 pumpFiles()

@@ -249,5 +249,18 @@ and nothing more — crossing NAT is the P-Direct-NAT track and is not built. Th
 is also no app above the pipe yet: inbound records are logged and dropped, since
 the daemon has nothing to route them to.
 
-Still outstanding: **Android**, BLE/ESP-NOW adapters, and `CLOSE`/`REKEY`. Those
-add transport and lifecycle, not protocol.
+**Android runs it too, through the same code.** `direct::UdpRunner` holds the
+negotiation and the sockets; the daemon and the JNI layer are both thin adapters
+over it, supplying only the mesh send and their own way of reporting. That is the
+engineering pattern the ROADMAP asks for — façades never reimplement punch logic
+per platform — and it is enforced by there being one runner, not a convention.
+Kotlin never touches a Direct socket: it says where the device is reachable
+(`enableDirect`), feeds delivered envelopes in, and ticks.
+
+**Android's Direct is compile-checked only.** There is no Android SDK in the
+build environment these docs are written from, so the JNI symbols and Kotlin
+declarations are verified symmetric and the crate builds and lints — but no
+phone has run it. The daemon path is the one with two-process evidence behind it.
+
+Still outstanding: BLE/ESP-NOW adapters, and `CLOSE`/`REKEY`. Those add transport
+and lifecycle, not protocol.

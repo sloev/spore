@@ -1,128 +1,63 @@
-//! The daemon's Direct runner — the half of PR8c that makes a pipe startable.
+//! The daemon's Direct surface — a thin adapter over `direct::UdpRunner`.
 //!
-//! `direct::Signalling` decides and this opens: the split the core landed is not
-//! a nicety here, it is load-bearing. `UdpPort::connect` needs the peer's
-//! locator, and the locator only exists once a candidate has been *chosen*, so
-//! the old `Pipe::answer` — which took the port before choosing — could not have
-//! been used by this file at all.
+//! The runner holds the negotiation and the sockets; this file supplies only
+//! what a daemon alone can: the mesh send, and turning an [`Event`] into a line
+//! on stderr. Android drives the same runner through its JNI handle, so the two
+//! native runtimes cannot drift into their own versions of the protocol.
 //!
-//! What this is honestly capable of: a LAN. Candidates are the address the node
-//! was told to advertise, so two daemons on the same network find each other and
-//! a pipe comes up. Across NAT it will not, because reflexive discovery and
-//! hole-punching are P-Direct-NAT and are not built — the daemon says so in its
-//! log rather than appearing to try and silently failing.
+//! Honestly capable of a LAN. Candidates are the address the node was told to
+//! advertise, so two daemons on one network find each other. Across NAT they
+//! will not, because reflexive discovery and hole-punching are P-Direct-NAT and
+//! are not built — the daemon says so at startup rather than appearing to try.
 //!
 //! Binary-crate module; no wire contract here.
 
 use spore::bridge::hub::{now, Shared};
-use spore::direct::{Candidate, Medium, Need, Pipe, RecordType, Signal, Signalling, UdpPort};
-
+use spore::direct::{Event, Outbound, RecordType, UdpRunner};
 use spore::{addr_of, fl, ty, Addr, Envelope, Src};
-use std::collections::HashMap;
-
-/// How long an unanswered offer is kept. A NAT binding dies in 30s–5min and the
-/// candidates in an older offer are stale, so the negotiation is better restarted
-/// than resumed.
-const OFFER_TTL_SECS: u32 = 120;
-
-/// The record MTU claimed for a UDP candidate — one datagram, one record, kept
-/// under the usual 1500-byte Ethernet path so a pipe does not depend on
-/// fragmentation surviving the network.
-const UDP_MTU: u16 = 1200;
 
 fn hex8(a: &Addr) -> String {
     a.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+fn hex4(id: &[u8; 16]) -> String {
+    id[..4].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub(crate) struct Direct {
-    sig: Signalling,
-    pipes: HashMap<[u8; 16], Pipe<UdpPort>>,
-    /// The locator this node hands out, as `ip:port`. Advertised verbatim: until
-    /// P-Direct-NAT lands a node cannot discover its own reflexive address, and
-    /// guessing one would be the dishonest option.
-    advertise: String,
-    /// The port bound when *initiating*, so the answering peer can reach the
-    /// locator above. A responder dials out from an ephemeral port instead.
-    bind_port: u16,
+    run: UdpRunner,
 }
 
 impl Direct {
     pub(crate) fn new(me: Addr, advertise: String, bind_port: u16) -> Direct {
-        Direct { sig: Signalling::new(me), pipes: HashMap::new(), advertise, bind_port }
-    }
-
-    fn candidates(&self) -> Vec<Candidate> {
-        vec![Candidate {
-            medium: Medium::udp(),
-            locator: self.advertise.clone().into_bytes(),
-            est_bps: 2_000_000,
-            mtu: UDP_MTU,
-            rtt_hint_ms: 15,
-        }]
-    }
-
-    /// The mediums this runtime can actually open. UDP only — the daemon has no
-    /// BLE or ESP-NOW radio to offer, and saying otherwise would be a control
-    /// with nothing behind it.
-    fn willing(&self) -> Vec<Medium> {
-        vec![Medium::udp()]
-    }
-
-    /// Open our end for a candidate the negotiation chose.
-    ///
-    /// `local` differs by role on purpose: an initiator binds the port it
-    /// advertised so the answer's traffic can arrive there, while a responder
-    /// dials out and lets the kernel pick, because it is the one sending first.
-    fn open(&self, chosen: &Candidate, local_port: u16) -> Option<UdpPort> {
-        if chosen.medium != Medium::udp() {
-            eprintln!("  [direct] chose {:?}, which this daemon cannot open", chosen.medium);
-            return None;
-        }
-        let peer = String::from_utf8(chosen.locator.clone()).ok()?;
-        match UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), chosen.mtu as usize) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("  [direct] cannot open a pipe to {peer}: {e}");
-                None
-            }
-        }
+        Direct { run: UdpRunner::new(me, advertise, bind_port) }
     }
 
     /// Keep a pipe up to `peer`, if one was configured.
     ///
     /// Re-offers rather than offering once at startup: at boot the peer's
     /// ANNOUNCE has usually not arrived, so the first offer would go out
-    /// cleartext to an unknown prekey — and an offer that is never answered
-    /// simply expires, which is the signal to try again.
+    /// cleartext to an unknown prekey — and an offer nobody answers simply
+    /// expires, which is the signal to try again.
     pub(crate) fn maintain(&mut self, hub: &Shared, peer: Addr) {
-        if !self.pipes.is_empty() || self.sig.pending() > 0 {
+        let (pipes, pending) = self.run.status();
+        if pipes > 0 || pending > 0 {
             return;
         }
-        self.offer(hub, peer);
-    }
-
-    /// Propose a pipe to `peer`. The OFFER rides the ordinary sealed DM path.
-    pub(crate) fn offer(&mut self, hub: &Shared, peer: Addr) {
-        let (bytes, pipe_id) = self.sig.offer(peer, need(), self.candidates(), now());
-        let forwards = hub.with_node(|n| {
-            let (_, f, _) = n.send_direct(peer, &bytes, now());
-            f
-        });
-        hub.originate(forwards);
+        let (out, pipe_id) = self.run.offer(peer, now());
         eprintln!("  [direct] OFFER → {} · pipe {}", hex8(&peer), hex4(&pipe_id));
+        self.send(hub, out);
     }
 
-    /// Interpret one envelope the router delivered to us.
-    ///
-    /// Returns `true` if it was Direct signalling — an ordinary app message is
-    /// left alone, which is the whole reason [`direct::is_signal`] exists.
+    /// Interpret one envelope the router delivered to us. `true` if it was Direct
+    /// signalling — an ordinary app message is left entirely alone.
     pub(crate) fn on_delivered(&mut self, hub: &Shared, wire: &[u8]) -> bool {
         let Ok((e, _)) = Envelope::decode(wire) else { return false };
         if e.typ != ty::DATA {
             return false;
         }
-        // Only a signed envelope names its sender provably, and the whole
-        // negotiation binds to that identity — an unsigned claim is not a peer.
+        // Only a signed envelope names its sender provably, and the negotiation
+        // binds to that identity — an unsigned `src` is a claim, not a peer.
         let Src::Full(pk) = &e.src else { return false };
         if e.flags & fl::SIGNED == 0 || !e.verify() {
             return false;
@@ -139,88 +74,58 @@ impl Direct {
             e.payload.clone()
         };
 
-        let willing = self.willing();
-        match self.sig.on_signal(peer, &plaintext, &willing) {
-            Signal::Offer { peer, accepted } => {
-                let pipe_id = accepted.pipe_id();
-                // Choosing happened above; only now is there a locator to dial.
-                let Some(port) = self.open(&accepted.chosen, 0) else { return true };
-                let (answer, pipe) = Pipe::answer_with(accepted, hub.addr(), port);
-                self.reply(hub, peer, &answer);
-                eprintln!("  [direct] ANSWER → {} · pipe {} up", hex8(&peer), hex4(&pipe_id));
-                self.pipes.insert(pipe_id, pipe);
-                true
-            }
-            Signal::Decline { peer, reply } => {
-                self.reply(hub, peer, &reply);
-                eprintln!("  [direct] declined an offer from {} — no medium in common", hex8(&peer));
-                true
-            }
-            Signal::Answered { peer, pending, answer, chosen } => {
-                let Some(port) = self.open(&chosen, self.bind_port) else { return true };
-                match Pipe::finish(pending, &answer, port) {
-                    Some(pipe) => {
-                        eprintln!("  [direct] pipe {} up with {}", hex4(&pipe.pipe_id()), hex8(&peer));
-                        self.pipes.insert(pipe.pipe_id(), pipe);
-                    }
-                    None => eprintln!("  [direct] {} sent an answer that did not verify", hex8(&peer)),
-                }
-                true
-            }
-            Signal::Refused { peer, reason, .. } => {
-                eprintln!("  [direct] {} refused: {reason:?}", hex8(&peer));
-                true
-            }
-            Signal::NotSignal => false,
+        let (out, event) = self.run.on_plaintext(peer, &plaintext, now());
+        if let Some(o) = out {
+            self.send(hub, o);
         }
+        match &event {
+            Event::NotSignal => return false,
+            Event::PipeUp { peer, pipe_id } => {
+                eprintln!("  [direct] pipe {} up with {}", hex4(pipe_id), hex8(peer))
+            }
+            Event::Declined { peer } => {
+                eprintln!("  [direct] declined an offer from {} — no medium in common", hex8(peer))
+            }
+            Event::Refused { peer, reason } => {
+                eprintln!("  [direct] {} refused: {reason:?}", hex8(peer))
+            }
+            Event::CannotOpen { peer, medium } => {
+                eprintln!("  [direct] cannot open {medium} for {}", hex8(peer))
+            }
+            Event::BadAnswer { peer } => {
+                eprintln!("  [direct] {} sent an answer that did not verify", hex8(peer))
+            }
+        }
+        true
     }
 
-    fn reply(&self, hub: &Shared, peer: Addr, bytes: &[u8]) {
+    fn send(&self, hub: &Shared, out: Outbound) {
         let forwards = hub.with_node(|n| {
-            let (_, f, _) = n.send_direct(peer, bytes, now());
+            let (_, f, _) = n.send_direct(out.peer, &out.bytes, now());
             f
         });
         hub.originate(forwards);
     }
 
-    /// Drain every open pipe. Nothing consumes Direct traffic in the daemon yet —
-    /// there is no app on top of it — so records are logged and dropped rather
-    /// than pretending to route somewhere.
+    /// Drain open pipes. Nothing consumes Direct traffic in the daemon yet —
+    /// there is no app on top — so records are logged and dropped rather than
+    /// pretending to route somewhere.
     pub(crate) fn poll(&mut self) {
-        for (id, pipe) in self.pipes.iter_mut() {
-            while let Some((ty, bytes)) = pipe.poll() {
-                match ty {
-                    RecordType::Keepalive => {}
-                    _ => eprintln!("  [direct] pipe {} ← {:?} ({} bytes)", hex4(id), ty, bytes.len()),
-                }
+        for (id, ty, bytes) in self.run.poll() {
+            if ty != RecordType::Keepalive {
+                eprintln!("  [direct] pipe {} ← {:?} ({} bytes)", hex4(&id), ty, bytes.len());
             }
         }
     }
 
-    /// Drop offers nobody answered, so a daemon offering pipes to an unreachable
-    /// peer does not hold their ephemeral secrets forever.
     pub(crate) fn expire(&mut self) {
-        let dropped = self.sig.expire(now(), OFFER_TTL_SECS);
+        let dropped = self.run.expire(now());
         if dropped > 0 {
             eprintln!("  [direct] {dropped} unanswered offer(s) expired");
         }
     }
 }
 
-fn need() -> Need {
-    Need { min_bps: 5_000, mtu_needed: 64, max_latency_ms: Some(150) }
-}
-
-fn hex4(id: &[u8; 16]) -> String {
-    id[..4].iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// Work out what to advertise from the config value: either an explicit
-/// `ip:port`, or a bare port to be paired with this host's primary IPv4.
-///
-/// Returns `None` when only a port was given and no primary IPv4 could be found:
-/// a node that cannot say where it is has nothing to offer, and advertising
-/// `0.0.0.0` would produce a candidate that can never be dialled.
 /// Parse a 16-hex-digit peer address, the form the daemon prints for itself.
 pub(crate) fn peer_addr(s: &str) -> Option<Addr> {
     let s = s.trim();
@@ -234,6 +139,12 @@ pub(crate) fn peer_addr(s: &str) -> Option<Addr> {
     Some(a)
 }
 
+/// Work out what to advertise from the config value: either an explicit
+/// `ip:port`, or a bare port to be paired with this host's primary IPv4.
+///
+/// `None` when only a port was given and no primary IPv4 could be found: a node
+/// that cannot say where it is has nothing to offer, and advertising `0.0.0.0`
+/// would produce a candidate that can never be dialled.
 pub(crate) fn locator(spec: &str) -> Option<(String, u16)> {
     if let Some((_, p)) = spec.rsplit_once(':') {
         let port = p.parse().ok()?;
