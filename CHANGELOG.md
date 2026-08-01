@@ -18,6 +18,20 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **A node now maintains itself on a timer instead of only when traffic
+  arrives — and the desktop daemon retries unacked sends for the first time.**
+  The expiry sweep and prekey rotation were reachable only from `Node::on_rx`,
+  so a quiet node pruned nothing and never advanced its forward secrecy; and
+  `resend_unacked` had exactly one production caller anywhere in the tree — the
+  Android JNI — so §8 resend-with-backoff worked on Android and nowhere else.
+  New `Node::tick(now)` is the one periodic entry point: it runs the sweep and
+  returns whatever fell due for resend. `Hub::tick()` wires it for hosted
+  nodes, the daemon calls it in its existing beacon loop, and Android's existing
+  periodic call now goes through it (no Kotlin change). Purely additive — the
+  ingest-side sweep still runs and both are idempotent, so a runtime that never
+  ticks behaves exactly as before. SPEC's runtime contract makes the timer
+  normative.
+
 - **Storage is now something a runtime supplies, not something the core
   assumes.** The store could only ever spill to a filesystem directory, so a
   runtime whose storage is not a disk — a browser tab with IndexedDB, an MCU

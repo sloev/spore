@@ -244,6 +244,20 @@ impl Hub {
         self.dispatch(forwards);
     }
 
+    /// Run the node's periodic work and send whatever it produces.
+    ///
+    /// The scheduling nutrient, wired for a hosted node: call it on a timer
+    /// (roughly once a second) alongside [`Hub::hello`] and [`Hub::beacon`].
+    /// Without it the node only maintains itself when traffic happens to
+    /// arrive — see [`Node::tick`].
+    pub fn tick(&self) {
+        let forwards = {
+            let mut n = lock(&self.node);
+            n.tick(now())
+        };
+        self.dispatch(forwards);
+    }
+
     /// Run a closure with exclusive access to the node.
     ///
     /// The closure runs **while the node lock is held**, so it must not call back

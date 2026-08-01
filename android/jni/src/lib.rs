@@ -861,7 +861,10 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeResendUnacked(
     let Some(r) = rt(ptr) else {
         return;
     };
-    let forwards = r.hub.with_node(|n| n.resend_unacked(spore::bridge::hub::now()));
+    // `tick` is `resend_unacked` plus the expiry sweep and prekey rotation, so
+    // the app's existing periodic call now also keeps the node maintained when
+    // it is idle. Same call site, no Kotlin change.
+    let forwards = r.hub.with_node(|n| n.tick(spore::bridge::hub::now()));
     r.hub.originate(forwards);
 }
 

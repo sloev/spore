@@ -2066,6 +2066,51 @@ mod tests {
     }
 
     #[test]
+    fn a_quiet_node_still_maintains_itself_if_it_ticks() {
+        // The scheduling nutrient. Before `tick` existed, every duty here was
+        // reachable only from `on_rx`, so a node that heard nothing rotated no
+        // prekeys and pruned nothing — its forward secrecy quietly froze.
+        let t0 = 1_700_000_000;
+        let mut n = Node::new("quiet", &[]);
+        let boot = n.prekey_pub;
+
+        // Not one inbound frame for a fortnight; only the timer runs.
+        let _ = n.tick(t0);
+        assert_ne!(n.prekey_pub, boot, "the bootstrap entry rotates once a clock is seen");
+
+        let after_boot = n.prekey_pub;
+        let _ = n.tick(t0 + PREKEY_PERIOD_SECS + 1);
+        assert_ne!(n.prekey_pub, after_boot, "a due rotation happens with no traffic at all");
+
+        // And the dedup set is pruned on the same schedule.
+        let stale = Envelope::new(ty::DATA, [9u8; 8], t0 + 10, b"old".to_vec());
+        n.mark_seen(&stale);
+        assert!(!n.seen.is_empty());
+        let _ = n.tick(t0 + PREKEY_PERIOD_SECS + SWEEP_INTERVAL_SECS + 100);
+        assert!(n.seen.is_empty(), "expired dedup entries are swept by the timer");
+    }
+
+    #[test]
+    fn tick_returns_the_resends_that_fell_due() {
+        // §8 resend-with-backoff had exactly one production caller (Android's
+        // JNI); the daemon never retried. `tick` is now the one entry point, so
+        // every runtime gets it from the same call.
+        let t0 = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let b = Node::new("b", &[]);
+
+        let (_id, forwards, _) = a.send_direct(b.addr, b"please confirm", t0);
+        assert!(!forwards.is_empty(), "the original send goes out");
+
+        // Nothing due yet: the first backoff has not elapsed.
+        assert!(a.tick(t0 + 1).is_empty(), "no resend before the backoff elapses");
+
+        // Past the 30 s first backoff, with no receipt, it is offered again.
+        let due = a.tick(t0 + 61);
+        assert!(!due.is_empty(), "an unacked ACKREQ send is resent once its backoff elapses");
+    }
+
+    #[test]
     fn the_ring_is_bounded_and_never_empty() {
         let mut n = Node::new("n", &[]);
         // Rotate far more often than the lifetime would ever allow, so nothing

@@ -264,6 +264,27 @@ impl Node {
         out
     }
 
+    /// The node's periodic work — **the scheduling nutrient** a runtime supplies
+    /// (`docs/DESIGN.md`; SPEC's runtime contract makes it normative).
+    ///
+    /// Call it on a timer, roughly once a second; it is cheap and self-gating, so
+    /// calling it more often costs almost nothing and less often only makes the
+    /// node lazier. It returns the envelopes that fell due for resend, which the
+    /// caller sends the same way it sends anything else.
+    ///
+    /// This exists because every duty below was previously reachable *only* from
+    /// [`Node::on_rx`] or from one platform's UI loop, so a node hearing nothing
+    /// did none of it: it stopped pruning, stopped rotating prekeys — quietly
+    /// freezing its own forward secrecy — and never retried an unacked send.
+    ///
+    /// Additive on purpose: the same sweep still runs on ingest, and both are
+    /// idempotent (one interval gate guards them), so a runtime that never ticks
+    /// behaves exactly as it did before.
+    pub fn tick(&mut self, now: u32) -> Vec<Forward> {
+        self.enforce_bounds(now);
+        self.resend_unacked(now)
+    }
+
     // ---- L4 request/response (RPC) --------------------------------------
 
     /// Call a service (an address or a served topic). Returns the request id

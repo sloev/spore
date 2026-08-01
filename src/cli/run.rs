@@ -266,6 +266,11 @@ pub(crate) fn run_config(cfg: Config) {
                     last_flood = t;
                     h.beacon();
                 }
+                // Expiry sweep, prekey rotation, and ACKREQ resend. Until this
+                // was here the daemon did none of them unless traffic arrived,
+                // so a quiet node never pruned, never advanced its forward
+                // secrecy, and never retried an unacked send.
+                h.tick();
                 thread::sleep(std::time::Duration::from_millis(500));
             }
         });
