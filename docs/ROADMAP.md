@@ -2249,6 +2249,83 @@ negotiated:
    iroh (relay/fallback) → fail honestly (say there's no path, per the
    non-goals above).
 
+**Settled 2026-08-01 (fourth pass): iroh is the NAT answer; the hand-rolled punch
+is demoted to an optimisation.** Steps 3–4 stop being load-bearing and step 5
+moves ahead of them.
+
+This is not a reversal — it is Findings 3 and 4 being taken at their word. iroh
+already does hole punching and relay fallback, is already a merged dependency, and
+this project already declined to hand-roll ICE because it was the largest
+dependency it would ever take. Two integration bugs in two consecutive PRs on the
+*easy* part of a hand-rolled punch (#101, #103) are evidence for that original
+judgement, not against it.
+
+Scope, stated narrowly on purpose. iroh is reached only when **both peers are on
+the public internet, both are behind NATs, and no LAN or overlay path exists.**
+That is the tail, not the trunk, of what SPORE is for:
+
+- **LAN** — both ends already reachable; nothing to traverse.
+- **ESP-NOW / BLE** — no IP, so no NAT concept; a link-layer locator.
+- **Overlays** (Reticulum, Yggdrasil, cjdns, WireGuard, Tor, I2P) — SPEC page 2
+  already treats these as "underlays with their own routing = one interface". An
+  overlay hands both peers a routable address, so a Direct candidate over one is
+  an ordinary `udp` candidate with the overlay's address as its locator. **An
+  overlay does not sit on the ladder; it removes the need for it.**
+
+Because that scope is narrow, leaning on a dependency there is cheap, and the
+third-party-trust disclosure stays bounded: iroh supports a **self-hosted relay**,
+so "a relay is needed" never means "n0's relay is needed". Native-only, so a
+browser's ladder still ends before it (per the runtime-membership decision below).
+
+**Open question worth answering before step 5, and possibly instead of it:** does
+anything emit a Direct candidate using an *overlay* address today? The bridges
+exist; nothing appears to offer their addresses as candidates. If that is right,
+wiring overlay addresses as ordinary candidates makes Direct work across the
+internet for anyone already running an overlay — with no punch, no relay and no
+new failure mode — which is a smaller and far more certain win than steps 3–5.
+
+**Prerequisite for any of it: make the fallback loud.** `UdpRunner::open` silently
+falls back to a plain connect when the punch fails, which makes "traversal worked"
+and "traversal never ran" indistinguishable — on a LAN both produce a working
+pipe. That is a control with nothing behind it, and it is the direct cause of both
+bugs above. Either report it (`Event::PunchFailed { fell_back }`, surfaced in the
+daemon log and Android status) or fail closed when the chosen candidate was a
+reflexive one. Small, and it makes every later P-Direct-NAT change
+self-diagnosing.
+
+**Design constraints for `IrohPort`, so they are not rediscovered the hard way.**
+The iroh connection *is* the medium — its punched path cannot be extracted and
+reused, for the same reason a punch must happen on the pipe's own socket, so it is
+wrapped as a `DatagramPort` and handed to `Pipe` like any other:
+
+- **QUIC datagrams, not streams.** [`DIRECT.md`](DIRECT.md) avoids ordered
+  delivery even on TCP so a lost media frame never head-of-line-blocks; running
+  records over a QUIC stream reintroduces exactly that. iroh's max datagram size
+  becomes `DatagramPort::mtu()`.
+- **Keep the record AEAD — the double encryption is the point.** The SPDR key
+  schedule binds both addresses, the pipe id *and the medium name*. Dropping our
+  own sealing would make a pipe's security depend on its medium, and the threat
+  model says every link is hostile.
+- **The iroh NodeId is a second identity; the signalling authenticates it.** Do
+  not reuse the SPORE signing key as iroh's static key — cross-protocol reuse.
+  Nothing is needed: the candidate rides inside a sealed, signed OFFER, so the
+  NodeId is attested by the SPORE identity exactly as an `ip:port` already is. No
+  new trust root and no new pairing step.
+- **A relayed iroh path is not "Direct" as this repo defines it.** `DIRECT.md`'s
+  two-planes table says one hop, straight over an underlay; a relay is multi-hop
+  and sees ciphertext, metadata and timing. iroh reports which it got, so surface
+  it — `Event::PipeUp { via: Direct | Relay(..) }`, in the daemon log and the
+  Android status. That is the "visible candidate, never a silent fallback"
+  requirement, and here the signal comes free instead of having to be invented.
+
+**Verification rule adopted with this decision:** a change claiming a network
+capability must carry a test that fails when that capability is absent. "Pipe up"
+could not fail. "A record arrives" could not fail either, because the fallback
+satisfied it. "A record arrives *and* the punch landed" would have caught both.
+If the native punch is ever revived, it needs a real NAT to test against — two
+Linux network namespaces with an `nftables` masquerade, which runs on
+`ubuntu-latest` — because without one, steps 3, 4 and 6 land blind.
+
 **Runtime-dependent by construction** (added at the 2026-08-01 second-pass review,
 in the [`DESIGN.md`](DESIGN.md) runtime vocabulary). Steps 2–5 are *supplies*, and
 not every runtime has them: iroh (step 5) is a native-only bridge, so a browser
