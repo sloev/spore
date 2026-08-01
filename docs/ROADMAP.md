@@ -75,7 +75,7 @@ name · **14** Freeze impact (almost always None).
 | **B5** | Advanced: ring health + cautious export | Medium | ✅ merged (#67) 🧪 | — | B-series |
 | **B6** | Bridges: status enum + permission recovery | High UX | ✅ merged (#68) 🧪 | — | B-series |
 | **B7** | Accessibility + density pass | High UX | ✅ merged (#69) 🧪 | B1–B6 | C1 |
-| **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
+| **B8** | Feed polish | Medium | ✅ merged (#72) 🧪 | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
 

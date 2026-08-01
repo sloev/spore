@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -51,6 +53,7 @@ internal fun FeedScreen(compose: (String) -> Unit) {
     val topics by NodeController.topics.collectAsState()
     var follow by remember { mutableStateOf("") }
     var activeTopic by remember { mutableStateOf<String?>(null) }
+    val confirm = rememberConfirm()
     val shown = remember(posts, activeTopic) {
         if (activeTopic == null) posts else posts.filter { it.topic == activeTopic }
     }
@@ -59,7 +62,20 @@ internal fun FeedScreen(compose: (String) -> Unit) {
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             ToughbookField(follow, { follow = it }, Modifier.weight(1f), placeholder = "follow a topic, e.g. spore/news")
             HGap()
-            CrateButton("Follow", { NodeController.follow(follow); follow = "" }, enabled = follow.isNotBlank())
+            CrateButton(
+                "Follow",
+                {
+                    val t = follow.trim()
+                    when (NodeController.follow(follow)) {
+                        NodeController.FollowResult.SUBSCRIBED -> confirm("Following #$t")
+                        NodeController.FollowResult.ALREADY_FOLLOWING -> confirm("Already following #$t")
+                        NodeController.FollowResult.NOT_STARTED -> confirm("Node not started yet — not saved")
+                        NodeController.FollowResult.EMPTY -> {}
+                    }
+                    follow = ""
+                },
+                enabled = follow.isNotBlank(),
+            )
         }
         // Topic chips read across, not down — a one-line filter strip.
         LazyRow(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -126,13 +142,44 @@ private fun PostCard(p: Post) {
             }
             Caption("#${p.topic} · ${timeOf(p.ts)}")
             VGap(6.dp)
-            Text(Markdown.render(body, Palette.Amber))
+            PostBody(Markdown.render(body, Palette.Amber))
             if (magnet != null) {
                 VGap(8.dp)
                 InlineImage(magnet, paths[magnet], transfers.firstOrNull { it.magnet == magnet })
             }
         }
     }
+}
+
+/**
+ * A post body, with `[text](url)` links copyable but never auto-opened.
+ *
+ * `Markdown.render` deliberately gives a link no click behaviour — it rides in a
+ * signed-but-public post, so its URL is attacker-controlled text, and tapping it
+ * open would be a drive-by-link surface. Long-press instead copies the URL to the
+ * clipboard, which needs the tapped-glyph's URL, not just "the post's first link" —
+ * hence resolving it through the text layout rather than a plain `.clickable`.
+ */
+@Composable
+private fun PostBody(text: androidx.compose.ui.text.AnnotatedString) {
+    val ctx = LocalContext.current
+    val confirm = rememberConfirm()
+    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    Text(
+        text,
+        modifier = Modifier.pointerInput(text) {
+            detectTapGestures(
+                onLongPress = { pos ->
+                    val offset = layout?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                    val url = text.getStringAnnotations("url", offset, offset).firstOrNull()?.item ?: return@detectTapGestures
+                    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("link", url))
+                    confirm("Copied link")
+                },
+            )
+        },
+        onTextLayout = { layout = it },
+    )
 }
 
 /**
@@ -155,8 +202,11 @@ private fun InlineImage(magnet: String, path: String?, transfer: Transfer?) {
     }
     // Decoded on IO, not in composition: a JPEG decode is tens of milliseconds and
     // this runs inside a scrolling list. `produceState` keeps the row rendering
-    // while it happens instead of stalling the frame.
-    val bmp by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(null, path) {
+    // while it happens instead of stalling the frame. The `Result` (not a plain
+    // nullable) is what lets a corrupt/truncated file show "couldn't load this
+    // image" instead of "decoding…" forever (B8) — a null bitmap and a
+    // not-decoded-yet bitmap were the same value before.
+    val state by androidx.compose.runtime.produceState<Result<android.graphics.Bitmap>?>(null, path) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -169,24 +219,24 @@ private fun InlineImage(magnet: String, path: String?, transfer: Transfer?) {
                 android.graphics.BitmapFactory.decodeFile(
                     path,
                     android.graphics.BitmapFactory.Options().apply { inSampleSize = scale },
-                )
-            }.getOrNull()
+                ) ?: error("not a decodable image")
+            }
         }
     }
-    val shown = bmp
-    if (shown == null) {
-        Caption("📎 decoding image…")
-        return
+    val bmp = state?.getOrNull()
+    when {
+        state == null -> Caption("📎 decoding image…")
+        bmp == null -> Caption("📎 couldn't load this image")
+        else -> Image(
+            bmp.asImageBitmap(),
+            contentDescription = "attached image",
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 220.dp)
+                .border(2.dp, Palette.Edge),
+            contentScale = ContentScale.Crop,
+        )
     }
-    Image(
-        shown.asImageBitmap(),
-        contentDescription = "attached image",
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 220.dp)
-            .border(2.dp, Palette.Edge),
-        contentScale = ContentScale.Crop,
-    )
 }
 
 /**
