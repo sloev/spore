@@ -1895,7 +1895,7 @@ mod tests {
                 assert_eq!(peer, a.addr);
                 assert_eq!(accepted.pipe_id(), pipe_id);
                 assert_eq!(accepted.chosen.medium, direct::Medium::udp());
-                direct::Pipe::answer_with(accepted, b.addr, b_port)
+                direct::Pipe::answer_with(accepted, b.addr, b"127.0.0.1:0", b_port)
             }
             _ => panic!("B should be able to serve this offer"),
         };
@@ -1997,7 +1997,7 @@ mod tests {
             direct::Signal::Offer { accepted, .. } => accepted,
             _ => panic!("served"),
         };
-        let (answer_bytes, _) = direct::Pipe::answer_with(accepted, b.addr, b_port);
+        let (answer_bytes, _) = direct::Pipe::answer_with(accepted, b.addr, b"127.0.0.1:0", b_port);
         let mut stranger = direct::Signalling::new(c.addr);
         assert!(matches!(
             stranger.on_signal(b.addr, &answer_bytes, &[direct::Medium::udp()]),

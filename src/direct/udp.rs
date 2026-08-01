@@ -145,7 +145,8 @@ mod tests {
             }],
         );
         let offer = Offer::decode(&offer_bytes).unwrap();
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::udp()], resp_port);
+        let (answer_bytes, resp_pipe) =
+            Pipe::answer(&offer, [0xB2u8; 8], &[Medium::udp()], b"127.0.0.1:0", resp_port);
         let mut resp_pipe = resp_pipe.unwrap();
         let answer = Answer::decode(&answer_bytes).unwrap();
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();
@@ -192,7 +193,8 @@ mod tests {
         // Lock the socket to the child, wrap it in a real UdpPort, and answer.
         sock.connect(child_addr).expect("connect to child");
         let port = UdpPort::from_socket(sock, 1200).expect("wrap responder socket");
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::udp()], port);
+        let (answer_bytes, resp_pipe) =
+            Pipe::answer(&offer, [0xB2u8; 8], &[Medium::udp()], b"127.0.0.1:0", port);
         let mut resp_pipe = resp_pipe.expect("responder accepts the offer");
 
         // The answer rides back over the same (now connected) socket as a raw datagram.

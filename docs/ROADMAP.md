@@ -2199,7 +2199,14 @@ negotiated:
    network need not lean on a third party. A discovered locator is offered as a
    second candidate ranked *below* the LAN one. Verified with two daemons, one
    asking the other. **It does not make NAT work** — see step 3.
-3. **In progress.** The punch itself is built and tested (`src/direct/punch.rs`):
+3. **Wire fix landed, wiring landed.** `Answer::Ok` now carries `from`, the
+   responder's own locator, and the initiator dials *that* instead of a candidate
+   from its own offer; `UdpRunner::open` punches on the socket the pipe then runs
+   on. SPDR is `VERSION = 3`. **Still unproven end to end:** no test yet shows a
+   record crossing between two `UdpRunner`s over real sockets, which is exactly
+   the gap that hid the original bug — see the note below.
+
+   *(historical)* The punch itself is built and tested (`src/direct/punch.rs`):
    two sides probing at once meet in the middle, a punch nobody answers fails
    inside its bound, and the socket that punched is the one handed to the pipe —
    a mapping belongs to a source port, so punching on any other socket is
@@ -2410,6 +2417,44 @@ account, no vendor inbox, no iOS-roadmap guilt.
 | Direct mostly LAN-shaped | WAN-capable Direct (punch + explicit relay) |
 | Anonymity easy to over-claim | An explicit toggle with an honest ceiling |
 | Group-feature pressure | A clear now (sealed topic) vs. later (roster) line |
+
+---
+
+## D1 — Editorial and architectural review of the documentation — ⬜ todo
+
+**Why.** The docs have grown by accretion — this session alone touched ROADMAP,
+DESIGN, DIRECT, CHANGELOG, DEV_GUIDE, MISSION and VISUALDESIGN — and nobody has
+audited them as a whole. Suspected symptoms, unverified: the same concepts
+explained in several places (transport independence, the endpoint-only rule, the
+runtime contract), onboarding duplicated across README/MISSION/DEV_GUIDE, and
+prose that argues where a table would state.
+
+**Change.** A full editorial pass over every markdown file, judged against "every
+sentence should justify its existence": per-document purpose/audience/category and
+whether it should exist at all; cross-document duplication with a
+define-once-reference-everywhere table; information architecture and read order;
+tone (target: RFC, kernel docs, Rust, SQLite, Go proposals — not philosophy);
+redundancy/verbosity/precision scores; and a prioritised delete/merge/rewrite plan
+with target word counts.
+
+**`BRIDGES.md` is the deliberate exception** — it earns its length as an
+encyclopedia and stays comprehensive.
+
+**Non-goals.** Adding documents. The bar for a new one is that it *reduces* future
+maintenance; prefer one definition referenced everywhere over five explanations.
+
+**Acceptance**
+- [ ] Every markdown file classified, with a keep/delete/merge recommendation.
+- [ ] Duplication table: concept → where it appears → where it should live.
+- [ ] Recommended structure and read order for a first-time contributor.
+- [ ] A ranked plan — the first ten commits, by impact.
+
+**Note on doing it well:** this needs the whole docs tree read in one pass, so it
+wants a session with the context budget to actually read them rather than sample
+them. A partial pass would produce confident-sounding claims about files nobody
+opened, which is worse than no review.
+
+**Branch:** `docs/editorial-review` · **Freeze impact:** None.
 
 ---
 

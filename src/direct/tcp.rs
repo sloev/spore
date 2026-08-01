@@ -217,7 +217,8 @@ mod tests {
             }],
         );
         let offer = Offer::decode(&offer_bytes).unwrap();
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, [0xB2u8; 8], &[Medium::tcp()], resp_port);
+        let (answer_bytes, resp_pipe) =
+            Pipe::answer(&offer, [0xB2u8; 8], &[Medium::tcp()], b"127.0.0.1:0", resp_port);
         let mut resp_pipe = resp_pipe.unwrap();
         let answer = Answer::decode(&answer_bytes).unwrap();
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();

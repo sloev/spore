@@ -36,12 +36,18 @@ pub const MAGIC: &[u8; 4] = b"SPDR";
 /// Profile version. Bumping it changes the signalling and key schedule; a peer on
 /// a different version is rejected rather than mis-negotiated.
 ///
-/// **2** — a candidate's medium is a length-prefixed name, not a byte code (and
-/// the KDF binds the name). Bumped rather than finessed: v1 spelled the same
-/// field differently, so a v1 peer would mis-parse every candidate. Cheap to do
-/// now and not later — until #95 nothing could start a pipe at all, so there is
-/// no deployed v1 signalling to strand.
-pub const VERSION: u8 = 2;
+/// **3** — the ANSWER carries the responder's own locator. Without it the
+/// initiator had nowhere to dial: `chosen` is a candidate from its *own* OFFER,
+/// so it connected to its own address and never received a record. See
+/// [`Answer::Ok`].
+///
+/// **2** — a candidate's medium is a length-prefixed name, not a byte code, and
+/// the KDF binds the name.
+///
+/// Both were bumped rather than finessed, since a peer on the older version
+/// mis-parses rather than politely failing. Cheap while no release has shipped a
+/// usable Direct; that stops being true at the next one.
+pub const VERSION: u8 = 3;
 
 /// A transport-capable medium, named by **convention rather than by code**.
 ///
@@ -183,8 +189,23 @@ pub enum Reject {
 /// reason it declined.
 #[derive(Clone, Debug)]
 pub enum Answer {
-    Ok { pipe_id: [u8; 16], eph_pub: [u8; 32], chosen: Candidate },
-    Reject { pipe_id: [u8; 16], reason: Reject },
+    /// Accepted. `chosen` is the candidate picked from the *initiator's* offer —
+    /// which is why `from` has to exist: it is the responder's own locator, the
+    /// address the initiator actually dials.
+    ///
+    /// Without it the initiator had only its own advertised address to work with,
+    /// connected its socket to that, and never received a record — while both
+    /// ends still derived matching keys and reported the pipe up.
+    Ok {
+        pipe_id: [u8; 16],
+        eph_pub: [u8; 32],
+        chosen: Candidate,
+        from: Vec<u8>,
+    },
+    Reject {
+        pipe_id: [u8; 16],
+        reason: Reject,
+    },
 }
 
 // ---- signalling codec (SPDR) --------------------------------------------------
@@ -318,7 +339,7 @@ impl Answer {
         let mut v = Vec::new();
         hdr(&mut v, T_ANSWER);
         match self {
-            Answer::Ok { pipe_id, eph_pub, chosen } => {
+            Answer::Ok { pipe_id, eph_pub, chosen, from } => {
                 v.extend_from_slice(pipe_id);
                 v.push(1); // ok
                 v.extend_from_slice(eph_pub);
@@ -327,6 +348,7 @@ impl Answer {
                 put_u32(&mut v, chosen.est_bps);
                 put_u16(&mut v, chosen.mtu);
                 put_u16(&mut v, chosen.rtt_hint_ms);
+                put_bytes(&mut v, from);
             }
             Answer::Reject { pipe_id, reason } => {
                 v.extend_from_slice(pipe_id);
@@ -349,10 +371,12 @@ impl Answer {
                 let est_bps = r.u32()?;
                 let mtu = r.u16()?;
                 let rtt_hint_ms = r.u16()?;
+                let from = r.bytes()?;
                 Some(Answer::Ok {
                     pipe_id,
                     eph_pub,
                     chosen: Candidate { medium, locator, est_bps, mtu, rtt_hint_ms },
+                    from,
                 })
             }
             0 => {
@@ -564,9 +588,18 @@ pub struct Pipe<P: DatagramPort> {
 /// responder's ephemeral public key comes back.
 pub struct Pending {
     pipe_id: [u8; 16],
+    // (see `Pending::pipe_id`)
     from: Addr,
     to: Addr,
     eph_sec: [u8; 32],
+}
+
+impl Pending {
+    /// Which pipe this half-open state belongs to — the punch demultiplexes its
+    /// probes by it, so the caller needs it before the pipe exists.
+    pub fn pipe_id(&self) -> [u8; 16] {
+        self.pipe_id
+    }
 }
 
 impl<P: DatagramPort> Pipe<P> {
@@ -593,10 +626,16 @@ impl<P: DatagramPort> Pipe<P> {
     /// right kind of port. A responder offering more than one medium cannot know
     /// that in advance — it wants [`accept`] then [`Pipe::answer_with`], which
     /// put the runtime's socket work in the gap between the two.
-    pub fn answer(offer: &Offer, me: Addr, willing: &[Medium], port: P) -> (Vec<u8>, Option<Pipe<P>>) {
+    pub fn answer(
+        offer: &Offer,
+        me: Addr,
+        willing: &[Medium],
+        local: &[u8],
+        port: P,
+    ) -> (Vec<u8>, Option<Pipe<P>>) {
         match accept(offer, willing) {
             Ok(acc) => {
-                let (bytes, pipe) = Self::answer_with(acc, me, port);
+                let (bytes, pipe) = Self::answer_with(acc, me, local, port);
                 (bytes, Some(pipe))
             }
             Err(reject) => (reject, None),
@@ -609,7 +648,7 @@ impl<P: DatagramPort> Pipe<P> {
     ///
     /// Infallible by construction: the choosing already happened in [`accept`], so
     /// there is no "no medium fits" outcome left to represent here.
-    pub fn answer_with(acc: Accepted, me: Addr, port: P) -> (Vec<u8>, Pipe<P>) {
+    pub fn answer_with(acc: Accepted, me: Addr, local: &[u8], port: P) -> (Vec<u8>, Pipe<P>) {
         let (eph_sec, eph_pub) = crate::ratchet::keypair();
         let shared = dh(&eph_sec, &acc.offer_eph);
         // We are the responder: initiator = the offer's sender, responder = me.
@@ -621,7 +660,7 @@ impl<P: DatagramPort> Pipe<P> {
             tx_seq: 0,
             port,
         };
-        let answer = Answer::Ok { pipe_id: acc.pipe_id, eph_pub, chosen: acc.chosen };
+        let answer = Answer::Ok { pipe_id: acc.pipe_id, eph_pub, chosen: acc.chosen, from: local.to_vec() };
         (answer.encode(), pipe)
     }
 
@@ -630,7 +669,7 @@ impl<P: DatagramPort> Pipe<P> {
     /// was a reject, was for a different pipe, or was malformed.
     pub fn finish(pending: Pending, answer: &Answer, port: P) -> Option<Pipe<P>> {
         let (eph_pub, chosen) = match answer {
-            Answer::Ok { pipe_id, eph_pub, chosen } if *pipe_id == pending.pipe_id => (eph_pub, chosen),
+            Answer::Ok { pipe_id, eph_pub, chosen, .. } if *pipe_id == pending.pipe_id => (eph_pub, chosen),
             _ => return None,
         };
         let shared = dh(&pending.eph_sec, eph_pub);
@@ -719,7 +758,9 @@ pub enum Signal {
     Decline { peer: Addr, reply: Vec<u8> },
     /// The ANSWER to an offer this node made. Open a port for `chosen`, then
     /// [`Pipe::finish`] with `pending` and `answer`.
-    Answered { peer: Addr, pending: Pending, answer: Answer, chosen: Candidate },
+    /// `dial` is the responder's own locator from the ANSWER — where to actually
+    /// reach them. `chosen` names the medium and its parameters.
+    Answered { peer: Addr, pending: Pending, answer: Answer, chosen: Candidate, dial: Vec<u8> },
     /// The peer refused, and why. Nothing to open.
     Refused { peer: Addr, pipe_id: [u8; 16], reason: Reject },
     /// Not SPDR, not addressed here, or an ANSWER for a pipe this node never
@@ -793,9 +834,9 @@ impl Signalling {
                 return Signal::NotSignal;
             };
             return match answer {
-                Answer::Ok { ref chosen, .. } => {
-                    let chosen = chosen.clone();
-                    Signal::Answered { peer, pending, answer, chosen }
+                Answer::Ok { ref chosen, ref from, .. } => {
+                    let (chosen, dial) = (chosen.clone(), from.clone());
+                    Signal::Answered { peer, pending, answer, chosen, dial }
                 }
                 Answer::Reject { reason, .. } => Signal::Refused { peer, pipe_id, reason },
             };
@@ -912,6 +953,7 @@ mod tests {
                 mtu: 1400,
                 rtt_hint_ms: 5,
             },
+            from: b"responder:5555".to_vec(),
         };
         match Answer::decode(&ok.encode()).unwrap() {
             Answer::Ok { chosen, .. } => assert_eq!(chosen.medium, Medium::tcp()),
@@ -1030,7 +1072,8 @@ mod tests {
         );
 
         let offer = Offer::decode(&offer_bytes).unwrap();
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, resp_addr, &[Medium::udp()], resp_port);
+        let (answer_bytes, resp_pipe) =
+            Pipe::answer(&offer, resp_addr, &[Medium::udp()], b"127.0.0.1:0", resp_port);
         let mut resp_pipe = resp_pipe.unwrap();
         let answer = Answer::decode(&answer_bytes).unwrap();
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();
@@ -1053,7 +1096,7 @@ mod tests {
             vec![Candidate { medium: Medium::udp(), locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
         let offer = Offer::decode(&ob).unwrap();
-        let (ans, resp) = Pipe::answer(&offer, to, &[Medium::udp()], rp);
+        let (ans, resp) = Pipe::answer(&offer, to, &[Medium::udp()], b"127.0.0.1:0", rp);
         let init = Pipe::finish(pending, &Answer::decode(&ans).unwrap(), ip).unwrap();
         (init, resp.unwrap())
     }
@@ -1092,6 +1135,7 @@ mod tests {
                 mtu: 100,
                 rtt_hint_ms: 1,
             },
+            from: b"responder:5555".to_vec(),
         };
         assert!(Pipe::finish(pending, &wrong, rp).is_none());
     }
@@ -1107,7 +1151,7 @@ mod tests {
             vec![Candidate { medium: Medium::udp(), locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
         let offer = Offer::decode(&ob).unwrap();
-        let (ans, resp) = Pipe::answer(&offer, [2u8; 8], &[Medium::udp()], rp);
+        let (ans, resp) = Pipe::answer(&offer, [2u8; 8], &[Medium::udp()], b"127.0.0.1:0", rp);
         let mut resp = resp.unwrap();
         let mut init = Pipe::finish(pending, &Answer::decode(&ans).unwrap(), ip).unwrap();
 
