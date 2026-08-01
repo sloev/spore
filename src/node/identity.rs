@@ -126,11 +126,30 @@ impl Node {
     /// and anywhere else with no filesystem.
     pub fn set_spill_dir(&mut self, dir: &std::path::Path, now: u32) -> std::io::Result<usize> {
         let adopted = self.store.set_spill_dir(dir, now)?;
+        // We held these before, so we have already relayed them — don't flood
+        // them again just because the process restarted.
+        Ok(self.absorb_adopted(adopted))
+    }
+
+    /// Spill to storage that is not a filesystem — the same contract as
+    /// [`Node::set_spill_dir`], for a runtime whose storage nutrient is browser
+    /// IndexedDB, MCU flash, or anything else (see `docs/DESIGN.md`).
+    ///
+    /// Adoption and its verification are identical either way: a backend is
+    /// never trusted to have kept the bytes it was handed, because an id *is*
+    /// the hash of its content. Returns how many envelopes were adopted.
+    pub fn set_spill_backend(&mut self, backend: Box<dyn store::SpillBackend>, now: u32) -> usize {
+        let adopted = self.store.set_spill_backend(backend, now);
+        self.absorb_adopted(adopted)
+    }
+
+    /// Re-learn what a set of adopted wires implies: we held them before, so we
+    /// have already relayed them, and any manifest among them should resume the
+    /// transfer a restart interrupted.
+    fn absorb_adopted(&mut self, adopted: Vec<Vec<u8>>) -> usize {
         let n = adopted.len();
         for wire in adopted {
             let Ok((e, _)) = Envelope::decode(&wire) else { continue };
-            // We held it before, so we have already relayed it — don't flood it
-            // again just because the process restarted.
             self.mark_seen(&e);
             if e.typ == ty::DATA
                 && matches!(
@@ -141,7 +160,7 @@ impl Node {
                 self.absorb_manifest(&e);
             }
         }
-        Ok(n)
+        n
     }
 
     /// How many bytes of the store stay in memory before the rest spills to the

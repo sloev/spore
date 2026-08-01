@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 #[derive(Clone)]
 enum Body {
     Mem(Vec<u8>),
-    /// Resident copy dropped; the bytes are at `<dir>/<hexid>.spore`.
+    /// Resident copy dropped; the bytes are in the spill backend under this id.
     Evicted,
 }
 
@@ -46,7 +46,7 @@ pub(crate) struct Stored {
 
 pub(crate) struct Store {
     map: HashMap<Id, Stored>,
-    spill: Option<PathBuf>,
+    spill: Option<Box<dyn SpillBackend>>,
     /// Bytes currently resident. Spilling drives this down; it is not a ceiling
     /// on what the node holds, only on what it holds *in memory*.
     mem_bytes: usize,
@@ -104,7 +104,97 @@ pub fn bound_known(known: &mut HashSet<String>) {
     }
 }
 
-const MAX_ADOPT_BYTES: u64 = 1024 * 1024;
+pub const MAX_ADOPT_BYTES: u64 = 1024 * 1024;
+
+/// Where the store's bytes live when they are not resident in memory — the
+/// **storage nutrient** a runtime supplies (see `docs/DESIGN.md`).
+///
+/// A backend moves dumb bytes and nothing else. It never decides what is valid:
+/// every check that matters — the id matching its content, the wire being
+/// exactly one envelope, expiry — stays in [`Store`], because a backend is by
+/// definition a place *other things can also write*. A filesystem directory can
+/// be edited by a backup tool; browser storage can be edited by the page. So the
+/// rule is the same either way: bytes coming back in are re-verified against the
+/// id that asked for them, and a mismatch reads as "not held" so the mesh
+/// re-fetches a good copy (C-ST4).
+///
+/// `Send` because a node is shared across bridge threads behind a mutex.
+pub trait SpillBackend: Send {
+    /// Store `wire` under `id`. Failure is deliberately not reported: a spill
+    /// that does not land leaves the entry memory-only, exactly as it would with
+    /// no backend at all.
+    fn put(&mut self, id: &Id, wire: &[u8]);
+
+    /// Read back what was stored. `None` if absent, unreadable, or larger than
+    /// [`MAX_ADOPT_BYTES`] — the caller treats all three identically, so a
+    /// backend never has to distinguish "gone" from "broken".
+    fn get(&self, id: &Id) -> Option<Vec<u8>>;
+
+    /// Forget `id`. Already-absent is success.
+    fn remove(&mut self, id: &Id);
+
+    /// Every id currently held, so a restart can adopt what the last run left.
+    /// Ids only — the bytes are fetched through [`SpillBackend::get`] and
+    /// verified one at a time, so listing never has to buffer the store.
+    fn ids(&self) -> Vec<Id>;
+}
+
+/// The filesystem backend: one `<hexid>.spore` file per envelope in a directory.
+/// What every daemon, desktop and Android node uses; the browser has no
+/// equivalent yet, which is why a tab is memory-only.
+#[derive(Debug)]
+pub struct FsSpill {
+    dir: PathBuf,
+}
+
+impl FsSpill {
+    /// Create the directory if it is not there yet.
+    pub fn new(dir: &Path) -> io::Result<FsSpill> {
+        std::fs::create_dir_all(dir)?;
+        Ok(FsSpill { dir: dir.to_path_buf() })
+    }
+
+    fn path(&self, id: &Id) -> PathBuf {
+        self.dir.join(filename(id))
+    }
+}
+
+impl SpillBackend for FsSpill {
+    fn put(&mut self, id: &Id, wire: &[u8]) {
+        let _ = std::fs::write(self.path(id), wire);
+    }
+
+    fn get(&self, id: &Id) -> Option<Vec<u8>> {
+        read_capped(&self.path(id), MAX_ADOPT_BYTES).ok()
+    }
+
+    fn remove(&mut self, id: &Id) {
+        let _ = std::fs::remove_file(self.path(id));
+    }
+
+    fn ids(&self) -> Vec<Id> {
+        let Ok(rd) = std::fs::read_dir(&self.dir) else { return Vec::new() };
+        rd.flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let id = id_from_filename(path.file_name()?.to_str()?)?;
+                // Fast reject on size before anything tries to read it. The
+                // directory is ours, but it is on disk where anything can drop a
+                // file, and "adopt whatever is here" must not mean "read a
+                // terabyte into memory". `get` is bounded too — this is the
+                // cheap first pass, not the bound.
+                match std::fs::metadata(&path) {
+                    Ok(m) if m.len() <= MAX_ADOPT_BYTES => Some(id),
+                    Ok(_) => {
+                        let _ = std::fs::remove_file(&path);
+                        None
+                    }
+                    Err(_) => None,
+                }
+            })
+            .collect()
+    }
+}
 
 /// `<hexid>.spore`, the same name [`crate::bridge::store`] uses on disk.
 fn filename(id: &Id) -> String {
@@ -182,8 +272,7 @@ impl Store {
         match &self.map.get(id)?.body {
             Body::Mem(w) => Some(w.clone()),
             Body::Evicted => {
-                let path = self.spill.as_ref()?.join(filename(id));
-                let wire = read_capped(&path, MAX_ADOPT_BYTES).ok()?;
+                let wire = self.spill.as_ref()?.get(id)?;
                 let (e, n) = Envelope::decode(&wire).ok()?;
                 (n == wire.len() && e.id() == *id).then_some(wire)
             }
@@ -198,8 +287,8 @@ impl Store {
         // Write through, so what the node holds outlives the process. A failed
         // write is not fatal — the entry simply stays memory-only, exactly as it
         // would with no spill directory at all.
-        if let Some(dir) = &self.spill {
-            let _ = std::fs::write(dir.join(filename(&id)), &wire);
+        if let Some(backend) = &mut self.spill {
+            backend.put(&id, &wire);
         }
         self.map.insert(id, Stored { body: Body::Mem(wire), len, expiry, stamp, seq, dest });
         self.mem_bytes += len;
@@ -212,8 +301,8 @@ impl Store {
         if matches!(s.body, Body::Mem(_)) {
             self.mem_bytes = self.mem_bytes.saturating_sub(s.len);
         }
-        if let Some(dir) = &self.spill {
-            let _ = std::fs::remove_file(dir.join(filename(id)));
+        if let Some(backend) = &mut self.spill {
+            backend.remove(id);
         }
         self.total_bytes = self.total_bytes.saturating_sub(s.len);
     }
@@ -253,38 +342,43 @@ impl Store {
     /// caller can re-learn manifests from them and resume a transfer that a
     /// restart interrupted.
     pub fn set_spill_dir(&mut self, dir: &Path, now: u32) -> std::io::Result<Vec<Vec<u8>>> {
-        std::fs::create_dir_all(dir)?;
-        self.spill = Some(dir.to_path_buf());
+        Ok(self.set_spill_backend(Box::new(FsSpill::new(dir)?), now))
+    }
+
+    /// Same, for a runtime whose storage is not a filesystem — browser
+    /// IndexedDB, MCU flash, a test double. The verification below is identical
+    /// either way, deliberately: a backend is never trusted to have kept the
+    /// bytes it was given.
+    pub fn set_spill_backend(&mut self, backend: Box<dyn SpillBackend>, now: u32) -> Vec<Vec<u8>> {
+        self.spill = Some(backend);
+        self.adopt(now)
+    }
+
+    /// Take everything the backend claims to hold, keep what verifies, and drop
+    /// the rest from the backend so a bad entry is not re-examined every start.
+    fn adopt(&mut self, now: u32) -> Vec<Vec<u8>> {
+        let Some(backend) = self.spill.as_ref() else { return Vec::new() };
+        let ids = backend.ids();
 
         let mut adopted = Vec::new();
+        let mut discard = Vec::new();
         let mut seq = self.map.len() as u64;
-        for entry in std::fs::read_dir(dir)? {
-            let path = entry?.path();
-            let Some(name) = path.file_name().and_then(|s| s.to_str()) else { continue };
-            let Some(id) = id_from_filename(name) else { continue };
+        for id in ids {
             if self.map.contains_key(&id) {
                 continue;
             }
-            // Check the size before reading it. The directory is ours, but a
-            // spill dir is on disk where anything can drop a file, and "adopt
-            // whatever is here" must not mean "read a terabyte into memory".
-            match std::fs::metadata(&path) {
-                Ok(m) if m.len() <= MAX_ADOPT_BYTES => {}
-                Ok(_) => {
-                    let _ = std::fs::remove_file(&path);
-                    continue;
-                }
-                Err(_) => continue,
-            }
-            let Ok(wire) = read_capped(&path, MAX_ADOPT_BYTES) else { continue };
+            let Some(backend) = self.spill.as_ref() else { break };
+            // Unreadable is not the backend's fault to prove — leave it alone
+            // and let the mesh re-fetch. Only *invalid* content is discarded.
+            let Some(wire) = backend.get(&id) else { continue };
             let Ok((e, n)) = Envelope::decode(&wire) else {
-                let _ = std::fs::remove_file(&path);
+                discard.push(id);
                 continue;
             };
-            // The name must match the content, the wire must be exactly one
+            // The id must match the content, the wire must be exactly one
             // envelope, and it must not already have expired.
             if n != wire.len() || e.id() != id || e.expiry <= now {
-                let _ = std::fs::remove_file(&path);
+                discard.push(id);
                 continue;
             }
             let len = wire.len();
@@ -296,14 +390,100 @@ impl Store {
             seq += 1;
             adopted.push(wire);
         }
+
+        if let Some(backend) = self.spill.as_mut() {
+            for id in &discard {
+                backend.remove(id);
+            }
+        }
         self.shed();
-        Ok(adopted)
+        adopted
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A backend with no filesystem under it — the shape a browser tab or an MCU
+    /// would supply. Exists to prove the seam is real: `Store` is not touched to
+    /// add it, and every guarantee below is enforced the same way it is for
+    /// `FsSpill`.
+    #[derive(Default)]
+    struct MemSpill {
+        blobs: HashMap<Id, Vec<u8>>,
+    }
+
+    impl SpillBackend for MemSpill {
+        fn put(&mut self, id: &Id, wire: &[u8]) {
+            self.blobs.insert(*id, wire.to_vec());
+        }
+        fn get(&self, id: &Id) -> Option<Vec<u8>> {
+            self.blobs.get(id).cloned()
+        }
+        fn remove(&mut self, id: &Id) {
+            self.blobs.remove(id);
+        }
+        fn ids(&self) -> Vec<Id> {
+            self.blobs.keys().copied().collect()
+        }
+    }
+
+    fn env_wire(payload: &[u8], expiry: u32) -> (Id, Vec<u8>) {
+        let e = Envelope::new(ty::DATA, [0u8; 8], expiry, payload.to_vec());
+        (e.id(), e.wire())
+    }
+
+    #[test]
+    fn a_non_filesystem_backend_spills_and_reads_back() {
+        // The storage nutrient, supplied by something that is not a disk.
+        let (id, wire) = env_wire(b"held without a filesystem", 9_000);
+        let mut s = Store::new();
+        s.set_spill_backend(Box::<MemSpill>::default(), 1);
+        s.set_mem_budget(1); // force everything out of memory immediately
+        s.put(id, wire.clone(), 9_000, 0, 0, [0u8; 8]);
+
+        // Resident copy is gone, but the store still serves the bytes.
+        assert_eq!(s.wire(&id).as_deref(), Some(&wire[..]), "reads back through the backend");
+        s.remove(&id);
+        assert!(s.wire(&id).is_none(), "removed from the backend too");
+    }
+
+    #[test]
+    fn adoption_verifies_content_whatever_the_backend_is() {
+        // The C-ST4 property must not depend on the backend being a filesystem:
+        // an id is the hash of its bytes, so a backend that hands back something
+        // else is caught and the entry discarded rather than served on.
+        let (good_id, good) = env_wire(b"genuine", 9_000);
+        let (tampered_id, _) = env_wire(b"claimed", 9_000);
+
+        let mut backend = MemSpill::default();
+        backend.put(&good_id, &good);
+        // Same id, different bytes — exactly what a rotted sector or an edited
+        // store looks like from the outside.
+        backend.put(&tampered_id, b"not what this id says it is");
+
+        let mut s = Store::new();
+        let adopted = s.set_spill_backend(Box::new(backend), 1);
+
+        assert_eq!(adopted.len(), 1, "only the entry whose id matches its bytes is adopted");
+        assert_eq!(adopted[0], good);
+        assert!(s.contains(&good_id));
+        assert!(!s.contains(&tampered_id), "a mismatched id is never adopted");
+        assert!(s.wire(&tampered_id).is_none());
+    }
+
+    #[test]
+    fn adoption_drops_expired_entries() {
+        let (id, wire) = env_wire(b"stale", 100);
+        let mut backend = MemSpill::default();
+        backend.put(&id, &wire);
+
+        let mut s = Store::new();
+        let adopted = s.set_spill_backend(Box::new(backend), 500); // now > expiry
+        assert!(adopted.is_empty(), "an expired entry is not adopted");
+        assert!(!s.contains(&id));
+    }
 
     #[test]
     fn read_capped_bounds_the_read_not_a_preceding_stat() {
