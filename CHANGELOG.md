@@ -18,6 +18,20 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Storage is now something a runtime supplies, not something the core
+  assumes.** The store could only ever spill to a filesystem directory, so a
+  runtime whose storage is not a disk — a browser tab with IndexedDB, an MCU
+  with flash — had somewhere to put bytes and no way to offer it, and silently
+  ran memory-only. `SpillBackend` is now a public trait
+  (`put`/`get`/`remove`/`ids`) with `FsSpill` as the filesystem implementation,
+  and `Node::set_spill_backend` accepts any other. `Node::set_spill_dir` is
+  unchanged and still the filesystem path. **Wire format and the frozen API are
+  untouched** — purely additive. The verification that matters is deliberately
+  *not* delegated: a backend moves dumb bytes, while the id-matches-content
+  check, the exactly-one-envelope check and expiry all stay in the store,
+  because a backend is by definition somewhere other things can also write
+  (C-ST4).
+
 - **Every GitHub release now carries the means to rebuild itself, not just the
   APK.** `spore-android.apk` was the only release-cutting workflow ever
   attached to a release; the offline source bundle (every dependency vendored,

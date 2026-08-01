@@ -430,6 +430,13 @@ pub mod file;
 
 mod store;
 
+/// The storage nutrient: where the bytes go when they are not resident.
+///
+/// `FsSpill` is what a daemon, desktop or Android node uses. `SpillBackend` is
+/// public so a runtime whose storage is *not* a filesystem — a browser tab, an
+/// MCU — can supply its own; see `docs/DESIGN.md`'s "The spore and the soil".
+pub use store::{FsSpill, SpillBackend};
+
 // ---------------------------------------------------------------------------
 // Page 2, rule 2 — KISS framing for byte streams (TCP, serial, RFCOMM, TNCs).
 // ---------------------------------------------------------------------------
