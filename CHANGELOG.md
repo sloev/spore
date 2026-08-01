@@ -18,6 +18,11 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+## 0.7.0 — 2026-08-01
+
+<!-- Add `- ` bullets here as work merges. This note is a comment so it
+     cannot reach a release page; the bump refuses if there are no bullets. -->
+
 - **A Direct medium is now a name, not a hardcoded enum — and an unknown one is
   ignored instead of poisoning the offer it arrived in.** `direct::Medium` was a
   closed `#[repr(u8)]` enum, which was the wrong shape twice over. `DESIGN.md`
