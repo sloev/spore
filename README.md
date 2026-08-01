@@ -328,6 +328,7 @@ before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 | `docs/BRIDGES.md` | bridge reference — status index + a deep dive per protocol (wire format, SPORE mapping, security, specs) |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
 | `CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
+| `docs/DEV_GUIDE.md` | start here to change something — the full repo map, per-area build/test commands, and repo conventions |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 | `docs/DIRECT.md` | SPORE Direct — the negotiated, non-routed E2E datagram pipe for low-latency media |
 
