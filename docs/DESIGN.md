@@ -25,9 +25,11 @@ So the application layer has exactly two ingredients:
 The wire format itself is [`SPEC.md`](SPEC.md); it is frozen, and nothing here
 changes it.
 
-**Parts of this document.** §§ "four patterns" through "congestion control" are
-the application layers. "The spore and the soil" onward is a different concern —
-where the core runs, and what a host owes it.
+This document has two parts. **Part 1** is the application layer — what you build
+on the envelope. **Part 2** is where the core runs and what a host owes it. They
+are different concerns and are kept apart below.
+
+# Part 1 — the application layer
 
 ## Every service is one of four patterns
 
@@ -663,7 +665,9 @@ address is worse than a relay that is slower. If profiling shows it dominating o
 constrained hardware, the next lever is caching "id → verified" for the `seen`
 lifetime, trading memory for CPU rather than trading away the check.
 
-## The spore and the soil — where the core runs
+# Part 2 — where the core runs
+
+## The spore and the soil
 
 The **core** is one implementation of the protocol — the same bytes on every
 machine, carrying nothing about where it landed. Anything that hosts it is a
