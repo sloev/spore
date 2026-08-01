@@ -138,4 +138,5 @@ The full rules are in the <a href="spec.html">Spec</a>; the reasoning is in
 <a href="bridges.html">Bridges</a>, and how to rebuild it from scratch in
 <a href="rebuild.html">Rebuild</a> and
 <a href="continuity.html">Continuity</a>. Source on
-<a href="https://github.com/sloev/spore">GitHub</a>.
+<a href="https://github.com/sloev/spore">GitHub</a>. Curious why we've made
+the calls we have? See our <a href="mission.html">mission</a>.
