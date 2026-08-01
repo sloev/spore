@@ -80,7 +80,7 @@ name · **14** Freeze impact (almost always None).
 | **B7** | Accessibility + density pass | High UX | ✅ merged (#69) 🧪 | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ✅ merged (#72) 🧪 | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ✅ merged (#73) | — | B7 |
-| **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ⬜ todo — see "C3" below | C1 (did it by hand) | W-series |
+| **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ✅ done — `design/tokens.json` → `design/generate.py`, CI job "design tokens in sync" | C1 (did it by hand) | W-series |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
 | **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
@@ -1574,7 +1574,7 @@ icon/text; tone large phosphor success text for OLED fatigue but keep LED segmen
 or CDN images. **Non-goals:** rebrand, new mascot, Impact-font download, Material-3 dynamic
 colour.
 
-## C3 — Generate the design tokens from one source — ⬜ todo
+## C3 — Generate the design tokens from one source — ✅ done
 
 **Why.** The same palette is hand-typed in three places today — `site/style.css`
 (`--void: #0a0a0c`), `web/spore-standalone.html`'s inline tokens, and Android
@@ -1599,14 +1599,28 @@ code, but they can and should share the palette by construction.
 independent), theming beyond the existing dark/Field-Notes pair, runtime theming.
 
 **Acceptance**
-- [ ] One source file; `site/style.css` vars, the standalone's tokens, and
-      `Chrome.kt`'s `Palette` are all generated from it.
-- [ ] Regenerating produces a byte-identical tree — CI fails on drift.
-- [ ] Contrast ratios are computed, and a forbidden pair fails the build.
-- [ ] No rendered colour changes: the diff is mechanical, verifiable against C1's
-      parity table.
+- [x] One source file; `site/style.css` vars, the standalone's tokens, and
+      `Chrome.kt`'s `Palette` are all generated from it. VISUALDESIGN's own token
+      and contrast tables are generated too — that is where the ratios were most
+      re-typed, so leaving it hand-written would have kept the drift.
+- [x] Regenerating produces a byte-identical tree — CI fails on drift
+      ("design tokens in sync", mirroring "bindings in sync").
+- [x] Contrast ratios are computed, and a forbidden pair fails the build. The
+      check runs **both ways**: a pair claimed readable that is not fails, and so
+      does a pair claimed forbidden that has quietly become readable — a stale
+      safety claim is as bad as a stale colour.
+- [x] No rendered colour changes: every hex in all four files is unchanged, counts
+      included, verified by diffing the extracted colour multiset per file.
 
 **Branch:** `feat/design-token-generator` · **Freeze impact:** None.
+
+**Where the boundary landed.** `docs/VISUALDESIGN.md` stays normative for the
+*reasoning* — why `--prose` exists, why there is no light CRT — and
+`design/tokens.json` is normative for the *values*. Prose that quotes a ratio is
+authored with a placeholder and substituted at generation, so the wording stays
+human ("pink on olive" reads better than the token name) while the number cannot
+outlive the palette. The one thing deliberately left hand-written is §1's
+`--prose` essay, which argues about comfort rather than stating a token.
 
 ---
 

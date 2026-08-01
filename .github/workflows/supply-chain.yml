@@ -68,6 +68,30 @@ jobs:
           fi
           echo "bindings match spec.json"
 
+  design-tokens:
+    name: design tokens in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `design/generate.py` emits the palette into the docs site's CSS, the
+      # standalone node's inlined CSS, Android's Compose Palette and
+      # VISUALDESIGN's contrast tables. The same hexes used to be hand-typed in
+      # each, with the WCAG ratios re-typed as comments beside them — so a
+      # palette change meant a manual four-way audit, and the ratios could
+      # silently stop describing the colours they sat next to.
+      #
+      # The script also fails on its own if a pairing stops matching the grade
+      # tokens.json claims for it, in either direction: a colour that is no
+      # longer readable, or a "forbidden" pair that has quietly become fine.
+      - name: Regenerate and diff
+        run: |
+          python3 design/generate.py
+          if ! git diff --exit-code -- design/ site/ web/ android/ docs/; then
+            echo "::error::design tokens are stale — run: python3 design/generate.py"
+            exit 1
+          fi
+          echo "every surface matches design/tokens.json"
+
   offline:
     name: offline bundle
     runs-on: ubuntu-latest
