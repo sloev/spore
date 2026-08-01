@@ -7,6 +7,22 @@
 petname: riverside
 topics: [news, weather]
 
+# SPORE Direct — the low-latency plane, off unless you say where this node is
+# reachable. Signalling (OFFER/ANSWER) rides the ordinary sealed mesh path; the
+# media then go straight over UDP.
+#
+#   direct: 7500                 # bind :7500 and advertise this host's primary IPv4
+#   direct: 203.0.113.5:7500     # …or say exactly how a peer should reach you
+#
+# LAN-only for now, and deliberately so: a node cannot yet discover its own
+# reflexive address, so what you write here is what peers are told. Crossing NAT
+# needs the P-Direct-NAT track (STUN + hole-punch + relay), which is not built.
+#
+# The daemon has no control surface to start a pipe from, so name a peer to keep
+# one open to — the 16-hex-digit address the other node prints at startup:
+#
+#   direct-to: a1b2c3d4e5f60718
+
 bridges:
   - broadcast                # zero-config: the primary subnet's own broadcast :7373
   - udp                      # or the plain 255.255.255.255 limited broadcast

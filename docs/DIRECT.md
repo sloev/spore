@@ -219,8 +219,19 @@ This increment adds the **mesh signalling glue**: `Signalling` above, and the
 A whole negotiation now runs over the real `send_direct`/`on_rx` path in a test —
 sealed, signed, decrypted, dispatched — and the pipe it produces carries traffic.
 
-Still to come, and honestly not yet true of any shipped app: **no daemon or
-Android build calls any of this yet.** `Signalling` is the seam they will call
-through, not the wiring itself — a runtime still has to poll it, open ports, and
-carry the returned bytes over `send_direct`. Also outstanding: BLE/ESP-NOW
-adapters, and `CLOSE`/`REKEY`. Those add transport and lifecycle, not protocol.
+**The daemon now runs it.** `direct:` in the config says where a node is
+reachable and `direct-to:` names a peer to keep a pipe to; two `spore` processes
+sharing any bridge negotiate over the mesh and bring a UDP pipe up between them,
+verified with two real processes rather than only in a test. `src/cli/direct.rs`
+is the reference consumer of the seam — it is also why the `accept`/`answer_with`
+split is load-bearing rather than cosmetic: `UdpPort::connect` needs the peer's
+locator, and that only exists once a candidate has been chosen.
+
+Honest limits, in the daemon's own log rather than only here: **LAN only.** A node
+cannot yet discover its own reflexive address, so it advertises what it was told
+and nothing more — crossing NAT is the P-Direct-NAT track and is not built. There
+is also no app above the pipe yet: inbound records are logged and dropped, since
+the daemon has nothing to route them to.
+
+Still outstanding: **Android**, BLE/ESP-NOW adapters, and `CLOSE`/`REKEY`. Those
+add transport and lifecycle, not protocol.

@@ -28,6 +28,66 @@ pub(crate) fn run_config(cfg: Config) {
     );
 
     let mut handles = Vec::new();
+
+    // Direct: a second plane, off unless the config says where this node can be
+    // reached. Installed before the bridges so no delivered envelope is missed.
+    match cfg.direct.as_deref().map(super::direct::locator) {
+        None => {}
+        Some(None) => eprintln!(
+            "  [direct] off: `direct:` needs an explicit ip:port, or a bare port \
+             with a discoverable primary IPv4"
+        ),
+        Some(Some((advertise, bind_port))) => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            hub.set_delivery_sink(tx);
+            println!("  [direct] reachable at {advertise} (UDP) — LAN only until P-Direct-NAT");
+            let mut d = super::direct::Direct::new(hub.addr(), advertise, bind_port);
+            let dial = match cfg.direct_to.as_deref() {
+                None => None,
+                Some(s) => match super::direct::peer_addr(s) {
+                    Some(a) => {
+                        println!("  [direct] will keep a pipe to {s}");
+                        Some(a)
+                    }
+                    None => {
+                        eprintln!("  [direct] ignoring `direct-to: {s}` — not a 16-hex-digit address");
+                        None
+                    }
+                },
+            };
+            let h = hub.clone();
+            handles.push(thread::spawn(move || {
+                let mut last_expire = now();
+                let mut last_offer = 0u32;
+                loop {
+                    // A short timeout rather than a blocking recv: the open pipes
+                    // are owned by this thread and have to be drained here too.
+                    match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                        Ok(wire) => {
+                            d.on_delivered(&h, &wire);
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                    d.poll();
+                    let t = now();
+                    if t.saturating_sub(last_expire) >= 30 {
+                        last_expire = t;
+                        d.expire();
+                    }
+                    // Offering is paced, not continuous: an unanswered offer has
+                    // to be given time to expire before another is worth making.
+                    if let Some(peer) = dial {
+                        if t.saturating_sub(last_offer) >= 30 {
+                            last_offer = t;
+                            d.maintain(&h, peer);
+                        }
+                    }
+                }
+            }));
+        }
+    }
+
     for spec in cfg.bridges {
         let h = hub.clone();
         let handle = match spec {

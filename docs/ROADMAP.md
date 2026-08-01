@@ -2180,11 +2180,11 @@ negotiated:
    into a `Signal` saying what to open, and `accept`/`Pipe::answer_with` split
    deciding from opening (`Pipe::answer` took the port before it chose, so a
    responder willing to use more than one medium could not use it). A whole
-   negotiation is tested over the real `send_direct`/`on_rx` path. **Still to
-   wire: the daemon and Android** — no shipped runtime calls `Signalling` yet, so
-   Direct is still not startable from any app. That is the remainder of PR8c and
-   splits cleanly in two, daemon first (it can be verified here; Android's
-   behaviour cannot).
+   negotiation is tested over the real `send_direct`/`on_rx` path. **Daemon wired** — `src/cli/direct.rs`, with `direct:`/`direct-to:` config
+   keys; two real daemon processes negotiate over the mesh and bring a UDP pipe
+   up. LAN only, and the daemon says so: reflexive discovery is this track's own
+   step 2 and is not built. **Still to wire: Android**, whose behaviour cannot be
+   verified in this environment — that is the remainder of PR8c.
 1. Candidates in SPDR — already shipped.
 2. Reflexive locators via a minimal, dependency-free STUN client (binding
    request/response only) — new, small, in-budget per Finding 4.

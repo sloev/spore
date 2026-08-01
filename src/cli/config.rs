@@ -62,6 +62,15 @@ pub(crate) struct Config {
     pub(crate) petname: String,
     pub(crate) topics: Vec<String>,
     pub(crate) bridges: Vec<Spec>,
+    /// Where this node is reachable for Direct media, as `ip:port` or a bare
+    /// port to pair with the primary IPv4. `None` leaves Direct off entirely —
+    /// a node that cannot say where it is has no candidate to offer.
+    pub(crate) direct: Option<String>,
+    /// A peer to keep a Direct pipe open to, as a 16-hex-digit address. The
+    /// daemon has no control surface to start one from, so without this the
+    /// initiator half could never run and two daemons would both sit waiting to
+    /// be offered a pipe.
+    pub(crate) direct_to: Option<String>,
 }
 
 // A deliberately tiny YAML subset: `key: value` lines, `- item` list entries,
@@ -77,6 +86,8 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     let mut petname = "spore".to_string();
     let mut topics: Vec<String> = Vec::new();
     let mut bridges: Vec<Spec> = Vec::new();
+    let mut direct: Option<String> = None;
+    let mut direct_to: Option<String> = None;
     let mut sec = Sec::None;
 
     for (i, raw) in text.lines().enumerate() {
@@ -121,13 +132,27 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
                 }
                 sec = Sec::Bridges;
             }
+            "direct-to" => {
+                if v.is_empty() {
+                    return Err(format!("line {ln}: `direct-to:` needs a 16-hex-digit peer address"));
+                }
+                direct_to = Some(v.to_string());
+                sec = Sec::None;
+            }
+            "direct" => {
+                if v.is_empty() {
+                    return Err(format!("line {ln}: `direct:` needs a port or an ip:port"));
+                }
+                direct = Some(v.to_string());
+                sec = Sec::None;
+            }
             other => return Err(format!("line {ln}: unknown key `{other}`")),
         }
     }
     if bridges.is_empty() {
         return Err("no bridges configured".to_string());
     }
-    Ok(Config { petname, topics, bridges })
+    Ok(Config { petname, topics, bridges, direct, direct_to })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
