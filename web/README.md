@@ -34,6 +34,14 @@ the whole crypto stack (ed25519, x25519, ChaCha20-Poly1305, blake2, sha2) runs
 unchanged in the browser. You can confirm the single import with
 `WebAssembly.Module.imports(new WebAssembly.Module(bytes))`.
 
+That single import is the clearest example of the model in
+[`DESIGN.md`](../docs/DESIGN.md)'s "The spore and the soil": the core asks its
+host for randomness rather than reaching for a source itself, which is exactly
+why the same build runs in a browser tab and in a daemon. Time works the same way
+(`now` is a parameter, never a clock the core reads). The browser is thin soil in
+one respect worth knowing: there is no disk to spill the store to, and the node
+stops when the last tab closes.
+
 **Calling convention.** Rust hands variable-length results back as one `i64` that
 packs a pointer and length: `(ptr << 32) | len`. JS reads the two halves with
 `BigInt.asUintN(64, …)`, copies the bytes out of wasm memory, then calls
