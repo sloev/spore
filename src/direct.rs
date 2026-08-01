@@ -35,28 +35,76 @@ use x25519_dalek::{PublicKey, StaticSecret};
 pub const MAGIC: &[u8; 4] = b"SPDR";
 /// Profile version. Bumping it changes the signalling and key schedule; a peer on
 /// a different version is rejected rather than mis-negotiated.
-pub const VERSION: u8 = 1;
+///
+/// **2** — a candidate's medium is a length-prefixed name, not a byte code (and
+/// the KDF binds the name). Bumped rather than finessed: v1 spelled the same
+/// field differently, so a v1 peer would mis-parse every candidate. Cheap to do
+/// now and not later — until #95 nothing could start a pipe at all, so there is
+/// no deployed v1 signalling to strand.
+pub const VERSION: u8 = 2;
 
-/// A transport-capable medium. `est_bps`/`mtu` in a candidate describe *this*
-/// link; the enum only names the family so both sides agree on what they chose.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Medium {
-    Udp = 0,
-    Tcp = 1,
-    Ble = 2,
-    EspNow = 3,
-}
+/// A transport-capable medium, named by **convention rather than by code**.
+///
+/// This was a closed `#[repr(u8)]` enum, which was the wrong shape twice over.
+/// `DESIGN.md`'s model already says the nutrient list is closed while the
+/// *bridge* list stays open — a medium is the Direct plane's version of a bridge,
+/// so enumerating them in the core made every new one an edit to `src/`, and an
+/// allocation somebody had to hand out. A name needs neither: run SPORE Direct
+/// over a medium nobody here has heard of and the core does not have to know.
+///
+/// It also removes a real failure mode. An unknown *code* had to be a decode
+/// error; an unknown *name* is simply a medium this node is not willing to use,
+/// so it is skipped like any other unusable candidate rather than poisoning the
+/// offer it arrived in.
+///
+/// `est_bps`/`mtu` on a candidate describe the link; the name only says which
+/// family it is, so both ends agree on what they chose and the KDF can bind it.
+///
+/// The conventional names are listed as associated constants and in
+/// `docs/DIRECT.md`. Nothing enforces them — that is the point — but a medium
+/// two implementations spell differently is two mediums, so stick to the list
+/// where one exists, and namespace anything new (`acme.lora-p2p`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Medium(String);
 
 impl Medium {
-    fn from_u8(v: u8) -> Option<Medium> {
-        Some(match v {
-            0 => Medium::Udp,
-            1 => Medium::Tcp,
-            2 => Medium::Ble,
-            3 => Medium::EspNow,
-            _ => return None,
-        })
+    /// One datagram carries exactly one record.
+    pub const UDP: &'static str = "udp";
+    /// Byte stream; records get a length prefix.
+    pub const TCP: &'static str = "tcp";
+    /// Bluetooth Low Energy.
+    pub const BLE: &'static str = "ble";
+    /// ESP-NOW, the connectionless ESP32 link.
+    pub const ESP_NOW: &'static str = "esp-now";
+
+    pub fn new(name: impl Into<String>) -> Medium {
+        Medium(name.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The conventional UDP medium — the one every runtime here can open.
+    pub fn udp() -> Medium {
+        Medium::new(Medium::UDP)
+    }
+
+    /// The conventional TCP medium.
+    pub fn tcp() -> Medium {
+        Medium::new(Medium::TCP)
+    }
+}
+
+impl std::fmt::Display for Medium {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl PartialEq<str> for Medium {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
     }
 }
 
@@ -223,7 +271,7 @@ impl Offer {
         v.extend_from_slice(&self.eph_pub);
         v.push(self.candidates.len().min(255) as u8);
         for c in self.candidates.iter().take(255) {
-            v.push(c.medium as u8);
+            put_bytes(&mut v, c.medium.as_str().as_bytes());
             put_bytes(&mut v, &c.locator);
             put_u32(&mut v, c.est_bps);
             put_u16(&mut v, c.mtu);
@@ -246,7 +294,7 @@ impl Offer {
         let n = r.u8()? as usize;
         let mut candidates = Vec::with_capacity(n);
         for _ in 0..n {
-            let medium = Medium::from_u8(r.u8()?)?;
+            let medium = Medium::new(String::from_utf8(r.bytes()?).ok()?);
             let locator = r.bytes()?;
             let est_bps = r.u32()?;
             let mtu = r.u16()?;
@@ -274,7 +322,7 @@ impl Answer {
                 v.extend_from_slice(pipe_id);
                 v.push(1); // ok
                 v.extend_from_slice(eph_pub);
-                v.push(chosen.medium as u8);
+                put_bytes(&mut v, chosen.medium.as_str().as_bytes());
                 put_bytes(&mut v, &chosen.locator);
                 put_u32(&mut v, chosen.est_bps);
                 put_u16(&mut v, chosen.mtu);
@@ -296,7 +344,7 @@ impl Answer {
         match r.u8()? {
             1 => {
                 let eph_pub = r.arr32()?;
-                let medium = Medium::from_u8(r.u8()?)?;
+                let medium = Medium::new(String::from_utf8(r.bytes()?).ok()?);
                 let locator = r.bytes()?;
                 let est_bps = r.u32()?;
                 let mtu = r.u16()?;
@@ -430,7 +478,7 @@ fn derive(
     pipe_id: &[u8; 16],
     initiator: &Addr,
     responder: &Addr,
-    medium: Medium,
+    medium: &Medium,
 ) -> ([u8; 32], [u8; 32]) {
     let mut h = Blake2bVar::new(64).unwrap();
     h.update(shared);
@@ -438,7 +486,7 @@ fn derive(
     h.update(pipe_id);
     h.update(initiator);
     h.update(responder);
-    h.update(&[medium as u8]);
+    h.update(medium.as_str().as_bytes());
     let mut out = [0u8; 64];
     h.finalize_variable(&mut out).unwrap();
     let mut a = [0u8; 32];
@@ -549,7 +597,7 @@ impl<P: DatagramPort> Pipe<P> {
         let (eph_sec, eph_pub) = crate::ratchet::keypair();
         let shared = dh(&eph_sec, &acc.offer_eph);
         // We are the responder: initiator = the offer's sender, responder = me.
-        let (init_tx, init_rx) = derive(&shared, &acc.pipe_id, &acc.initiator, &me, acc.chosen.medium);
+        let (init_tx, init_rx) = derive(&shared, &acc.pipe_id, &acc.initiator, &me, &acc.chosen.medium);
         let pipe = Pipe {
             tx_key: init_rx, // responder transmits on the initiator's rx key
             rx_key: init_tx,
@@ -570,7 +618,8 @@ impl<P: DatagramPort> Pipe<P> {
             _ => return None,
         };
         let shared = dh(&pending.eph_sec, eph_pub);
-        let (init_tx, init_rx) = derive(&shared, &pending.pipe_id, &pending.from, &pending.to, chosen.medium);
+        let (init_tx, init_rx) =
+            derive(&shared, &pending.pipe_id, &pending.from, &pending.to, &chosen.medium);
         Some(Pipe { tx_key: init_tx, rx_key: init_rx, pipe_id: pending.pipe_id, tx_seq: 0, port })
     }
 
@@ -802,14 +851,14 @@ mod tests {
             eph_pub: [9u8; 32],
             candidates: vec![
                 Candidate {
-                    medium: Medium::Udp,
+                    medium: Medium::udp(),
                     locator: b"10.0.0.1:7000".to_vec(),
                     est_bps: 1_000_000,
                     mtu: 1200,
                     rtt_hint_ms: 20,
                 },
                 Candidate {
-                    medium: Medium::Ble,
+                    medium: Medium::new(Medium::BLE),
                     locator: b"aa:bb".to_vec(),
                     est_bps: 100_000,
                     mtu: 200,
@@ -836,7 +885,7 @@ mod tests {
             pipe_id: [3u8; 16],
             eph_pub: [4u8; 32],
             chosen: Candidate {
-                medium: Medium::Tcp,
+                medium: Medium::tcp(),
                 locator: b"host:9".to_vec(),
                 est_bps: 9,
                 mtu: 1400,
@@ -844,7 +893,7 @@ mod tests {
             },
         };
         match Answer::decode(&ok.encode()).unwrap() {
-            Answer::Ok { chosen, .. } => assert_eq!(chosen.medium, Medium::Tcp),
+            Answer::Ok { chosen, .. } => assert_eq!(chosen.medium, Medium::tcp()),
             _ => panic!("expected ok"),
         }
         let rej = Answer::Reject { pipe_id: [3u8; 16], reason: Reject::Busy };
@@ -862,24 +911,81 @@ mod tests {
         assert!(Offer::decode(&o[..o.len() - 3]).is_none(), "truncated tail rejected");
     }
 
+    /// The behaviour the byte-code enum could not have: a medium this build has
+    /// never heard of is *skipped*, not fatal.
+    ///
+    /// Under the old `Medium::from_u8`, an unrecognised code propagated `None`
+    /// out of `Offer::decode` and took the whole offer with it — so a peer
+    /// advertising one new path alongside three usable ones got nothing at all,
+    /// and adding any medium anywhere broke every older build.
+    #[test]
+    fn an_unknown_medium_is_ignored_rather_than_poisoning_the_offer() {
+        let mut o = sample_offer();
+        o.candidates.insert(
+            0,
+            Candidate {
+                medium: Medium::new("acme.lora-p2p"),
+                locator: b"whatever-this-means".to_vec(),
+                est_bps: 9_000_000,
+                mtu: 1500,
+                rtt_hint_ms: 1, // the best-looking candidate, so ranking would pick it
+                                // if it were ever considered
+            },
+        );
+
+        // It survives a round trip: the codec carries a name it cannot interpret.
+        let decoded = Offer::decode(&o.encode()).expect("an unknown medium must still decode");
+        assert_eq!(decoded.candidates.len(), o.candidates.len(), "no candidate is dropped on the wire");
+        assert_eq!(decoded.candidates[0].medium, Medium::new("acme.lora-p2p"));
+
+        // And it is simply not chosen, because nobody declared willingness for it.
+        let c = choose(&decoded, &[Medium::udp()]).expect("the usable candidate still wins");
+        assert_eq!(c.medium, Medium::udp(), "an unknown medium never outranks one we can open");
+
+        // An offer of *only* unknown mediums is an honest NoMedium, not a parse
+        // failure — the peer hears a reason instead of silence.
+        let only_alien = Offer { candidates: vec![decoded.candidates[0].clone()], ..decoded.clone() };
+        let round_tripped = Offer::decode(&only_alien.encode()).expect("still decodes");
+        assert_eq!(choose(&round_tripped, &[Medium::udp()]), Err(Reject::NoMedium));
+    }
+
+    #[test]
+    fn a_medium_is_a_name_and_the_key_schedule_binds_it() {
+        // Names are conventions, not codes: anything round trips.
+        for name in ["udp", "esp-now", "acme.lora-p2p", ""] {
+            let mut o = sample_offer();
+            o.candidates[0].medium = Medium::new(name);
+            let d = Offer::decode(&o.encode()).expect("any name decodes");
+            assert_eq!(d.candidates[0].medium, Medium::new(name));
+        }
+
+        // Two mediums spelled differently are two mediums, and the KDF says so:
+        // the same shared secret and pipe under a different medium name derives
+        // different keys, so a record cannot be replayed onto another medium.
+        let shared = [7u8; 32];
+        let (a, _) = derive(&shared, &[1u8; 16], &[2u8; 8], &[3u8; 8], &Medium::udp());
+        let (b, _) = derive(&shared, &[1u8; 16], &[2u8; 8], &[3u8; 8], &Medium::tcp());
+        assert_ne!(a, b, "the medium name is bound into the key schedule");
+    }
+
     #[test]
     fn choose_filters_by_throughput_and_mtu_then_ranks_by_latency() {
         let o = sample_offer();
         // Willing on both; UDP meets 5kbps/64B and has the lower rtt -> chosen.
-        let c = choose(&o, &[Medium::Udp, Medium::Ble]).unwrap();
-        assert_eq!(c.medium, Medium::Udp);
+        let c = choose(&o, &[Medium::udp(), Medium::new(Medium::BLE)]).unwrap();
+        assert_eq!(c.medium, Medium::udp());
 
         // Only BLE on offer meets a tiny need, so it wins when UDP isn't willing.
-        let c = choose(&o, &[Medium::Ble]).unwrap();
-        assert_eq!(c.medium, Medium::Ble);
+        let c = choose(&o, &[Medium::new(Medium::BLE)]).unwrap();
+        assert_eq!(c.medium, Medium::new(Medium::BLE));
 
         // No overlap at all -> NoMedium.
-        assert_eq!(choose(&o, &[Medium::EspNow]), Err(Reject::NoMedium));
+        assert_eq!(choose(&o, &[Medium::new(Medium::ESP_NOW)]), Err(Reject::NoMedium));
 
         // Overlap exists but the need is too big for any -> Throughput.
         let mut greedy = o.clone();
         greedy.need.mtu_needed = 5000;
-        assert_eq!(choose(&greedy, &[Medium::Udp, Medium::Ble]), Err(Reject::Throughput));
+        assert_eq!(choose(&greedy, &[Medium::udp(), Medium::new(Medium::BLE)]), Err(Reject::Throughput));
     }
 
     #[test]
@@ -894,7 +1000,7 @@ mod tests {
             [42u8; 16],
             Need { min_bps: 5_000, mtu_needed: 64, max_latency_ms: None },
             vec![Candidate {
-                medium: Medium::Udp,
+                medium: Medium::udp(),
                 locator: b"127.0.0.1:0".to_vec(),
                 est_bps: 1_000_000,
                 mtu: 1200,
@@ -903,7 +1009,7 @@ mod tests {
         );
 
         let offer = Offer::decode(&offer_bytes).unwrap();
-        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, resp_addr, &[Medium::Udp], resp_port);
+        let (answer_bytes, resp_pipe) = Pipe::answer(&offer, resp_addr, &[Medium::udp()], resp_port);
         let mut resp_pipe = resp_pipe.unwrap();
         let answer = Answer::decode(&answer_bytes).unwrap();
         let mut init_pipe = Pipe::finish(pending, &answer, init_port).unwrap();
@@ -923,10 +1029,10 @@ mod tests {
             to,
             [1u8; 16], // same pipe id on purpose: keys must still differ by addr/eph
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
-            vec![Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
+            vec![Candidate { medium: Medium::udp(), locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
         let offer = Offer::decode(&ob).unwrap();
-        let (ans, resp) = Pipe::answer(&offer, to, &[Medium::Udp], rp);
+        let (ans, resp) = Pipe::answer(&offer, to, &[Medium::udp()], rp);
         let init = Pipe::finish(pending, &Answer::decode(&ans).unwrap(), ip).unwrap();
         (init, resp.unwrap())
     }
@@ -952,13 +1058,19 @@ mod tests {
             [2u8; 8],
             [0xAAu8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
-            vec![Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
+            vec![Candidate { medium: Medium::udp(), locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
         // An answer that names a *different* pipe id must be refused, not finished.
         let wrong = Answer::Ok {
             pipe_id: [0xBBu8; 16],
             eph_pub: [1u8; 32],
-            chosen: Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 },
+            chosen: Candidate {
+                medium: Medium::udp(),
+                locator: vec![],
+                est_bps: 10,
+                mtu: 100,
+                rtt_hint_ms: 1,
+            },
         };
         assert!(Pipe::finish(pending, &wrong, rp).is_none());
     }
@@ -971,10 +1083,10 @@ mod tests {
             [2u8; 8],
             [5u8; 16],
             Need { min_bps: 1, mtu_needed: 1, max_latency_ms: None },
-            vec![Candidate { medium: Medium::Udp, locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
+            vec![Candidate { medium: Medium::udp(), locator: vec![], est_bps: 10, mtu: 100, rtt_hint_ms: 1 }],
         );
         let offer = Offer::decode(&ob).unwrap();
-        let (ans, resp) = Pipe::answer(&offer, [2u8; 8], &[Medium::Udp], rp);
+        let (ans, resp) = Pipe::answer(&offer, [2u8; 8], &[Medium::udp()], rp);
         let mut resp = resp.unwrap();
         let mut init = Pipe::finish(pending, &Answer::decode(&ans).unwrap(), ip).unwrap();
 

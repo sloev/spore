@@ -25,7 +25,7 @@ fn main() {
         *b"pipe-id-16-bytes",
         Need { min_bps: 5_000, mtu_needed: 64, max_latency_ms: Some(150) },
         vec![Candidate {
-            medium: Medium::Udp,
+            medium: Medium::udp(),
             locator: b"198.51.100.7:7373".to_vec(),
             est_bps: 2_000_000,
             mtu: 1200,
@@ -36,7 +36,7 @@ fn main() {
 
     // Bob decodes the offer, is willing to use UDP, and answers over his port.
     let offer = Offer::decode(&offer_bytes).expect("valid offer");
-    let (answer_bytes, bob_pipe) = Pipe::answer(&offer, bob, &[Medium::Udp], bob_port);
+    let (answer_bytes, bob_pipe) = Pipe::answer(&offer, bob, &[Medium::udp()], bob_port);
     let mut bob_pipe = bob_pipe.expect("Bob accepted");
     println!("Bob   → ANSWER (chose UDP)");
 

@@ -53,7 +53,7 @@ impl Direct {
 
     fn candidates(&self) -> Vec<Candidate> {
         vec![Candidate {
-            medium: Medium::Udp,
+            medium: Medium::udp(),
             locator: self.advertise.clone().into_bytes(),
             est_bps: 2_000_000,
             mtu: UDP_MTU,
@@ -65,7 +65,7 @@ impl Direct {
     /// BLE or ESP-NOW radio to offer, and saying otherwise would be a control
     /// with nothing behind it.
     fn willing(&self) -> Vec<Medium> {
-        vec![Medium::Udp]
+        vec![Medium::udp()]
     }
 
     /// Open our end for a candidate the negotiation chose.
@@ -74,7 +74,7 @@ impl Direct {
     /// advertised so the answer's traffic can arrive there, while a responder
     /// dials out and lets the kernel pick, because it is the one sending first.
     fn open(&self, chosen: &Candidate, local_port: u16) -> Option<UdpPort> {
-        if chosen.medium != Medium::Udp {
+        if chosen.medium != Medium::udp() {
             eprintln!("  [direct] chose {:?}, which this daemon cannot open", chosen.medium);
             return None;
         }

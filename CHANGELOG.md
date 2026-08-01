@@ -18,6 +18,24 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **A Direct medium is now a name, not a hardcoded enum — and an unknown one is
+  ignored instead of poisoning the offer it arrived in.** `direct::Medium` was a
+  closed `#[repr(u8)]` enum, which was the wrong shape twice over. `DESIGN.md`
+  already says the nutrient list is closed while the *bridge* list stays open, and
+  a medium is the Direct plane's version of a bridge — so enumerating them in the
+  core made every new medium an edit to `src/` and an allocation somebody had to
+  hand out. Worse, an unknown code *had* to be a decode error: `Offer::decode`
+  propagated it with `?`, so a peer advertising one unfamiliar path alongside three
+  usable ones got nothing at all. A medium is now a length-prefixed name carried
+  verbatim; an unrecognised one decodes cleanly and is simply a candidate nobody
+  declared willingness for, so it is skipped like any other unusable path, and an
+  offer of only unknown mediums answers `no_medium` — a reason rather than silence.
+  The name is bound into the KDF, so a record still cannot be replayed onto a
+  different medium. The SPDR profile is `VERSION = 2` for the encoding change,
+  bumped rather than finessed because a v1 peer would mis-parse every candidate —
+  cheap now, since until the daemon wiring below nothing could start a pipe at all.
+  The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
+
 - **The daemon can now bring a Direct pipe up.** The core seam below made
   signalling possible; nothing called it, so Direct still could not be started
   from anything you can run. `src/cli/direct.rs` is that consumer: `direct:` in

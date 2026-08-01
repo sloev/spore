@@ -2252,16 +2252,15 @@ what makes the declaration user-visible rather than merely internal: a browser
 runtime says it has no relay of its own, instead of showing a candidate that can
 never connect.
 
-**Adding a rung is an SPDR-profile change, not a free addition — check this before
-designing step 5's candidate.** `direct::Medium` is a `#[repr(u8)]` wire enum, and
-`Offer::decode` parses candidates with `Medium::from_u8(r.u8()?)?` — the `?`
-propagates, so an unknown medium fails **the entire OFFER**, not just that one
-candidate. A peer on an older build therefore drops the whole offer, including the
-candidates it would have been able to use. The frozen v1 envelope wire is untouched
-either way (SPDR is opaque payload riding on top of it), but the profile is
-versioned (`direct::VERSION`) and a new rung needs a deliberate mixed-version story
-— bump the profile, or omit unknown-to-the-peer candidates when composing the offer
-— rather than being added and left to work itself out.
+**Adding a rung no longer breaks older peers — resolved.** This was recorded as a
+trap: `direct::Medium` was a `#[repr(u8)]` wire enum and `Offer::decode` parsed
+candidates with `Medium::from_u8(r.u8()?)?`, so the `?` propagated and an unknown
+medium failed *the entire OFFER* — an older peer dropped the whole offer including
+the candidates it could have used. A medium is now a length-prefixed **name**, so
+an unrecognised one decodes cleanly and is simply a candidate nobody is willing to
+open. Step 5's relay candidate can therefore be added without stranding anything.
+The SPDR profile went to `VERSION = 2` for the encoding change, which was cheap to
+do while no deployed build could start a pipe at all.
 
 **This does not add a sixth nutrient.** Transport is still one nutrient and the
 list is still closed — a punch rung is a *supply* of it, exactly as a bridge is
