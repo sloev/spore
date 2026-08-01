@@ -18,6 +18,19 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Android: a bridge can be paused without losing it (PR2 carried-forward
+  toggle).** Removing a bridge always meant re-entering its setup from scratch
+  — re-scanning for the BLE device, re-granting the mic permission. Audio modem,
+  Meshtastic BLE and RNode BLE now get a Pause/Resume control next to Remove:
+  Pause stops the transport and frees its hub interface but keeps the row and
+  its configuration, and Resume restarts with that exact same configuration,
+  landing back in the same row rather than adding a duplicate one. Wi-Fi Direct
+  and Web don't get one yet — Wi-Fi Direct's actual transport turns out to be
+  the core-owned UDP bridge with no stop hook (a Pause would silently leave the
+  socket running), and Web can aggregate any number of added relays that a
+  Resume can't yet replay — both stay Remove-only rather than offer a control
+  that would lie about what it did. No wire or wasm changes.
+
 - **The standalone web node is on the real palette now, not a stand-in (C1).**
   `web/spore-standalone.html` has carried its own inline stylesheet since it
   was written — it has to, being a single offline file — but that stylesheet

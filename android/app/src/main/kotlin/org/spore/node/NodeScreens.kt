@@ -656,12 +656,15 @@ private fun classifyBridgeStatus(status: String): BridgeStatus {
 
 /**
  * One bridge: an LED dot, the kind, its status line, and — for a bridge this app
- * can actually stop — a Remove control.
+ * can actually stop — Pause/Resume and Remove controls.
  *
  * `canStop` is the honest gate (§ VISUALDESIGN / audit "no fake UI"): a bridge we
  * registered the interface for (Audio, BLE, Wi-Fi Direct, Web) gets a real Remove
  * that cancels its pumps and unregisters the interface; a core-owned bridge
  * (TCP/UDP) shows a plain caption instead of a button that would do nothing.
+ * `canToggle` is the same honesty gate for a separate Pause/Resume (PR2 carried
+ * forward): only offered where a Resume can restart with the exact configuration
+ * the row already shows, not a button that quietly comes back to something else.
  */
 @Composable
 private fun BridgeRow(b: BridgeState) {
@@ -683,6 +686,14 @@ private fun BridgeRow(b: BridgeState) {
             HGap(6.dp)
             // Never colour alone (§1) — the dot is paired with the status word.
             Caption(label)
+            if (b.canToggle) {
+                HGap(6.dp)
+                CrateButton(
+                    if (b.enabled) "Pause" else "Resume",
+                    { NodeController.toggleBridge(b) },
+                    contentDescription = if (b.enabled) "Pause ${b.kind}" else "Resume ${b.kind}",
+                )
+            }
             if (b.canStop) {
                 HGap(6.dp)
                 CrateButton("Remove", { NodeController.stopBridge(b) })
