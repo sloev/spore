@@ -138,6 +138,47 @@ A `DatagramPort` is whatever the chosen medium's adapter provides — `mtu`, `se
 an in-memory `Loopback` for tests and for wiring two in-process peers (see
 `examples/direct_loopback.rs`), plus two real socket adapters described next.
 
+### Carrying it over the mesh
+
+`Pipe::answer` above takes the port *before* it chooses, which only works when the
+responder is willing to use exactly one medium. Anything choosing among several
+opens the port in the gap between deciding and answering:
+
+```rust
+use spore::direct::{Signalling, Signal, Pipe, Medium};
+
+let mut sig = Signalling::new(my_addr);
+
+// Initiator: the SPDR bytes go out as an ordinary sealed DM.
+let (offer_bytes, pipe_id) = sig.offer(peer, need, candidates, now);
+node.send_direct(peer, &offer_bytes, now);
+
+// Either side, on the plaintext of a delivered DM:
+match sig.on_signal(sender, &plaintext, &[Medium::Udp]) {
+    Signal::Offer { peer, accepted } => {
+        let port = open_port_for(&accepted.chosen);      // the runtime's job
+        let (answer_bytes, pipe) = Pipe::answer_with(accepted, my_addr, port);
+        node.send_direct(peer, &answer_bytes, now);
+    }
+    Signal::Decline { peer, reply } => { node.send_direct(peer, &reply, now); }
+    Signal::Answered { pending, answer, chosen, .. } => {
+        let port = open_port_for(&chosen);
+        let pipe = Pipe::finish(pending, &answer, port).unwrap();
+    }
+    Signal::Refused { reason, .. } => { /* tell the user, honestly */ }
+    Signal::NotSignal => { /* an ordinary message — hand it to the app */ }
+}
+```
+
+The division is deliberate and is the one from `DESIGN.md`'s runtime model:
+**deciding is the core's, opening is the runtime's.** `Signalling` holds no
+sockets and no clock — `now` is a parameter, and `willing` is the runtime saying
+what it can actually open. A runtime that can open nothing passes `&[]` and every
+offer is declined with a real reason, rather than accepted and then quietly
+failing to connect. Offers that are never answered are dropped by
+`Signalling::expire`, since a NAT binding dies in 30s–5min and a stale candidate
+set is better restarted than resumed.
+
 ## Socket adapters
 
 `direct/udp.rs` and `direct/tcp.rs` implement `DatagramPort` over real sockets.
@@ -168,9 +209,18 @@ avoided even on TCP.
 
 The **pure protocol core** landed first: the `SPDR` negotiation codec, the key
 schedule, the AEAD record, medium selection, the `DatagramPort` trait, the
-`Loopback` transport, and the `Pipe` — all unit-tested end to end. This increment
-adds the **real UDP and TCP socket adapters** above, exercised against real kernel
+`Loopback` transport, and the `Pipe` — all unit-tested end to end. Then the
+**real UDP and TCP socket adapters** above, exercised against real kernel
 sockets — including a genuine two-process UDP round-trip that re-execs the test
-binary and negotiates a live pipe across the process boundary. Still to come: the
-mesh signalling glue that carries `SPDR` over `send_direct`, BLE/ESP-NOW adapters,
-and `CLOSE`/`REKEY`; those add transport and lifecycle, not protocol.
+binary and negotiates a live pipe across the process boundary.
+
+This increment adds the **mesh signalling glue**: `Signalling` above, and the
+`accept`/`answer_with` split that lets a port be opened for the medium that won.
+A whole negotiation now runs over the real `send_direct`/`on_rx` path in a test —
+sealed, signed, decrypted, dispatched — and the pipe it produces carries traffic.
+
+Still to come, and honestly not yet true of any shipped app: **no daemon or
+Android build calls any of this yet.** `Signalling` is the seam they will call
+through, not the wiring itself — a runtime still has to poll it, open ports, and
+carry the returned bytes over `send_direct`. Also outstanding: BLE/ESP-NOW
+adapters, and `CLOSE`/`REKEY`. Those add transport and lifecycle, not protocol.

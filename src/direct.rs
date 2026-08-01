@@ -26,6 +26,9 @@ use blake2::digest::{Update as _, VariableOutput};
 use blake2::Blake2bVar;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use rand::rngs::OsRng;
+use rand::RngCore;
+use std::collections::HashMap;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 /// Wire magic so another app ignores an SPDR payload it doesn't understand.
@@ -343,6 +346,75 @@ pub fn choose<'a>(offer: &'a Offer, willing: &[Medium]) -> Result<&'a Candidate,
     Ok(fit[0])
 }
 
+/// The responder's decision, taken *before* any port exists.
+///
+/// Deciding which medium wins is the core's job; opening a socket for it is the
+/// runtime's. [`accept`] and [`Pipe::answer_with`] are the two halves, and this
+/// is what is held across the gap between them.
+///
+/// [`Pipe::answer`] fuses the two, which is only usable when the responder is
+/// willing to use exactly one medium — it takes the port before it knows which
+/// candidate won, so a node offering several would have to guess. Anything
+/// choosing among mediums wants this pair instead.
+pub struct Accepted {
+    /// The candidate that won. The runtime opens a port for *this* medium.
+    pub chosen: Candidate,
+    pipe_id: [u8; 16],
+    initiator: Addr,
+    offer_eph: [u8; 32],
+}
+
+impl Accepted {
+    /// The pipe this decision belongs to.
+    pub fn pipe_id(&self) -> [u8; 16] {
+        self.pipe_id
+    }
+}
+
+/// Build an OFFER. Free-standing because nothing about proposing a pipe needs a
+/// port — [`Pipe::offer`]'s type parameter was only ever incidental, and
+/// [`Signalling`] would otherwise have to name an arbitrary transport to call it.
+fn build_offer(
+    from: Addr,
+    to: Addr,
+    pipe_id: [u8; 16],
+    need: Need,
+    candidates: Vec<Candidate>,
+) -> (Vec<u8>, Pending) {
+    let (eph_sec, eph_pub) = crate::ratchet::keypair();
+    let offer = Offer { pipe_id, from, to, need, eph_pub, candidates };
+    (offer.encode(), Pending { pipe_id, from, to, eph_sec })
+}
+
+/// Responder side, step 1: choose a candidate without opening anything.
+///
+/// `Err` is the encoded reject ANSWER to send back — there is nothing to open in
+/// that case, which is exactly why the reject path does not need a port either.
+pub fn accept(offer: &Offer, willing: &[Medium]) -> Result<Accepted, Vec<u8>> {
+    match choose(offer, willing) {
+        Ok(c) => Ok(Accepted {
+            chosen: c.clone(),
+            pipe_id: offer.pipe_id,
+            initiator: offer.from,
+            offer_eph: offer.eph_pub,
+        }),
+        Err(reason) => Err(Answer::Reject { pipe_id: offer.pipe_id, reason }.encode()),
+    }
+}
+
+/// True if `payload` is SPDR signalling rather than ordinary application bytes.
+///
+/// A node receives OFFER/ANSWER as the plaintext of an ordinary sealed DM, so
+/// something has to tell the two apart before the app sees a message that is not
+/// for it. The magic is checked, not guessed at — an app payload that happens to
+/// start with these four bytes still has to carry a version and a known type.
+pub fn is_signal(payload: &[u8]) -> bool {
+    payload.len() >= 6
+        && &payload[..4] == MAGIC
+        && payload[4] == VERSION
+        && matches!(payload[5], T_OFFER | T_ANSWER)
+}
+
 // ---- key schedule -------------------------------------------------------------
 
 fn dh(sec: &[u8; 32], pubk: &[u8; 32]) -> [u8; 32] {
@@ -443,35 +515,50 @@ impl<P: DatagramPort> Pipe<P> {
         need: Need,
         candidates: Vec<Candidate>,
     ) -> (Vec<u8>, Pending) {
-        let (eph_sec, eph_pub) = crate::ratchet::keypair();
-        let offer = Offer { pipe_id, from, to, need, eph_pub, candidates };
-        (offer.encode(), Pending { pipe_id, from, to, eph_sec })
+        build_offer(from, to, pipe_id, need, candidates)
     }
 
     /// Responder side: given an OFFER and the mediums we're willing to use, pick a
     /// candidate, derive keys, and open our end over `port` (built for the chosen
     /// medium). Returns the ANSWER bytes to send back and our live [`Pipe`]. On no
     /// fit, returns the ANSWER bytes carrying the reject and no pipe.
+    /// Convenience for a responder willing to use exactly **one** medium: decide
+    /// and open in a single call.
+    ///
+    /// `port` is taken before the choice is made, so it has to already be the
+    /// right kind of port. A responder offering more than one medium cannot know
+    /// that in advance — it wants [`accept`] then [`Pipe::answer_with`], which
+    /// put the runtime's socket work in the gap between the two.
     pub fn answer(offer: &Offer, me: Addr, willing: &[Medium], port: P) -> (Vec<u8>, Option<Pipe<P>>) {
-        let chosen = match choose(offer, willing) {
-            Ok(c) => c.clone(),
-            Err(reason) => {
-                return (Answer::Reject { pipe_id: offer.pipe_id, reason }.encode(), None);
+        match accept(offer, willing) {
+            Ok(acc) => {
+                let (bytes, pipe) = Self::answer_with(acc, me, port);
+                (bytes, Some(pipe))
             }
-        };
+            Err(reject) => (reject, None),
+        }
+    }
+
+    /// Responder side, step 2: derive keys over the port the runtime opened for
+    /// [`Accepted::chosen`]. Returns the ANSWER bytes to carry back over the mesh
+    /// and the live pipe.
+    ///
+    /// Infallible by construction: the choosing already happened in [`accept`], so
+    /// there is no "no medium fits" outcome left to represent here.
+    pub fn answer_with(acc: Accepted, me: Addr, port: P) -> (Vec<u8>, Pipe<P>) {
         let (eph_sec, eph_pub) = crate::ratchet::keypair();
-        let shared = dh(&eph_sec, &offer.eph_pub);
-        // We are the responder: initiator = offer.from, responder = me.
-        let (init_tx, init_rx) = derive(&shared, &offer.pipe_id, &offer.from, &me, chosen.medium);
+        let shared = dh(&eph_sec, &acc.offer_eph);
+        // We are the responder: initiator = the offer's sender, responder = me.
+        let (init_tx, init_rx) = derive(&shared, &acc.pipe_id, &acc.initiator, &me, acc.chosen.medium);
         let pipe = Pipe {
             tx_key: init_rx, // responder transmits on the initiator's rx key
             rx_key: init_tx,
-            pipe_id: offer.pipe_id,
+            pipe_id: acc.pipe_id,
             tx_seq: 0,
             port,
         };
-        let answer = Answer::Ok { pipe_id: offer.pipe_id, eph_pub, chosen };
-        (answer.encode(), Some(pipe))
+        let answer = Answer::Ok { pipe_id: acc.pipe_id, eph_pub, chosen: acc.chosen };
+        (answer.encode(), pipe)
     }
 
     /// Initiator side: consume the responder's ANSWER, derive keys, and open our
@@ -546,6 +633,126 @@ impl<P: DatagramPort> Pipe<P> {
     /// The underlying transport, e.g. to read its MTU.
     pub fn port(&self) -> &P {
         &self.port
+    }
+}
+
+// ---- mesh signalling ----------------------------------------------------------
+
+/// What an inbound SPDR payload means, and what the runtime has to do about it.
+///
+/// Every variant that needs a socket names the medium to open and hands back the
+/// state to finish with. The core decides; the runtime opens. Nothing here holds
+/// a port, and nothing here sees a byte that flows over one.
+pub enum Signal {
+    /// An OFFER this node can serve. Open a port for `accepted.chosen`, call
+    /// [`Pipe::answer_with`], and carry the ANSWER bytes it returns back to
+    /// `peer` over the mesh.
+    Offer { peer: Addr, accepted: Accepted },
+    /// An OFFER this node cannot serve. Carry `reply` back to `peer`. Nothing is
+    /// opened and nothing is left half-built — the reject path needs no port,
+    /// which is the whole reason choosing happens before opening.
+    Decline { peer: Addr, reply: Vec<u8> },
+    /// The ANSWER to an offer this node made. Open a port for `chosen`, then
+    /// [`Pipe::finish`] with `pending` and `answer`.
+    Answered { peer: Addr, pending: Pending, answer: Answer, chosen: Candidate },
+    /// The peer refused, and why. Nothing to open.
+    Refused { peer: Addr, pipe_id: [u8; 16], reason: Reject },
+    /// Not SPDR, not addressed here, or an ANSWER for a pipe this node never
+    /// offered. The payload is ordinary application bytes; hand it to the app.
+    NotSignal,
+}
+
+/// The half-open Direct negotiations this node is party to.
+///
+/// This is the piece that was missing: `direct` could already negotiate and the
+/// adapters could already carry bytes, but nothing tied SPDR to
+/// [`Node::send_direct`](crate::Node::send_direct), so no app could start a pipe
+/// at all — which is why NAT traversal had never actually been hit in practice.
+///
+/// Pure, like the rest of this module: no sockets and no clock of its own. Time
+/// arrives as a parameter; ports are the runtime's to open.
+pub struct Signalling {
+    me: Addr,
+    pending: HashMap<[u8; 16], (Pending, u32)>,
+}
+
+impl Signalling {
+    pub fn new(me: Addr) -> Signalling {
+        Signalling { me, pending: HashMap::new() }
+    }
+
+    /// Start a negotiation. Returns the SPDR bytes to carry to `to` over
+    /// `Node::send_direct`, and the id of the pipe they propose.
+    pub fn offer(
+        &mut self,
+        to: Addr,
+        need: Need,
+        candidates: Vec<Candidate>,
+        now: u32,
+    ) -> (Vec<u8>, [u8; 16]) {
+        let mut pipe_id = [0u8; 16];
+        OsRng.fill_bytes(&mut pipe_id);
+        let (bytes, pending) = build_offer(self.me, to, pipe_id, need, candidates);
+        self.pending.insert(pipe_id, (pending, now));
+        (bytes, pipe_id)
+    }
+
+    /// Interpret the plaintext of a delivered DM from `peer`.
+    ///
+    /// `willing` is this runtime's declared set — the mediums it can actually
+    /// open, not the ones it would like to. A runtime that can open nothing
+    /// passes an empty slice and every offer is declined honestly, rather than
+    /// accepted and then quietly failing to connect.
+    pub fn on_signal(&mut self, peer: Addr, payload: &[u8], willing: &[Medium]) -> Signal {
+        if !is_signal(payload) {
+            return Signal::NotSignal;
+        }
+        if let Some(offer) = Offer::decode(payload) {
+            // An offer addressed to someone else is not ours to answer, even if
+            // the mesh happened to hand it to us.
+            if offer.to != self.me {
+                return Signal::NotSignal;
+            }
+            return match accept(&offer, willing) {
+                Ok(accepted) => Signal::Offer { peer, accepted },
+                Err(reply) => Signal::Decline { peer, reply },
+            };
+        }
+        if let Some(answer) = Answer::decode(payload) {
+            let pipe_id = match &answer {
+                Answer::Ok { pipe_id, .. } | Answer::Reject { pipe_id, .. } => *pipe_id,
+            };
+            // An answer for a pipe we never offered is dropped: without our own
+            // ephemeral secret there is nothing to derive, so nothing to act on.
+            let Some((pending, _)) = self.pending.remove(&pipe_id) else {
+                return Signal::NotSignal;
+            };
+            return match answer {
+                Answer::Ok { ref chosen, .. } => {
+                    let chosen = chosen.clone();
+                    Signal::Answered { peer, pending, answer, chosen }
+                }
+                Answer::Reject { reason, .. } => Signal::Refused { peer, pipe_id, reason },
+            };
+        }
+        Signal::NotSignal
+    }
+
+    /// Forget offers that were never answered. Returns how many were dropped.
+    ///
+    /// Unbounded without this: a daemon that offers a pipe to an unreachable peer
+    /// holds that ephemeral secret forever. `ttl` wants to be short — a NAT
+    /// binding dies in 30s–5min, so the candidates in an older offer are stale
+    /// anyway and the negotiation is better restarted than resumed.
+    pub fn expire(&mut self, now: u32, ttl: u32) -> usize {
+        let before = self.pending.len();
+        self.pending.retain(|_, (_, made)| now.saturating_sub(*made) < ttl);
+        before - self.pending.len()
+    }
+
+    /// How many offers are waiting for an answer.
+    pub fn pending(&self) -> usize {
+        self.pending.len()
     }
 }
 

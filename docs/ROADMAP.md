@@ -2176,6 +2176,15 @@ negotiated:
 0. **PR8c — wire Direct into the app** (daemon + Android): `send_direct`
    actually carries OFFER/ANSWER, an adapter opens on ANSWER. Prerequisite for
    everything below; nothing here is real until this lands.
+   **Core seam landed** — `direct::Signalling` turns a delivered DM's plaintext
+   into a `Signal` saying what to open, and `accept`/`Pipe::answer_with` split
+   deciding from opening (`Pipe::answer` took the port before it chose, so a
+   responder willing to use more than one medium could not use it). A whole
+   negotiation is tested over the real `send_direct`/`on_rx` path. **Still to
+   wire: the daemon and Android** — no shipped runtime calls `Signalling` yet, so
+   Direct is still not startable from any app. That is the remainder of PR8c and
+   splits cleanly in two, daemon first (it can be verified here; Android's
+   behaviour cannot).
 1. Candidates in SPDR — already shipped.
 2. Reflexive locators via a minimal, dependency-free STUN client (binding
    request/response only) — new, small, in-budget per Finding 4.

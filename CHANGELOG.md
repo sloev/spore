@@ -18,6 +18,25 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Direct signalling can now reach a peer at all — `SPDR` rides `send_direct`.**
+  The negotiation codec, key schedule and socket adapters were all built and
+  tested, but nothing tied them to the mesh: no code anywhere outside
+  `src/direct.rs` looked at an `SPDR` payload, so no app could start a pipe, which
+  is why NAT traversal had never actually been hit in practice. `direct::Signalling`
+  is the missing seam — it turns the plaintext of a delivered DM into a `Signal`
+  saying what to open and hands back the state to finish with. A whole negotiation
+  now runs over the real `send_direct`/`on_rx` path in a test, sealed and signed
+  like any other DM, and the resulting pipe carries traffic both ways.
+  **A real API gap fell out of it:** `Pipe::answer` took the port *before*
+  `choose` ran inside it, so a responder willing to use more than one medium could
+  not use it — it would have had to guess which medium would win. `accept` (decide,
+  no port) and `Pipe::answer_with` (open, then derive) split the two; `answer`
+  stays as the single-medium convenience it always effectively was. Deciding is the
+  core's, opening is the runtime's — the seam `docs/DESIGN.md`'s runtime model
+  already implied. Unanswered offers expire rather than holding an ephemeral secret
+  forever. Purely additive; the SPDR wire and `direct::VERSION` are unchanged.
+  **No daemon or Android build calls this yet** — that wiring is the next step.
+
 - **The palette is now defined once and generated into every surface that renders
   it, with the contrast ratios computed instead of typed.** The same hexes were
   hand-maintained in four places — `site/style.css`, the standalone node's inlined
