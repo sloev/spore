@@ -2204,12 +2204,41 @@ apart is what makes the ladder honest without making the core aware of hosts.
   The runtime declares which rungs it can supply; the core walks the shared order
   and skips the rest.
 
-The contract shape already exists: `SpillBackend` is the same bargain for storage
-— the runtime supplies an implementation or it does not, and the core degrades
-honestly instead of pretending. `MISSION.md`'s honesty clause ("a runtime declares
-what it cannot do … never a control with nothing behind it") is what makes the
-declaration user-visible rather than merely internal: a browser runtime says it has
-no relay of its own, instead of showing a candidate that can never connect.
+**The handshake — including the capability exchange — is core; only the contents
+are the runtime's.** This is the load-bearing reason, and it is not a new idea: it
+is how Direct already works. `direct::choose(offer, willing)` (`src/direct.rs`) is
+a capability handshake sitting in the core today — two peers agree on a medium, and
+the runtime's whole role is to pass in `willing`, the set it can actually serve.
+The core never touches the socket or the bytes; `DatagramPort` is the runtime's.
+[`DIRECT.md`](DIRECT.md) states the property directly: everything in
+`src/direct.rs` is pure — no sockets, no `Node` — so it compiles wherever the core
+does, wasm included.
+
+The ladder is that same negotiation with more rungs, so it belongs in the same
+place: a pure function in `src/direct.rs` alongside `choose`, taking the local
+capability set as a parameter. It is specifically **not** a filter each façade
+applies before calling the core. A capability set is an input to an agreement
+between two peers, so a façade that pre-filtered would be settling half of a
+negotiation on its own, and the two ends could settle it differently.
+
+Two smaller supports point the same way. `SpillBackend` is the same bargain for
+storage — the runtime supplies an implementation or it does not, and the core
+degrades honestly instead of pretending. And `MISSION.md`'s honesty clause ("a
+runtime declares what it cannot do … never a control with nothing behind it") is
+what makes the declaration user-visible rather than merely internal: a browser
+runtime says it has no relay of its own, instead of showing a candidate that can
+never connect.
+
+**Adding a rung is an SPDR-profile change, not a free addition — check this before
+designing step 5's candidate.** `direct::Medium` is a `#[repr(u8)]` wire enum, and
+`Offer::decode` parses candidates with `Medium::from_u8(r.u8()?)?` — the `?`
+propagates, so an unknown medium fails **the entire OFFER**, not just that one
+candidate. A peer on an older build therefore drops the whole offer, including the
+candidates it would have been able to use. The frozen v1 envelope wire is untouched
+either way (SPDR is opaque payload riding on top of it), but the profile is
+versioned (`direct::VERSION`) and a new rung needs a deliberate mixed-version story
+— bump the profile, or omit unknown-to-the-peer candidates when composing the offer
+— rather than being added and left to work itself out.
 
 **This does not add a sixth nutrient.** Transport is still one nutrient and the
 list is still closed — a punch rung is a *supply* of it, exactly as a bridge is
@@ -2229,10 +2258,14 @@ STUN-shaped echo is SPORE's own to decide — relay is now iroh's concern
   at) an iroh relay, a decision that already lives in iroh's own config, not
   a new `spore.example.yaml` flag.
 
-Engineering pattern (unchanged): one shared helper (something like
-`spore_direct_nat`) used identically by the daemon, desktop, and Android —
-façades only ever call the Direct API, never reimplement punch logic per
-platform. Tracked as **P-Direct-NAT**, now inclusive of PR8c per Finding 1.
+Engineering pattern (**revised at the third pass**; it previously read "one shared
+helper — something like `spore_direct_nat` — used identically by the daemon,
+desktop, and Android"): the shared thing is the **core**, not a helper standing
+beside the runtimes. The walk lives in `src/direct.rs` next to `choose`, and each
+runtime passes in what it can supply. The original intent is unchanged and now has
+a stronger home than a helper crate — façades only ever call the Direct API, and
+never reimplement punch logic per platform. Tracked as **P-Direct-NAT**, now
+inclusive of PR8c per Finding 1.
 
 **Hard limit to document, not paper over:** CGNAT-to-CGNAT with no working
 relay candidate still fails sometimes. A relay is the permanent escape hatch
