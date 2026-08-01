@@ -13,11 +13,11 @@ A SPORE message is a **signed postcard**: to, from, expiry, payload, signature. 
 **Threat model, stated once:** every link is hostile — logged, spoofed, jammed, MITM'd. Links are trusted with *nothing*; authenticity and secrecy live only in the envelope. Attackers can drop or delay; redundancy and flood-fallback heal both.
 
 ## The runtime contract — what the host must supply
-The protocol is pure; it holds no OS. A conformant node needs four things from whatever runs it, and gets them wrong silently if it does not ask.
+The protocol is pure; it holds no OS. A conformant node needs four things from whatever runs it, and gets them wrong silently if it does not ask. (Transport is the fifth thing a host supplies, but it is a bridge concern, not a protocol one — see Page 2 and [DESIGN.md](DESIGN.md) Part 2, which counts all five.)
 
 - **Randomness.** A CSPRNG for the signing seed, prekey secrets, ratchet keys, mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and MUST NOT be derivable from the identity seed** (§7.2).
 - **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7 local days (§5.7). Time is supplied per call, never read by the protocol itself.
-- **Custody.** Received envelopes are held until expiry and served on WANT (§6). The bytes may live anywhere — memory, disk, flash, remote store. Custody is untrusted storage: **an entry read back MUST be re-verified against its ID before it is served**, and a mismatch MUST read as "not held" so the mesh re-fetches. An ID is the hash of its bytes, so this is always checkable and never needs a second authority.
+- **Custody** (DESIGN Part 2 calls the mechanism *storage*; this is the duty it serves). Received envelopes are held until expiry and served on WANT (§6). The bytes may live anywhere — memory, disk, flash, remote store. Custody is untrusted storage: **an entry read back MUST be re-verified against its ID before it is served**, and a mismatch MUST read as "not held" so the mesh re-fetches. An ID is the hash of its bytes, so this is always checkable and never needs a second authority.
 - **Scheduling.** Four duties MUST run on a timer, not only on arrival: expiry sweep, prekey rotation (§7.2), Trickle beacons (§5.4b), and ACKREQ resend backoff (§5.4d). **A node driven only by inbound traffic stalls all four** — it stops pruning, stops advancing forward secrecy, and never retries.
 
 ## 1. Identity & addressing

@@ -673,7 +673,10 @@ The **core** is one implementation of the protocol — the same bytes on every
 machine, carrying nothing about where it landed. Anything that hosts it is a
 **runtime**: a language binding, a daemon, a browser worker, a microcontroller
 firmware. Runtimes vary enormously; what they have to provide does not. A runtime
-supplies **five nutrients**, and the core supplies everything else.
+supplies **five nutrients**, and the core supplies everything else. Four of them
+are normative in [`SPEC.md`](SPEC.md)'s runtime contract, which counts transport
+separately as a bridge concern; *storage* there is called **custody**, the duty,
+where this names the mechanism.
 
 *The image, once, because it is the whole idea: the core is a spore and a runtime
 is the soil it lands in. Past this paragraph the docs use the plain words —* core,
