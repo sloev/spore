@@ -1,13 +1,12 @@
 # Visual design — Neo-Tokyo Tactical Wasteland
 
-One visual language for every SPORE surface: the web node, the Pages site, the
-Android app, and whatever comes next. **Post-apocalyptic survivalist bunker meets
-hyper-cute anime cyberpunk** — a ruggedised field terminal that someone has covered
-in stickers.
+Normative for every SPORE surface: the web node, the Pages site, the Android app.
+Every value here is meant to be pasted into a stylesheet or a Compose theme, and
+every rule is one an implementer can check they followed.
 
-This document is normative. It defines tokens, not moods: every value here is meant
-to be pasted into a stylesheet or a Compose theme, and every rule is one an
-implementer can check they followed.
+The language, once, because the tokens below encode it: **post-apocalyptic
+survivalist bunker meets hyper-cute anime cyberpunk** — a ruggedised field terminal
+someone has covered in stickers.
 
 <p align="center"><em>The mascot is <strong>Baud</strong> — a pastel chibi in
 tactical web-gear and an eye-patch, holding an oversized LoRa antenna, throwing a
@@ -16,8 +15,7 @@ work.</em></p>
 
 ## Implementation status
 
-This document is normative, and it is only worth anything where code follows it.
-Which surfaces actually consume these tokens, so nobody has to guess:
+Which surfaces actually consume these tokens:
 
 | Surface | Tokens | Chrome (scanlines, crate shadows, reduced-motion) |
 |---|---|---|
@@ -180,8 +178,8 @@ pairing there is, so there is nothing to desaturate there.
   `text-shadow: 0 0 2px currentColor;` — 2px. More turns body copy to mush.
   Drop it entirely under `prefers-reduced-motion: reduce`, where it reads as blur.
 
-If a project wants true VT323, embed a subsetted WOFF2 as a `data:` URI and measure
-the cost. Do not link it.
+A project wanting true VT323 MUST embed a subsetted WOFF2 as a `data:` URI. It MUST
+NOT link one — see constraint 1.
 
 ### Micro-copy
 
