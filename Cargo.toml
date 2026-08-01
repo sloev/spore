@@ -47,13 +47,16 @@ zeroize = "1"
 # dedicated `iroh` CI job on stable. `dep:` gating keeps every other build lean.
 # Marked experimental (🧪) in BRIDGES.md.
 iroh = { version = "1", optional = true }
+# Only reachable through `bridge-iroh`, and already in that feature's tree via
+# iroh itself — so it adds no crates and cannot move the default MSRV.
+bytes = { version = "1", optional = true }
 tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net", "io-util", "sync", "time"] }
 
 [features]
 # QUIC peer-to-peer envelope bridge over iroh (hole punch + relay fallback). iroh's
 # default `tls-ring` feature selects the rustls `ring` crypto provider, which the
 # `Minimal`/`N0` presets install on the endpoint builder — no direct rustls dep here.
-bridge-iroh = ["dep:iroh", "dep:tokio"]
+bridge-iroh = ["dep:iroh", "dep:tokio", "dep:bytes"]
 
 # On the web (wasm32) OsRng needs a randomness source. We use getrandom's
 # `custom` backend and route it to a JS import (`spore_fill_random`) so the wasm

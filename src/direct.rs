@@ -528,6 +528,27 @@ fn nonce(seq: u16) -> [u8; 12] {
 
 // ---- transport abstraction ----------------------------------------------------
 
+/// A boxed port, so one runner can hold pipes over different mediums.
+///
+/// `Pipe<P>` is generic, which means a UDP pipe and an iroh pipe are different
+/// types and cannot share a map. Boxing is how the rest of this codebase solves
+/// that — `Box<dyn SpillBackend>` is the same shape — and it is what
+/// medium-by-convention already implies: the set of mediums is open, so the type
+/// holding them cannot be closed.
+pub type AnyPort = Box<dyn DatagramPort + Send>;
+
+impl DatagramPort for AnyPort {
+    fn mtu(&self) -> usize {
+        (**self).mtu()
+    }
+    fn send(&mut self, frame: &[u8]) -> std::io::Result<()> {
+        (**self).send(frame)
+    }
+    fn try_recv(&mut self) -> Option<Vec<u8>> {
+        (**self).try_recv()
+    }
+}
+
 /// One direction-agnostic direct link: whatever the chosen medium's adapter
 /// provides. The pipe drives it by polling — no callbacks — the same model the
 /// JNI bridges use. Adapters (UDP, TCP, BLE) implement this; the crate ships an
@@ -556,6 +577,11 @@ pub use tcp::TcpPort;
 // P-Direct-NAT step 2: reflexive locators, and the echo that answers them.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stun;
+
+// P-Direct-NAT step 5: Direct over an iroh QUIC connection — the last rung,
+// compiled in only where the iroh bridge is.
+#[cfg(all(feature = "bridge-iroh", not(target_arch = "wasm32")))]
+pub mod iroh;
 
 // P-Direct-NAT step 3: the coordinated punch that makes a reflexive locator
 // reachable rather than merely known.
