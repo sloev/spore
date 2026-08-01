@@ -22,6 +22,7 @@ first PR; you shouldn't need to read this one again.
 | Check a security question | `docs/SECURITY_FINDINGS.md` (register of findings + fixes) and `SECURITY.md` (how to report one) |
 | Verify a "🧪 needs hardware" claim | `docs/HARDWARE.md` (device evidence log) and `android/TESTING.md` |
 | Add a language binding | `bindings/generate.py` + `bindings/spec.json` — bindings are generated, never hand-edited |
+| Change a colour | `design/tokens.json`, then `python3 design/generate.py` — the site CSS, the standalone's tokens, Android's `Palette` and VISUALDESIGN's contrast tables are all generated from it |
 | Work out whether code belongs in the core or a runtime | `docs/DESIGN.md`'s "The spore and the soil" — one core, many runtimes, five nutrients, and the word legend these docs hold to. Platform-specific means it belongs in the runtime, not `src/`. |
 
 ## Repo map
@@ -31,8 +32,9 @@ first PR; you shouldn't need to read this one again.
 | `src/` | The core Rust crate — the router kernel, protocol layers, and every bridge. Frozen wire format; see `CONTRIBUTING.md`. Detail below. |
 | `src/main.rs` | The 12-step demo + a YAML config loader (`spore.example.yaml`) that runs a daemon's bridges on one node. |
 | `bindings/` | Generated Python / Go / JS wrappers over the C ABI (`bindings/spore.h`), plus `spec.json` the generator reads. Never hand-edit the generated output — change `generate.py` or `spec.json` and regenerate. |
+| `design/` | `tokens.json` (every colour, once) and `generate.py`, which emits the palette into the four surfaces that render it and computes the WCAG ratios rather than trusting typed ones. Same shape as `bindings/`: change the source and regenerate, never hand-edit a generated block. |
 | `web/` | The browser stack: the wasm build of the core, JS transports (one file per medium — `web/transports/`), and `build-standalone.mjs`, which inlines all of it into the single self-contained `spore-standalone.html` node (zero network requests, verified by CI). |
-| `site/` | The GitHub Pages generator (`build.mjs`) that renders `site/home.md` and most of `docs/*.md` into the public site, plus `site/seed/` (the printable paper-seed fountain-code tooling) and `site/style.css` (the design tokens — normative source is `docs/VISUALDESIGN.md`). |
+| `site/` | The GitHub Pages generator (`build.mjs`) that renders `site/home.md` and most of `docs/*.md` into the public site, plus `site/seed/` (the printable paper-seed fountain-code tooling) and `site/style.css`, whose token block is generated from `design/tokens.json` (`docs/VISUALDESIGN.md` stays normative for the reasoning). |
 | `android/` | The Android app. `android/jni/` is a small additive Rust crate (`spore-jni`) exposing an opaque-handle C ABI to Kotlin — host-checkable with plain `cargo check`, unlike the app itself which needs the Android SDK/NDK. `android/app/src/main/kotlin/org/spore/node/` is the Kotlin app. |
 | `docs/` | Everything below. One doc per concern — see the table in the next section for which one answers which question. |
 | `reference/` | Dependency-free Tier-0 decoders (pure Python, no crypto libs) that parse and verify a real envelope — the "trust nothing, reimplement from the spec" sanity check — plus `vectors.json`, the generated cross-language test vectors every binding and reference decoder is checked against. |

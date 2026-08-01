@@ -18,6 +18,24 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The palette is now defined once and generated into every surface that renders
+  it, with the contrast ratios computed instead of typed.** The same hexes were
+  hand-maintained in four places — `site/style.css`, the standalone node's inlined
+  CSS, Android's Compose `Palette`, and `docs/VISUALDESIGN.md`'s tables — each
+  carrying its own re-typed WCAG ratios, so a palette change meant a manual
+  four-way audit and the ratios could silently stop describing the colours they
+  sat beside. They had already drifted: Android carried three ratios per colour
+  where the CSS carried one, `--dim` on void was written as both 4.68:1 and 4.6:1,
+  and `--warn`/`--bad` existed only in the standalone. `design/tokens.json` is now
+  the one place a colour is defined and `design/generate.py` emits all four,
+  following the proven `bindings/spec.json` pattern with a matching CI job
+  ("design tokens in sync"). The generator refuses to run if a pairing stops
+  matching the grade the source claims for it, **in either direction** — a colour
+  that is no longer readable, or a "never do this" pair that has quietly become
+  fine, since a stale safety claim is as misleading as a stale colour. **No
+  rendered colour changed:** every hex in all four files is identical, counts
+  included; the diff is comments, ordering and formatting only.
+
 - **A node now maintains itself on a timer instead of only when traffic
   arrives — and the desktop daemon retries unacked sends for the first time.**
   The expiry sweep and prekey rotation were reachable only from `Node::on_rx`,
