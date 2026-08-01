@@ -2224,9 +2224,10 @@ negotiated:
    it because it asserted key agreement and never that a record flowed.
 
    Fixing it means the ANSWER must carry the responder's own locator, which is an
-   SPDR encoding change (`VERSION` 2 → 3). Still cheap: no release has shipped
-   with a usable Direct, so there is no deployed signalling to strand — but that
-   stops being true at the next release, which makes this the moment to do it.
+   SPDR encoding change (`VERSION` 2 → 3), which is acceptable: the project is
+   explicitly unstable before 1.0, so SPDR may be re-cut without a migration
+   story. That freedom stops at 1.0, and it never extended to the v1 *envelope*
+   wire, which is frozen independently of any release number.
    The punch then supplies the other half, since it learns the peer's *actual*
    source address from the probe that arrives rather than trusting a predicted
    one — which is also what makes it work through a symmetric NAT that rewrote
@@ -2249,8 +2250,17 @@ negotiated:
    same bargain as `Box<dyn SpillBackend>`, and it is what medium-by-convention
    already implied — an open medium list cannot be held by a closed type.
 
-   **Still to wire: the daemon.** Nothing constructs an endpoint and calls
-   `set_iroh` yet, so iroh is compiled-in-capable but not switched on anywhere.
+   **Daemon wired.** `direct-iroh: direct-only | n0` stands up an endpoint and
+   offers the medium. The relay posture is **never defaulted** — an unrecognised
+   value is a config error, because inheriting a third party is exactly the kind
+   of silent choice the honesty contract forbids. `direct-only` runs with no relay
+   and no discovery; `n0` opts into n0's public relay and the daemon prints, at the
+   moment it takes effect, that this is a third party which sees ciphertext, volume
+   and timing when a path is relayed. iroh supports self-hosted relays, so needing
+   a relay never has to mean needing n0's.
+
+   A build without `bridge-iroh` says `direct-iroh:` was ignored rather than
+   silently doing nothing.
 
    *(original plan)* **iroh as the relay/NAT-fallback candidate** (Finding 3) instead of a new
    SPORE-native relay protocol — offered as a real, visible candidate, never a

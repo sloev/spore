@@ -52,7 +52,38 @@ impl Direct {
         if let Some(r) = self.run.reflexive() {
             v.push(format!("{r} (reflexive, needs a punch)"));
         }
+        #[cfg(feature = "bridge-iroh")]
+        if let Some(id) = self.run.iroh_id() {
+            v.push(format!("{} (iroh, may relay)", &id[..16.min(id.len())]));
+        }
         v.join(" · ")
+    }
+
+    /// Stand up an iroh endpoint and offer `iroh` as a medium.
+    ///
+    /// `relay` picks the trust posture, and it is deliberately not defaulted:
+    /// `"direct-only"` runs with no relay and no discovery, so nothing is
+    /// disclosed to anyone but the peer; `"n0"` opts into n0's public relay,
+    /// which is a real third-party disclosure — that relay sees ciphertext,
+    /// volume and timing — and so has to be chosen rather than inherited.
+    #[cfg(feature = "bridge-iroh")]
+    pub(crate) fn enable_iroh(&mut self, relay: &str) -> Option<String> {
+        use iroh::{endpoint::presets, Endpoint, RelayMode};
+        let rt = std::sync::Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().ok()?);
+        let direct_only = relay != "n0";
+        let ep = rt
+            .block_on(async {
+                let b = if direct_only {
+                    Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled)
+                } else {
+                    Endpoint::builder(presets::N0)
+                };
+                b.alpns(vec![spore::direct::iroh::ALPN.to_vec()]).bind().await
+            })
+            .ok()?;
+        let id = ep.id().to_string();
+        self.run.set_iroh(rt, ep);
+        Some(id)
     }
 
     /// Ask a reflexive echo where we appear to be, and offer that too.

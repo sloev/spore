@@ -76,6 +76,30 @@ pub(crate) fn run_config(cfg: Config) {
                     None => eprintln!("  [direct] {server} did not answer — offering the LAN locator only"),
                 }
             }
+            // iroh: the last rung, and the only one that can involve a third
+            // party. The posture is printed at the moment it takes effect, not
+            // buried in a config comment.
+            #[cfg(feature = "bridge-iroh")]
+            if let Some(relay) = cfg.direct_iroh.as_deref() {
+                match d.enable_iroh(relay) {
+                    Some(id) => {
+                        println!("  [direct] iroh endpoint {id}");
+                        if relay == "n0" {
+                            println!(
+                                "  [direct] iroh relay: n0's public relay — a third party that \
+                                 sees ciphertext, volume and timing when a path is relayed"
+                            );
+                        } else {
+                            println!("  [direct] iroh relay: none (direct-only)");
+                        }
+                    }
+                    None => eprintln!("  [direct] iroh endpoint failed to bind — medium not offered"),
+                }
+            }
+            #[cfg(not(feature = "bridge-iroh"))]
+            if cfg.direct_iroh.is_some() {
+                eprintln!("  [direct] `direct-iroh:` ignored — this build has no `bridge-iroh` feature");
+            }
             println!("  [direct] offering {}", d.offering());
             // Said once, plainly: knowing the outside address is not the same as
             // being reachable at it, and the punch as wired cannot land (see the
