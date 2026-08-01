@@ -1,5 +1,13 @@
 # SPORE application layer — design
 
+<p align="center">
+  <a href="spore-design.png"><img src="spore-design.png" alt="SPORE application layer on one page" width="820" /></a>
+</p>
+
+<p align="center"><em>Poster summary —
+<a href="spore-design.png">full size</a>. The sections below are the living text;
+the poster can lag.</em></p>
+
 SPORE's envelope is a dumb pipe: you hand it bytes and it moves them, and the
 16-byte header on the wire never changes no matter what carries it. This document
 is about everything you'd actually *build* on that pipe — file sharing, web-style
