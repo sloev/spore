@@ -82,7 +82,7 @@ name · **14** Freeze impact (almost always None).
 | **C1** | Token parity + forbidden-pair audit | High UX | ✅ merged (#73) | — | B7 |
 | **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ⬜ todo — see "C3" below | C1 (did it by hand) | W-series |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
-| **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation — **top of priority compass** | 🟡 **partial** — P-Runtime-1 storage backend shipped (#87); P-Runtime-2 scheduling contract still todo. See "Runtime nutrients" below | — | unblocks W-series and any thin runtime |
+| **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
 | **P-Group-Roster** | Signal-style membership (signed roster, add/remove epochs, sender binding) | Feature / protocol — **not v1, do not fake in UI** | ⬜ future — sealed-topic + honest UX is the shippable answer today | — | — |
@@ -1860,7 +1860,7 @@ the PR guard's refusal to modify `api_freeze.rs` is never triggered.
       without touching `Store`.
 - [ ] `set_spill_dir` behaviour is byte-identical; no existing caller changes.
 
-### P-Runtime-2 — scheduling as a nutrient  ⬜ todo, lower
+### P-Runtime-2 — scheduling as a nutrient  ✅ shipped (#90)
 
 Ticking sync, expiry and resend is driven by `bridge::hub` and `cli::run` by
 convention rather than through an interface, so each new runtime re-derives what

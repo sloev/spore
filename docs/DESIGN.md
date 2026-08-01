@@ -711,13 +711,13 @@ Two words are reserved and mean something else in these docs:
 | **Time** | expiry, dedup windows, ratchet TTL | `now: u32` is a parameter on `send` / `on_rx` / `open_dm`. The protocol layers never read a clock — the host decides what time it is. |
 | **Transport** | bytes in, bytes out | Bridges (next section). The router never learns which medium carried it. |
 | **Storage** | spilling the envelope store past a memory budget | The `SpillBackend` trait; `FsSpill` is the filesystem implementation. A runtime with other storage supplies its own. |
-| **Scheduling** | ticking sync, expiry, resend | The hub and the CLI drive it by convention rather than through an interface. |
+| **Scheduling** | expiry sweep, prekey rotation, resend | `Node::tick`, called on a timer. Without it a node only maintains itself when traffic happens to arrive. |
 
-Four of the five are contracts rather than assumptions, which is why the same
-core compiles to a daemon, to a `.so` behind a Python import, and to a
-`wasm32-unknown-unknown` module with exactly one import. Only scheduling is still
-a habit: the hub and the CLI drive the tick by convention rather than through an
-interface.
+All five are now contracts rather than assumptions, which is why the same core
+compiles to a daemon, to a `.so` behind a Python import, and to a
+`wasm32-unknown-unknown` module with exactly one import. What a runtime owes the
+core is a closed list, and every item on it is something the core asks for rather
+than reaches for.
 
 **Runtimes vary; nutrients do not.** That is the whole discipline, and it is what
 keeps the platforms comparable. An ESP32 firmware, a desktop daemon and a browser
