@@ -30,14 +30,44 @@ pub struct Outbound {
     pub bytes: Vec<u8>,
 }
 
+/// How a pipe's socket was actually established.
+///
+/// This exists because "the punch worked" and "the punch never ran" produced an
+/// identical result: a working pipe on a LAN, where the plain-connect fallback is
+/// correct anyway. That indistinguishability hid two bugs (#101, #103). A pipe now
+/// says which it got.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Via {
+    /// A hole was punched: the peer's probe arrived, so the path is proven open
+    /// in both directions before a single record is sent.
+    Punched,
+    /// The punch did not land and a plain connect was used instead.
+    ///
+    /// **Not automatically a failure.** For a candidate that already routes — LAN,
+    /// global IPv6, a declared overlay — there was nothing to punch and this is
+    /// the normal, correct outcome. For a reflexive candidate it means there is
+    /// no path, and records will not arrive however healthy the pipe looks.
+    FellBack,
+}
+
+impl std::fmt::Display for Via {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Via::Punched => "punched",
+            Via::FellBack => "no punch, plain connect",
+        })
+    }
+}
+
 /// What just happened, for the runtime to surface however it surfaces things —
 /// a daemon logs it, an app puts it on screen. The runner never prints.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Not Direct signalling. The payload is the app's, untouched.
     NotSignal,
-    /// We answered an offer and our end is up.
-    PipeUp { peer: Addr, pipe_id: [u8; 16] },
+    /// We answered an offer and our end is up. `via` says whether the socket was
+    /// punched open or fell back — see [`Via`].
+    PipeUp { peer: Addr, pipe_id: [u8; 16], via: Via },
     /// We could not open the medium that won, so no pipe. The reply, if any, has
     /// already been handed back.
     CannotOpen { peer: Addr, medium: Medium },
@@ -70,6 +100,10 @@ pub struct UdpRunner {
     /// This host's global IPv6, if it has one — an address with no NAT in front
     /// of it, so it needs neither discovery nor a punch.
     global_v6: Option<String>,
+    /// How the most recent pipe was established. Kept so a runtime with only a
+    /// status line — Android — can surface it too; loud only in the daemon log
+    /// would be loud only where the problem was already known.
+    last_via: Option<Via>,
     /// The pipe id currently being punched for. Probes are demultiplexed by it,
     /// so it has to be in hand before [`Self::open`] runs.
     punching: [u8; 16],
@@ -84,6 +118,7 @@ impl UdpRunner {
             bind_port,
             reflexive: None,
             extra: Vec::new(),
+            last_via: None,
             global_v6: crate::bridge::udp::primary_ipv6().map(|a| a.to_string()),
             punching: [0u8; 16],
         }
@@ -219,15 +254,17 @@ impl UdpRunner {
     /// LAN there is no NAT to traverse and nothing was needed, and off a LAN the
     /// records will simply not arrive, which the caller reports honestly rather
     /// than the pipe pretending otherwise.
-    fn open(&self, chosen: &Candidate, target: &[u8], local_port: u16) -> Option<UdpPort> {
+    fn open(&self, chosen: &Candidate, target: &[u8], local_port: u16) -> Option<(UdpPort, Via)> {
         if chosen.medium != *Medium::UDP {
             return None;
         }
         let peer = String::from_utf8(target.to_vec()).ok()?;
         let mtu = chosen.mtu as usize;
         match super::punch::punch(local_port, peer.as_str(), &self.punching, super::punch::WINDOW) {
-            Ok(sock) => UdpPort::from_socket(sock, mtu).ok(),
-            Err(_) => UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), mtu).ok(),
+            Ok(sock) => UdpPort::from_socket(sock, mtu).ok().map(|p| (p, Via::Punched)),
+            Err(_) => {
+                UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), mtu).ok().map(|p| (p, Via::FellBack))
+            }
         }
     }
 
@@ -261,25 +298,27 @@ impl UdpRunner {
                 // The responder binds its advertised port too, so the locator it
                 // sends back is one the initiator can actually dial — and so the
                 // punch happens on that mapping rather than an ephemeral one.
-                let Some(port) = self.open(&accepted.chosen, &target, self.bind_port) else {
+                let Some((port, via)) = self.open(&accepted.chosen, &target, self.bind_port) else {
                     return (None, Event::CannotOpen { peer, medium: accepted.chosen.medium });
                 };
                 let me = self.sig.me();
                 let local = self.local_locator();
                 let (answer, pipe) = Pipe::answer_with(accepted, me, local.as_bytes(), port);
                 self.pipes.insert(pipe_id, pipe);
-                (Some(Outbound { peer, bytes: answer }), Event::PipeUp { peer, pipe_id })
+                self.last_via = Some(via);
+                (Some(Outbound { peer, bytes: answer }), Event::PipeUp { peer, pipe_id, via })
             }
             Signal::Answered { peer, pending, answer, chosen, dial } => {
                 self.punching = pending.pipe_id();
-                let Some(port) = self.open(&chosen, &dial, self.bind_port) else {
+                let Some((port, via)) = self.open(&chosen, &dial, self.bind_port) else {
                     return (None, Event::CannotOpen { peer, medium: chosen.medium });
                 };
                 match Pipe::finish(pending, &answer, port) {
                     Some(pipe) => {
                         let pipe_id = pipe.pipe_id();
                         self.pipes.insert(pipe_id, pipe);
-                        (None, Event::PipeUp { peer, pipe_id })
+                        self.last_via = Some(via);
+                        (None, Event::PipeUp { peer, pipe_id, via })
                     }
                     None => (None, Event::BadAnswer { peer }),
                 }
@@ -308,6 +347,11 @@ impl UdpRunner {
     /// Open pipes, and offers still waiting for an answer.
     pub fn status(&self) -> (usize, usize) {
         (self.pipes.len(), self.sig.pending())
+    }
+
+    /// How the most recent pipe was established, if there has been one.
+    pub fn last_via(&self) -> Option<Via> {
+        self.last_via
     }
 
     /// Whether a pipe is already up. Used to avoid re-offering over a live one.
@@ -461,6 +505,18 @@ mod carriage_tests {
         let (none, ev) = a.on_plaintext(b_addr, &answer.bytes, 1_700_000_000);
         assert!(none.is_none(), "an answer needs no reply");
         assert!(matches!(ev, Event::PipeUp { .. }), "A finishes its end: {ev:?}");
+
+        // Pinning today's reality rather than the intent: neither end punched.
+        // The responder's window closes before it sends the ANSWER, so the
+        // initiator's never overlaps it (ROADMAP, P-Direct-NAT step 3). Both fall
+        // back to a plain connect, which is why a record still arrives on
+        // loopback — and why this assertion is the one that will fail, loudly and
+        // in the right place, when the ordering is fixed.
+        assert!(
+            matches!(ev, Event::PipeUp { via: Via::FellBack, .. }),
+            "expected the documented fallback; if this now says Punched the \
+             ordering fix landed and this assertion should be inverted: {ev:?}"
+        );
 
         // Note the wall time of this test: about 4s, which is two full punch
         // windows timing out. That is not incidental — see `docs/ROADMAP.md`

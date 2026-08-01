@@ -1598,6 +1598,13 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectStatus(
         return empty(env);
     };
     let (pipes, pending) = run.status();
-    let s = format!("{} · {pipes} pipe(s), {pending} offer(s) pending", run.advertise());
+    // The "how" matters as much as the count: a pipe that fell back instead of
+    // punching will not carry anything across a NAT, and used to look identical
+    // to one that worked.
+    let how = match run.last_via() {
+        Some(v) => format!(" · last: {v}"),
+        None => String::new(),
+    };
+    let s = format!("{} · {pipes} pipe(s), {pending} offer(s) pending{how}", run.advertise());
     env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
