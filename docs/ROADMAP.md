@@ -80,6 +80,7 @@ name · **14** Freeze impact (almost always None).
 | **B7** | Accessibility + density pass | High UX | ✅ merged (#69) 🧪 | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ✅ merged (#72) 🧪 | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ✅ merged (#73) | — | B7 |
+| **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ⬜ todo — see "C3" below | C1 (did it by hand) | W-series |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
 | **P-Soil** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation — **top of priority compass** | ⬜ todo — P-Soil-1 storage backend trait; P-Soil-2 scheduling contract. See "Soil: the nutrients a runtime supplies" below | — | unblocks W-series and any thin vessel |
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
@@ -1573,6 +1574,40 @@ icon/text; tone large phosphor success text for OLED fatigue but keep LED segmen
 or CDN images. **Non-goals:** rebrand, new mascot, Impact-font download, Material-3 dynamic
 colour.
 
+## C3 — Generate the design tokens from one source — ⬜ todo
+
+**Why.** The same palette is hand-typed in three places today — `site/style.css`
+(`--void: #0a0a0c`), `web/spore-standalone.html`'s inline tokens, and Android
+`Chrome.kt` (`Color(0xFF0A0A0C)`) — with the WCAG ratios re-typed as comments in
+each. C1 brought them to parity **by hand**, which means the next palette change
+needs the same manual audit again. They have already drifted in content: Android
+carries three contrast ratios per colour (on Void, on Asphalt, on Kevlar), the CSS
+carries one.
+
+**Change.** One token source (`VISUALDESIGN.md` is already normative for the
+values) generating all three, following the pattern this repo already runs for
+`bindings/spec.json` → `generate.py` → C header + Python + Go + JS, with a
+`git diff --exit-code` CI job the way "bindings in sync" works. Measured contrast
+ratios get computed rather than typed, so a forbidden pair (pink on kevlar,
+2.32:1) fails the build instead of relying on a reviewer to notice.
+
+**Why it matters more now:** with the UI decision above, tokens are the main thing
+two *different* UI technologies must agree on. Compose and CSS cannot share widget
+code, but they can and should share the palette by construction.
+
+**Non-goals:** changing any current value (that is C2's job, and it stays
+independent), theming beyond the existing dark/Field-Notes pair, runtime theming.
+
+**Acceptance**
+- [ ] One source file; `site/style.css` vars, the standalone's tokens, and
+      `Chrome.kt`'s `Palette` are all generated from it.
+- [ ] Regenerating produces a byte-identical tree — CI fails on drift.
+- [ ] Contrast ratios are computed, and a forbidden pair fails the build.
+- [ ] No rendered colour changes: the diff is mechanical, verifiable against C1's
+      parity table.
+
+**Branch:** `feat/design-token-generator` · **Freeze impact:** None.
+
 ---
 
 # Track: site — readability + less generic + more fun UI
@@ -1917,6 +1952,60 @@ company-app chat UI would. Concretely: no feature here should require the
 standalone HTML specifically (a bridge, a Python script, or the daemon CLI
 must remain equally capable), and copy should read "a SPORE node in your
 browser," not "the SPORE app."
+
+### UI across vessels — locked decision (2026-08-01)
+
+Explicit human direction, recorded here rather than rediscovered per platform.
+**Two UI implementations, not three**, over three shared layers.
+
+| Vessel | UI | Reaches the node via |
+|---|---|---|
+| Browser / standalone | the web UI | in-process (wasm) |
+| Desktop | **the same** web UI | localhost HTTP to the daemon |
+| Android | **Compose** (stays native) | JNI |
+
+**Shared underneath all of them:** the op-set (one declared surface, generated
+adapters — the `bindings/spec.json` → `generate.py` pattern), the communicator
+domain logic (threads, rooms, feed, library live in the core, not in each UI's
+state), and the design tokens (see C3 below).
+
+**Desktop is `daemon + web UI`, and ships in two steps.** Step 1 needs no wrapper
+at all: the daemon serves the UI on `127.0.0.1` and the user opens their own
+browser — zero new dependencies, works the day the HTTP surface exists, and it is
+already a named target ("cli daemon with browser-accessed UI"). Step 2, only if
+app-feel is wanted, adds a **Wry** window pointed at that port.
+
+**Wry, not Tauri** — the reason is architectural, not size. Tauri's headline
+feature is its JS↔Rust IPC bridge, which is precisely what must not be used here:
+the UI has to speak HTTP to localhost so the *same bundle* runs in a browser, in a
+desktop window, and against the API from Android. Tauri would put a tempting
+shortcut (`invoke()` the Rust command directly) next to the rule that forbids
+forking the UI — paying a large tree for the one feature that breaks the
+one-bundle guarantee. Wry is window + webview and nothing else; same maintainers,
+so escalating later stays in-ecosystem.
+
+Before adopting Wry, check what bit this repo once already: the tree is at ~404
+crates and the offline bundle at ~91 MB, and **an optional feature still moves the
+core MSRV** — that is exactly how `bridge-iroh` pushed the floor 1.75 → 1.85,
+because Cargo resolves optional deps too. Resolve Wry against 1.85 *before* adding
+it. Linux additionally needs WebKitGTK as a system dependency, which is the one
+platform where step 1 is arguably the permanent answer rather than a stopgap. Gate
+it exactly like `bridge-iroh`: off by default, off the default and MSRV CI
+matrices, its own job.
+
+**Android stays Compose.** `WebBridgeHost.kt` already shows where the line belongs
+— it runs the repo's real web transport modules in a *headless* WebView, so
+WebSocket/Nostr/WebTorrent are not reimplemented in Kotlin. That is sharing web
+code where there is no UI surface. The UI surface is the opposite case: B1–B7
+fixed BackHandler, scroll-to-latest, IME insets, notifications, transfers
+overflow, permission recovery, and the accessibility/density pass — precisely what
+a WebView reintroduces. Swapping ~5,300 lines of Compose for a WebView would
+discard that work and reopen those bugs.
+
+**Trap to avoid:** do not build the desktop app by wrapping
+`spore-standalone.html` in a window. That is the *browser* vessel in a desktop
+costume — no disk spill, no background life once the window closes, and none of
+the native bridges (UDP, folder, serial, Tor). Desktop is daemon + UI.
 
 ### Feature scope (from the source plan, unchanged)
 
