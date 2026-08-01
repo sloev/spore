@@ -285,3 +285,66 @@ mod tests {
         assert_eq!(r.candidates().len(), 1, "it can be withdrawn again");
     }
 }
+
+#[cfg(test)]
+mod carriage_tests {
+    use super::*;
+    use std::net::UdpSocket;
+
+    fn free_port() -> u16 {
+        UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    /// The test whose absence hid the ANSWER-locator bug: not "did both ends
+    /// agree keys" but "did a record actually arrive".
+    ///
+    /// Two runners over real sockets, the SPDR bytes carried between them by
+    /// hand the way a runtime carries them over the mesh.
+    #[test]
+    fn a_record_crosses_between_two_runners_over_real_sockets() {
+        let (a_addr, b_addr) = ([0xA1u8; 8], [0xB2u8; 8]);
+        let (a_port, b_port) = (free_port(), free_port());
+        let mut a = UdpRunner::new(a_addr, format!("127.0.0.1:{a_port}"), a_port);
+        let mut b = UdpRunner::new(b_addr, format!("127.0.0.1:{b_port}"), b_port);
+
+        // A offers; B answers. In a runtime these bytes ride send_direct.
+        let (offer, _) = a.offer(b_addr, 1_700_000_000);
+        let (answer, ev) = b.on_plaintext(a_addr, &offer.bytes, 1_700_000_000);
+        assert!(matches!(ev, Event::PipeUp { .. }), "B opens its end: {ev:?}");
+        let answer = answer.expect("B replies with an ANSWER");
+
+        let (none, ev) = a.on_plaintext(b_addr, &answer.bytes, 1_700_000_000);
+        assert!(none.is_none(), "an answer needs no reply");
+        assert!(matches!(ev, Event::PipeUp { .. }), "A finishes its end: {ev:?}");
+
+        // Note the wall time of this test: about 4s, which is two full punch
+        // windows timing out. That is not incidental — see `docs/ROADMAP.md`
+        // P-Direct-NAT step 3: the responder's punch blocks and finishes *before*
+        // the ANSWER is sent, so the two windows are disjoint by construction and
+        // the punch can never land. Both ends fall back to a plain connect, which
+        // is why a record still arrives here. On a LAN that is correct and costs
+        // only the delay; across a NAT it means there is still no path.
+
+        // The part that was never checked before: bytes, not key agreement.
+        let a_pipe = a.pipes.values_mut().next().expect("A holds a pipe");
+        a_pipe.send(RecordType::Data, b"north pier at midnight").unwrap();
+
+        let mut got = None;
+        for _ in 0..200 {
+            for (_, ty, bytes) in b.poll() {
+                if ty == RecordType::Data {
+                    got = Some(bytes);
+                }
+            }
+            if got.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            got.as_deref(),
+            Some(&b"north pier at midnight"[..]),
+            "a record must actually arrive — agreeing keys is not carriage"
+        );
+    }
+}
