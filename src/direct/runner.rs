@@ -62,6 +62,9 @@ pub struct UdpRunner {
     /// Where a STUN echo last said we appear to be, as `ip:port`. `None` until
     /// asked — a node never guesses its own reflexive address.
     reflexive: Option<String>,
+    /// The pipe id currently being punched for. Probes are demultiplexed by it,
+    /// so it has to be in hand before [`Self::open`] runs.
+    punching: [u8; 16],
 }
 
 impl UdpRunner {
@@ -72,6 +75,7 @@ impl UdpRunner {
             advertise: advertise.into(),
             bind_port,
             reflexive: None,
+            punching: [0u8; 16],
         }
     }
 
@@ -120,17 +124,40 @@ impl UdpRunner {
         self.reflexive = seen.map(|a| a.to_string());
     }
 
+    /// The locator this node hands to a peer as its own — the reflexive one when
+    /// known, since that is the address a peer outside the LAN has to dial.
+    fn local_locator(&self) -> String {
+        self.reflexive.clone().unwrap_or_else(|| self.advertise.clone())
+    }
+
     /// The reflexive locator currently being offered, if any.
     pub fn reflexive(&self) -> Option<&str> {
         self.reflexive.as_deref()
     }
 
-    fn open(&self, chosen: &Candidate, local_port: u16) -> Option<UdpPort> {
+    /// Open our end for a chosen candidate, dialling `target`.
+    ///
+    /// `target` is passed explicitly rather than read from `chosen.locator`,
+    /// because they are not the same address: `chosen` is always one of the
+    /// *initiator's* candidates, so the initiator must dial the responder's
+    /// locator from the ANSWER instead of its own.
+    ///
+    /// Punches first (P-Direct-NAT step 3) and keeps the socket that punched — a
+    /// NAT mapping belongs to a source port, so the pipe has to run on that exact
+    /// socket. If the punch does not land we fall back to a plain connect: on a
+    /// LAN there is no NAT to traverse and nothing was needed, and off a LAN the
+    /// records will simply not arrive, which the caller reports honestly rather
+    /// than the pipe pretending otherwise.
+    fn open(&self, chosen: &Candidate, target: &[u8], local_port: u16) -> Option<UdpPort> {
         if chosen.medium != *Medium::UDP {
             return None;
         }
-        let peer = String::from_utf8(chosen.locator.clone()).ok()?;
-        UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), chosen.mtu as usize).ok()
+        let peer = String::from_utf8(target.to_vec()).ok()?;
+        let mtu = chosen.mtu as usize;
+        match super::punch::punch(local_port, peer.as_str(), &self.punching, super::punch::WINDOW) {
+            Ok(sock) => UdpPort::from_socket(sock, mtu).ok(),
+            Err(_) => UdpPort::connect(("0.0.0.0", local_port), peer.as_str(), mtu).ok(),
+        }
     }
 
     /// Propose a pipe to `peer`. The caller sends the bytes over the mesh.
@@ -158,16 +185,23 @@ impl UdpRunner {
                 let pipe_id = accepted.pipe_id();
                 // Choosing happened inside `on_signal`; only now is there a
                 // locator to dial, which is why deciding and opening are split.
-                let Some(port) = self.open(&accepted.chosen, 0) else {
+                self.punching = pipe_id;
+                let target = accepted.chosen.locator.clone();
+                // The responder binds its advertised port too, so the locator it
+                // sends back is one the initiator can actually dial — and so the
+                // punch happens on that mapping rather than an ephemeral one.
+                let Some(port) = self.open(&accepted.chosen, &target, self.bind_port) else {
                     return (None, Event::CannotOpen { peer, medium: accepted.chosen.medium });
                 };
                 let me = self.sig.me();
-                let (answer, pipe) = Pipe::answer_with(accepted, me, port);
+                let local = self.local_locator();
+                let (answer, pipe) = Pipe::answer_with(accepted, me, local.as_bytes(), port);
                 self.pipes.insert(pipe_id, pipe);
                 (Some(Outbound { peer, bytes: answer }), Event::PipeUp { peer, pipe_id })
             }
-            Signal::Answered { peer, pending, answer, chosen } => {
-                let Some(port) = self.open(&chosen, self.bind_port) else {
+            Signal::Answered { peer, pending, answer, chosen, dial } => {
+                self.punching = pending.pipe_id();
+                let Some(port) = self.open(&chosen, &dial, self.bind_port) else {
                     return (None, Event::CannotOpen { peer, medium: chosen.medium });
                 };
                 match Pipe::finish(pending, &answer, port) {

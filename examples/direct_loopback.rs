@@ -36,7 +36,7 @@ fn main() {
 
     // Bob decodes the offer, is willing to use UDP, and answers over his port.
     let offer = Offer::decode(&offer_bytes).expect("valid offer");
-    let (answer_bytes, bob_pipe) = Pipe::answer(&offer, bob, &[Medium::udp()], bob_port);
+    let (answer_bytes, bob_pipe) = Pipe::answer(&offer, bob, &[Medium::udp()], b"127.0.0.1:0", bob_port);
     let mut bob_pipe = bob_pipe.expect("Bob accepted");
     println!("Bob   → ANSWER (chose UDP)");
 
