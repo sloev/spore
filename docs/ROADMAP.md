@@ -81,7 +81,8 @@ name · **14** Freeze impact (almost always None).
 | **B8** | Feed polish | Medium | ✅ merged (#72) 🧪 | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ✅ merged (#73) | — | B7 |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
-| **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking — **top of priority compass** | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
+| **P-Soil** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation — **top of priority compass** | ⬜ todo — P-Soil-1 storage backend trait; P-Soil-2 scheduling contract. See "Soil: the nutrients a runtime supplies" below | — | unblocks W-series and any thin vessel |
+| **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
 | **P-Group-Roster** | Signal-style membership (signed roster, add/remove epochs, sender binding) | Feature / protocol — **not v1, do not fake in UI** | ⬜ future — sealed-topic + honest UX is the shippable answer today | — | — |
 | **W-series** | Web node: browser as a daily-driver peer (Mail/Rooms/Feed/Files/Folder), not a transport demo | Feature / product | ⬜ todo — phased W0–W8, see "Web node as a full daily-driver peer" below | — | — |
@@ -1776,6 +1777,76 @@ feat/bridge-iroh
 
 ---
 
+## Soil: the nutrients a runtime supplies (P-Soil)
+
+**Steering:** [`DESIGN.md`](DESIGN.md)'s "The spore and the soil" — the core asks
+its host for five things (randomness, time, transport, storage, scheduling) and
+supplies everything else. Three of the five are already contracts rather than
+assumptions. This track closes the remaining two, so "what does this soil
+provide?" becomes something the code answers instead of a convention each vessel
+re-derives.
+
+**Why it leads the compass:** every platform track is downstream of it. The
+W-series browser node stays memory-only until storage is a contract, a thin
+ESP-class vessel cannot spill to flash, and the honest capability report a UI
+reads ("this vessel has no disk") has nothing to read until a vessel can declare
+what it supplies. Doing this first means those tracks build on one real seam
+instead of each inventing its own.
+
+### P-Soil-1 — storage as a nutrient  ⬜ todo
+
+**Current shape.** `Store` holds envelopes in memory up to `set_mem_budget` and
+spills the coldest wires past it. The only spill backend that exists is a
+filesystem directory, bound through `Node::set_spill_dir(&Path, now)`. A vessel
+whose storage is not a filesystem — a browser with IndexedDB/OPFS, an MCU with
+flash — has no way to offer it and silently runs memory-only. Note the precise
+shape of the gap: the core does **not** assume a disk (a node with no spill dir
+works fine, by design), it offers exactly *one* shape of storage.
+
+**Change.** A backend trait behind the existing spill machinery — put / get /
+remove / enumerate-on-adopt — with today's filesystem code as its first
+implementation. `set_spill_dir` stays as the filesystem convenience constructor;
+a sibling entry point accepts any backend.
+
+**Freeze impact: None.** Verified against `tests/api_freeze.rs`: the frozen
+surface pins `Node::set_store_budget`, and neither `Store` itself nor
+`set_spill_dir` appears there. This is additive — no `allow-frozen-change`, and
+the PR guard's refusal to modify `api_freeze.rs` is never triggered.
+
+**Acceptance**
+- [ ] `Store` spills through the trait; the filesystem backend passes every
+      existing spill test unchanged, including
+      `the_store_spills_to_disk_and_still_serves_what_it_spilled` and the
+      corrupt / truncated-spill cases.
+- [ ] Adopt-time verification still discards content whose id does not match, so
+      a tampered spill directory cannot inject — the property `set_spill_dir`
+      already guarantees must survive the refactor.
+- [ ] A memory-backed test backend proves a second implementation is possible
+      without touching `Store`.
+- [ ] `set_spill_dir` behaviour is byte-identical; no existing caller changes.
+
+### P-Soil-2 — scheduling as a nutrient  ⬜ todo, lower
+
+Ticking sync, expiry and resend is driven by `bridge::hub` and `cli::run` by
+convention rather than through an interface, so each new vessel re-derives what
+"tick" means and how often. Smaller and less urgent than P-Soil-1 — no feature is
+blocked on it — but it is the last of the five that is a habit rather than a
+contract. After P-Soil-1, or folded in if the same PR makes it natural.
+
+### Explicitly not in this track
+
+Compile-time `max_core` gating (`C0…C8` as cargo features). Recorded as declined
+rather than forgotten: the ratchet session map lives inline on `Node`, so
+cfg-gating protocol layers out reaches into `lib.rs` instead of excluding files,
+and no shipping vessel needs the binary-size saving yet. Revisit only if a real
+MCU target proves it necessary. The cheaper version of the same idea — gating
+*supplies* rather than protocol layers — is the existing "Feature-gate optional
+bridges" item.
+
+**Branch:** `feat/soil-storage-backend`
+
+---
+
 ## Web node as a full daily-driver peer (W-series)
 
 **Steering:** `MISSION.md` pillar 3 (Façades) + pillar 4 (Nodes people can run —
@@ -1903,12 +1974,10 @@ as Signal groups.
 
 ### Priority
 
-Not yet placed on the "Priority compass" above — that list is locked human
-direction from the 2026-08-01 audit tour and this track postdates it. Proposed
-slot: after **P-Direct-NAT** (which several of these transports — WebRTC,
-iroh-in-browser later — benefit from) and independent of the anonymity/iOS
-items, since it touches neither. Flag for the next priority-compass review
-rather than self-ranking here.
+Placed third on the "Priority compass" below at the 2026-08-01 second-pass
+review — after **P-Soil** (whose storage seam this track's browser node is the
+first real consumer of) and **P-Direct-NAT**, and independent of the
+anonymity/iOS items, since it touches neither.
 
 ---
 
@@ -2024,6 +2093,16 @@ negotiated:
    iroh (relay/fallback) → fail honestly (say there's no path, per the
    non-goals above).
 
+**Vessel-dependent by construction** (added at the 2026-08-01 second-pass review,
+in the [`DESIGN.md`](DESIGN.md) soil vocabulary). Steps 2–5 are *supplies*, and
+not every soil has them: iroh (step 5) is a native-only bridge, so a browser
+vessel's ladder ends at step 3 and it reaches a relay only through a peer that
+has one; UPnP/NAT-PMP (step 4) is desktop/daemon-only, as already noted. The
+preference order in step 6 is therefore **per-vessel, not global** — each runtime
+walks the subset it can actually supply, and says so rather than offering a
+candidate it has no way to try. Worth settling before implementation, since it
+decides whether the ladder is one shared table or a capability query.
+
 **Should a daemon help other people's NAT traversal by default?** Only the
 STUN-shaped echo is SPORE's own to decide — relay is now iroh's concern
 (its own relay operators, or a self-hosted one, choose that separately):
@@ -2050,15 +2129,23 @@ once this ships; claim exactly what steps 0–6 cover.
 ### Priority compass
 
 In order, per explicit human direction — later roadmap grooming should read
-top-to-bottom here before picking up new discretionary work:
+top-to-bottom here before picking up new discretionary work. **Revised
+2026-08-01 (second pass)**, on explicit direction, to lead with the soil work and
+to place the W-series, which the first pass predated.
 
-1. **P-Direct-NAT** — ends the single most repeated pain (Direct usually not
+1. **P-Soil** — storage, then scheduling, as declared nutrients. First because
+   everything below is downstream of it: the browser node stays memory-only, a
+   thin vessel cannot spill to flash, and no runtime can honestly declare what it
+   lacks until it can declare what it supplies.
+2. **P-Direct-NAT** — ends the single most repeated pain (Direct usually not
    actually connecting on a real WAN).
-2. **Family** — sealed-topic + honest UX is buildable now; full roster only if
+3. **W-series** — the browser as a daily-driver peer; the first vessel to consume
+   P-Soil's storage seam and the communicator-as-extension pattern.
+4. **Family** — sealed-topic + honest UX is buildable now; full roster only if
    the product genuinely demands it (see non-goals above).
-3. **Anonymity toggle** — mix-preferred + a runnable **P-Mix-Runner** example;
+5. **Anonymity toggle** — mix-preferred + a runnable **P-Mix-Runner** example;
    do not block this on being Tor-complete, which is explicitly not the goal.
-4. **iOS** — non-goal, documented, not revisited absent new direction.
+6. **iOS** — non-goal, documented, not revisited absent new direction.
 
 ### North star — what these tracks add up to
 
