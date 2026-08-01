@@ -84,6 +84,7 @@ name · **14** Freeze impact (almost always None).
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking — **top of priority compass** | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
 | **P-Group-Roster** | Signal-style membership (signed roster, add/remove epochs, sender binding) | Feature / protocol — **not v1, do not fake in UI** | ⬜ future — sealed-topic + honest UX is the shippable answer today | — | — |
+| **W-series** | Web node: browser as a daily-driver peer (Mail/Rooms/Feed/Files/Folder), not a transport demo | Feature / product | ⬜ todo — phased W0–W8, see "Web node as a full daily-driver peer" below | — | — |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
@@ -1772,6 +1773,136 @@ feat/bridge-iroh
 - Claiming 🧪 radios production-ready without HARDWARE results
 - Full release-pipeline fixture automation (note only)
 - Routing Direct records through store-and-forward relays (Direct is non-routed by definition)
+
+---
+
+## Web node as a full daily-driver peer (W-series)
+
+**Steering:** `MISSION.md` pillar 3 (Façades) + pillar 4 (Nodes people can run —
+"Android, desktop, browser/wasm, daemon, ESP/home router") — the browser is a
+first-class node, not a demo toy. Source: an implementer plan
+(`SPORE_WEB_NODE_FULL_PLAN.md`) reviewed against the current tree; findings and
+scope below are from that review, not the plan verbatim.
+
+### Confirmed: standalone HTML, "web node," and the site demo are one file
+
+`web/build-standalone.mjs`'s own header says it plainly: the single generated
+`spore-standalone.html` "is also the live demo served on the site." Verified in
+the pipeline itself — `.github/workflows/pages.yml` copies the exact same file
+to both `_site/spore-standalone.html` and `_site/demo/index.html` (its comment:
+*"The live demo IS the standalone: one self-contained file... Serve the same
+file at /demo/"*). One artifact, three names. There is no separate "demo" to
+diverge from the "real" node — improving one is improving all of it, and CI's
+zero-external-network check (`ci.yml`, greps the file for `import`/`export`/
+`https?://`) already guards that it stays a real offline node, not a
+CDN-backed page.
+
+### Confirmed: today it's a transport demo, not a daily-use node
+
+Reading `web/build-standalone.mjs`'s actual UI (not just its stated intent):
+three panels — **This node** (address, a raw hex-dest + payload compose box,
+subscribe-to-topic), **Bridges** (add/remove/inspect transports), **Seed &
+memory** (export/forget). `spore_node_send`/`spore_node_recv` in `src/wasm.rs`
+are the only send/receive exports, and `Node::send` is the raw
+unsealed/unsigned path — the same call a protocol implementer would use to
+verify a transport works, not what a user sends a friend. There is no thread
+view, no file library, no topic-room concept, no feed. This matches the source
+plan's own diagnosis (its phase **W0** is literally "audit wasm API vs Node
+capabilities, gap list, no fake buttons") — the audit is confirmed accurate:
+**yes**, it is currently explanatory/demo-shaped, and **yes**, the goal below
+(daily-use functional node) is the right direction, not scope creep.
+
+### The real gap is `src/wasm.rs`, not just UI
+
+The Rust core already has everything the plan's feature table needs —
+`Node::send_direct`/`open_dm` (sealed + §7 ratchet, shipped in #70), `topic.rs`
+(encrypted topic membership/rotation), `feed.rs` (topic-scoped microblog), and
+`file.rs`/`bundle.rs`/`node/files.rs` (`publish_file`, `publish_file_sealed`,
+`fetch`, `open_file`, content-addressed manifests — all present, all tested).
+None of it is reachable from the browser: `src/wasm.rs` exports exactly 15
+functions today, covering node lifecycle, raw send/recv, and the prekey ring —
+no DM, no topic, no file, no feed call among them. So **W1 (encrypted DM)
+cannot start with UI work** — it starts with new `wasm.rs` exports, the same
+shape as `android/jni`'s existing pattern (an additive C-ABI-style surface
+over the frozen core, itself not part of the frozen contract — confirmed
+against `CONTRIBUTING.md`'s frozen-file list, which names `bindings/spore.h`,
+`reference/vectors.json`, and `tests/api_freeze.rs`, not `wasm.rs`). Freeze
+impact: **None** — additive exports, no wire change, no `allow-frozen-change`
+needed.
+
+### Guardrail: this stays a reference client, not "the" SPORE app
+
+MISSION.md is explicit: *"Chat UI is one client, not the product definition."*
+The plan's Mail/Rooms/Feed/Files/Folder IA is a good **reference**
+implementation — proof the façade pattern works end-to-end in a browser — but
+it must not become the implied canonical SPORE experience the way a
+company-app chat UI would. Concretely: no feature here should require the
+standalone HTML specifically (a bridge, a Python script, or the daemon CLI
+must remain equally capable), and copy should read "a SPORE node in your
+browser," not "the SPORE app."
+
+### Feature scope (from the source plan, unchanged)
+
+| Capability | Mechanism | Honesty note |
+|---|---|---|
+| Encrypted DM | `send_direct`/`open_dm` (ratchet, already shipped) | New wasm exports only |
+| Open group | Unencrypted topic | Name + join UX |
+| Encrypted group | Sealed topic / shared key | **No roster** — UI must say "anyone with the key can write," never "members" |
+| Public shout | Public/flood topic | — |
+| Feed / personal blog | Topic posts signed by addr, chronological | Follow = subscribe, not a server relationship |
+| Authorized-only feed | Sealed topic key via invite/QR, **not** an allowlist server | Label as a **capability key** |
+| Files | Manifests/magnets via existing `node/files.rs` | Library UI only, no new wire |
+| Public folder (`spore://<addr>/path`) | App-level path-index convention (JSON, published as a magnet/topic) | World-readable like a public topic — never call it a private homepage; sandbox any rendered foreign HTML (XSS) |
+
+### Phased delivery
+
+W0 audit is done (above). Remaining, one PR per phase, same density as the
+B-series:
+
+- **W1** — Encrypted DM: `wasm.rs` exports for `send_direct`/`open_dm`, thread
+  list, compose, delivery honesty (no read receipts).
+- **W2** — Topics: open group join/create + public shout, clearly labeled public.
+- **W3** — Sealed group: shared-key/invite-blob room, "anyone with the key can
+  post" banner.
+- **W4** — Feed/microblog: compose to `feed::<addr>`, follow = subscribe,
+  optional link-out to long-form in the public folder.
+- **W5** — Files: publish → magnet, fetch by magnet, progress UI, local search.
+- **W6** — Public folder + `spore://` resolver: index publish/refresh, MIME
+  present-or-download, sandboxed foreign HTML, `spore://` scheme registration
+  where the browser allows it.
+- **W7** — Authorized feed polish: invite flow, documented revoke-by-rotation
+  limitation.
+- **W8** — Continuity polish: export seed from the new UI, `web/README.md` +
+  `docs/APPS.md` updates, mobile-browser limits documented.
+
+### Non-goals (unchanged from the source plan)
+
+iOS; a real group roster/admin-kick (still `P-Group-Roster`, not this track);
+a global filename DHT; transparent clearnet browsing; describing sealed groups
+as Signal groups.
+
+### Acceptance (overall)
+
+- [ ] Two browsers on a LAN: DM, open room, sealed room (with key), shout,
+      feed post, publish a file, fetch a magnet — all through the standalone
+      HTML, no daemon involved.
+- [ ] Publish `about.html` to a public folder; a second node resolves
+      `spore://<addr>/about.html` and renders it by MIME.
+- [ ] Every `wasm.rs` addition has a matching `web/test.mjs` case, same bar as
+      the existing node-ABI tests.
+- [ ] UI never claims path/delivery/membership/anonymity the core doesn't
+      provide (same rule as every other surface in this roadmap).
+- [ ] Still a full node — store, bridges, same envelopes — not a view-only
+      client wrapping a relay.
+
+### Priority
+
+Not yet placed on the "Priority compass" above — that list is locked human
+direction from the 2026-08-01 audit tour and this track postdates it. Proposed
+slot: after **P-Direct-NAT** (which several of these transports — WebRTC,
+iroh-in-browser later — benefit from) and independent of the anonymity/iOS
+items, since it touches neither. Flag for the next priority-compass review
+rather than self-ranking here.
 
 ---
 
