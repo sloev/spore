@@ -59,12 +59,22 @@ const html = `<!doctype html>
 <title>SPORE — a whole node in one file</title>
 <style>
   :root {
-    --bg:#0e1116; --panel:#171b22; --edge:#262c36; --ink:#e6edf3;
-    --dim:#8b98a9; --accent:#57c785; --accent2:#4aa3ff; --warn:#e0a030; --bad:#e05a5a;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /* Neo-Tokyo Tactical Wasteland (docs/VISUALDESIGN.md §1) — same values as
+       site/style.css, so the docs site and this standalone node read as one
+       design language rather than two unrelated apps sharing a repo (C1). */
+    --bg:#0a0a0c; --panel:#1a1c20; --kevlar:#4b5320; --edge:#2a2f1c; --ink:#ffb000;
+    --dim:#8a7a4a; --accent:#ff2a85; --accent2:#00ffff; --ok:#39ff14;
+    --warn:#ffb000; --bad:#ff2a85;
+    --mono: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: light) {
-    :root { --bg:#f6f8fa; --panel:#fff; --edge:#d8dee4; --ink:#1f2328; --dim:#5b6670; }
+    :root {
+      /* Field Notes (VISUALDESIGN §1 "Light mode") — every colour re-checked
+         to clear 4.5:1 on paper, same as site/style.css's light variant. */
+      --bg:#f4f1e8; --panel:#fff; --kevlar:#d8d2c0; --edge:#d8d2c0; --ink:#1a1c20;
+      --dim:#5b5647; --accent:#c2185b; --accent2:#00707a; --ok:#1f7a0c;
+      --warn:#8a5f00; --bad:#c2185b;
+    }
   }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
@@ -77,35 +87,50 @@ const html = `<!doctype html>
   .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0 20px; }
   .pill { font-size:12px; color:var(--dim); border:1px solid var(--edge); border-radius:999px; padding:3px 10px; }
   .pill.addr { font-family:var(--mono); color:var(--accent2); }
-  .card { background:var(--panel); border:1px solid var(--edge); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .card { background:var(--panel); border:1px solid var(--edge); border-radius:2px;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.6); padding:16px; margin-bottom:16px; }
   .card h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
   .log { font-family:var(--mono); font-size:12.5px; background:var(--bg); border:1px solid var(--edge);
     border-radius:8px; height:220px; overflow-y:auto; padding:10px; white-space:pre-wrap; }
-  .log .rx{color:var(--accent)} .log .tx{color:var(--accent2)} .log .relay{color:var(--dim)}
+  /* rx/open are "it worked", not the primary-action accent — §1 reserves
+     --accent (pink) for the CTA/cursor role and --ok (phosphor) for success,
+     a distinction the old generic green/blue palette collapsed by accident. */
+  .log .rx{color:var(--ok)} .log .tx{color:var(--accent2)} .log .relay{color:var(--dim)}
   .log .sys{color:var(--dim)} .log .bad{color:var(--bad)}
   .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
   input[type=text], select, textarea { background:var(--bg); color:var(--ink);
-    border:1px solid var(--edge); border-radius:8px; padding:8px 10px; font:inherit; }
+    border:1px solid var(--edge); border-radius:2px; padding:8px 10px; font:inherit; }
   input[type=text]{ flex:1; min-width:150px; }
   select{ min-width:200px; }
   textarea{ width:100%; font-family:var(--mono); font-size:11.5px; height:70px; resize:vertical; }
-  button{ background:var(--accent); color:#05130b; border:0; font-weight:600; border-radius:8px;
+  /* Radio switch (§3): pink face, void ink — never pink-on-kevlar. Disabled
+     falls back to the inert kevlar face with a dim label (§7 checklist item
+     5) rather than a translucent accent, which is what a bare browser
+     :disabled default would otherwise have done to a pink button. */
+  button{ background:var(--accent); color:var(--bg); border:0; font-weight:600; border-radius:2px;
     padding:8px 14px; cursor:pointer; font:inherit; }
+  button:disabled{ background:var(--kevlar); color:var(--dim); cursor:not-allowed; }
   button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--edge); }
-  button.x{ background:transparent; color:var(--dim); border:1px solid var(--edge); padding:2px 9px; border-radius:6px; }
+  button.ghost:disabled{ color:var(--dim); border-color:var(--edge); cursor:not-allowed; }
+  button.x{ background:transparent; color:var(--dim); border:1px solid var(--edge); padding:2px 9px; border-radius:2px; }
   .note{ color:var(--dim); font-size:13px; margin:2px 0 0; }
   a{ color:var(--accent2); }
   code{ font-family:var(--mono); font-size:.9em; background:var(--bg); border:1px solid var(--edge); border-radius:5px; padding:1px 5px; }
-  .bridge{ border:1px solid var(--edge); border-radius:10px; padding:10px 12px; margin-top:10px; }
+  .bridge{ border:1px solid var(--edge); border-radius:2px; padding:10px 12px; margin-top:10px; }
   .bridge .hd{ display:flex; align-items:center; gap:10px; }
   .bridge .ttl{ font-weight:600; font-size:13.5px; flex:1; }
   .badge{ font-size:11px; font-family:var(--mono); border:1px solid var(--edge); border-radius:999px; padding:2px 8px; color:var(--dim); white-space:nowrap; }
-  .badge.open{ color:var(--accent); border-color:var(--accent); }
+  .badge.open{ color:var(--ok); border-color:var(--ok); }
   .badge.err{ color:var(--bad); border-color:var(--bad); }
   .bridge .bd{ margin-top:8px; display:flex; flex-direction:column; gap:8px; }
   .bridge .bd .row{ margin-top:0; }
   .cnt{ font-size:11px; color:var(--dim); font-family:var(--mono); }
   footer{ max-width:960px; margin:0 auto; padding:12px 20px 60px; color:var(--dim); font-size:12.5px; }
+  /* Focus is never removed, only thickened — §3 Toughbook rule, §7 checklist
+     item 4, extended here to every interactive element, not just inputs. */
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent2); outline-offset: 2px;
+  }
 </style>
 </head>
 <body>

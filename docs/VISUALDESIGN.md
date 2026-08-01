@@ -22,8 +22,18 @@ Which surfaces actually consume these tokens, so nobody has to guess:
 | Surface | Tokens | Chrome (scanlines, crate shadows, reduced-motion) |
 |---|---|---|
 | `site/style.css` — the Pages site | ✅ | ✅ |
-| `web/spore-standalone.html` — the browser node | ✅ inherits the stylesheet | ✅ |
+| `web/spore-standalone.html` — the browser node | ✅ own token set, same values (C1) | ✅ crate shadow, focus ring; no scanlines/vignette (none implemented — nothing to gate) |
 | Android — `Chrome.kt` + `MainActivity.kt` | ✅ | ✅ crate, Toughbook input, radio switch, segmented LED, stickers, scanlines, reduced motion |
+
+**Found and fixed by the C1 audit:** this table's `web/spore-standalone.html` row
+used to say "inherits the stylesheet," which was never true — the standalone
+generator (`web/build-standalone.mjs`) has always carried its own inline
+`<style>` block (it must, being a single offline file with zero external
+requests), and that block's tokens were a generic, ungoverned dark scheme with
+no relation to §1 — the exact "claims with no implementation behind them"
+shape this project has found before. Fixed by giving it the real token
+*values* under the same variable names, plus the cyan focus ring and
+kevlar-faced disabled state §3/§7 require and it was missing outright.
 
 **Three places Android cannot match this document exactly.** Recorded here rather
 than left for someone to discover as a bug:
@@ -105,9 +115,15 @@ a button glanced at once, but tiring across paragraphs — the kind of glare a r
 didn't have to contend with because nobody read a novel off one. `--prose` is the
 same hue at roughly 60% saturation (`hsl(41, 60%, 60%)`), still comfortably clearing
 7:1 (AAA) on both `--void` and `--asphalt`, so nothing is traded for the calmer read.
-Site-only for now (`site/style.css`, long-form `<p>`/`<li>`/`<td>` inside `main.doc`);
-Android's `Chrome.kt` Palette keeps full amber for its (much shorter) body text,
-noted as a candidate for the C1 token-parity pass rather than assumed done here.
+**Site-only, decided by the C1 audit.** `--prose` exists for `site/style.css`'s
+long-form `<p>`/`<li>`/`<td>` inside `main.doc` — doc pages read start-to-finish
+for minutes at a stretch, which is exactly the fatigue this token trades against.
+Android's `Chrome.kt` Palette keeps full amber deliberately: its body text is chat
+bubbles, captions and single-line status rows, never a multi-paragraph read, so
+there is no comfort problem to solve and adding a second amber-family token would
+be complexity without a payoff. `web/spore-standalone.html`'s longest text is the
+one `.tag` paragraph under the header — reviewed and left on full `--ink` for the
+same reason. Revisit only if a surface grows genuinely long-form body copy.
 
 ### Semantic mapping
 

@@ -18,6 +18,25 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The standalone web node is on the real palette now, not a stand-in (C1).**
+  `web/spore-standalone.html` has carried its own inline stylesheet since it
+  was written — it has to, being a single offline file — but that stylesheet
+  was still the generic dark scheme it started as, never actually updated to
+  docs/VISUALDESIGN.md's Neo-Tokyo Tactical Wasteland tokens, despite the doc
+  claiming it did. Now on the same hex values as `site/style.css` and
+  Android's `Chrome.kt` Palette (both of which were already correct), in both
+  dark and the "Field Notes" light variant. Also added: a 2px cyan
+  `:focus-visible` ring on every interactive element (previously none), and a
+  kevlar-faced `:disabled` button state (previously none — with the button
+  face now pink, an unstyled disabled state would have rendered exactly the
+  "translucent pink" VISUALDESIGN forbids). A related semantic fix: the log's
+  "received" lines and the "bridge open" badge used the primary-action accent
+  color, which read as success by coincidence in the old palette's green but
+  would have read as the wrong thing once accent became pink — remapped to
+  the dedicated `--ok` token. Audited Android for the same class of bug
+  (pink-on-kevlar, disabled-state treatment, missing focus rings); found
+  already correct there. No wire or wasm-export changes.
+
 - **Android: Feed polish (B8).** Following a topic now says so — "Following
   #x", "Already following #x", or "Node not started yet" — instead of the
   Follow button silently doing nothing or nothing visible happening on a
