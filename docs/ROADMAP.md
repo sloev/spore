@@ -71,13 +71,13 @@ name · **14** Freeze impact (almost always None).
 | **B1** | Chat nav: Back + scroll-to-latest + IME insets | Critical UX | ✅ merged (#58) 🧪 | — | B2–B8, C1 |
 | **B2** | Send/error feedback (no silent no-op) | Critical UX | ✅ merged (#61) 🧪 | — | B-series |
 | **B3** | Empty states + PUBLIC/broadcast confirm | High UX | ✅ merged (#62) 🧪 | — | B-series |
-| **B4** | Notifications + transfers overflow | High UX | 🟢 in review (#66) 🧪 | — | B-series |
-| **B5** | Advanced: ring health + cautious export | Medium | 🟢 in review (#67) 🧪 | — | B-series |
-| **B6** | Bridges: status enum + permission recovery | High UX | 🟢 in review (#68) 🧪 | — | B-series |
-| **B7** | Accessibility + density pass | High UX | 🟢 in review (#69) 🧪 | B1–B6 | C1 |
+| **B4** | Notifications + transfers overflow | High UX | ✅ merged (#66) 🧪 | — | B-series |
+| **B5** | Advanced: ring health + cautious export | Medium | ✅ merged (#67) 🧪 | — | B-series |
+| **B6** | Bridges: status enum + permission recovery | High UX | ✅ merged (#68) 🧪 | — | B-series |
+| **B7** | Accessibility + density pass | High UX | ✅ merged (#69) 🧪 | B1–B6 | C1 |
 | **B8** | Feed polish | Medium | ⬜ todo | — | B-series |
 | **C1** | Token parity + forbidden-pair audit | High UX | ⬜ todo | — | B7 |
-| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | 🟢 story cards ✅ (#63); contrast pass ✅ (#64); copy-code buttons in review | — | C1 |
+| **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
 
 **Minimum credible phone node:** PR0 + PR1 + PR2 + one device-matrix pass.
 
