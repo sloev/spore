@@ -71,6 +71,12 @@ pub(crate) struct Config {
     /// initiator half could never run and two daemons would both sit waiting to
     /// be offered a pipe.
     pub(crate) direct_to: Option<String>,
+    /// A reflexive echo to ask where we appear to be, as `host:port`. Any SPORE
+    /// daemon running `stun:` is one; so is any public STUN server.
+    pub(crate) direct_stun: Option<String>,
+    /// Run a reflexive echo on this port for other nodes to ask. Default off —
+    /// it is a service you choose to offer, though it costs one packet.
+    pub(crate) stun: Option<u16>,
 }
 
 // A deliberately tiny YAML subset: `key: value` lines, `- item` list entries,
@@ -88,6 +94,8 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     let mut bridges: Vec<Spec> = Vec::new();
     let mut direct: Option<String> = None;
     let mut direct_to: Option<String> = None;
+    let mut direct_stun: Option<String> = None;
+    let mut stun: Option<u16> = None;
     let mut sec = Sec::None;
 
     for (i, raw) in text.lines().enumerate() {
@@ -132,6 +140,17 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
                 }
                 sec = Sec::Bridges;
             }
+            "direct-stun" => {
+                if v.is_empty() {
+                    return Err(format!("line {ln}: `direct-stun:` needs a host:port"));
+                }
+                direct_stun = Some(v.to_string());
+                sec = Sec::None;
+            }
+            "stun" => {
+                stun = Some(v.parse().map_err(|_| format!("line {ln}: `stun:` needs a port"))?);
+                sec = Sec::None;
+            }
             "direct-to" => {
                 if v.is_empty() {
                     return Err(format!("line {ln}: `direct-to:` needs a 16-hex-digit peer address"));
@@ -152,7 +171,7 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     if bridges.is_empty() {
         return Err("no bridges configured".to_string());
     }
-    Ok(Config { petname, topics, bridges, direct, direct_to })
+    Ok(Config { petname, topics, bridges, direct, direct_to, direct_stun, stun })
 }
 
 #[cfg(not(target_arch = "wasm32"))]

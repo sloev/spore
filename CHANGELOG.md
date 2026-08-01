@@ -36,6 +36,23 @@ Two conventions specific to this project:
   cheap now, since until the daemon wiring below nothing could start a pipe at all.
   The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
 
+- **A node can now discover the address the outside world sees, and answer that
+  question for other nodes (P-Direct-NAT step 2).** Direct could only ever offer
+  the address a node was *told* it had, so it worked on a LAN and nowhere else.
+  `direct::stun` is a minimal binding client and echo — RFC 5389's binding
+  exchange and nothing more: no auth, no FINGERPRINT, no ICE, no dependency, with
+  unknown attributes skipped rather than rejected so a full STUN server still
+  interoperates. The **echo half ships with it and is the point**: a daemon's
+  `stun:` port answers statelessly (one packet in, one out, nothing retained), so
+  one SPORE node is a reflexive-locator server for another and the network need
+  not quietly depend on a third party's STUN server. A discovered locator is
+  offered as a second candidate ranked *below* the LAN one, so a path that works
+  without crossing a NAT is always preferred. **This does not make NAT traversal
+  work:** most NATs drop an unsolicited inbound datagram, which is what the
+  coordinated hole-punch (step 3) exists to fix — the daemon says so at startup
+  rather than implying the new locator is reachable. Verified with two daemons,
+  one asking the other's echo.
+
 - **Android can bring a Direct pipe up too — through the same code as the
   daemon.** Wiring it separately would have meant two implementations of one
   negotiation, which is exactly the per-platform punch logic the roadmap's
