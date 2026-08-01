@@ -2189,9 +2189,17 @@ negotiated:
    the crate builds, but no device has run it. **PR8c is complete**; Direct is
    startable from both native runtimes, LAN-scoped until this track's own step 2.
 1. Candidates in SPDR — already shipped.
-2. Reflexive locators via a minimal, dependency-free STUN client (binding
-   request/response only) — new, small, in-budget per Finding 4.
-3. Coordinated UDP hole-punch: simultaneous probes once both sides have
+2. ~~Reflexive locators via a minimal, dependency-free STUN client (binding
+   request/response only)~~ — **done.** `src/direct/stun.rs`: binding
+   request/response, XOR-MAPPED-ADDRESS for v4 and v6, unknown attributes
+   skipped rather than rejected so a full STUN server interoperates. No
+   dependency, no ICE. The **echo** half ships with it and is what the
+   default-on decision below asked for — a daemon's `stun:` port answers
+   statelessly, so one SPORE node is a reflexive server for another and the
+   network need not lean on a third party. A discovered locator is offered as a
+   second candidate ranked *below* the LAN one. Verified with two daemons, one
+   asking the other. **It does not make NAT work** — see step 3.
+3. **← next.** Coordinated UDP hole-punch: simultaneous probes once both sides have
    freshly re-confirmed reachability close together in time (Finding 2) —
    never timed off a possibly-stale OFFER/ANSWER round trip.
 4. Optional UPnP/NAT-PMP/PCP on desktop/daemon, where a device actually offers it.

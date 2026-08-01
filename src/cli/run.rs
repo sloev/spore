@@ -29,6 +29,31 @@ pub(crate) fn run_config(cfg: Config) {
 
     let mut handles = Vec::new();
 
+    // The reflexive echo (P-Direct-NAT step 2). Stateless: one packet in, one
+    // out, nothing retained — which is why it is cheap enough to just run, and
+    // why every SPORE daemon offering it keeps the network from depending on a
+    // third party's STUN server for something the protocol does for itself.
+    if let Some(port) = cfg.stun {
+        println!("  [stun] reflexive echo on :{port}");
+        handles.push(thread::spawn(move || match std::net::UdpSocket::bind(("0.0.0.0", port)) {
+            Ok(sock) => {
+                let mut buf = [0u8; 1024];
+                loop {
+                    match sock.recv_from(&mut buf) {
+                        Ok((n, from)) => {
+                            spore::direct::stun::serve_one(&sock, &buf[..n], from);
+                        }
+                        Err(e) => {
+                            eprintln!("  [stun] {e}");
+                            return;
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("  [stun] cannot bind :{port}: {e}"),
+        }));
+    }
+
     // Direct: a second plane, off unless the config says where this node can be
     // reached. Installed before the bridges so no delivered envelope is missed.
     match cfg.direct.as_deref().map(super::direct::locator) {
@@ -40,8 +65,20 @@ pub(crate) fn run_config(cfg: Config) {
         Some(Some((advertise, bind_port))) => {
             let (tx, rx) = std::sync::mpsc::channel();
             hub.set_delivery_sink(tx);
-            println!("  [direct] reachable at {advertise} (UDP) — LAN only until P-Direct-NAT");
+            println!("  [direct] reachable at {advertise} (UDP)");
             let mut d = super::direct::Direct::new(hub.addr(), advertise, bind_port);
+            // Ask where we appear from outside, if an echo was named. Best
+            // effort and non-fatal: a node that cannot reach one simply offers
+            // its LAN locator, which is exactly what it did before.
+            if let Some(server) = cfg.direct_stun.as_deref() {
+                match d.learn_reflexive(server) {
+                    Some(seen) => println!("  [direct] reflexive locator {seen} (via {server})"),
+                    None => eprintln!("  [direct] {server} did not answer — offering the LAN locator only"),
+                }
+            }
+            // Said once, plainly: knowing the outside address is not the same as
+            // being reachable at it. The punch is step 3 and is not built.
+            eprintln!("  [direct] note: no hole-punch yet — a pipe across NAT will usually still fail");
             let dial = match cfg.direct_to.as_deref() {
                 None => None,
                 Some(s) => match super::direct::peer_addr(s) {

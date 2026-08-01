@@ -22,6 +22,19 @@ topics: [news, weather]
 # one open to — the 16-hex-digit address the other node prints at startup:
 #
 #   direct-to: a1b2c3d4e5f60718
+#
+# Reflexive locators (P-Direct-NAT step 2). Ask an echo where you appear from
+# outside and offer that address too; any SPORE daemon running `stun:` is one,
+# and so is any public STUN server:
+#
+#   direct-stun: 203.0.113.9:7900
+#   stun: 7900                   # …and run the echo yourself, for other nodes
+#
+# The echo is stateless — one packet in, one out, nothing kept — which is why
+# running it costs nothing and why SPORE need not depend on a third party for it.
+# Knowing your outside address is still not the same as being reachable at it:
+# the coordinated hole-punch is step 3 and is not built, so a pipe across NAT
+# will usually still fail. The LAN locator is always preferred when both work.
 
 bridges:
   - broadcast                # zero-config: the primary subnet's own broadcast :7373

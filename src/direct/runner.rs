@@ -52,19 +52,27 @@ pub enum Event {
 pub struct UdpRunner {
     sig: Signalling,
     pipes: HashMap<[u8; 16], Pipe<UdpPort>>,
-    /// The locator handed out in offers, as `ip:port`. Advertised verbatim: a
-    /// node cannot yet discover its own reflexive address, and guessing one is
-    /// the dishonest option.
+    /// The LAN locator handed out in offers, as `ip:port`. Configured, not
+    /// guessed — a node never invents an address for itself.
     advertise: String,
     /// Bound when *initiating*, so an answering peer can reach the locator above.
     /// A responder dials out from an ephemeral port instead, being the one that
     /// sends first.
     bind_port: u16,
+    /// Where a STUN echo last said we appear to be, as `ip:port`. `None` until
+    /// asked — a node never guesses its own reflexive address.
+    reflexive: Option<String>,
 }
 
 impl UdpRunner {
     pub fn new(me: Addr, advertise: impl Into<String>, bind_port: u16) -> UdpRunner {
-        UdpRunner { sig: Signalling::new(me), pipes: HashMap::new(), advertise: advertise.into(), bind_port }
+        UdpRunner {
+            sig: Signalling::new(me),
+            pipes: HashMap::new(),
+            advertise: advertise.into(),
+            bind_port,
+            reflexive: None,
+        }
     }
 
     /// The mediums this runtime can open. UDP alone — neither native runtime has
@@ -75,13 +83,46 @@ impl UdpRunner {
     }
 
     fn candidates(&self) -> Vec<Candidate> {
-        vec![Candidate {
+        let mut out = vec![Candidate {
             medium: Medium::udp(),
             locator: self.advertise.clone().into_bytes(),
             est_bps: 2_000_000,
             mtu: UDP_MTU,
             rtt_hint_ms: 15,
-        }]
+        }];
+        // The reflexive locator goes second, and is ranked worse on purpose: a
+        // LAN path that works is always preferable to one that has to survive a
+        // NAT, and `choose` breaks ties by latency hint.
+        if let Some(r) = &self.reflexive {
+            out.push(Candidate {
+                medium: Medium::udp(),
+                locator: r.clone().into_bytes(),
+                est_bps: 2_000_000,
+                mtu: UDP_MTU,
+                rtt_hint_ms: 60,
+            });
+        }
+        out
+    }
+
+    /// Record where a STUN echo says this node appears to be, so offers carry a
+    /// candidate a peer outside the LAN could dial.
+    ///
+    /// **Discovering the address is not the same as the path working.** Without
+    /// the coordinated punch (P-Direct-NAT step 3) an inbound datagram to that
+    /// mapping is dropped by most NATs, and the mapping itself belongs to the
+    /// socket that asked — so a candidate learned on one socket and dialled on
+    /// another describes a binding that may no longer exist. This offers the
+    /// locator honestly and lets `choose` prefer the LAN path; making it
+    /// *connect* is step 3's job, which is where the socket-sharing design
+    /// belongs rather than half-built here.
+    pub fn set_reflexive(&mut self, seen: Option<std::net::SocketAddr>) {
+        self.reflexive = seen.map(|a| a.to_string());
+    }
+
+    /// The reflexive locator currently being offered, if any.
+    pub fn reflexive(&self) -> Option<&str> {
+        self.reflexive.as_deref()
     }
 
     fn open(&self, chosen: &Candidate, local_port: u16) -> Option<UdpPort> {
@@ -171,5 +212,42 @@ impl UdpRunner {
 
     pub fn advertise(&self) -> &str {
         &self.advertise
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reflexive_locator_is_offered_but_ranked_below_the_lan_one() {
+        let mut r = UdpRunner::new([1u8; 8], "192.168.1.10:7500", 7500);
+        assert_eq!(r.candidates().len(), 1, "only the configured locator until we ask");
+        assert_eq!(r.reflexive(), None, "never guessed");
+
+        r.set_reflexive(Some("203.0.113.9:41234".parse().unwrap()));
+        let c = r.candidates();
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].locator, b"192.168.1.10:7500".to_vec());
+        assert_eq!(c[1].locator, b"203.0.113.9:41234".to_vec());
+        assert!(
+            c[1].rtt_hint_ms > c[0].rtt_hint_ms,
+            "a path that has to survive a NAT must never outrank one that does not"
+        );
+
+        // `choose` ranks by that hint, so a peer willing to use both picks the LAN.
+        let offer = super::super::Offer {
+            pipe_id: [0u8; 16],
+            from: [1u8; 8],
+            to: [2u8; 8],
+            need: Need { min_bps: 1_000, mtu_needed: 64, max_latency_ms: None },
+            eph_pub: [0u8; 32],
+            candidates: c,
+        };
+        let picked = super::super::choose(&offer, &[Medium::udp()]).unwrap();
+        assert_eq!(picked.locator, b"192.168.1.10:7500".to_vec());
+
+        r.set_reflexive(None);
+        assert_eq!(r.candidates().len(), 1, "it can be withdrawn again");
     }
 }

@@ -5,10 +5,12 @@
 //! on stderr. Android drives the same runner through its JNI handle, so the two
 //! native runtimes cannot drift into their own versions of the protocol.
 //!
-//! Honestly capable of a LAN. Candidates are the address the node was told to
-//! advertise, so two daemons on one network find each other. Across NAT they
-//! will not, because reflexive discovery and hole-punching are P-Direct-NAT and
-//! are not built — the daemon says so at startup rather than appearing to try.
+//! Candidates are the address the node was told to advertise, plus — if a
+//! reflexive echo was named — the address that echo says it sees. Discovering
+//! the latter is P-Direct-NAT step 2 and is real; *connecting* over it is step 3
+//! (the coordinated punch) and is not built, so a pipe that has to cross a NAT
+//! still usually fails. The daemon says which locators it is offering rather
+//! than implying either one works.
 //!
 //! Binary-crate module; no wire contract here.
 
@@ -26,11 +28,26 @@ fn hex4(id: &[u8; 16]) -> String {
 
 pub(crate) struct Direct {
     run: UdpRunner,
+    bind_port: u16,
 }
 
 impl Direct {
     pub(crate) fn new(me: Addr, advertise: String, bind_port: u16) -> Direct {
-        Direct { run: UdpRunner::new(me, advertise, bind_port) }
+        Direct { run: UdpRunner::new(me, advertise, bind_port), bind_port }
+    }
+
+    /// Ask a reflexive echo where we appear to be, and offer that too.
+    ///
+    /// The probe binds the port we advertise, so the mapping described is the one
+    /// a peer would dial. It is a *candidate*, not a working path: most NATs drop
+    /// an unsolicited inbound datagram, which is what the coordinated punch
+    /// (step 3) exists to fix. Offering it costs nothing and `choose` still
+    /// prefers the LAN locator.
+    pub(crate) fn learn_reflexive(&mut self, server: &str) -> Option<std::net::SocketAddr> {
+        let sock = std::net::UdpSocket::bind(("0.0.0.0", self.bind_port)).ok()?;
+        let seen = spore::direct::stun::reflexive(&sock, server, std::time::Duration::from_secs(2)).ok()?;
+        self.run.set_reflexive(Some(seen));
+        Some(seen)
     }
 
     /// Keep a pipe up to `peer`, if one was configured.
