@@ -1835,6 +1835,25 @@ candidate available still fails sometimes. A relay is the permanent escape
 hatch here, not a cleverer punch algorithm — don't claim arbitrary NAT
 traversal once this ships; claim what steps 1–6 actually cover.
 
+**Should a daemon help other people's NAT traversal by default?** Split by
+what it actually costs the operator, not treated as one question:
+
+- **Reflexive-locator echo (step 2, STUN-shaped) — default on.** A daemon
+  with a public address can tell an asking peer what address it was seen
+  from. Stateless, one packet in and one out, carries no payload, costs
+  nothing to keep running — there's little to object to, and it keeps SPORE
+  from quietly depending on a third party's STUN server for something the
+  protocol can trivially do for itself. Reasonable to ship on by default.
+- **Relay candidate (step 5, forwarding actual Direct traffic) — opt-in,
+  off by default.** This is a materially different ask: bandwidth, and an
+  operator now carrying strangers' traffic without having agreed to. This is
+  exactly what "an explicit relay candidate... never a silent fallback the
+  user didn't choose" above already says — the same principle applies to
+  *offering* the daemon as a relay, not just to a client *picking* one. A
+  config flag (`spore.example.yaml`, something like `relay: false` by
+  default) is the honest shape; a daemon that never opted in must not show up
+  as a candidate for anyone.
+
 Engineering pattern: one shared helper (something like `spore_direct_nat`)
 used identically by the daemon, desktop, and Android — façades only ever call
 the Direct API, never reimplement punch logic per platform. Tracked as
