@@ -193,6 +193,68 @@ pub fn primary_ipv4() -> Option<Ipv4Addr> {
     }
 }
 
+/// Discover this host's global IPv6 source address, the same way — ask the OS
+/// which source it would route to the internet from.
+///
+/// Worth having separately from [`primary_ipv4`] because it is a different kind
+/// of address, not a different spelling of one: a global IPv6 has **no NAT in
+/// front of it**. Where an IPv4 locator usually needs reflexive discovery and a
+/// hole punch to be reachable, this is already the address a peer dials.
+///
+/// `None` when the host has no global IPv6 — link-local (`fe80::/10`), unique-local
+/// (`fc00::/7`), loopback and unspecified are all rejected, because none of them
+/// is dialable from off-link and offering one would be a candidate that can never
+/// connect.
+///
+/// Reachability still depends on the path firewall: most home routers drop
+/// unsolicited inbound v6 by default. That is a pinhole a punch can open, unlike
+/// a NAT mapping that has to be discovered first — so this is a strictly better
+/// starting point, not a guarantee.
+pub fn primary_ipv6() -> Option<std::net::Ipv6Addr> {
+    let probe = UdpSocket::bind("[::]:0").ok()?;
+    probe.connect("[2001:db8::1]:9").ok()?; // documentation prefix: picks a source, routes nowhere
+    match probe.local_addr().ok()?.ip() {
+        IpAddr::V6(ip) if is_global_v6(&ip) => Some(ip),
+        _ => None,
+    }
+}
+
+/// Is this a globally routable IPv6 address?
+///
+/// Hand-rolled because `Ipv6Addr::is_global` is still unstable, and this is the
+/// whole of what we need: reject the ranges that cannot be dialed from off-link.
+fn is_global_v6(ip: &std::net::Ipv6Addr) -> bool {
+    let o = ip.octets();
+    let unique_local = (o[0] & 0xfe) == 0xfc; // fc00::/7
+    let link_local = o[0] == 0xfe && (o[1] & 0xc0) == 0x80; // fe80::/10
+    !(ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() || unique_local || link_local)
+}
+
+#[cfg(test)]
+mod v6_tests {
+    use super::is_global_v6;
+
+    #[test]
+    fn only_globally_routable_v6_is_offered_as_a_candidate() {
+        let g = |s: &str| is_global_v6(&s.parse().unwrap());
+        // Dialable from off-link.
+        assert!(g("2001:db8::1"), "documentation range is still global-scope");
+        assert!(g("2606:4700:4700::1111"));
+        assert!(!g("fd00::1"), "unique-local is not routable off-site");
+        // Not dialable — offering any of these is a candidate that cannot connect.
+        assert!(!g("::"), "unspecified");
+        assert!(!g("::1"), "loopback");
+        assert!(!g("fe80::1"), "link-local");
+        assert!(!g("febf::1"), "top of fe80::/10");
+        assert!(!g("fc00::1"), "unique-local, bottom of fc00::/7");
+        assert!(!g("fdff::1"), "unique-local, top of fc00::/7");
+        assert!(!g("ff02::1"), "multicast");
+        // fe00::/9 is not link-local: the /10 boundary is the second byte's top
+        // two bits, and getting that wrong would reject real addresses.
+        assert!(g("fec0::1"), "site-local was deprecated, but it is not fe80::/10");
+    }
+}
+
 /// The directed broadcast address of the primary subnet, e.g. `192.168.1.255`.
 ///
 /// On Linux the exact netmask comes from `/proc/net/route`; everywhere else (and

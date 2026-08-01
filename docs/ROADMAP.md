@@ -2277,12 +2277,25 @@ third-party-trust disclosure stays bounded: iroh supports a **self-hosted relay*
 so "a relay is needed" never means "n0's relay is needed". Native-only, so a
 browser's ladder still ends before it (per the runtime-membership decision below).
 
-**Open question worth answering before step 5, and possibly instead of it:** does
-anything emit a Direct candidate using an *overlay* address today? The bridges
-exist; nothing appears to offer their addresses as candidates. If that is right,
-wiring overlay addresses as ordinary candidates makes Direct work across the
-internet for anyone already running an overlay — with no punch, no relay and no
-new failure mode — which is a smaller and far more certain win than steps 3–5.
+**Answered, and half-done: nothing emitted anything but IPv4.** `UdpRunner::candidates()`
+was the only producer and offered exactly two locators, both `udp` over v4 — the
+configured LAN address and the reflexive one.
+
+**A global IPv6 is now offered, and it is the WAN path that needs nothing built.**
+Most ISPs hand out global v6, and a global v6 address has **no NAT in front of
+it** — unlike the reflexive locator it is already the address a peer dials, with
+no discovery, no punch and no relay. It is ranked between LAN and reflexive, so
+`choose` prefers it over a path that does not exist yet. A path firewall may still
+drop unsolicited inbound, but that is a pinhole rather than a mapping that must be
+discovered first: better odds, not a promise, and the daemon prints exactly which
+locators it is offering so "why did it not connect" is answerable without a packet
+capture.
+
+**Still open: overlay addresses.** Reticulum, Yggdrasil, cjdns, WireGuard, Tor and
+I2P all hand a node a routable address, and none of them is offered as a candidate
+yet. Same argument as IPv6, same shape of fix — one more entry in `candidates()`
+sourced from whichever bridges are configured. Smaller and more certain than
+steps 3–5.
 
 **Prerequisite for any of it: make the fallback loud.** `UdpRunner::open` silently
 falls back to a plain connect when the punch fails, which makes "traversal worked"

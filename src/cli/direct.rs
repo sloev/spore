@@ -36,6 +36,20 @@ impl Direct {
         Direct { run: UdpRunner::new(me, advertise, bind_port), bind_port }
     }
 
+    /// The locators this node is offering, for the operator to see. A path that
+    /// is not listed is not on offer — the point is that "why did it not connect"
+    /// is answerable without a packet capture.
+    pub(crate) fn offering(&self) -> String {
+        let mut v = vec![format!("{} (LAN)", self.run.advertise())];
+        if let Some(v6) = self.run.global_v6() {
+            v.push(format!("[{v6}]:{} (IPv6, no NAT)", self.bind_port));
+        }
+        if let Some(r) = self.run.reflexive() {
+            v.push(format!("{r} (reflexive, needs a punch)"));
+        }
+        v.join(" · ")
+    }
+
     /// Ask a reflexive echo where we appear to be, and offer that too.
     ///
     /// The probe binds the port we advertise, so the mapping described is the one
