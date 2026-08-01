@@ -227,9 +227,15 @@ mod tests {
             );
         });
 
-        // Backoff starts at 2s, so a few seconds must show more than one attempt
-        // without the thread having given up.
-        let deadline = std::time::Instant::now() + Duration::from_secs(6);
+        // Wait for the third attempt rather than for a fixed span. Backoff is 2s,
+        // so a healthy run reaches three attempts in ~4s and this returns then —
+        // the deadline is only a failure bound, never a delay, because the loop
+        // exits the moment the count is reached. It is generous on purpose: at
+        // 6s there was under 2s of slack for thread start and scheduling, and a
+        // loaded CI runner spent it (seen on macOS: "expected repeated attempts,
+        // got 2"). Timing out here should mean retrying is broken, not that the
+        // machine was busy.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while tries.load(Ordering::SeqCst) < 3 && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
         }
