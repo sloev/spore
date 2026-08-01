@@ -314,6 +314,7 @@ before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
+| `MISSION.md`    | what SPORE is for and the decision test every change is weighed against — read first |
 | `src/lib.rs`    | the router kernel: envelope, fountain fragmentation, paths, `Node`, sealing |
 | `src/*.rs`      | one file per layer: `session`, `ratchet`, `mix`, `topic` (KEYROT), `congestion`, `file`, `rpc`, `feed`, `kiss`, `armor` |
 | `src/bridge/`   | one file per bridge (udp, tcp, store, meshtastic, audio, ssb, bag, …) + the `hub` that shares a node across them |

@@ -1,10 +1,12 @@
 # Developer guide — a map of the repo
 
 This is the doc for "I want to change something — where do I even start."
-`CONTRIBUTING.md` covers the *rules* (freeze, CI, branches, releases); this one
-covers the *territory* — what lives where, why it's split the way it is, and
-which doc is the source of truth for which question. Read this once before
-your first PR; you shouldn't need to read it again.
+[`../MISSION.md`](../MISSION.md) covers the *why* — what SPORE is for and the
+decision test a change is weighed against; `CONTRIBUTING.md` covers the
+*rules* (freeze, CI, branches, releases); this one covers the *territory* —
+what lives where, why it's split the way it is, and which doc is the source
+of truth for which question. Read `MISSION.md` first, this once before your
+first PR; you shouldn't need to read this one again.
 
 ## Start here, by goal
 
@@ -138,6 +140,7 @@ list CI runs for the core crate; this is the map of *which* commands apply to
 
 | Doc | For |
 |---|---|
+| `MISSION.md` | What SPORE is for and the decision test a change is weighed against — read before proposing a feature. |
 | `docs/SPEC.md` | The wire format itself — the two-page normative spec. |
 | `docs/REBUILD.md` | Reimplementing SPORE in another language, with worked byte examples. |
 | `docs/DESIGN.md` | The application layers above transport: files, sessions, RPC, feeds, ratchet, mix. |

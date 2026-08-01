@@ -1811,53 +1811,104 @@ above. Clearnet exit (a peer relaying your traffic to the open internet,
 tracked separately) is not part of this and stays off by default — it is a
 convenience feature, not an anonymity one, and must never be described as such.
 
-### Direct NAT traversal — staged plan
+### Direct NAT traversal — staged plan (revised after deep review, 2026-08-01)
 
 `docs/DIRECT.md` and the carried-forward notes elsewhere already say Direct
 has no ICE/STUN/TURN/punch state machine yet — connecting assumes a usable
-locator exists after ANSWER. This is the staged plan to close that, signaling
-still entirely inside SPORE envelopes (SPDR offer/answer on the mesh), media
-still on whatever underlay was negotiated:
+locator exists after ANSWER. A deep review before starting implementation
+(reading `docs/DIRECT.md`, `Node::send_direct`, the `bridge-iroh` module, and
+`docs/BRIDGES.md`'s WebRTC writeup) turned up findings that reshape this plan
+from the version first sketched; the revisions below are agreed, not
+open — the plan built on the research is the one to implement, no need to
+re-litigate the "should we" questions this section used to hedge on.
 
+**Finding 1 — Direct isn't reachable from the app yet.** `docs/DIRECT.md`'s own
+Status section: the SPDR codec, key schedule, and UDP/TCP socket adapters are
+built and unit-tested, but the mesh signalling glue that actually calls
+`Pipe::offer`/`send_direct` from the app — previously tracked separately as
+**PR8c** — was never merged. Nobody hits NAT-traversal pain today because
+nobody can start a Direct pipe from the app at all. **Agreed: PR8c is now
+Phase 0 of this track, not a separately carried-forward item** — wiring
+OFFER/ANSWER into the daemon and Android app comes first, everything below is
+built and field-tested against a Direct that actually exists in the app.
+
+**Finding 2 — signaling latency and NAT-binding lifetime are in tension.**
+`Node::send_direct` is an ordinary sealed unicast DM through the normal
+mesh path-learning/flood mechanism — no fast path — and `docs/DIRECT.md`'s own
+table says mesh delivery is "seconds to days." A NAT UDP binding typically
+dies in 30s–5min of inactivity. So a coordinated punch **must not** be
+attempted blindly off of however long OFFER→ANSWER happened to take over the
+general mesh — by the time an ANSWER arrives after a slow mesh hop, the
+candidates in it are presumptively stale. **Design consequence:** the punch
+attempt (step 3 below) triggers off freshly re-exchanged locators once both
+peers are demonstrably live and closely-timed (e.g. a fast round trip was just
+observed, or both are already reachable over some existing low-latency
+bridge), not off the original OFFER/ANSWER timestamps.
+
+**Finding 3 — iroh already does hole punching and relay fallback.**
+`src/bridge/iroh.rs`'s own doc comment: iroh "gives QUIC connections between
+endpoints identified by a public key, with hole punching and relay fallback
+when a direct path can't be found" — already an integrated dependency (PR9,
+merged). That is most of what step 5 below set out to build from scratch.
+
+**Finding 4 — this project already declined to hand-roll this class of thing
+once.** `docs/BRIDGES.md`'s WebRTC section: a native Rust ICE/DTLS/SCTP stack
+was "the largest dependency this project would have taken... spending it here
+was considered and declined," with Tor/I2P (and now iroh) recorded as the
+answer for "NAT traversal between two daemons with no reachable address." A
+minimal STUN *client* — one UDP binding request/response, no ICE state
+machine — is meaningfully smaller than what was declined, so reflexive-locator
+discovery stays in scope; a **new SPORE-native relay protocol** does not.
+
+**Agreed revised plan**, signaling still entirely inside SPORE envelopes
+(SPDR offer/answer on the mesh), media still on whatever underlay was
+negotiated:
+
+0. **PR8c — wire Direct into the app** (daemon + Android): `send_direct`
+   actually carries OFFER/ANSWER, an adapter opens on ANSWER. Prerequisite for
+   everything below; nothing here is real until this lands.
 1. Candidates in SPDR — already shipped.
-2. Reflexive locators via STUN (or equivalent) — new.
-3. Coordinated UDP hole-punch after ANSWER: simultaneous probes on the
-   negotiated underlay, timed from the signaling exchange, not guessed.
+2. Reflexive locators via a minimal, dependency-free STUN client (binding
+   request/response only) — new, small, in-budget per Finding 4.
+3. Coordinated UDP hole-punch: simultaneous probes once both sides have
+   freshly re-confirmed reachability close together in time (Finding 2) —
+   never timed off a possibly-stale OFFER/ANSWER round trip.
 4. Optional UPnP/NAT-PMP/PCP on desktop/daemon, where a device actually offers it.
-5. An explicit relay candidate (a friend/home node, or iroh used purely as a
-   relay medium) — offered as a real, visible candidate, never a silent
-   fallback the user didn't choose.
+5. **iroh as the relay/NAT-fallback candidate** (Finding 3) instead of a new
+   SPORE-native relay protocol — offered as a real, visible candidate, never a
+   silent fallback the user didn't choose, and only where `bridge-iroh` is
+   compiled in. iroh already supports a self-hosted relay, not only n0's
+   public one, so "run your own relay" stays available without SPORE
+   reinventing it; using the default public one is a real third-party-trust
+   disclosure (`bridge-iroh`'s own doc comment already notes a relay sees
+   ciphertext + metadata + timing) that belongs in `docs/DIRECT.md`'s threat
+   model once this ships.
 6. Preference order when several candidates work: LAN → reflexive punch →
-   relay → fail honestly (say there's no path, per the non-goals above).
+   iroh (relay/fallback) → fail honestly (say there's no path, per the
+   non-goals above).
 
-**Hard limit to document, not paper over:** CGNAT-to-CGNAT with no relay
-candidate available still fails sometimes. A relay is the permanent escape
-hatch here, not a cleverer punch algorithm — don't claim arbitrary NAT
-traversal once this ships; claim what steps 1–6 actually cover.
+**Should a daemon help other people's NAT traversal by default?** Only the
+STUN-shaped echo is SPORE's own to decide — relay is now iroh's concern
+(its own relay operators, or a self-hosted one, choose that separately):
 
-**Should a daemon help other people's NAT traversal by default?** Split by
-what it actually costs the operator, not treated as one question:
+- **Reflexive-locator echo (step 2) — default on.** Stateless, one packet in
+  and one out, carries no payload, costs nothing to keep running — and it
+  keeps SPORE from quietly depending on a third party's STUN server for
+  something the protocol can trivially do for itself.
+- **Relay** is no longer a SPORE-native opt-in question — see step 5. A
+  daemon operator who wants to offer a relay does so by running (or pointing
+  at) an iroh relay, a decision that already lives in iroh's own config, not
+  a new `spore.example.yaml` flag.
 
-- **Reflexive-locator echo (step 2, STUN-shaped) — default on.** A daemon
-  with a public address can tell an asking peer what address it was seen
-  from. Stateless, one packet in and one out, carries no payload, costs
-  nothing to keep running — there's little to object to, and it keeps SPORE
-  from quietly depending on a third party's STUN server for something the
-  protocol can trivially do for itself. Reasonable to ship on by default.
-- **Relay candidate (step 5, forwarding actual Direct traffic) — opt-in,
-  off by default.** This is a materially different ask: bandwidth, and an
-  operator now carrying strangers' traffic without having agreed to. This is
-  exactly what "an explicit relay candidate... never a silent fallback the
-  user didn't choose" above already says — the same principle applies to
-  *offering* the daemon as a relay, not just to a client *picking* one. A
-  config flag (`spore.example.yaml`, something like `relay: false` by
-  default) is the honest shape; a daemon that never opted in must not show up
-  as a candidate for anyone.
+Engineering pattern (unchanged): one shared helper (something like
+`spore_direct_nat`) used identically by the daemon, desktop, and Android —
+façades only ever call the Direct API, never reimplement punch logic per
+platform. Tracked as **P-Direct-NAT**, now inclusive of PR8c per Finding 1.
 
-Engineering pattern: one shared helper (something like `spore_direct_nat`)
-used identically by the daemon, desktop, and Android — façades only ever call
-the Direct API, never reimplement punch logic per platform. Tracked as
-**P-Direct-NAT**.
+**Hard limit to document, not paper over:** CGNAT-to-CGNAT with no working
+relay candidate still fails sometimes. A relay is the permanent escape hatch
+here, not a cleverer punch algorithm — don't claim arbitrary NAT traversal
+once this ships; claim exactly what steps 0–6 cover.
 
 ### Priority compass
 

@@ -1,9 +1,10 @@
 # Contributing
 
-New to the repo? [`docs/DEV_GUIDE.md`](docs/DEV_GUIDE.md) is the map of where
-everything lives and which doc answers which question — read that first if
-you're not sure where to start. This doc is the rules once you know where
-you're going: freeze, CI gates, branches, releases.
+New to the repo? [`MISSION.md`](MISSION.md) is what SPORE is actually for and
+the decision test every change is weighed against — read that first, before
+any feature idea. [`docs/DEV_GUIDE.md`](docs/DEV_GUIDE.md) is the map of where
+everything lives and which doc answers which question. This doc is the rules
+once you know where you're going: freeze, CI gates, branches, releases.
 
 The **SPORE v1 wire format** and the crate's **public API shape** are frozen. The
 crate and the shipped distribution are versioned separately and are still `0.x` —
