@@ -147,6 +147,7 @@ list CI runs for the core crate; this is the map of *which* commands apply to
 | `docs/BRIDGES.md` | Every bridge: wire format, SPORE mapping, security profile, spec links. |
 | `docs/DIRECT.md` | SPORE Direct — the negotiated non-routed E2E pipe. |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust. |
+| `docs/RESILIENCE.md` | How Continuity, Rebuild, the reference decoders, and release artifacts fit together. |
 | `docs/APPS.md` | What to install, with download links — the user-facing app index. |
 | `docs/ROADMAP.md` | The engineering plan: PR map, carried-forward items, status. |
 | `docs/SECURITY_FINDINGS.md` / `SECURITY.md` | The findings register / how to report a new one. |

@@ -52,6 +52,10 @@ company.
    [`docs/REBUILD.md`](docs/REBUILD.md)/vendor paths so the mesh outlives any
    single maintainer.
 
+Pillars 6 and 7 answer different questions on purpose — see
+[`docs/RESILIENCE.md`](docs/RESILIENCE.md) for how they and the reference
+decoders and every release's own offline bundle fit together.
+
 Chat UI is **one client**, not the product definition.
 
 ---

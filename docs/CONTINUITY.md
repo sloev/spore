@@ -13,6 +13,11 @@ survivor. This page is about the *software* doing the same: one HTML file, one
 printout, or one offline bundle is enough to understand, verify, and run a node —
 without depending on the same infrastructure the mesh is meant to outlast.
 
+This page is about a *node* surviving; [Rebuild](rebuild.html) is its
+companion for the *protocol* surviving even this codebase — see
+[Resilience](resilience.html) for how the two, plus the reference decoders and
+every release's own offline bundle, fit together.
+
 <div class="story story-continuity" role="list">
 
 <figure class="story-card crate" role="listitem">
