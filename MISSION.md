@@ -43,8 +43,8 @@ company.
 4. **Nodes people can run** — Android, desktop, browser/wasm, daemon,
    ESP/home router. **Not iOS.** One **core**, many **runtimes** — a language
    binding, an OS process, a browser worker, an MCU firmware — each supplying
-   the same five **nutrients** (randomness, time, transport, storage,
-   scheduling). Runtimes vary; the nutrients do not. See
+   the same four **nutrients** (randomness, time, storage, scheduling) across
+   the transport boundary. Runtimes vary; the nutrients do not. See
    [`docs/DESIGN.md`](docs/DESIGN.md)'s "The spore and the soil" for the model
    and the word legend these docs hold to.
 5. **A holdable protocol story** — two-sided A4 / `spore-v1` one-pager that
@@ -58,7 +58,7 @@ company.
    single maintainer.
 
 Pillars 6 and 7 answer different questions on purpose — see
-[`docs/RESILIENCE.md`](docs/RESILIENCE.md) for how they and the reference
+[`docs/CONTINUITY.md`](docs/CONTINUITY.md) for how they and the reference
 decoders and every release's own offline bundle fit together.
 
 Chat UI is **one client**, not the product definition.

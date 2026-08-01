@@ -13,7 +13,7 @@ A SPORE message is a **signed postcard**: to, from, expiry, payload, signature. 
 **Threat model, stated once:** every link is hostile — logged, spoofed, jammed, MITM'd. Links are trusted with *nothing*; authenticity and secrecy live only in the envelope. Attackers can drop or delay; redundancy and flood-fallback heal both.
 
 ## The runtime contract — what the host must supply
-The protocol is pure; it holds no OS. A conformant node needs four things from whatever runs it, and gets them wrong silently if it does not ask.
+The protocol is pure; it holds no OS. A conformant node needs four things from whatever runs it, and gets them wrong silently if it does not ask. Transport is not a fifth: the protocol names interfaces but never opens one, so bytes in and out are the boundary this contract is stated across, not an item on it (Page 2; [DESIGN.md](DESIGN.md) Part 2).
 
 - **Randomness.** A CSPRNG for the signing seed, prekey secrets, ratchet keys, mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and MUST NOT be derivable from the identity seed** (§7.2).
 - **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7 local days (§5.7). Time is supplied per call, never read by the protocol itself.

@@ -23,9 +23,8 @@ unit-tested and compiles everywhere the core does, wasm included.
 | Reliability | fountain-coded, retried | best-effort datagram (app adds order/retry *above* the record) |
 | On the wire | signed envelopes (frozen) | `SPDR` signalling on the mesh; AEAD records on the underlay |
 
-Direct does **not** route its records through the mesh, does not change any T0–T2
-relay behaviour, and does not try to guarantee latency on duty-cycled radios — a
-LoRa candidate is simply never offered for a voice pipe.
+Direct does not try to guarantee latency on duty-cycled radios: a LoRa candidate
+is simply never offered for a voice pipe.
 
 ## Handshake
 
@@ -130,35 +129,13 @@ voice call.
 
 ## API
 
-```rust
-use spore::direct::{Pipe, Offer, Answer, Need, Candidate, Medium, RecordType, DatagramPort};
+A `DatagramPort` is whatever the chosen medium's adapter provides — `mtu`,
+`send`, `try_recv`, driven by polling. The crate ships an in-memory `Loopback`
+for tests (`examples/direct_loopback.rs`), two real socket adapters, and an iroh
+adapter behind the `bridge-iroh` feature.
 
-// Initiator: build an OFFER, send its bytes over the mesh (send_direct), keep `pending`.
-let (offer_bytes, pending) = Pipe::<MyPort>::offer(my_addr, peer_addr, pipe_id, need, candidates);
-
-// Responder: on the OFFER, pick a medium, open the chosen adapter, answer.
-let offer = Offer::decode(&offer_bytes).unwrap();
-let (answer_bytes, resp_pipe) = Pipe::answer(&offer, my_addr, &[Medium::Udp], my_port);
-
-// Initiator: on the ANSWER, open the chosen adapter and finish.
-let answer = Answer::decode(&answer_bytes).unwrap();
-let mut pipe = Pipe::finish(pending, &answer, my_port).unwrap();
-
-// Then, best-effort, both ways:
-pipe.send(RecordType::Data, b"...")?;
-while let Some((ty, bytes)) = pipe.poll() { /* … */ }
-```
-
-A `DatagramPort` is whatever the chosen medium's adapter provides — `mtu`, `send`,
-`try_recv`, driven by polling (the same model the JNI bridges use). The crate ships
-an in-memory `Loopback` for tests and for wiring two in-process peers (see
-`examples/direct_loopback.rs`), plus two real socket adapters described next.
-
-### Carrying it over the mesh
-
-`Pipe::answer` above takes the port *before* it chooses, which only works when the
-responder is willing to use exactly one medium. Anything choosing among several
-opens the port in the gap between deciding and answering:
+`Signalling` is the entry point. It holds no sockets and no clock: `now` is a
+parameter, `willing` is the runtime declaring what it can actually open.
 
 ```rust
 use spore::direct::{Signalling, Signal, Pipe, Medium};
@@ -170,30 +147,39 @@ let (offer_bytes, pipe_id) = sig.offer(peer, need, candidates, now);
 node.send_direct(peer, &offer_bytes, now);
 
 // Either side, on the plaintext of a delivered DM:
-match sig.on_signal(sender, &plaintext, &[Medium::Udp]) {
+match sig.on_signal(sender, &plaintext, &[Medium::udp()]) {
     Signal::Offer { peer, accepted } => {
-        let port = open_port_for(&accepted.chosen);      // the runtime's job
-        let (answer_bytes, pipe) = Pipe::answer_with(accepted, my_addr, port);
+        let port = open_port_for(&accepted.chosen);          // the runtime's job
+        let (answer_bytes, pipe) = Pipe::answer_with(accepted, my_addr, local, port);
         node.send_direct(peer, &answer_bytes, now);
     }
-    Signal::Decline { peer, reply } => { node.send_direct(peer, &reply, now); }
-    Signal::Answered { pending, answer, chosen, .. } => {
-        let port = open_port_for(&chosen);
+    Signal::Decline { peer, reply } => node.send_direct(peer, &reply, now),
+    Signal::Answered { pending, answer, dial, .. } => {
+        let port = open_port_for_target(&dial);
         let pipe = Pipe::finish(pending, &answer, port).unwrap();
     }
     Signal::Refused { reason, .. } => { /* tell the user, honestly */ }
     Signal::NotSignal => { /* an ordinary message — hand it to the app */ }
 }
+
+pipe.send(RecordType::Data, b"...")?;
+while let Some((ty, bytes)) = pipe.poll() { /* … */ }
 ```
 
-The division is deliberate and is the one from `DESIGN.md`'s runtime model:
-**deciding is the core's, opening is the runtime's.** `Signalling` holds no
-sockets and no clock — `now` is a parameter, and `willing` is the runtime saying
-what it can actually open. A runtime that can open nothing passes `&[]` and every
-offer is declined with a real reason, rather than accepted and then quietly
-failing to connect. Offers that are never answered are dropped by
-`Signalling::expire`, since a NAT binding dies in 30s–5min and a stale candidate
-set is better restarted than resumed.
+Rules this shape enforces:
+
+- **Deciding is the core's; opening is the runtime's.** `accept` chooses without a
+  port; `Pipe::answer_with` derives over the port the runtime then opened. They are
+  split because `UdpPort::connect` needs the peer's locator, which exists only
+  after a candidate has been chosen. `Pipe::answer` fuses both and is usable only
+  when exactly one medium is willing.
+- **`dial` is the responder's own locator**, carried in the ANSWER. `chosen` is a
+  candidate from the *initiator's* offer, so an initiator dialling `chosen` would
+  dial itself.
+- A runtime that can open nothing passes `&[]`. Every offer is then declined with
+  a reason rather than accepted and quietly left unable to connect.
+- Unanswered offers MUST be expired (`Signalling::expire`): a NAT binding dies in
+  30s–5min, so a stale candidate set is better restarted than resumed.
 
 ## Socket adapters
 
@@ -223,44 +209,25 @@ avoided even on TCP.
 
 ## Status
 
-The **pure protocol core** landed first: the `SPDR` negotiation codec, the key
-schedule, the AEAD record, medium selection, the `DatagramPort` trait, the
-`Loopback` transport, and the `Pipe` — all unit-tested end to end. Then the
-**real UDP and TCP socket adapters** above, exercised against real kernel
-sockets — including a genuine two-process UDP round-trip that re-execs the test
-binary and negotiates a live pipe across the process boundary.
+| Piece | State |
+|---|---|
+| `SPDR` codec, key schedule, AEAD record, medium selection, `Pipe` | ✅ pure, unit-tested |
+| UDP / TCP adapters | ✅ real sockets, incl. a two-process round trip |
+| Mesh signalling (`Signalling`, `accept`/`answer_with`) | ✅ tested over the real `send_direct`/`on_rx` path |
+| Daemon (`src/cli/direct.rs`) | ✅ two processes negotiate and carry a record |
+| Android (JNI + Kotlin) | 🧪 compile-checked only — no device has run it |
+| BLE / ESP-NOW adapters, `CLOSE`/`REKEY` | ⬜ not built |
 
-This increment adds the **mesh signalling glue**: `Signalling` above, and the
-`accept`/`answer_with` split that lets a port be opened for the medium that won.
-A whole negotiation now runs over the real `send_direct`/`on_rx` path in a test —
-sealed, signed, decrypted, dispatched — and the pipe it produces carries traffic.
+Reachability, by candidate — see [`ROADMAP.md`](ROADMAP.md)'s P-Direct-NAT track:
 
-**The daemon now runs it.** `direct:` in the config says where a node is
-reachable and `direct-to:` names a peer to keep a pipe to; two `spore` processes
-sharing any bridge negotiate over the mesh and bring a UDP pipe up between them,
-verified with two real processes rather than only in a test. `src/cli/direct.rs`
-is the reference consumer of the seam — it is also why the `accept`/`answer_with`
-split is load-bearing rather than cosmetic: `UdpPort::connect` needs the peer's
-locator, and that only exists once a candidate has been chosen.
+| Path | State |
+|---|---|
+| LAN | ✅ |
+| Global IPv6 | ✅ no NAT in front of it |
+| Declared overlay (`direct-also:`) | ✅ already routes |
+| Reflexive + hole punch | ❌ the two punch windows are disjoint by construction; falls back to a plain connect and says so |
+| iroh (`direct-iroh:`) | ✅ opt-in; relay posture is never defaulted |
 
-Honest limits, in the daemon's own log rather than only here: **LAN only.** A node
-cannot yet discover its own reflexive address, so it advertises what it was told
-and nothing more — crossing NAT is the P-Direct-NAT track and is not built. There
-is also no app above the pipe yet: inbound records are logged and dropped, since
-the daemon has nothing to route them to.
-
-**Android runs it too, through the same code.** `direct::UdpRunner` holds the
-negotiation and the sockets; the daemon and the JNI layer are both thin adapters
-over it, supplying only the mesh send and their own way of reporting. That is the
-engineering pattern the ROADMAP asks for — façades never reimplement punch logic
-per platform — and it is enforced by there being one runner, not a convention.
-Kotlin never touches a Direct socket: it says where the device is reachable
-(`enableDirect`), feeds delivered envelopes in, and ticks.
-
-**Android's Direct is compile-checked only.** There is no Android SDK in the
-build environment these docs are written from, so the JNI symbols and Kotlin
-declarations are verified symmetric and the crate builds and lints — but no
-phone has run it. The daemon path is the one with two-process evidence behind it.
-
-Still outstanding: BLE/ESP-NOW adapters, and `CLOSE`/`REKEY`. Those add transport
-and lifecycle, not protocol.
+The daemon prints which locators it offers and how each pipe was established, so
+a failure is diagnosable without a packet capture. Nothing consumes Direct
+traffic in either runtime yet: inbound records are counted and dropped.
