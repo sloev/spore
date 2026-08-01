@@ -13,6 +13,7 @@ use super::hub::Shared;
 use super::KissStream;
 use crate::*;
 use std::io::{ErrorKind, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 #[cfg(test)]
 use std::sync::Mutex;
@@ -31,10 +32,14 @@ pub fn run<S: Read + Write>(
     rx: &Receiver<Forward>,
     stream: &mut S,
     label: &str,
+    stop: &AtomicBool,
 ) -> std::io::Result<()> {
     let mut ks = KissStream::new();
     let mut buf = [0u8; 2048];
     loop {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         match stream.read(&mut buf) {
             Ok(0) => {
                 println!("  [{label}] iface {iface} peer closed");
@@ -75,6 +80,7 @@ pub fn run_reconnecting<S, F>(
     rx: Receiver<Forward>,
     mut connect: F,
     label: &str,
+    stop: &AtomicBool,
 ) -> std::io::Result<()>
 where
     S: Read + Write,
@@ -82,20 +88,44 @@ where
 {
     const FIRST: Duration = Duration::from_secs(2);
     const CAP: Duration = Duration::from_secs(60);
+    const STEP: Duration = Duration::from_millis(200);
     let mut wait = FIRST;
 
     loop {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         match connect() {
             Ok(mut s) => {
                 wait = FIRST; // a successful connect resets the backoff
-                if let Err(e) = run(hub.clone(), iface, &rx, &mut s, label) {
+                if let Err(e) = run(hub.clone(), iface, &rx, &mut s, label, stop) {
                     eprintln!("  [{label}] iface {iface} link error: {e}");
                 }
             }
-            Err(e) => eprintln!("  [{label}] iface {iface} connect failed: {e}"),
+            Err(e) => {
+                // A `connect` that failed because `stop` cut it short (see
+                // tcp::run's non-blocking accept poll) isn't a real failure —
+                // don't log noise for the caller's own shutdown.
+                if !stop.load(Ordering::Relaxed) {
+                    eprintln!("  [{label}] iface {iface} connect failed: {e}");
+                }
+            }
+        }
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
         }
         eprintln!("  [{label}] iface {iface} retrying in {}s", wait.as_secs());
-        std::thread::sleep(wait);
+        // Sleep in small steps so a stop signal isn't stuck behind up to 60s
+        // of backoff.
+        let mut remaining = wait;
+        while remaining > Duration::ZERO {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let step = remaining.min(STEP);
+            std::thread::sleep(step);
+            remaining -= step;
+        }
         wait = (wait * 2).min(CAP);
     }
 }
@@ -193,6 +223,7 @@ mod tests {
                     }
                 },
                 "test",
+                &AtomicBool::new(false),
             );
         });
 
@@ -220,8 +251,9 @@ mod tests {
         let written = Arc::new(Mutex::new(Vec::new()));
 
         // First attempt: a stream that dies before draining anything.
+        let stop = AtomicBool::new(false);
         let mut dead = Dead;
-        let _ = run(hub.clone(), 0, &rx, &mut dead, "test");
+        let _ = run(hub.clone(), 0, &rx, &mut dead, "test", &stop);
 
         // Second attempt with the same receiver: the envelope is still there.
         // A real socket with a read timeout yields WouldBlock when idle, which
@@ -248,7 +280,7 @@ mod tests {
             }
         }
         let mut rec = Recorder(written.clone(), 0);
-        let _ = run(hub, 0, &rx, &mut rec, "test");
+        let _ = run(hub, 0, &rx, &mut rec, "test", &stop);
 
         let got = written.lock().unwrap().clone();
         assert!(!got.is_empty(), "the queued envelope was lost across the reconnect");

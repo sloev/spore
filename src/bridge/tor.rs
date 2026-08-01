@@ -133,6 +133,8 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
             Ok(s)
         },
         "tor",
+        // CLI/daemon-only: no per-bridge stop control yet.
+        &std::sync::atomic::AtomicBool::new(false),
     )
 }
 

@@ -58,18 +58,21 @@ data class Post(val topic: String, val author: String, val text: String, val ver
 
 /**
  * A configured bridge and its status line. `iface` is the hub interface to
- * unregister when the bridge is removed (null for a core-owned bridge like TCP/UDP
- * whose interface this app didn't register and can't cleanly stop, or a toggled-off
- * bridge, which is unregistered but keeps its row). `canStop` gates the Remove
- * control — a bridge we cannot stop shows no button rather than a dead one.
+ * unregister when the bridge is removed or toggled off — every bridge kind gets
+ * a real one now (PR2 carried forward: the core-owned UDP/TCP bridges, and
+ * Wi-Fi Direct's UDP flood underneath its P2P group, used to have no stop hook
+ * at all). `canStop` gates the Remove control — kept as a flag rather than
+ * assumed true so a future bridge kind that genuinely can't be stopped still
+ * shows a plain caption instead of a dead button.
  *
- * `canToggle` (PR2 carried forward) gates a separate Pause/Resume control that
- * stops the transport but keeps the row and its configuration, so Resume restarts
- * cleanly instead of forgetting everything the way Remove + re-add would. Only
- * bridges [NodeController] can fully recreate from stored parameters set this —
- * see `toggleBridge`'s doc for which ones and why the rest don't. `id` is this
- * row's stable identity, since `iface` goes to `null` once disabled and `kind`
- * alone is not unique (two BLE bridges of the same radio type).
+ * `canToggle` (same carried-forward item) gates a separate Pause/Resume control
+ * that stops the transport but keeps the row and its configuration, so Resume
+ * restarts cleanly instead of forgetting everything the way Remove + re-add
+ * would. Only bridges [NodeController] can fully recreate from stored
+ * parameters set this — see `toggleBridge`'s doc for which ones and why the
+ * rest don't. `id` is this row's stable identity, since `iface` goes to `null`
+ * once disabled and `kind` alone is not unique (two BLE bridges of the same
+ * radio type).
  */
 data class BridgeState(
     val kind: String,
@@ -335,9 +338,14 @@ object NodeController {
         // Refollow persisted topics.
         prefs.getStringSet("topics", emptySet())?.forEach { follow(it, persist = false) }
 
-        // UDP broadcast is on by default (the zero-config LAN bridge).
-        SporeNative.nativeStartUdp(ptr, 0)
-        addBridgeState("UDP broadcast", "primary subnet", "on")
+        // UDP broadcast is on by default (the zero-config LAN bridge), and
+        // there's no manual "Add" for it — so unlike TCP, Remove alone would
+        // be a one-way trip until the app restarts. Pause/Resume (PR2
+        // carried-forward toggle) and Remove are both real now: the
+        // core-owned run loop actually stops when nativeUnregisterIface
+        // signals it, instead of a control that would have looked live but
+        // done nothing.
+        startUdpBroadcast(null)
 
         pollJob = CoroutineScope(Dispatchers.IO).launch {
             var lastFrag = ""
@@ -783,11 +791,15 @@ object NodeController {
 
     // -- bridges ----------------------------------------------------------------
 
-    /** Add a TCP bridge (empty = listen; else "host:port"). */
+    /**
+     * Add a TCP bridge (empty = listen; else "host:port"). Real Remove (PR2
+     * carried-forward) — see [addBridgeState]'s call at the UDP-broadcast
+     * bootstrap for why this used to be a dead button.
+     */
     fun addTcp(target: String) {
         if (ptr == 0L) return
-        SporeNative.nativeStartTcp(ptr, target)
-        addBridgeState("TCP", if (target.isBlank()) "listening" else target, "on")
+        val iface = SporeNative.nativeStartTcp(ptr, target)
+        addBridgeState("TCP", if (target.isBlank()) "listening" else target, "on", iface, canStop = true)
     }
 
     private var audio: AudioBridge? = null
@@ -811,6 +823,18 @@ object NodeController {
         val budget = SporeNative.nativeSuggestedBulkBudget(kind)
         return if (budget < 0) SporeNative.nativeRegisterIface(ptr)
         else SporeNative.nativeRegisterIfaceLimited(ptr, budget)
+    }
+
+    /**
+     * The zero-config LAN bridge, started once at bootstrap and re-startable via
+     * [toggleBridge]'s Resume — see the bootstrap call site for why this one
+     * needs Pause/Resume rather than Remove-only.
+     */
+    private fun startUdpBroadcast(existingId: Long?) {
+        if (ptr == 0L) return
+        val iface = SporeNative.nativeStartUdp(ptr, 0)
+        val id = upsertBridgeRow(existingId, "UDP broadcast", "primary subnet", "on", iface, canStop = true, canToggle = true)
+        bridgeReenable[id] = { startUdpBroadcast(id) }
     }
 
     /** Data-over-sound. UI must have RECORD_AUDIO granted before calling. */
@@ -1241,17 +1265,22 @@ object NodeController {
 
     /**
      * Enable/disable, distinct from Remove (PR2 carried forward, unblocked by
-     * PR3's reconnect/backoff): Pause stops the transport but keeps the row, so
-     * Resume restarts with the exact same configuration instead of the user
-     * re-entering it. Gated on `canToggle` — only set for bridges whose full
-     * config we hold onto: Audio (none needed) and the BLE radios (device +,
-     * for RNode, its radio params — see `start*Ble`). Wi-Fi Direct isn't
-     * offered one: its actual transport is the core-owned UDP bridge started by
-     * `nativeStartUdpLimited`, which has no stop hook (same gap as core TCP/UDP,
-     * tracked separately in ROADMAP.md) — "Pause" would leave the socket running
-     * underneath a row that claims otherwise. Web isn't either: one row can
-     * aggregate any number of added relays/swarms, and replaying that whole set
-     * on Resume is unbuilt — Remove-only until it is, rather than a Resume that
+     * PR3's reconnect/backoff for the BLE radios and, later, by giving the
+     * core-owned UDP/TCP bridges a real stop hook — see `nativeStartUdp` and
+     * `SporeNative.nativeUnregisterIface`'s doc). Pause stops the transport but
+     * keeps the row, so Resume restarts with the exact same configuration
+     * instead of the user re-entering it. Gated on `canToggle` — only set for
+     * bridges whose full config we hold onto: Audio and UDP broadcast (neither
+     * needs any), and the BLE radios (device +, for RNode, its radio params —
+     * see `start*Ble`).
+     *
+     * Wi-Fi Direct's Remove is real now too (it also unregisters its UDP
+     * bridge's iface, not just the P2P group), but it isn't offered a toggle
+     * yet — re-forming a P2P group on Resume needs the same start/stop
+     * restructuring the BLE radios and UDP broadcast already went through, just
+     * not done here. Web isn't either: one row can aggregate any number of
+     * added relays/swarms, and replaying that whole set on Resume is unbuilt —
+     * both stay Remove-only rather than a Resume that does the wrong thing or
      * quietly comes back empty.
      */
     fun toggleBridge(state: BridgeState) {

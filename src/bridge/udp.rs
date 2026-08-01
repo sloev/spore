@@ -18,7 +18,9 @@ use super::hub::Shared;
 use crate::{Forward, Iface};
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::time::Duration;
 
 struct Udp {
@@ -46,13 +48,24 @@ impl DatagramTransport for Udp {
 
 /// Bind UDP `port` and bridge the LAN with the *limited* broadcast: floods go to
 /// `255.255.255.255:port`, unicast to peers learned by snooping.
-pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, port: u16) -> std::io::Result<()> {
+///
+/// `stop`, once set, ends the loop within one read-timeout interval (200ms) —
+/// the caller (a JNI-driven Android bridge, or any other owner of the `Arc`)
+/// signals it and then calls `Hub::unregister(iface)` itself; the two are
+/// separate concerns (see docs/ROADMAP.md's PR2 carried-forward notes).
+pub fn run(
+    hub: Shared,
+    iface: Iface,
+    rx: Receiver<Forward>,
+    port: u16,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<()> {
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
     sock.set_broadcast(true)?;
     sock.set_read_timeout(Some(Duration::from_millis(200)))?;
     let bcast: SocketAddr = SocketAddrV4::new(Ipv4Addr::BROADCAST, port).into();
     println!("  [udp] iface {iface} on :{port} (limited broadcast)");
-    run_datagram(hub, iface, rx, Udp { sock, bcast })
+    run_datagram(hub, iface, rx, stop.as_ref(), Udp { sock, bcast })
 }
 
 /// The spec's multicast groups (Page 2). IPv6 has no broadcast, so an overlay
@@ -82,6 +95,7 @@ pub fn run_group(
     rx: Receiver<Forward>,
     bind: &str,
     group: &str,
+    stop: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     let (bind_addr, dest, how) = plan(bind, group)?;
     let sock = UdpSocket::bind(bind_addr)?;
@@ -109,7 +123,7 @@ pub fn run_group(
     }
 
     println!("  [udp] iface {iface} on {bind_addr} -> {dest}");
-    run_datagram(hub, iface, rx, Udp { sock, bcast: dest })
+    run_datagram(hub, iface, rx, stop.as_ref(), Udp { sock, bcast: dest })
 }
 
 /// What a `bind`/`group` pair asks the socket to do.
@@ -154,6 +168,7 @@ pub fn run_primary(
     iface: Iface,
     rx: Receiver<Forward>,
     port: Option<u16>,
+    stop: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     let port = port.unwrap_or(SPORE_LAN_PORT);
     let sock = UdpSocket::bind(("0.0.0.0", port))?;
@@ -162,7 +177,7 @@ pub fn run_primary(
     let bcast_ip = primary_broadcast().unwrap_or(Ipv4Addr::BROADCAST);
     let bcast: SocketAddr = SocketAddrV4::new(bcast_ip, port).into();
     println!("  [udp] iface {iface} on :{port} (primary subnet broadcast {bcast_ip})");
-    run_datagram(hub, iface, rx, Udp { sock, bcast })
+    run_datagram(hub, iface, rx, stop.as_ref(), Udp { sock, bcast })
 }
 
 /// Discover this host's primary local IPv4 by asking the OS which source address
@@ -236,6 +251,30 @@ fn default_mask(ip: Ipv4Addr) -> Ipv4Addr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// PR2 carried-forward "stop/remove for core-owned TCP/UDP": a running
+    /// bridge must actually end within one read-timeout interval of the flag
+    /// being set — not just accept the parameter and ignore it.
+    #[test]
+    fn run_stops_promptly_once_the_flag_is_set() {
+        let hub = crate::bridge::hub::Hub::new(crate::Node::new("n", &[]));
+        let (iface, rx) = hub.register();
+        let stop = Arc::new(AtomicBool::new(false));
+        let running = stop.clone();
+        // Port 0: let the OS pick one, we only care that the loop starts and stops.
+        let handle = std::thread::spawn(move || run(hub, iface, rx, 0, running));
+
+        std::thread::sleep(Duration::from_millis(50)); // let it actually bind and enter the loop
+        stop.store(true, Ordering::Relaxed);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !handle.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(handle.is_finished(), "run did not stop within 2s of the flag being set");
+        assert!(handle.join().unwrap().is_ok());
+    }
 
     #[test]
     fn broadcast_from_ip_and_mask() {

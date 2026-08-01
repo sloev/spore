@@ -195,11 +195,38 @@ Direct/Web. Carried forward:
       superseded by this PR.
 - [ ] **Edit a bridge in place** (change a URL/params) — today it is Remove +
       re-add; needs a native mutate or re-register helper.
-- [ ] **Stop/remove for core-owned TCP/UDP** (and, per the toggle work above,
+- [x] **Stop/remove for core-owned TCP/UDP** (and, per the toggle work above,
       Wi-Fi Direct — it turns out to ride the same core-owned UDP path) — they
       show no control today (honest, not a dead button); a clean core-side stop
       for a specific TCP/UDP iface would let them be removable too, and would
-      also be the prerequisite for a real Wi-Fi Direct toggle.
+      also be the prerequisite for a real Wi-Fi Direct toggle. **Shipped (#75,
+      `feat/core-owned-bridge-stop`).** `bridge::udp::run`/`run_primary`/
+      `run_group` and `bridge::tcp::run` (and the shared `driver::run_datagram`/
+      `stream_link::run`/`run_reconnecting` underneath every stream/datagram
+      bridge, Android or CLI) now take a `stop: Arc<AtomicBool>`, checked once
+      per already-short-timeout read — free for every datagram medium, which
+      all already poll on a 200ms timeout, but real work for TCP: a blocking
+      `TcpListener::accept()` has no read-timeout equivalent, so listen mode is
+      non-blocking and polls the flag instead (a plain check after a blocking
+      `accept()` would still hang forever with no peer ever connecting — see
+      `tcp::accept_or_stop`, covered by a test that proves exactly that
+      scenario). JNI's `nativeStartUdp`/`nativeStartTcp`/`nativeStartUdpLimited`
+      now return the hub iface (they used to return nothing, so Kotlin never
+      even *had* a handle to stop these by); `nativeUnregisterIface` is the one
+      call that tears down both a Kotlin-driven and an OS-thread-owned bridge
+      now, so no new Kotlin-facing stop API was needed. `WifiDirectBridge.stop()`
+      used to only tear down the P2P group and leak the UDP bridge thread
+      underneath forever — it now unregisters that too. Folded "UDP broadcast"
+      (the always-on default LAN bridge, with no manual re-add UI) into the
+      Pause/Resume toggle system alongside Remove, since a plain Remove would
+      have been an unrecoverable one-way trip until the app restarts; TCP and
+      Wi-Fi Direct got Remove only — TCP because re-adding is a one-line retype,
+      Wi-Fi Direct because a real Resume needs the same start/stop restructuring
+      as the toggle-capable bridges and wasn't done here (documented as the
+      still-open follow-up, not silently dropped). CLI/daemon-only bridges
+      (ax25, i2p, reticulum's own TCP/UDP companions, tor) pass a stop flag that
+      is constructed and never set — no per-bridge stop control from the CLI
+      yet, Ctrl-C still ends the whole process.
 - [ ] **Device QA** — add/stop/remove/re-add round-trip on hardware — **PR6**.
 
 ---

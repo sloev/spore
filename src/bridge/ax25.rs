@@ -50,6 +50,9 @@ pub fn run_tcp(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -
             Ok(s)
         },
         "ax25",
+        // CLI/daemon-only: no per-bridge stop control yet (the process itself
+        // is the unit of shutdown here), so this flag is never set.
+        &std::sync::atomic::AtomicBool::new(false),
     )
 }
 

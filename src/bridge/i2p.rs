@@ -207,6 +207,8 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
             Ok(s)
         },
         "i2p",
+        // CLI/daemon-only: no per-bridge stop control yet.
+        &std::sync::atomic::AtomicBool::new(false),
     )
 }
 
@@ -241,6 +243,8 @@ pub fn run_accept(hub: Shared, iface: Iface, rx: Receiver<Forward>, sam_addr: &s
             Ok(s)
         },
         "i2p",
+        // CLI/daemon-only: no per-bridge stop control yet.
+        &std::sync::atomic::AtomicBool::new(false),
     )
 }
 

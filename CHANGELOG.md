@@ -18,6 +18,26 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Removing (or pausing) a core-owned UDP/TCP bridge — or Wi-Fi Direct — now
+  actually stops it (PR2 carried-forward).** `bridge::udp::run`/`run_primary`/
+  `run_group` and `bridge::tcp::run` used to have no way to be told to stop:
+  Android's JNI layer spawned them on a detached OS thread with no handle back,
+  so their Remove button (where one existed at all) never had anything to call.
+  They now take a stop flag, checked on every already-short-timeout read except
+  for TCP listen mode's `accept()`, which has no read-timeout equivalent and so
+  is polled non-blocking instead — a real fix, not a cosmetic one: a plain flag
+  check after a blocking `accept()` would still hang forever with nobody ever
+  connecting. `WifiDirectBridge`'s Remove used to tear down only the P2P group,
+  leaking the UDP flood underneath it forever; it now stops that too. The
+  always-on default LAN bridge ("UDP broadcast") joins the Pause/Resume toggle
+  system below rather than getting Remove-only, since it has no manual re-add
+  control and a one-way Remove would have meant no LAN bridge until the app
+  restarted. CLI/daemon bridges (`ax25`, `i2p`, `reticulum`'s TCP/UDP
+  companions, `tor`) are unaffected — Ctrl-C still ends the whole process, so
+  they get a stop flag that's simply never set. Wire format and JNI ABI shape
+  unchanged; `nativeStartUdp`/`nativeStartTcp`/`nativeStartUdpLimited` now
+  return the hub iface instead of nothing.
+
 - **Android: a bridge can be paused without losing it (PR2 carried-forward
   toggle).** Removing a bridge always meant re-entering its setup from scratch
   — re-scanning for the BLE device, re-granting the mic permission. Audio modem,

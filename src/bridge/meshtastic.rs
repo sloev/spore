@@ -252,7 +252,10 @@ pub fn run(
     println!("  [meshtastic] iface {iface} on {group}:{UDP_PORT} (node !{my_node:08x})");
 
     let t = Mesh { sock, dst, my_node, rng: my_node ^ 0x9e37_79b9 };
-    crate::bridge::driver::run_datagram(hub, iface, rx, t)
+    // This CLI/daemon-only runner has no stop control of its own yet (the
+    // process itself is the unit of shutdown here); `run_datagram`'s stop
+    // check is a no-op flag that never gets set.
+    crate::bridge::driver::run_datagram(hub, iface, rx, &std::sync::atomic::AtomicBool::new(false), t)
 }
 
 // ---------------------------------------------------------------------------
