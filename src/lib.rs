@@ -1836,6 +1836,191 @@ mod tests {
         assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
     }
 
+    // -- Direct signalling over the mesh (PR8c) ------------------------------
+
+    fn udp_candidate() -> direct::Candidate {
+        direct::Candidate {
+            medium: direct::Medium::Udp,
+            locator: b"198.51.100.7:7373".to_vec(),
+            est_bps: 2_000_000,
+            mtu: 1200,
+            rtt_hint_ms: 15,
+        }
+    }
+
+    fn a_need() -> direct::Need {
+        direct::Need { min_bps: 5_000, mtu_needed: 64, max_latency_ms: Some(150) }
+    }
+
+    /// The gap PR8c closes: SPDR had no way to reach a peer. This drives a whole
+    /// negotiation over the real `send_direct`/`on_rx` path — sealed, signed,
+    /// decrypted, dispatched — and then talks over the pipe it produced.
+    #[test]
+    fn spdr_signalling_rides_send_direct_end_to_end() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        meet(&mut a, &mut b, now);
+
+        let mut a_sig = direct::Signalling::new(a.addr);
+        let mut b_sig = direct::Signalling::new(b.addr);
+        // The two ends of the link the runtime "opens". In a daemon these come
+        // from a UdpPort bound *after* the medium is chosen; Loopback stands in
+        // so the whole path runs with no sockets.
+        let (a_port, b_port) = direct::Loopback::pair(1200);
+
+        // A offers, and the offer travels as an ordinary sealed DM.
+        let (offer_bytes, pipe_id) = a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now);
+        assert_eq!(a_sig.pending(), 1, "the offer is half-open until answered");
+        let (_, fwds, encrypted) = a.send_direct(b.addr, &offer_bytes, now);
+        assert!(encrypted, "signalling is sealed like any other DM");
+        let wire = fwd_bytes(&fwds[0]);
+        assert!(
+            !wire.windows(4).any(|w| w == direct::MAGIC),
+            "SPDR magic must not be readable on the wire — signalling is sealed, not just wrapped"
+        );
+
+        // B decrypts, and only then decides. The port is opened for the medium
+        // that won, not guessed at before the choosing.
+        let brx = b.on_rx(&wire, 0, Some(a.addr), now);
+        let payload = brx
+            .delivered
+            .iter()
+            .find_map(|d| b.open_dm(a.addr, &d.payload, d.flags & fl::RATCHET != 0, now))
+            .expect("B decrypts the signalling");
+        assert!(direct::is_signal(&payload), "B can tell signalling from an app message");
+
+        let (answer_bytes, mut b_pipe) = match b_sig.on_signal(a.addr, &payload, &[direct::Medium::Udp]) {
+            direct::Signal::Offer { peer, accepted } => {
+                assert_eq!(peer, a.addr);
+                assert_eq!(accepted.pipe_id(), pipe_id);
+                assert_eq!(accepted.chosen.medium, direct::Medium::Udp);
+                direct::Pipe::answer_with(accepted, b.addr, b_port)
+            }
+            _ => panic!("B should be able to serve this offer"),
+        };
+
+        // The ANSWER goes back the same way.
+        let (_, fwds, _) = b.send_direct(a.addr, &answer_bytes, now);
+        let wire = fwd_bytes(&fwds[0]);
+        let arx = a.on_rx(&wire, 0, Some(b.addr), now);
+        let payload = arx
+            .delivered
+            .iter()
+            .find_map(|d| a.open_dm(b.addr, &d.payload, d.flags & fl::RATCHET != 0, now))
+            .expect("A decrypts the answer");
+
+        let mut a_pipe = match a_sig.on_signal(b.addr, &payload, &[direct::Medium::Udp]) {
+            direct::Signal::Answered { pending, answer, chosen, .. } => {
+                assert_eq!(chosen.medium, direct::Medium::Udp);
+                direct::Pipe::finish(pending, &answer, a_port).expect("A finishes the pipe")
+            }
+            _ => panic!("A should see its own offer answered"),
+        };
+        assert_eq!(a_sig.pending(), 0, "answered offers stop being half-open");
+        assert_eq!(a_pipe.pipe_id(), pipe_id, "both ends agree which pipe this is");
+        assert_eq!(b_pipe.pipe_id(), pipe_id);
+
+        // And the pipe actually carries traffic, both ways.
+        a_pipe.send(direct::RecordType::Data, b"north pier at midnight").unwrap();
+        let (ty, msg) = b_pipe.poll().expect("B receives over the negotiated pipe");
+        assert_eq!(ty, direct::RecordType::Data);
+        assert_eq!(msg, b"north pier at midnight");
+
+        b_pipe.send(direct::RecordType::Media, b"copy, moving now").unwrap();
+        let (_, msg) = a_pipe.poll().expect("A receives the reply");
+        assert_eq!(msg, b"copy, moving now");
+    }
+
+    /// A runtime that cannot open anything says so, and says it *before* any port
+    /// would have been needed — the decline path never touches a socket.
+    #[test]
+    fn a_runtime_that_can_open_nothing_declines_honestly() {
+        let now = 1_700_000_000;
+        let a = Node::new("a", &[]);
+        let b = Node::new("b", &[]);
+        let mut a_sig = direct::Signalling::new(a.addr);
+        let mut b_sig = direct::Signalling::new(b.addr);
+
+        let (offer_bytes, _) = a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now);
+        match b_sig.on_signal(a.addr, &offer_bytes, &[]) {
+            direct::Signal::Decline { peer, reply } => {
+                assert_eq!(peer, a.addr);
+                // The reply is a real ANSWER carrying the reason, not silence.
+                match direct::Answer::decode(&reply).expect("a decodable reject") {
+                    direct::Answer::Reject { reason, .. } => assert_eq!(reason, direct::Reject::NoMedium),
+                    _ => panic!("a decline is a reject"),
+                }
+            }
+            _ => panic!("a runtime with no mediums must decline, not accept and fail later"),
+        }
+
+        // And the offerer learns it was refused rather than waiting forever.
+        let (offer_bytes, _) = a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now);
+        let reply = match b_sig.on_signal(a.addr, &offer_bytes, &[]) {
+            direct::Signal::Decline { reply, .. } => reply,
+            _ => panic!("declined"),
+        };
+        match a_sig.on_signal(b.addr, &reply, &[direct::Medium::Udp]) {
+            direct::Signal::Refused { reason, .. } => assert_eq!(reason, direct::Reject::NoMedium),
+            _ => panic!("A should see the refusal"),
+        }
+    }
+
+    #[test]
+    fn unsolicited_and_misaddressed_signalling_is_ignored() {
+        let now = 1_700_000_000;
+        let a = Node::new("a", &[]);
+        let b = Node::new("b", &[]);
+        let c = Node::new("c", &[]);
+        let mut a_sig = direct::Signalling::new(a.addr);
+        let mut b_sig = direct::Signalling::new(b.addr);
+
+        // An ordinary app message is not signalling.
+        assert!(matches!(
+            b_sig.on_signal(a.addr, b"meet at the north pier", &[direct::Medium::Udp]),
+            direct::Signal::NotSignal
+        ));
+
+        // An offer addressed to C is not B's to answer, however it arrived.
+        let (for_c, _) = a_sig.offer(c.addr, a_need(), vec![udp_candidate()], now);
+        assert!(matches!(b_sig.on_signal(a.addr, &for_c, &[direct::Medium::Udp]), direct::Signal::NotSignal));
+
+        // An answer to an offer we never made has no ephemeral secret behind it,
+        // so there is nothing to derive and nothing to act on.
+        let (offer_bytes, _) = a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now);
+        let (_, b_port) = direct::Loopback::pair(1200);
+        let accepted = match b_sig.on_signal(a.addr, &offer_bytes, &[direct::Medium::Udp]) {
+            direct::Signal::Offer { accepted, .. } => accepted,
+            _ => panic!("served"),
+        };
+        let (answer_bytes, _) = direct::Pipe::answer_with(accepted, b.addr, b_port);
+        let mut stranger = direct::Signalling::new(c.addr);
+        assert!(matches!(
+            stranger.on_signal(b.addr, &answer_bytes, &[direct::Medium::Udp]),
+            direct::Signal::NotSignal
+        ));
+    }
+
+    #[test]
+    fn unanswered_offers_expire_instead_of_accumulating() {
+        let now = 1_700_000_000;
+        let a = Node::new("a", &[]);
+        let b = Node::new("b", &[]);
+        let mut a_sig = direct::Signalling::new(a.addr);
+
+        a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now);
+        a_sig.offer(b.addr, a_need(), vec![udp_candidate()], now + 100);
+        assert_eq!(a_sig.pending(), 2);
+
+        // A NAT binding is long dead by 120s; the older offer's candidates are
+        // stale, so it is dropped rather than resumed.
+        assert_eq!(a_sig.expire(now + 160, 120), 1);
+        assert_eq!(a_sig.pending(), 1, "the fresher offer survives");
+        assert_eq!(a_sig.expire(now + 1_000, 120), 1);
+        assert_eq!(a_sig.pending(), 0);
+    }
+
     // -- §7 Double Ratchet sessions (PR0b) ----------------------------------
 
     #[test]
