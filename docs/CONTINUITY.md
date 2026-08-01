@@ -13,10 +13,23 @@ survivor. This page is about the *software* doing the same: one HTML file, one
 printout, or one offline bundle is enough to understand, verify, and run a node —
 without depending on the same infrastructure the mesh is meant to outlast.
 
-This page is about a *node* surviving; [Rebuild](rebuild.html) is its
-companion for the *protocol* surviving even this codebase — see
-[Resilience](resilience.html) for how the two, plus the reference decoders and
-every release's own offline bundle, fit together.
+This page is about a *node* surviving. [Rebuild](rebuild.html) is its companion
+for the *protocol* surviving even this codebase.
+
+## The pieces of "outlives us"
+
+| Piece | Answers | Lives at |
+|---|---|---|
+| **Continuity** | If I lose this device, this app, this website — does *my* node come back? | This page |
+| **Rebuild** | If this codebase disappeared, could someone who has never seen it write a compatible node? | [`REBUILD.md`](REBUILD.md) |
+| **Reference decoders** | Can I check a real envelope against something I need not trust — no crypto library, no dependency? | [`reference/`](https://github.com/sloev/spore/tree/master/reference) |
+| **Release artifacts** | Can I get a working node *and* the means to rebuild it from one download, with no live infrastructure? | Every [release](https://github.com/sloev/spore/releases) carries `spore-standalone.html` and `spore-offline-bundle.tar.gz` beside the APK — [`APPS.md`](APPS.md) |
+| **The frozen contract** | Will a node built from any of the above still speak to one built today? | `tests/api_freeze.rs` + `reference/vectors.json`, held by [`CONTRIBUTING.md`](../CONTRIBUTING.md)'s freeze rules |
+| **Public domain** | Is there a license, company or maintainer this depends on outliving? | [`LICENSE`](../LICENSE) — no |
+
+A surviving copy — a phone, a saved HTML file, a printed Seed Sheet, a clone, a
+release tarball — carries everything needed to keep working, verify it is
+genuine, and regrow the rest.
 
 <div class="story story-continuity" role="list">
 

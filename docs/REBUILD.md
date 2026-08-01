@@ -10,7 +10,7 @@ you are wire-compatible.
 The one-page protocol spec is [`SPEC.md`](SPEC.md); this guide is the by-hand
 companion that walks the bytes. For keeping a *running node* alive rather than
 reimplementing the protocol, see [Continuity](continuity.html) — and
-[Resilience](resilience.html) for how the two fit together.
+[Continuity](continuity.html) for how the two fit together.
 
 ## The primitives you need
 

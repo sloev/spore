@@ -48,7 +48,6 @@ const pages = [
   ['CONTRIBUTING.md', 'contributing.html', null],
   ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
   ['MISSION.md', 'mission.html', null],
-  ['docs/RESILIENCE.md', 'resilience.html', null],
 ];
 
 // Map a source .md path (as written in links) to its output page.
@@ -89,7 +88,6 @@ const titles = new Map([
   ['contributing.html', 'SPORE — contributing'],
   ['dev-guide.html', 'SPORE — developer guide'],
   ['mission.html', 'SPORE — mission'],
-  ['resilience.html', 'SPORE — resilience'],
 ]);
 
 const descriptions = new Map([
