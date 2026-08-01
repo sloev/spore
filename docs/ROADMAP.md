@@ -2249,8 +2249,17 @@ negotiated:
    same bargain as `Box<dyn SpillBackend>`, and it is what medium-by-convention
    already implied — an open medium list cannot be held by a closed type.
 
-   **Still to wire: the daemon.** Nothing constructs an endpoint and calls
-   `set_iroh` yet, so iroh is compiled-in-capable but not switched on anywhere.
+   **Daemon wired.** `direct-iroh: direct-only | n0` stands up an endpoint and
+   offers the medium. The relay posture is **never defaulted** — an unrecognised
+   value is a config error, because inheriting a third party is exactly the kind
+   of silent choice the honesty contract forbids. `direct-only` runs with no relay
+   and no discovery; `n0` opts into n0's public relay and the daemon prints, at the
+   moment it takes effect, that this is a third party which sees ciphertext, volume
+   and timing when a path is relayed. iroh supports self-hosted relays, so needing
+   a relay never has to mean needing n0's.
+
+   A build without `bridge-iroh` says `direct-iroh:` was ignored rather than
+   silently doing nothing.
 
    *(original plan)* **iroh as the relay/NAT-fallback candidate** (Finding 3) instead of a new
    SPORE-native relay protocol — offered as a real, visible candidate, never a

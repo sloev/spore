@@ -55,8 +55,14 @@ Two conventions specific to this project:
   absent from both the offer and the willing set, so a peer offering it hears an
   honest decline. Making this possible, a pipe's port is now boxed
   (`direct::AnyPort`) — a UDP pipe and an iroh pipe are different types and could
-  not share one map, the same bargain `SpillBackend` already makes. **No daemon
-  switches it on yet.**
+  not share one map, the same bargain `SpillBackend` already makes. **The daemon switches it on with `direct-iroh:`**, whose value —
+  `direct-only` or `n0` — is the relay trust posture and is never defaulted: an
+  unrecognised value is a config error, because inheriting a third party is the
+  kind of silent choice the honesty contract exists to prevent. Choosing `n0`
+  makes the daemon print, at the moment it takes effect, that this is a third
+  party which sees ciphertext, volume and timing when a path is relayed. The
+  offering line lists the iroh candidate too, so what the operator is told matches
+  what is actually offered.
 
 - **A Direct pipe now says how it was established, instead of hiding it.**
   `UdpRunner::open` fell back to a plain connect whenever the hole punch failed,

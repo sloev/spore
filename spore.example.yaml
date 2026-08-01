@@ -38,6 +38,18 @@ topics: [news, weather]
 # Must be UDP-dialable. A Tor .onion or I2P .b32 is not — those are stream
 # rendezvous names and would need their own medium and adapter, not a locator.
 #
+# SPORE Direct over iroh — the last rung, for when both ends are behind NATs
+# with no LAN, IPv6 or overlay path between them. Needs a build with the
+# `bridge-iroh` feature. The relay posture is a trust decision and is never
+# defaulted, so you say which you want:
+#
+#   direct-iroh: direct-only   # hole punching only; no relay, nothing told to anyone
+#   direct-iroh: n0            # n0's public relay as fallback — a real third party
+#                              # that sees ciphertext, volume and timing when used
+#
+# iroh supports self-hosted relays, so "a relay is needed" never has to mean
+# "n0's relay is needed" — but pointing at your own is iroh's own configuration.
+#
 #   direct-stun: 203.0.113.9:7900
 #   stun: 7900                   # …and run the echo yourself, for other nodes
 #

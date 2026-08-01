@@ -77,6 +77,10 @@ pub(crate) struct Config {
     /// address on an IP-layer overlay (Yggdrasil, cjdns, a VPN). Not
     /// discoverable, so it has to be declared.
     pub(crate) direct_also: Vec<String>,
+    /// Enable Direct over iroh, and with what relay posture: `direct-only` (no
+    /// relay, nothing disclosed to a third party) or `n0` (n0's public relay,
+    /// which is a real disclosure). Absent = off.
+    pub(crate) direct_iroh: Option<String>,
     pub(crate) direct_stun: Option<String>,
     /// Run a reflexive echo on this port for other nodes to ask. Default off —
     /// it is a service you choose to offer, though it costs one packet.
@@ -99,6 +103,7 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     let mut direct: Option<String> = None;
     let mut direct_to: Option<String> = None;
     let mut direct_also: Vec<String> = Vec::new();
+    let mut direct_iroh: Option<String> = None;
     let mut direct_stun: Option<String> = None;
     let mut stun: Option<u16> = None;
     let mut sec = Sec::None;
@@ -152,6 +157,18 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
                 }
                 sec = Sec::None;
             }
+            "direct-iroh" => {
+                match v {
+                    "direct-only" | "n0" => direct_iroh = Some(v.to_string()),
+                    _ => {
+                        return Err(format!(
+                            "line {ln}: `direct-iroh:` takes `direct-only` or `n0`, not `{v}` \
+                             — the relay posture is a trust decision and is not defaulted"
+                        ))
+                    }
+                }
+                sec = Sec::None;
+            }
             "direct-stun" => {
                 if v.is_empty() {
                     return Err(format!("line {ln}: `direct-stun:` needs a host:port"));
@@ -183,7 +200,7 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
     if bridges.is_empty() {
         return Err("no bridges configured".to_string());
     }
-    Ok(Config { petname, topics, bridges, direct, direct_to, direct_also, direct_stun, stun })
+    Ok(Config { petname, topics, bridges, direct, direct_to, direct_also, direct_iroh, direct_stun, stun })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
