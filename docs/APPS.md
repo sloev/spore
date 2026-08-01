@@ -71,6 +71,11 @@ sha256sum -c spore-android.apk.sha256</code></pre>
     seed makes the next. Identity and bridges live in <code>localStorage</code>.</p>
     <p>Add WebSocket, WebRTC, Nostr, WebTorrent, Serial, Bluetooth, or the audio modem
     from the page. Web Serial / Web Bluetooth need desktop Chromium-family browsers.</p>
+    <p>The page above is served by GitHub Pages; every
+    <a href="https://github.com/sloev/spore/releases/tag/rolling">release</a> also carries the
+    exact same file as a permanent asset
+    (<a href="https://github.com/sloev/spore/releases/latest/download/spore-standalone.html">latest</a>) —
+    a copy that doesn't depend on this site staying up.</p>
   </details>
 </figure>
 
@@ -95,8 +100,17 @@ cargo run                    # in-memory mesh demo
 cargo run -- node.yaml       # bridges from a config file</code></pre>
     <p>Config examples in the GitHub README; what each link speaks is in
     <a href="bridges.html">Bridges</a>. Targets Linux, macOS, Windows; core also wasm and esp-idf.</p>
+    <p><strong>No network to reach crates.io?</strong> Every
+    <a href="https://github.com/sloev/spore/releases/latest/download/spore-offline-bundle.tar.gz">release</a>
+    also carries this whole source tree with every dependency already vendored in
+    — it unpacks flat (no wrapping folder), so give it one:</p>
+    <pre><code>mkdir spore-offline &amp;&amp; cd spore-offline
+curl -LO https://github.com/sloev/spore/releases/latest/download/spore-offline-bundle.tar.gz
+tar xzf spore-offline-bundle.tar.gz
+cargo build --release --offline</code></pre>
   </details>
 </figure>
+
 
 <figure class="story-card crate" role="listitem">
   <div class="story-art" aria-hidden="true">

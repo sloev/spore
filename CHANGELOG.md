@@ -18,6 +18,21 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Every GitHub release now carries the means to rebuild itself, not just the
+  APK.** `spore-android.apk` was the only release-cutting workflow ever
+  attached to a release; the offline source bundle (every dependency vendored,
+  `cargo build --offline` works immediately) and the standalone browser node
+  existed but were either a CI artifact that expires after 90 days or only
+  ever served live from GitHub Pages, with no permanent, offline-verifiable
+  copy. Both are now attached to every rolling and tagged release alongside
+  the APK — `docs/APPS.md`'s desktop/CLI card and `docs/CONTINUITY.md`'s seed
+  table point at them directly instead of only "clone and vendor it
+  yourself." Matches `MISSION.md`'s "rebuild without us" — this repository,
+  this site, and crates.io can all disappear and a release you already
+  downloaded still rebuilds. Nightly builds (the 5-deep rollback history) are
+  deliberately APK-only, to keep their per-build storage cost from growing
+  5×; the rolling and tagged releases are the two that matter for this.
+
 - **Removing (or pausing) a core-owned UDP/TCP bridge — or Wi-Fi Direct — now
   actually stops it (PR2 carried-forward).** `bridge::udp::run`/`run_primary`/
   `run_group` and `bridge::tcp::run` used to have no way to be told to stop:

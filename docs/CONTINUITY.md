@@ -60,7 +60,7 @@ without depending on the same infrastructure the mesh is meant to outlast.
       <tbody>
         <tr><td><strong>Single-file HTML</strong></td><td>a browser</td><td>full node offline, zero network</td></tr>
         <tr><td><strong>Seed Sheet</strong></td><td>camera + patience</td><td>any ~K of N QR → reimplementation guide</td></tr>
-        <tr><td><strong>Repo + vendor/</strong></td><td>Rust toolchain</td><td>daemon + bridges offline after one online vendor step</td></tr>
+        <tr><td><strong>Offline bundle</strong></td><td>Rust toolchain</td><td>daemon + bridges, <code>cargo build --offline</code> immediately — every release carries the source with dependencies pre-vendored, or run <code>make-offline-bundle.sh</code> on a clone yourself</td></tr>
         <tr><td><strong>SPEC + by-hand examples</strong></td><td>pen, paper</td><td>reimplement in any language</td></tr>
         <tr><td><strong>Pure-Python T0</strong></td><td>Python 3</td><td>receive + verify public mail, no packages</td></tr>
         <tr><td><strong>Armored envelope</strong></td><td>typing</td><td>inject one message from paper or voice</td></tr>
@@ -103,7 +103,11 @@ without depending on the same infrastructure the mesh is meant to outlast.
   </details>
   <details>
     <summary>Only one laptop, no internet</summary>
-    <p>Clone + toolchain rebuild offline <strong>after</strong> you vendor while still online:</p>
+    <p>Simplest: grab <code>spore-offline-bundle.tar.gz</code> from any
+    <a href="https://github.com/sloev/spore/releases">release</a> before you go offline — every
+    one carries this source tree with dependencies already vendored in, so
+    <code>cargo build --offline</code> works the moment you unpack it. No release artifact handy?
+    Clone + vendor it yourself while still online:</p>
     <pre><code>./scripts/make-offline-bundle.sh
 ./scripts/make-offline-bundle.sh --tar</code></pre>
     <p>MSRV is enforced by CI (see Cargo.toml / security findings for the floor).

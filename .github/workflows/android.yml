@@ -99,7 +99,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+          # wasm32 is for the standalone-node release asset built below, not the
+          # APK — cargo-ndk never touches it.
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -175,6 +177,49 @@ jobs:
             ${{ steps.apk.outputs.path }}
             ${{ steps.sums.outputs.sums }}
 
+      # MISSION.md: "rebuild without us" is a promise every release should carry,
+      # not just the APK. These two run only when a release is actually about to
+      # be cut (not on a PR's debug-only build, which never reaches the steps
+      # below) — no point spending the time otherwise. The wasm build needs the
+      # network (crates.io) the same as any first build does, so it runs before
+      # vendoring — `cargo vendor`'s config redirects *every* subsequent build to
+      # the local vendor/ directory, and there's no need to find out the hard way
+      # whether that vendor set, resolved without ever building the wasm32
+      # target in this job, actually covers it.
+      - name: Build the standalone web node (release asset)
+        if: steps.ver.outputs.kind == 'rolling' || steps.ver.outputs.kind == 'tagged'
+        run: |
+          cargo build --release --lib --target wasm32-unknown-unknown
+          node web/build-standalone.mjs
+          # CI's own ci.yml job already asserts this file makes zero external
+          # requests; nothing new to verify here, just carry the same file.
+
+      # `make-offline-bundle.sh --tar` is also run by supply-chain.yml's own
+      # "offline bundle" job, which exists to *prove* the vendor-and-build-
+      # offline promise stays true — this step reuses exactly that script
+      # rather than a second implementation, so there is one place that promise
+      # can go stale. Unlike that job, this one's tarball is a release asset,
+      # not a CI artifact that expires: CONTINUITY.md's "Repo + vendor/" seed
+      # row previously meant "run this script yourself"; from this release
+      # onward it also means "or just download it".
+      - name: Build the offline source bundle (release asset)
+        if: steps.ver.outputs.kind == 'rolling' || steps.ver.outputs.kind == 'tagged'
+        run: |
+          # The script tars up the whole working tree as source; a build
+          # product has no business inside a bundle whose whole point is "the
+          # source, and nothing a build produces" (its own words), so the
+          # standalone node built above steps out of the way and back once
+          # packing is done.
+          mv web/spore-standalone.html /tmp/spore-standalone.html
+          ./scripts/make-offline-bundle.sh --tar
+          mv /tmp/spore-standalone.html web/spore-standalone.html
+          # A constant name alongside the versioned one, same pattern as the
+          # APK's spore-android.apk — so /releases/latest/download/... and
+          # /releases/download/rolling/... resolve without knowing the version.
+          src=$(ls spore-offline-*.tar.gz | grep -v '\.sha256$' | head -1)
+          cp "$src" spore-offline-bundle.tar.gz
+          sha256sum spore-offline-bundle.tar.gz > spore-offline-bundle.tar.gz.sha256
+
       # Clear the release's assets rather than deleting the release.
       #
       # This used to be `gh release delete rolling --cleanup-tag` followed by a
@@ -214,6 +259,9 @@ jobs:
           files: |
             android/spore-android.apk
             android/spore-android.apk.sha256
+            web/spore-standalone.html
+            spore-offline-bundle.tar.gz
+            spore-offline-bundle.tar.gz.sha256
           body: |
             Rolling SPORE Android node — **${{ steps.ver.outputs.name }}**, built from
             `master` at ${{ github.sha }}. Replaced on every merge, so this page always
@@ -227,6 +275,18 @@ jobs:
 
             Need to go back a few days? The `nightly-*` releases keep the last five
             dated builds.
+
+            ---
+
+            Every release here also carries the means to rebuild it without this
+            repository, this site, or crates.io existing (see
+            [`MISSION.md`](https://github.com/sloev/spore/blob/master/MISSION.md)):
+
+            - **[⬇ spore-standalone.html](https://github.com/sloev/spore/releases/download/rolling/spore-standalone.html)**
+              — the whole browser node, one file, zero network requests.
+            - **[⬇ spore-offline-bundle.tar.gz](https://github.com/sloev/spore/releases/download/rolling/spore-offline-bundle.tar.gz)**
+              — this source tree plus every dependency it needs, vendored; unpack
+              and `cargo build --offline` works with no registry.
 
       # Dated history, five deep. The `rolling` release above is a moving pointer
       # and deliberately holds only the current APK — which is no help when a build
@@ -352,14 +412,30 @@ jobs:
           [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
           what is known and unfixed. Builds are debug-signed until a release keystore
           is configured, so Android will warn about an unknown developer.
+
+          ---
+
+          Every release also carries the means to rebuild it without this
+          repository, this site, or crates.io existing (see
+          [MISSION.md](https://github.com/sloev/spore/blob/master/MISSION.md)):
+          the standalone browser node (`spore-standalone.html`, one file, zero
+          network requests) and a source bundle with every dependency vendored
+          in (`spore-offline-bundle.tar.gz` — unpack and `cargo build --offline`
+          works with no registry).
           NOTE
           echo "SHA-256 \`$(cut -d' ' -f1 "spore-${tag}.apk.sha256")\`" >> notes.md
+          # `gh release create` uploads by basename, so these need no copying —
+          # `../` here is the same relative-to-CWD reference `../CHANGELOG.md`
+          # already uses a few lines up. The glob picks up both the versioned
+          # and constant-named bundle copies built two steps ago.
           gh release create "$tag" \
             --target "$GITHUB_SHA" \
             --title "SPORE $tag" \
             --notes-file notes.md \
             "spore-${tag}.apk" "spore-${tag}.apk.sha256" \
-            spore-android.apk spore-android.apk.sha256
+            spore-android.apk spore-android.apk.sha256 \
+            ../web/spore-standalone.html \
+            ../spore-offline-*.tar.gz ../spore-offline-*.tar.gz.sha256
           echo "cut $tag"
 
       # A tagged release keeps both names: the versioned one is the archive copy
@@ -379,6 +455,9 @@ jobs:
             ${{ steps.sums.outputs.sums }}
             android/spore-android.apk
             android/spore-android.apk.sha256
+            web/spore-standalone.html
+            spore-offline-*.tar.gz
+            spore-offline-*.tar.gz.sha256
           body: |
             SPORE Android node — **${{ github.ref_name }}**. The current version;
             rolling `master` builds are versioned from it until the next tag.
@@ -404,3 +483,13 @@ jobs:
             [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
             what is known and unfixed. Builds are debug-signed until a release
             keystore is configured, so Android will warn about an unknown developer.
+
+            ---
+
+            Every release also carries the means to rebuild it without this
+            repository, this site, or crates.io existing (see
+            [MISSION.md](https://github.com/sloev/spore/blob/master/MISSION.md)):
+            the standalone browser node (`spore-standalone.html`, one file, zero
+            network requests) and a source bundle with every dependency vendored
+            in (`spore-offline-bundle.tar.gz` — unpack and `cargo build --offline`
+            works with no registry).
