@@ -12,8 +12,9 @@ use jni::JNIEnv;
 use spore::bridge::hub::{Hub, Shared};
 use spore::{addr_of, topic_of, Envelope, Forward, Iface, Node, Src};
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// Everything one node needs, behind a `jlong` handle.
@@ -24,6 +25,14 @@ struct Runtime {
     // hub iface and pumps it by polling for outbound frames + pushing inbound —
     // the same poll model as the delivery inbox, so no Rust→Kotlin callbacks.
     ifaces: Mutex<HashMap<i32, Receiver<Forward>>>,
+    // The OS-thread-owned bridges (UDP, TCP — nativeStartUdp/nativeStartTcp/
+    // nativeStartUdpLimited) have no poll-driven Kotlin side to stop by dropping
+    // a channel; this is their stop signal, keyed by the same iface id Kotlin
+    // already gets back and later passes to nativeUnregisterIface, which is the
+    // one place both kinds of bridge get torn down (see there for why one flag
+    // check suffices even though the run loop's blocking read has its own
+    // timeout — PR2 carried-forward "stop/remove for core-owned TCP/UDP").
+    stream_stop: Mutex<HashMap<i32, Arc<AtomicBool>>>,
     // Streaming audio demodulator state + frames it has completed. The mic PCM is
     // captured by Kotlin (AudioRecord) and fed here; the DSP is the same tested
     // `bridge::audio` the desktop daemon uses, so phone and laptop interoperate.
@@ -66,6 +75,15 @@ fn rt<'a>(ptr: jlong) -> Option<&'a Runtime> {
     Some(unsafe { &*(ptr as *const Runtime) })
 }
 
+/// Register a fresh stop flag for an OS-thread-owned bridge's `iface`, so
+/// `nativeUnregisterIface` can signal it later. Shared by every `nativeStart*`
+/// that hands its run loop off to `thread::spawn` rather than a Kotlin poll.
+fn register_stream_stop(r: &Runtime, iface: Iface) -> Arc<AtomicBool> {
+    let stop = Arc::new(AtomicBool::new(false));
+    r.stream_stop.lock().unwrap().insert(iface as i32, stop.clone());
+    stop
+}
+
 /// Create a runtime. `seed` is null for a fresh identity, or 32 bytes to restore.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
@@ -92,6 +110,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
         hub,
         inbox: Mutex::new(rx),
         ifaces: Mutex::new(HashMap::new()),
+        stream_stop: Mutex::new(HashMap::new()),
         demod: Mutex::new(spore::bridge::audio::Demod::new()),
         demod_out: Mutex::new(VecDeque::new()),
     })) as jlong;
@@ -250,36 +269,41 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdp(
     _class: JClass,
     ptr: jlong,
     port: jint,
-) {
+) -> jint {
     let Some(r) = rt(ptr) else {
-        return;
+        return 0;
     };
     let (iface, rx) = r.hub.register();
     let hub = r.hub.clone();
     let port = if port > 0 { Some(port as u16) } else { None };
+    let stop = register_stream_stop(r, iface);
     thread::spawn(move || {
-        let _ = spore::bridge::udp::run_primary(hub, iface, rx, port);
+        let _ = spore::bridge::udp::run_primary(hub, iface, rx, port, stop);
     });
+    iface as jint
 }
 
 /// Start a TCP bridge on a background thread. `target` empty = listen; otherwise
-/// connect to `host:port`.
+/// connect to `host:port`. Returns the hub iface, so Kotlin can stop it later
+/// with `nativeUnregisterIface` the same as any other bridge.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartTcp(
     mut env: JNIEnv,
     _class: JClass,
     ptr: jlong,
     target: JString,
-) {
+) -> jint {
     let Some(r) = rt(ptr) else {
-        return;
+        return 0;
     };
     let t: Option<String> = env.get_string(&target).ok().map(|s| s.into()).filter(|s: &String| !s.is_empty());
     let (iface, rx) = r.hub.register();
     let hub = r.hub.clone();
+    let stop = register_stream_stop(r, iface);
     thread::spawn(move || {
-        let _ = spore::bridge::tcp::run(hub, iface, rx, t);
+        let _ = spore::bridge::tcp::run(hub, iface, rx, t, stop);
     });
+    iface as jint
 }
 
 /// Register a Kotlin-driven bridge interface; returns its iface id. Pump it with
@@ -298,13 +322,23 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeRegisterIface(
     iface as jint
 }
 
-/// Retire a Kotlin-driven bridge's interface: a stopped or removed bridge.
+/// Retire a bridge's interface — Kotlin-driven (BLE, audio, Wi-Fi Direct, Web)
+/// or OS-thread-owned (UDP, TCP): a stopped or removed bridge either way, one
+/// call for both.
 ///
-/// Drops our end of its forward queue (so the bridge's drain loop sees the channel
-/// disconnect and exits) and tells the hub to stop routing to that slot. The iface
-/// id is not recycled — the hub keeps the slot as a hole to preserve every other
-/// interface's id — so a bridge must obtain a fresh id from `nativeRegisterIface`
-/// if it is ever restarted. Safe to call twice, and on an id that was never ours.
+/// For a Kotlin-driven bridge: drops our end of its forward queue (so the
+/// bridge's drain loop sees the channel disconnect and exits). For an
+/// OS-thread-owned one: flips the stop flag `nativeStartUdp`/`nativeStartTcp`/
+/// `nativeStartUdpLimited` registered for this `iface`, which its run loop
+/// notices within one read-timeout interval (200ms) and returns from — this is
+/// what makes Remove on a core-owned TCP/UDP bridge (or Wi-Fi Direct, which
+/// rides the same UDP path) *real* instead of a dead button, per PR2's
+/// carried-forward "stop/remove for core-owned TCP/UDP". Either way, this also
+/// tells the hub to stop routing to that slot. The iface id is not recycled —
+/// the hub keeps the slot as a hole to preserve every other interface's id — so
+/// a bridge must obtain a fresh id from `nativeRegisterIface`/`nativeStartUdp`/
+/// `nativeStartTcp` if it is ever restarted. Safe to call twice, and on an id
+/// that was never ours.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeUnregisterIface(
     _env: JNIEnv,
@@ -316,6 +350,9 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeUnregisterIface(
         return;
     };
     r.ifaces.lock().unwrap().remove(&iface);
+    if let Some(stop) = r.stream_stop.lock().unwrap().remove(&iface) {
+        stop.store(true, Ordering::Relaxed);
+    }
     r.hub.unregister(iface as Iface);
 }
 
@@ -1216,22 +1253,27 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeFragStatus(
 
 /// Start the plain limited-broadcast UDP bridge (255.255.255.255) — used on a
 /// Wi-Fi Direct group where the subnet-directed broadcast isn't discoverable.
+/// Returns the hub iface, so the caller (`WifiDirectBridge`) can stop it for
+/// real via `nativeUnregisterIface` instead of leaving it running underneath a
+/// torn-down P2P group.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeStartUdpLimited(
     _env: JNIEnv,
     _class: JClass,
     ptr: jlong,
     port: jint,
-) {
+) -> jint {
     let Some(r) = rt(ptr) else {
-        return;
+        return 0;
     };
     let (iface, rx) = r.hub.register();
     let hub = r.hub.clone();
     let port = if port > 0 { port as u16 } else { 7373 };
+    let stop = register_stream_stop(r, iface);
     thread::spawn(move || {
-        let _ = spore::bridge::udp::run(hub, iface, rx, port);
+        let _ = spore::bridge::udp::run(hub, iface, rx, port, stop);
     });
+    iface as jint
 }
 
 // -- L4 request/response (used app-side for the profile pull) -----------------

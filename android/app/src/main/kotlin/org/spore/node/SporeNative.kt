@@ -50,11 +50,19 @@ object SporeNative {
     /** Originate a signed message to `dest` (8 bytes; all-zero = public). */
     external fun nativeSend(ptr: Long, dest: ByteArray, payload: ByteArray)
 
-    /** Start the primary-subnet UDP broadcast bridge (port <= 0 = default). */
-    external fun nativeStartUdp(ptr: Long, port: Int)
+    /**
+     * Start the primary-subnet UDP broadcast bridge (port <= 0 = default).
+     * Returns its hub iface, so it can later be stopped for real with
+     * [nativeUnregisterIface] (PR2 carried-forward: core-owned bridges used to
+     * have no stop control at all).
+     */
+    external fun nativeStartUdp(ptr: Long, port: Int): Int
 
-    /** Start a TCP bridge (empty target = listen; else "host:port"). */
-    external fun nativeStartTcp(ptr: Long, target: String)
+    /**
+     * Start a TCP bridge (empty target = listen; else "host:port"). Returns its
+     * hub iface — see [nativeStartUdp].
+     */
+    external fun nativeStartTcp(ptr: Long, target: String): Int
 
     /** Register a Kotlin-driven bridge interface; returns its iface id. */
     external fun nativeRegisterIface(ptr: Long): Int
@@ -114,8 +122,11 @@ object SporeNative {
     /** Unwrap a MeshPacket; the SPORE envelope if it rides portnum 256, else null. */
     external fun nativeMeshtasticUnwrap(frame: ByteArray): ByteArray?
 
-    /** Start the plain limited-broadcast UDP bridge (for Wi-Fi Direct groups). */
-    external fun nativeStartUdpLimited(ptr: Long, port: Int)
+    /**
+     * Start the plain limited-broadcast UDP bridge (for Wi-Fi Direct groups).
+     * Returns its hub iface — see [nativeStartUdp].
+     */
+    external fun nativeStartUdpLimited(ptr: Long, port: Int): Int
 
     /** In-progress reassemblies as "idhex:have/count" lines ("" = none). */
     external fun nativeFragStatus(ptr: Long): String

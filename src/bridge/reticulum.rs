@@ -132,6 +132,8 @@ pub fn run_tcp(
             Ok(s)
         },
         "reticulum",
+        // CLI/daemon-only: no per-bridge stop control yet.
+        &std::sync::atomic::AtomicBool::new(false),
     )
 }
 
@@ -206,10 +208,14 @@ pub fn run_udp(
         }
     }
 
+    // This CLI/daemon-only runner has no stop control of its own yet (the
+    // process itself is the unit of shutdown here); `run_datagram`'s stop
+    // check is a no-op flag that never gets set.
     super::driver::run_datagram(
         hub,
         iface,
         rx,
+        &std::sync::atomic::AtomicBool::new(false),
         Rns { sock, peer, framer: super::kiss_stream::KissStream::new(), out: Default::default() },
     )
 }

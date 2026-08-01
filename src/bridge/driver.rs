@@ -14,6 +14,7 @@
 use super::hub::{now, Shared};
 use super::Neighbors;
 use crate::{Forward, Iface};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 
 /// One received frame: the envelope bytes and the underlay address it came from
@@ -46,11 +47,17 @@ pub trait DatagramTransport {
 }
 
 /// Run a datagram transport as a bridge: the whole shared loop, generic over the
-/// medium. Blocks until an error or the process ends.
+/// medium. Blocks until an error, `stop` is set, or the process ends.
+///
+/// `stop` is checked once per iteration, right after the read that already
+/// bounds it to `t`'s own poll interval (every medium here sets a short read
+/// timeout) — so a caller that wants this bridge stoppable just needs a
+/// transport that doesn't block indefinitely, which they all already are.
 pub fn run_datagram<T: DatagramTransport>(
     hub: Shared,
     iface: Iface,
     rx: Receiver<Forward>,
+    stop: &AtomicBool,
     mut t: T,
 ) -> std::io::Result<()> {
     if let Some(m) = t.mtu() {
@@ -58,6 +65,9 @@ pub fn run_datagram<T: DatagramTransport>(
     }
     let mut nbrs: Neighbors<T::Addr> = Neighbors::new(2 * 3600);
     loop {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         // Receive: learn the sender (ARP snoop) and hand the frame to the node.
         if let Some((env, from)) = t.recv()? {
             let nbr = match from {

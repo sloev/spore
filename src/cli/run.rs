@@ -31,10 +31,13 @@ pub(crate) fn run_config(cfg: Config) {
     for spec in cfg.bridges {
         let h = hub.clone();
         let handle = match spec {
+            // No per-bridge stop control from the CLI yet (Ctrl-C ends the whole
+            // process); each gets its own flag that is simply never set.
             Spec::Udp(port) => {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
-                    if let Err(e) = spore::bridge::udp::run(h, iface, rx, port) {
+                    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    if let Err(e) = spore::bridge::udp::run(h, iface, rx, port, stop) {
                         eprintln!("  [udp] {e}");
                     }
                 })
@@ -42,7 +45,8 @@ pub(crate) fn run_config(cfg: Config) {
             Spec::Broadcast(port) => {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
-                    if let Err(e) = spore::bridge::udp::run_primary(h, iface, rx, port) {
+                    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    if let Err(e) = spore::bridge::udp::run_primary(h, iface, rx, port, stop) {
                         eprintln!("  [udp] {e}");
                     }
                 })
@@ -50,7 +54,8 @@ pub(crate) fn run_config(cfg: Config) {
             Spec::Tcp(target) => {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
-                    if let Err(e) = spore::bridge::tcp::run(h, iface, rx, target) {
+                    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    if let Err(e) = spore::bridge::tcp::run(h, iface, rx, target, stop) {
                         eprintln!("  [tcp] {e}");
                     }
                 })
@@ -188,7 +193,8 @@ pub(crate) fn run_config(cfg: Config) {
             Spec::UdpGroup(bind, group) => {
                 let (iface, rx) = hub.register();
                 thread::spawn(move || {
-                    if let Err(e) = spore::bridge::udp::run_group(h, iface, rx, &bind, &group) {
+                    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    if let Err(e) = spore::bridge::udp::run_group(h, iface, rx, &bind, &group, stop) {
                         eprintln!("  [udp] {e}");
                     }
                 })

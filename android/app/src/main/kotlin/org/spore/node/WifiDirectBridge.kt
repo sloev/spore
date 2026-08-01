@@ -18,6 +18,11 @@ class WifiDirectBridge(private val ctx: Context, private val ptr: Long) {
     private var channel: WifiP2pManager.Channel? = null
     private var receiver: BroadcastReceiver? = null
     private var udpStarted = false
+    // The UDP flood's own hub iface (PR2 carried-forward), separate from the P2P
+    // group: stop() used to only tear down the group and leave this running
+    // forever underneath — a real bridge, not just a dead Remove button, needs
+    // both torn down.
+    private var udpIface: Int? = null
     var onState: ((String) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
@@ -40,7 +45,7 @@ class WifiDirectBridge(private val ctx: Context, private val ptr: Long) {
                     if (group != null && !udpStarted) {
                         udpStarted = true
                         onState?.invoke("group up")
-                        SporeNative.nativeStartUdpLimited(ptr, 0)
+                        udpIface = SporeNative.nativeStartUdpLimited(ptr, 0)
                     }
                 }
             }
@@ -69,6 +74,8 @@ class WifiDirectBridge(private val ctx: Context, private val ptr: Long) {
         if (m != null && ch != null) m.removeGroup(ch, null)
         manager = null
         channel = null
+        udpIface?.let { SporeNative.nativeUnregisterIface(ptr, it) }
+        udpIface = null
         onState?.invoke("stopped")
     }
 }
