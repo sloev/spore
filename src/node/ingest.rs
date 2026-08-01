@@ -96,10 +96,15 @@ impl Node {
         self.maybe_rotate_prekey(now);
         if !self.sessions.contains_key(&src_addr) {
             if let Some(my_sec) = self.ring.last().map(|pk| pk.secret) {
+                // PR0 Part B: the session's skip TTL is this Node's own
+                // configured offline window, not a fixed const — this is
+                // what keeps the seal layer and the ratchet's skip window
+                // promising the same thing without being two settings that
+                // could drift apart.
                 let session = if self.addr < src_addr {
-                    ratchet::Ratchet::init_alice(my_sec, prekey)
+                    ratchet::Ratchet::init_alice(my_sec, prekey, self.prekey_lifetime_secs)
                 } else {
-                    ratchet::Ratchet::init_bob(my_sec, self.prekey_pub, prekey)
+                    ratchet::Ratchet::init_bob(my_sec, self.prekey_pub, prekey, self.prekey_lifetime_secs)
                 };
                 self.sessions.insert(src_addr, session);
             }

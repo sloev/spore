@@ -153,6 +153,16 @@ object SporeNative {
     /** Set how many bytes this node keeps for stored traffic (files included). */
     external fun nativeSetStoreBudget(ptr: Long, bytes: Int)
 
+    /**
+     * The current "offline window" in seconds (PR0 Part B): how long a
+     * prekey secret — and a bootstrapped §7 ratchet session's skip TTL —
+     * survives before deletion. Defaults to 604800 (7 days).
+     */
+    external fun nativeOfflineWindowSecs(ptr: Long): Int
+
+    /** Set the offline window; clamped server-side to a sane range. */
+    external fun nativeSetOfflineWindowSecs(ptr: Long, secs: Int)
+
     /** Back the store with `dir`, keeping `memBytes` resident. Returns envelopes adopted. */
     external fun nativeSetSpillDir(ptr: Long, dir: String, memBytes: Int, now: Int): Int
 

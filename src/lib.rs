@@ -307,6 +307,13 @@ pub struct Node {
     // restart rather than persisted, so there is no second place a session
     // secret lives to drift from the prekey ring's own accessor.
     sessions: HashMap<Addr, ratchet::Ratchet>,
+    // The "offline window" (PR0 Part B): how long a prekey secret — and, via
+    // session bootstrap, a ratchet session's skipped-key cache — survives
+    // before deletion. Defaults to PREKEY_LIFETIME_SECS; runtime-configurable
+    // via set_offline_window_secs so this is the one policy value both the
+    // seal layer and the session layer read, rather than two consts that
+    // could drift apart.
+    prekey_lifetime_secs: u32,
 
     max_store_bytes: usize,
     seq: u64,
@@ -969,8 +976,8 @@ mod tests {
         let now = 1_700_000_000; // fixed clock; this test is about ordering, not expiry
         let (a_sec, a_pub) = ratchet::keypair();
         let (b_sec, b_pub) = ratchet::keypair();
-        let mut alice = ratchet::Ratchet::init_alice(a_sec, b_pub);
-        let mut bob = ratchet::Ratchet::init_bob(b_sec, b_pub, a_pub);
+        let mut alice = ratchet::Ratchet::init_alice(a_sec, b_pub, PREKEY_LIFETIME_SECS);
+        let mut bob = ratchet::Ratchet::init_bob(b_sec, b_pub, a_pub, PREKEY_LIFETIME_SECS);
 
         // Alice -> Bob (bootstraps Bob's receiving chain).
         let m1 = alice.encrypt(b"hello bob");
@@ -1262,7 +1269,8 @@ mod tests {
             n.peer_names.insert(a, "x".into());
             // §7 ratchet sessions (PR0b) are peer-keyed exactly like the three
             // tables above, and must be bounded the same way.
-            n.sessions.insert(a, ratchet::Ratchet::init_bob([0u8; 32], [0u8; 32], [0u8; 32]));
+            n.sessions
+                .insert(a, ratchet::Ratchet::init_bob([0u8; 32], [0u8; 32], [0u8; 32], PREKEY_LIFETIME_SECS));
         }
         for i in 0..(MAX_ACKED + 500) as u32 {
             let mut id = [0u8; 16];
@@ -1920,6 +1928,47 @@ mod tests {
         // And a RATCHET-flagged message with no matching session simply
         // doesn't open — there is nothing to fall back to for that branch.
         assert_eq!(b.open_dm(claimed_sender, &sealed, true, now), None);
+    }
+
+    #[test]
+    fn offline_window_is_clamped_and_drives_both_the_ring_and_new_sessions() {
+        // PR0 Part B: one knob, read by the seal layer (prekey sweep) and
+        // handed to any ratchet session bootstrapped from here on — not two
+        // consts that could drift apart.
+        let mut n = Node::new("n", &[]);
+        assert_eq!(n.offline_window_secs(), PREKEY_LIFETIME_SECS, "7 days by default");
+
+        // Floor: can't go below the daily rotation cadence.
+        n.set_offline_window_secs(1);
+        assert_eq!(n.offline_window_secs(), PREKEY_PERIOD_SECS);
+        // Ceiling: a sanity bound, not an unbounded number.
+        n.set_offline_window_secs(u32::MAX);
+        assert_eq!(n.offline_window_secs(), 365 * 86_400);
+
+        // A shortened window actually shortens how long a swept-past-lifetime
+        // prekey survives.
+        let t0 = 1_700_000_000;
+        let short = 3 * 86_400; // 3 days
+        n.set_offline_window_secs(short);
+        n.rotate_prekey(t0);
+        assert_eq!(n.prekey_count(), 2);
+        n.sweep_prekeys(t0 + short + 1);
+        assert_eq!(n.prekey_count(), 1, "the boot entry aged out under the shortened window");
+
+        // A session bootstrapped after the change wires the new window into
+        // Ratchet::init_alice/init_bob without erroring, end to end through
+        // the real ANNOUNCE/send_direct/open_dm path — the skip-TTL decay
+        // behaviour itself is exercised at the primitive level by
+        // ratchet.rs's own (now-parameterized) skipped-key tests.
+        let mut a = Node::new("a", &[]);
+        meet(&mut a, &mut n, t0);
+        let (_, fwds, _) = a.send_direct(n.addr, b"hi", t0);
+        let e = Envelope::decode(&fwd_bytes(&fwds[0])).unwrap().0;
+        let nrx = n.on_rx(&fwd_bytes(&fwds[0]), 0, Some(a.addr), t0);
+        assert!(nrx
+            .delivered
+            .iter()
+            .any(|d| n.open_dm(a.addr, &d.payload, e.flags & fl::RATCHET != 0, t0).is_some()));
     }
 
     // -- §7 prekey ring (S-022) --------------------------------------------

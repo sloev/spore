@@ -66,6 +66,7 @@ impl Node {
             peer_busy: HashMap::new(),
             peer_names: HashMap::new(),
             sessions: HashMap::new(),
+            prekey_lifetime_secs: PREKEY_LIFETIME_SECS,
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
@@ -205,10 +206,11 @@ impl Node {
     /// rotation stamps it: its real age is unknown, and guessing would either
     /// discard a live key or claim an expiry it cannot honour.
     pub fn sweep_prekeys(&mut self, now: u32) {
+        let lifetime = self.prekey_lifetime_secs;
         let newest = self.ring.len().saturating_sub(1);
         let mut i = 0;
         self.ring.retain(|pk| {
-            let keep = i == newest || pk.born == 0 || now.saturating_sub(pk.born) < PREKEY_LIFETIME_SECS;
+            let keep = i == newest || pk.born == 0 || now.saturating_sub(pk.born) < lifetime;
             i += 1;
             keep
         });
@@ -224,6 +226,25 @@ impl Node {
     /// How many prekey secrets are held right now (for tests and status UIs).
     pub fn prekey_count(&self) -> usize {
         self.ring.len()
+    }
+
+    /// The current "offline window" (PR0 Part B): how long a prekey secret —
+    /// and, via session bootstrap in `absorb_announce`, a ratchet session's
+    /// skipped-key cache — survives before deletion. Defaults to
+    /// [`PREKEY_LIFETIME_SECS`] (7 days).
+    pub fn offline_window_secs(&self) -> u32 {
+        self.prekey_lifetime_secs
+    }
+
+    /// Set the offline window. Clamped to `[PREKEY_PERIOD_SECS, 365 days]` —
+    /// the floor so the window is never shorter than the daily rotation
+    /// cadence (a shorter window would delete a prekey before it ever got a
+    /// chance to matter), the ceiling a sanity bound. Takes effect for future
+    /// prekey sweeps and for any ratchet session bootstrapped from here on;
+    /// it does not retroactively rewrite an already-running session's own
+    /// skip TTL, or already-swept prekeys.
+    pub fn set_offline_window_secs(&mut self, secs: u32) {
+        self.prekey_lifetime_secs = secs.clamp(PREKEY_PERIOD_SECS, 365 * 86_400);
     }
 
     /// A snapshot for a ring-health status UI: `(count, oldest secret's age in
