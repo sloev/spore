@@ -53,9 +53,10 @@ Two conventions specific to this project:
   offer of only unknown mediums answers `no_medium` — a reason rather than silence.
   The name is bound into the KDF, so a record still cannot be replayed onto a
   different medium. The SPDR profile is `VERSION = 2` for the encoding change,
-  bumped rather than finessed because a v1 peer would mis-parse every candidate —
-  cheap now, since until the daemon wiring below nothing could start a pipe at all.
-  The frozen v1 envelope wire is untouched; SPDR is opaque payload riding on it.
+  bumped rather than finessed because a v1 peer would mis-parse every candidate,
+  which is acceptable while the project is explicitly unstable before 1.0. The
+  frozen v1 envelope wire is untouched either way — SPDR is opaque payload riding
+  on it, and pre-1.0 freedom over the profile was never freedom over that.
 
 - **Direct can run over an iroh QUIC connection — the last rung of the NAT
   ladder.** `IrohPort` wraps an established iroh connection as a `DatagramPort`,

@@ -2224,9 +2224,10 @@ negotiated:
    it because it asserted key agreement and never that a record flowed.
 
    Fixing it means the ANSWER must carry the responder's own locator, which is an
-   SPDR encoding change (`VERSION` 2 → 3). Still cheap: no release has shipped
-   with a usable Direct, so there is no deployed signalling to strand — but that
-   stops being true at the next release, which makes this the moment to do it.
+   SPDR encoding change (`VERSION` 2 → 3), which is acceptable: the project is
+   explicitly unstable before 1.0, so SPDR may be re-cut without a migration
+   story. That freedom stops at 1.0, and it never extended to the v1 *envelope*
+   wire, which is frozen independently of any release number.
    The punch then supplies the other half, since it learns the peer's *actual*
    source address from the probe that arrives rather than trusting a predicted
    one — which is also what makes it work through a symmetric NAT that rewrote
