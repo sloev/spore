@@ -533,6 +533,11 @@ pub use tcp::TcpPort;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stun;
 
+// P-Direct-NAT step 3: the coordinated punch that makes a reflexive locator
+// reachable rather than merely known.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod punch;
+
 // The UDP runner both native runtimes drive. Shared so the daemon and Android
 // cannot drift into two different negotiations of the same protocol.
 #[cfg(not(target_arch = "wasm32"))]

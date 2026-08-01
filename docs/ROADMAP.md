@@ -2199,7 +2199,33 @@ negotiated:
    network need not lean on a third party. A discovered locator is offered as a
    second candidate ranked *below* the LAN one. Verified with two daemons, one
    asking the other. **It does not make NAT work** — see step 3.
-3. **← next.** Coordinated UDP hole-punch: simultaneous probes once both sides have
+3. **In progress.** The punch itself is built and tested (`src/direct/punch.rs`):
+   two sides probing at once meet in the middle, a punch nobody answers fails
+   inside its bound, and the socket that punched is the one handed to the pipe —
+   a mapping belongs to a source port, so punching on any other socket is
+   worthless. It is **not yet wired**, because doing so surfaced a wire gap and a
+   bug that have to be fixed first (below).
+
+   **Bug found while wiring it — the ANSWER never says where the responder is.**
+   `Answer::Ok` carries `{ pipe_id, eph_pub, chosen }`, and `chosen` is a
+   candidate from the *initiator's* own OFFER. So on receiving an ANSWER the
+   initiator calls `open(&chosen, ..)` and connects its socket **to its own
+   advertised address**. The responder dials the initiator from an ephemeral
+   port, and the initiator's connected socket rejects it. Both ends still derive
+   matching keys and report the pipe up, so it looks like it worked — records
+   simply never arrive initiator-ward. The two-daemon verification in #95 missed
+   it because it asserted key agreement and never that a record flowed.
+
+   Fixing it means the ANSWER must carry the responder's own locator, which is an
+   SPDR encoding change (`VERSION` 2 → 3). Still cheap: no release has shipped
+   with a usable Direct, so there is no deployed signalling to strand — but that
+   stops being true at the next release, which makes this the moment to do it.
+   The punch then supplies the other half, since it learns the peer's *actual*
+   source address from the probe that arrives rather than trusting a predicted
+   one — which is also what makes it work through a symmetric NAT that rewrote
+   the port.
+
+4. Coordinated UDP hole-punch: simultaneous probes once both sides have
    freshly re-confirmed reachability close together in time (Finding 2) —
    never timed off a possibly-stale OFFER/ANSWER round trip.
 4. Optional UPnP/NAT-PMP/PCP on desktop/daemon, where a device actually offers it.
