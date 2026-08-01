@@ -59,9 +59,17 @@ data class Post(val topic: String, val author: String, val text: String, val ver
 /**
  * A configured bridge and its status line. `iface` is the hub interface to
  * unregister when the bridge is removed (null for a core-owned bridge like TCP/UDP
- * whose interface this app didn't register and can't cleanly stop). `canStop`
- * gates the Remove control — a bridge we cannot stop shows no button rather than a
- * dead one.
+ * whose interface this app didn't register and can't cleanly stop, or a toggled-off
+ * bridge, which is unregistered but keeps its row). `canStop` gates the Remove
+ * control — a bridge we cannot stop shows no button rather than a dead one.
+ *
+ * `canToggle` (PR2 carried forward) gates a separate Pause/Resume control that
+ * stops the transport but keeps the row and its configuration, so Resume restarts
+ * cleanly instead of forgetting everything the way Remove + re-add would. Only
+ * bridges [NodeController] can fully recreate from stored parameters set this —
+ * see `toggleBridge`'s doc for which ones and why the rest don't. `id` is this
+ * row's stable identity, since `iface` goes to `null` once disabled and `kind`
+ * alone is not unique (two BLE bridges of the same radio type).
  */
 data class BridgeState(
     val kind: String,
@@ -69,6 +77,9 @@ data class BridgeState(
     val status: String,
     val iface: Int? = null,
     val canStop: Boolean = false,
+    val canToggle: Boolean = false,
+    val enabled: Boolean = true,
+    val id: Long = 0L,
 )
 
 /**
@@ -783,6 +794,13 @@ object NodeController {
     private val bleBridges = mutableListOf<BleBridge>()
     private var wifiDirect: WifiDirectBridge? = null
 
+    // Toggle support (PR2 carried forward): for a bridge whose full config we can
+    // hold onto (audio needs none; BLE needs the device + radio params), a closure
+    // that restarts it into the *same* row. Populated on every (re-)start, dropped
+    // on Remove — see `toggleBridge` / `stopBridge`.
+    private val bridgeReenable = mutableMapOf<Long, () -> Unit>()
+    private var nextBridgeId = 1L
+
     /**
      * An iface paced to what this kind of link can actually afford to relay for
      * other people. Only file chunks are counted — messages, announces and
@@ -798,15 +816,27 @@ object NodeController {
     /** Data-over-sound. UI must have RECORD_AUDIO granted before calling. */
     fun enableAudio(): Boolean {
         if (ptr == 0L || audio != null) return false
+        startAudio(null)
+        return true
+    }
+
+    /** Shared by [enableAudio] (new row) and a Resume from [toggleBridge] (same row). */
+    private fun startAudio(existingId: Long?) {
+        if (ptr == 0L) return
         // Sound moves ~23 bytes a second, so this link talks but does not haul.
         val iface = limitedIface("audio")
         audio = AudioBridge(ptr, iface).also { it.start() }
-        addBridgeState("Audio modem", "16-FSK · mic + speaker", "on", iface, canStop = true)
-        return true
+        val id = upsertBridgeRow(existingId, "Audio modem", "16-FSK · mic + speaker", "on", iface, canStop = true, canToggle = true)
+        bridgeReenable[id] = { startAudio(id) }
     }
 
     /** A paired Meshtastic node over BLE. UI gates on BLUETOOTH_CONNECT. */
     fun enableMeshtasticBle(ctx: Context, device: android.bluetooth.BluetoothDevice) {
+        if (ptr == 0L) return
+        startMeshtasticBle(null, ctx, device)
+    }
+
+    private fun startMeshtasticBle(existingId: Long?, ctx: Context, device: android.bluetooth.BluetoothDevice) {
         if (ptr == 0L) return
         val iface = limitedIface("meshtastic")
         val myNode = SporeNative.nativeAddr(ptr).let {
@@ -815,8 +845,9 @@ object NodeController {
         }
         val b = MeshtasticBleBridge(ptr, iface, ctx, device, myNode)
         bleBridges.add(b)
-        addBridgeState("Meshtastic BLE", deviceLabel(device), "connecting", iface, canStop = true)
-        b.onState = { s -> updateBridgeState("Meshtastic BLE", s) }
+        val id = upsertBridgeRow(existingId, "Meshtastic BLE", deviceLabel(device), "connecting", iface, canStop = true, canToggle = true)
+        b.onState = { s -> updateBridgeStatus(id, s) }
+        bridgeReenable[id] = { startMeshtasticBle(id, ctx, device) }
         b.start()
     }
 
@@ -826,11 +857,20 @@ object NodeController {
         freqHz: Long, bwHz: Long, sf: Int, cr: Int, txDbm: Int,
     ) {
         if (ptr == 0L) return
+        startRNodeBle(null, ctx, device, freqHz, bwHz, sf, cr, txDbm)
+    }
+
+    private fun startRNodeBle(
+        existingId: Long?, ctx: Context, device: android.bluetooth.BluetoothDevice,
+        freqHz: Long, bwHz: Long, sf: Int, cr: Int, txDbm: Int,
+    ) {
+        if (ptr == 0L) return
         val iface = limitedIface("reticulum")
         val b = RNodeBleBridge(ptr, iface, ctx, device, freqHz, bwHz, sf, cr, txDbm)
         bleBridges.add(b)
-        addBridgeState("RNode BLE", deviceLabel(device), "connecting", iface, canStop = true)
-        b.onState = { s -> updateBridgeState("RNode BLE", s) }
+        val id = upsertBridgeRow(existingId, "RNode BLE", deviceLabel(device), "connecting", iface, canStop = true, canToggle = true)
+        b.onState = { s -> updateBridgeStatus(id, s) }
+        bridgeReenable[id] = { startRNodeBle(id, ctx, device, freqHz, bwHz, sf, cr, txDbm) }
         b.start()
     }
 
@@ -1160,17 +1200,74 @@ object NodeController {
         iface: Int? = null,
         canStop: Boolean = false,
     ) {
-        bridges.value = bridges.value + BridgeState(kind, detail, status, iface, canStop)
+        bridges.value = bridges.value + BridgeState(kind, detail, status, iface, canStop, id = nextBridgeId++)
     }
 
     /**
-     * Stop and remove a bridge: cancel its pumps, unregister its hub interface, and
-     * drop its row. Only bridges this app registered an interface for can be fully
-     * unregistered; a core-owned bridge (TCP/UDP) has `canStop = false` and never
-     * reaches here from the UI. The interface id is not recycled — a restart gets a
-     * fresh one.
+     * Add a new row (`existingId == null`) or restart an existing one in place
+     * (Resume, from [toggleBridge]) — same row identity, fresh `iface`/status.
+     * Returns the row's id either way, for the caller to key its `onState`
+     * callback and [bridgeReenable] closure on.
+     */
+    private fun upsertBridgeRow(
+        existingId: Long?,
+        kind: String,
+        detail: String,
+        status: String,
+        iface: Int?,
+        canStop: Boolean,
+        canToggle: Boolean,
+    ): Long {
+        val id = existingId ?: nextBridgeId++
+        val row = BridgeState(kind, detail, status, iface, canStop, canToggle, enabled = true, id = id)
+        bridges.value = if (existingId == null) bridges.value + row
+        else bridges.value.map { if (it.id == id) row else it }
+        return id
+    }
+
+    /**
+     * Stop and remove a bridge: cancel its pumps, unregister its hub interface (if
+     * still registered — a no-op if this row was already toggled off), and drop its
+     * row and any stored restart closure. Only bridges this app registered an
+     * interface for can be fully unregistered; a core-owned bridge (TCP/UDP) has
+     * `canStop = false` and never reaches here from the UI. The interface id is not
+     * recycled — a restart (via Remove + re-add, or Resume) gets a fresh one.
      */
     fun stopBridge(state: BridgeState) {
+        stopBridgeTransport(state)
+        bridgeReenable.remove(state.id)
+        bridges.value = bridges.value.filterNot { it.id == state.id }
+    }
+
+    /**
+     * Enable/disable, distinct from Remove (PR2 carried forward, unblocked by
+     * PR3's reconnect/backoff): Pause stops the transport but keeps the row, so
+     * Resume restarts with the exact same configuration instead of the user
+     * re-entering it. Gated on `canToggle` — only set for bridges whose full
+     * config we hold onto: Audio (none needed) and the BLE radios (device +,
+     * for RNode, its radio params — see `start*Ble`). Wi-Fi Direct isn't
+     * offered one: its actual transport is the core-owned UDP bridge started by
+     * `nativeStartUdpLimited`, which has no stop hook (same gap as core TCP/UDP,
+     * tracked separately in ROADMAP.md) — "Pause" would leave the socket running
+     * underneath a row that claims otherwise. Web isn't either: one row can
+     * aggregate any number of added relays/swarms, and replaying that whole set
+     * on Resume is unbuilt — Remove-only until it is, rather than a Resume that
+     * quietly comes back empty.
+     */
+    fun toggleBridge(state: BridgeState) {
+        if (!state.canToggle) return
+        if (state.enabled) {
+            stopBridgeTransport(state)
+            bridges.value = bridges.value.map {
+                if (it.id == state.id) it.copy(status = "stopped", iface = null, enabled = false) else it
+            }
+        } else {
+            bridgeReenable[state.id]?.invoke()
+        }
+    }
+
+    /** Tear down the transport for [state]'s row without touching `bridges` itself. */
+    private fun stopBridgeTransport(state: BridgeState) {
         when (state.kind) {
             "Audio modem" -> { audio?.stop(); audio = null }
             "Meshtastic BLE", "RNode BLE" -> {
@@ -1182,13 +1279,15 @@ object NodeController {
             "Web" -> { webHost?.stop(); webHost = null }
         }
         if (ptr != 0L) state.iface?.let { SporeNative.nativeUnregisterIface(ptr, it) }
-        // Match the exact row: kind alone isn't unique (two BLE bridges), so key on
-        // the interface too.
-        bridges.value = bridges.value.filterNot { it.kind == state.kind && it.iface == state.iface }
     }
 
     private fun updateBridgeState(kind: String, status: String) {
         bridges.value = bridges.value.map { if (it.kind == kind) it.copy(status = status) else it }
+    }
+
+    /** Like [updateBridgeState], but keyed on the stable row id (BLE bridges, post-toggle). */
+    private fun updateBridgeStatus(id: Long, status: String) {
+        bridges.value = bridges.value.map { if (it.id == id) it.copy(status = status) else it }
     }
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

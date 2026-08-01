@@ -170,19 +170,36 @@ Shipped: staging, one bubble, image preview, FileProvider Open. Carried forward:
 - [ ] **Device QA** — stage/remove/send/open, large image, peer-without-file,
       reduced motion — tracked in **PR6**.
 
-### From PR2 — hub unregister + bridge stop/remove (in review #42, `feat/hub-unregister-bridges`)
+### From PR2 — hub unregister + bridge stop/remove (merged #42, `feat/hub-unregister-bridges`)
 
 Shipped: `Hub::unregister`, `nativeUnregisterIface`, Remove for Audio/BLE/Wi-Fi
 Direct/Web. Carried forward:
 
+- [x] **Enable/disable *toggle*** distinct from Remove (keep the row, stop/restart
+      the transport) — depends on **PR3**'s reconnect/backoff so a re-enable has a
+      clean start path. **Shipped (#74, `feat/bridge-enable-disable-toggle`),
+      scoped to Audio + the two BLE radios** (Meshtastic, RNode) — the bridges
+      whose full config `NodeController` can hold onto and replay on Resume with
+      no new UI input. A Pause stops the transport and unregisters its hub iface
+      but keeps the row and a restart closure; Resume calls the same closure back
+      into the *same* row (a stable `BridgeState.id` now, since `iface` goes to
+      `null` while paused and `kind` alone was never unique across two same-type
+      BLE bridges). **Wi-Fi Direct and Web deliberately excluded, not
+      forgotten:** Wi-Fi Direct's real transport is the core-owned UDP bridge
+      (`nativeStartUdpLimited`, no stop hook) — its own `stop()` only tears down
+      the P2P group, so a Pause would leave the socket running under a row that
+      claims otherwise, the same honesty problem as the TCP/UDP item below. Web
+      aggregates however many relays/swarms were added under one row; replaying
+      that whole set on Resume isn't built, so it stays Remove-only rather than
+      a Resume that quietly comes back empty. Both are real remaining scope, not
+      superseded by this PR.
 - [ ] **Edit a bridge in place** (change a URL/params) — today it is Remove +
       re-add; needs a native mutate or re-register helper.
-- [ ] **Enable/disable *toggle*** distinct from Remove (keep the row, stop/restart
-      the transport) — depends on **PR3**'s reconnect/backoff so a re-enable has a
-      clean start path.
-- [ ] **Stop/remove for core-owned TCP/UDP** — they show no control today (honest,
-      not a dead button); a clean core-side stop for a specific TCP/UDP iface would
-      let them be removable too.
+- [ ] **Stop/remove for core-owned TCP/UDP** (and, per the toggle work above,
+      Wi-Fi Direct — it turns out to ride the same core-owned UDP path) — they
+      show no control today (honest, not a dead button); a clean core-side stop
+      for a specific TCP/UDP iface would let them be removable too, and would
+      also be the prerequisite for a real Wi-Fi Direct toggle.
 - [ ] **Device QA** — add/stop/remove/re-add round-trip on hardware — **PR6**.
 
 ---
