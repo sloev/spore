@@ -131,6 +131,12 @@ and it keeps working after you go offline.</p>
 
 </div>
 
+The name is the idea: the protocol is a **spore** — a small seed carrying
+everything needed to regrow the whole thing from one copy — and every device it
+lands in is **soil**. A laptop, a phone, a browser tab or a cheap radio board
+each feed it what they have — a clock, some randomness, room to keep messages, a
+way to reach other devices — and the same node grows in all of them.
+
 ## For builders
 
 The full rules are in the <a href="spec.html">Spec</a>; the reasoning is in

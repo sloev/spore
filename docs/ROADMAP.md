@@ -1784,6 +1784,12 @@ first-class node, not a demo toy. Source: an implementer plan
 (`SPORE_WEB_NODE_FULL_PLAN.md`) reviewed against the current tree; findings and
 scope below are from that review, not the plan verbatim.
 
+In the vocabulary of [`DESIGN.md`](DESIGN.md)'s "The spore and the soil": the
+browser is one **vessel** among several, and the communicator this track builds
+is an **extension of that runtime**, not part of the core. Thin soil in one
+respect that shapes the scope below — no disk to spill the store to, and the node
+stops when the last tab closes.
+
 ### Confirmed: standalone HTML, "web node," and the site demo are one file
 
 `web/build-standalone.mjs`'s own header says it plainly: the single generated

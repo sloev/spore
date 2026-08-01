@@ -666,6 +666,58 @@ address is worse than a relay that is slower. If profiling shows it dominating o
 constrained hardware, the next lever is caching "id → verified" for the `seen`
 lifetime, trading memory for CPU rather than trading away the check.
 
+## The spore and the soil — where the core runs
+
+The core is the seed: one implementation of the protocol, the same bytes on every
+machine, carrying nothing about where it landed. Everything that hosts it — an OS
+process, a language binding, a browser worker, a microcontroller firmware — is
+soil. Soil varies enormously; what it has to provide does not. A runtime supplies
+**five nutrients**, and the core supplies everything else.
+
+<details>
+<summary>Deep dive: the five nutrients, the vessels, and which ones already work this way</summary>
+
+| Nutrient | What the core needs it for | How it gets it today |
+|---|---|---|
+| **Randomness** | keys, nonces | The wasm build's *single* import is `env.spore_fill_random`; native uses `OsRng`. Already a contract, not a call. |
+| **Time** | expiry, dedup windows, ratchet TTL | `now: u32` is a parameter on `send` / `on_rx` / `open_dm`. The protocol layers never read a clock — the host decides what time it is. |
+| **Transport** | bytes in, bytes out | Bridges (next section). The router never learns which medium carried it. |
+| **Storage** | spilling the envelope store past a memory budget | `store.rs` still reaches for `std::fs` directly — the one nutrient not yet expressed as a contract, and the reason a browser tab cannot spill. |
+| **Scheduling** | ticking sync, expiry, resend | The hub and the CLI drive it by convention rather than through an interface. |
+
+Three of the five are already contracts rather than assumptions, which is why the
+same core compiles to a daemon, to a `.so` behind a Python import, and to a
+`wasm32-unknown-unknown` module with exactly one import. The remaining gap is
+storage — a nutrient the core currently takes for granted instead of asking for.
+
+**Soil varies; nutrients do not.** That is the whole discipline, and it is what
+keeps the platforms comparable. An ESP32 firmware, a desktop daemon and a browser
+worker are not three architectures — they are three soils filling the same five
+holes, richly or thinly. Where a runtime cannot supply a nutrient it says so
+rather than pretending: no disk means no spill, and the honest consequence (a
+smaller store) is surfaced, not hidden.
+
+A **vessel** is any host that carries the seed:
+
+| Vessel | Soil it offers |
+|---|---|
+| **Language binding** | A Python or Go program using [`bindings/`](../bindings/README.md) *is* a runtime — the thinnest one there is. If the nutrient contract is awkward from Python, the contract is wrong. |
+| **CLI daemon** | `src/cli/` — config-driven bridges, disk store, OS clock |
+| **Desktop app** | The same daemon plus a UI surface |
+| **Android** | The same core under a foreground service |
+| **Browser / worker** | wasm; no disk, and no background life once the last tab closes |
+| **Embedded (ESP32)** | Thin soil: little memory, no filesystem, one or two transports |
+
+**Extensions grow in the soil, not in the seed.** A communicator — threads, rooms,
+feed, library, public folder — is an extension of the *runtime* that declares
+which nutrients it needs. It is one client of the core, never part of it. That is
+why the chat UI is replaceable and the protocol is not.
+
+One place the metaphor lies, worth saying plainly: soil is passive and a runtime
+is not. The vessel owns `main()`, drives the tick, and decides when to flush. It
+hosts the core; it does not merely surround it.
+</details>
+
 ## Bridges & bindings — SPORE rides everything
 
 A bridge is *not part of the protocol*. It only moves envelope bytes in and out of
