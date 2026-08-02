@@ -251,6 +251,46 @@ Three rules that go with them:
    between sections. Four steps is enough; a fifth is usually two things that
    should have been the same.
 
+`design/generate.py` enforces the count as well as the values: exactly these
+three names, each within the range this document allows it, or the build fails.
+Adding a fourth means editing `CONTROL_SIZES` in the generator with a reason —
+not typing a number into a screen where nobody will see it again.
+
+### What each control is for
+
+Normative. The left column is the *purpose*; picking an element for any other
+reason is how the variation came back last time.
+
+| Purpose | Element | Rule |
+|---|---|---|
+| Send · Post · Confirm public · Download copy | **Primary** radio-switch, pink or phosphor face | **One visible primary per context.** Two primaries means neither is one |
+| Pause · Resume · Copy · Share · Add | **Secondary** radio-switch, kevlar/asphalt face, amber label | Same height as primary — that is what makes them read as one system |
+| Remove · Forget · Reveal seed | Secondary **plus a confirm dialog**, always | Never signalled by colour alone (§0.3, and B7) |
+| Major navigation | Persistent tab bar or side nav | Android/web node: Chats · Feed · Bridges. Site: Try it · How it works · Get a node · Spec · Mission |
+| Live status — peers, envelopes, bridge state | Segmented LED + short mono text | `0 peers · 65 stored`. **No sentences** |
+| Long explanation, security detail | Expander or a secondary screen | **Never open by default on a working screen** |
+| Lists — bridges, chats, topics | Uniform `row` inside a crate | icon · title · status · overflow, one row height throughout |
+| Empty state | Baud + one short line + one or two actions | "No one nearby yet" → ADD BRIDGE / SHARE INVITE |
+| Identity | Header crate | avatar/petname · address · copy · compact status |
+
+### Density
+
+Also normative, and the rule the app currently breaks most often:
+
+- **A working screen shows at most one short instructional sentence by default.**
+  Everything else lives behind an expander, an info affordance, or first run.
+- **Empty states and status chrome are one line.** Keep the honesty, drop the lecture.
+- **A returning user must find the primary action in under three seconds of
+  scanning.** This is the test the other rules exist to pass.
+- **The front page is plain language only.** No tactical jargon on the way in —
+  the aesthetic is in the pixels, not the vocabulary. Someone deciding whether
+  SPORE is for them should not have to decode it first.
+
+None of this removes information. It moves it: the security copy, the bridge
+explanations and the "what is a topic" text all still exist, one tap away, where
+someone who wants them will look. What changes is that the app stops explaining
+itself to the person who already knows.
+
 **Container — the ammo crate.** `--panel` fill, 2px `--edge` border, 2px hard offset
 shadow (`4px 4px 0 rgba(0,0,0,.6)`), no blur, no rounding beyond 2px. Optional
 hex-mesh background at ≤4% opacity. Stickers — anarchy sigils crossed with Sanrio
