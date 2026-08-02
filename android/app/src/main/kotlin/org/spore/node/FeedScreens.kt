@@ -112,16 +112,16 @@ internal fun FeedScreen(compose: (String) -> Unit) {
 
 @Composable
 private fun TopicChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    // Selected is pink-on-void with a pink edge; unselected is amber on kevlar,
-    // which §1 allows for chrome at 4.48:1. Pink on kevlar — the combination the
-    // mock reached for — is 2.32:1 and never used.
+    // Selected is pink-on-void with a pink edge; unselected is amber on moss,
+    // which §1 allows for chrome at 4.27:1. Pink on moss — the combination the
+    // mock reached for — is 2.21:1 and never used.
     StickerBadge(
         label,
         // .selectable (not .clickable) announces selected/unselected to TalkBack —
         // colour alone (pink vs amber) doesn't (B7).
         Modifier.selectable(selected = selected, onClick = onClick, role = Role.Tab).padding(vertical = 2.dp),
         ink = if (selected) Palette.Pink else Palette.Amber,
-        bg = if (selected) Palette.Void else Palette.Kevlar,
+        bg = if (selected) Palette.Void else Palette.Moss,
         edge = if (selected) Palette.Pink else Palette.Edge,
     )
 }

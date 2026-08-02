@@ -24,7 +24,7 @@ part — rather than the plan? See [`DEV_GUIDE.md`](DEV_GUIDE.md).
 - **Honesty over polish:** 🧪 markers, "Still open", served-vs-fetching language, and
   **no fake UI** — never a control whose backend is missing.
 - **[`VISUALDESIGN.md`](VISUALDESIGN.md) is normative** for colour, contrast, motion,
-  components. Never pink on olive/kevlar (measured 2.32:1). Never signal failure by
+  components. Never pink on olive/moss (measured 2.21:1). Never signal failure by
   colour alone (pink is both accent and "bad").
 - **Zero external network requests** in `web/spore-standalone.html` (CI greps for it).
 - Motion fully static under reduced motion / `ANIMATOR_DURATION_SCALE == 0`. Sound and
@@ -1209,7 +1209,7 @@ than any single PR:
 - [ ] Status chrome is compact — `0 peers · 65 stored`.
 - [ ] The site has persistent, clear navigation.
 - [ ] The web node has a persistent identity + status header.
-- [ ] Pink never on kevlar; the contrast table is still green. *(enforced by
+- [ ] Pink never on moss; the contrast table is still green. *(enforced by
       `generate.py` both ways since C3 — a pair claimed forbidden that became
       readable fails too.)*
 - [ ] Reduced motion is fully static; the standalone still makes zero external

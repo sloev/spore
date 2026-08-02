@@ -66,7 +66,7 @@ const html = `<!doctype html>
        hexes rather than a raw-plus-semantic indirection: this file ships alone. */
     --bg:#0a0a0c;
     --panel:#1a1c20;
-    --kevlar:#4b5320;
+    --moss:#3a5a2e;
     --edge:#2a2f1c;
     --ink:#ffb000;
     --dim:#8a7a4a;
@@ -100,7 +100,7 @@ const html = `<!doctype html>
          to clear 4.5:1 on paper, same as site/style.css's light variant. */
       --bg:#f4f1e8;
       --panel:#fff;
-      --kevlar:#d8d2c0;
+      --moss:#d8d2c0;
       --edge:#d8d2c0;
       --ink:#1a1c20;
       --dim:#5b5647;
@@ -139,13 +139,13 @@ const html = `<!doctype html>
   input[type=text]{ flex:1; min-width:150px; }
   select{ min-width:200px; }
   textarea{ width:100%; font-family:var(--mono); font-size:11.5px; height:70px; resize:vertical; }
-  /* Radio switch (§3): pink face, void ink — never pink-on-kevlar. Disabled
-     falls back to the inert kevlar face with a dim label (§7 checklist item
+  /* Radio switch (§3): pink face, void ink — never pink-on-moss. Disabled
+     falls back to the inert moss face with a dim label (§7 checklist item
      5) rather than a translucent accent, which is what a bare browser
      :disabled default would otherwise have done to a pink button. */
   button{ background:var(--accent); color:var(--bg); border:0; font-weight:600; border-radius:2px;
     padding:8px 14px; cursor:pointer; font:inherit; }
-  button:disabled{ background:var(--kevlar); color:var(--dim); cursor:not-allowed; }
+  button:disabled{ background:var(--moss); color:var(--dim); cursor:not-allowed; }
   button.ghost{ background:transparent; color:var(--ink); border:1px solid var(--edge); }
   button.ghost:disabled{ color:var(--dim); border-color:var(--edge); cursor:not-allowed; }
   button.x{ background:transparent; color:var(--dim); border:1px solid var(--edge); padding:2px 9px; border-radius:2px; }

@@ -67,7 +67,7 @@ import androidx.compose.ui.unit.sp
  *    Material look this language exists to avoid — so the shadow is drawn by hand
  *    in [crate] and [radioFace]. Reach for `shadow()` here and the crate stops
  *    being a crate.
- *  * **Never pink on olive.** 2.32:1, the one pairing §1 forbids outright. It is
+ *  * **Never pink on olive.** 2.21:1, the one pairing §1 forbids outright. It is
  *    also the pairing the palette invites, so [StickerBadge] takes its own
  *    background and the pink variants sit on void.
  */
@@ -80,16 +80,17 @@ import androidx.compose.ui.unit.sp
  *
  * Ratios are measured, not estimated, and are regenerated with the colour, so
  * they cannot fall out of step with it. Three numbers per foreground: contrast
- * on Void, Asphalt, Kevlar, in that order.
+ * on Void, Asphalt, Moss, in that order.
  */
 internal object Palette {
     val Void = Color(0xFF0A0A0C)     // CRT Black — page base, the dark of a powered-down screen
     val Asphalt = Color(0xFF1A1C20)  // Worn Asphalt — panels, cards, raised surfaces
-    val Kevlar = Color(0xFF4B5320)   // Kevlar Olive — crate fills, inert chrome, disabled states
-    val Amber = Color(0xFFFFB000)    // 10.80 / 9.31 / 4.48 (Kevlar is large-text only)
-    val Phosphor = Color(0xFF39FF14) // 14.59 / 12.58 / 6.06
-    val Pink = Color(0xFFFF2A85)     // 5.58 / 4.81 / 2.32 ← never on Kevlar
-    val Cyan = Color(0xFF00FFFF)     // 15.78 / 13.61 / 6.55
+    val Moss = Color(0xFF3A5A2E)     // Deep Moss — crate fills, inert chrome, disabled states — olive drab that something has grown on
+    val Amber = Color(0xFFFFB000)    // 10.80 / 9.31 / 4.27 (Moss is large-text only)
+    val Phosphor = Color(0xFF39FF14) // 14.59 / 12.58 / 5.78
+    val Pink = Color(0xFFFF2A85)     // 5.58 / 4.81 / 2.21 ← never on Moss
+    val Cyan = Color(0xFF00FFFF)     // 15.78 / 13.61 / 6.25
+    val Copper = Color(0xFFB5651D)   // 4.56 / 3.94 / 1.81 (Asphalt is large-text only) ← never on Moss
     val Edge = Color(0xFF2A2F1C)     // borders — olive shifted dark, reads as machined metal
     val Dim = Color(0xFF8A7A4A)      // de-emphasised text — amber desaturated, 4.68:1 on Void
 
@@ -307,7 +308,7 @@ internal fun DisplayHeading(
 
 /**
  * §3's input: an inset `--void` field, 2 px `--edge` border, four 3 px "screw"
- * dots in `--kevlar` at the corners. Focus *thickens* the border to a 2 px cyan
+ * dots in `--moss` at the corners. Focus *thickens* the border to a 2 px cyan
  * ring — §7 says never remove the focus indicator, so this replaces it rather
  * than suppressing it.
  *
@@ -412,7 +413,7 @@ private fun ToughbookFace(
                     Offset(size.width - m - d, m),
                     Offset(m, size.height - m - d),
                     Offset(size.width - m - d, size.height - m - d),
-                ).forEach { drawRect(Palette.Kevlar, it, Size(d, d)) }
+                ).forEach { drawRect(Palette.Moss, it, Size(d, d)) }
             }
             .padding(horizontal = 10.dp, vertical = 10.dp)
             .then(if (singleLine) Modifier else Modifier.height(minHeight)),
@@ -431,12 +432,12 @@ private fun ToughbookFace(
 // -- the radio switch ---------------------------------------------------------
 
 /**
- * §3's button: a chunky `--kevlar` face with a 3 px hard drop-shadow and an
+ * §3's button: a chunky `--moss` face with a 3 px hard drop-shadow and an
  * `--amber` uppercase label. Pressing translates it 3 px down-right and drops the
  * shadow to zero — the throw is the whole point, so it is position *and* shadow,
  * not a ripple.
  *
- * Amber on olive is 4.48:1, which §1 permits for large text only. The label is
+ * Amber on olive is 4.27:1, which §1 permits for large text only. The label is
  * therefore 15 sp bold, clearing WCAG's 14 pt-bold threshold. Shrink it and the
  * button quietly becomes unreadable.
  *
@@ -455,7 +456,7 @@ internal fun CrateButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    face: Color = Palette.Kevlar,
+    face: Color = Palette.Moss,
     ink: Color = Palette.Amber,
     contentDescription: String? = null,
 ) {
@@ -547,7 +548,7 @@ internal fun SegmentedLed(
                 Modifier
                     .weight(1f)
                     .height(height)
-                    .background(if (i < lit) on else Palette.Kevlar),
+                    .background(if (i < lit) on else Palette.Moss),
             )
         }
     }
@@ -560,7 +561,7 @@ internal fun SegmentedLed(
  * design review, and a rotated badge over live text is a legibility problem
  * dressed as personality.
  *
- * [bg] defaults to void so a pink badge is legal — pink on kevlar is 2.32:1 and
+ * [bg] defaults to void so a pink badge is legal — pink on moss is 2.21:1 and
  * the one pairing §1 bans, which is exactly the mistake this signature prevents
  * by not defaulting the background to the crate fill.
  */
@@ -609,7 +610,7 @@ internal fun CrateSwitch(
     Box(
         modifier
             .size(width = 40.dp, height = 22.dp)
-            .background(if (checked) Palette.Phosphor else Palette.Kevlar, CrateShape)
+            .background(if (checked) Palette.Phosphor else Palette.Moss, CrateShape)
             .border(2.dp, Palette.Edge, CrateShape)
             .radioClickable(interaction, enabled) { onCheckedChange(!checked) }
             .padding(2.dp),
@@ -648,7 +649,7 @@ internal fun Caption(text: String, modifier: Modifier = Modifier, color: Color =
 /**
  * A modal yes/no for an action that can't be taken back — a PUBLIC broadcast, say.
  * The confirm button carries the pink CTA (pink face, void ink — never pink on
- * kevlar); Cancel is the quiet default and dismissing the dialog also cancels.
+ * moss); Cancel is the quiet default and dismissing the dialog also cancels.
  */
 @Composable
 internal fun ConfirmDialog(

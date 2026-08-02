@@ -6,11 +6,12 @@
   /* Raw palette */
   --void: #0a0a0c;     /* CRT Black */
   --asphalt: #1a1c20;  /* Worn Asphalt */
-  --kevlar: #4b5320;   /* Kevlar Olive */
+  --moss: #3a5a2e;     /* Deep Moss */
   --amber: #ffb000;    /* Tactical Amber    10.80:1 on void */
   --phosphor: #39ff14; /* Phosphor Green    14.59:1 on void */
-  --pink: #ff2a85;     /* Radioactive Pink   5.58:1 on void — NEVER on kevlar (2.32:1) */
+  --pink: #ff2a85;     /* Radioactive Pink   5.58:1 on void — NEVER on moss (2.21:1) */
   --cyan: #00ffff;     /* Pastel Cyan       15.78:1 on void */
+  --copper: #b5651d;   /* Copper Oxide       4.56:1 on void — NEVER on moss (1.81:1) */
 
   /* Semantic roles */
   --bg: var(--void);
@@ -385,7 +386,7 @@ body.page-index .story-card > details p {
 /* ---- SVG illustration styles (currentColor + tokens via CSS) ---- */
 
 .ill .node {
-  fill: var(--kevlar);
+  fill: var(--moss);
   stroke: var(--phosphor);
   stroke-width: 2;
 }

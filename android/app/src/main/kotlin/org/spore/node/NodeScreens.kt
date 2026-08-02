@@ -673,7 +673,7 @@ private fun BridgeRow(b: BridgeState) {
     val (dot, label) = when (classifyBridgeStatus(b.status)) {
         BridgeStatus.Up -> Palette.Phosphor to b.status
         BridgeStatus.Connecting -> Palette.Amber to b.status
-        BridgeStatus.Down -> Palette.Kevlar to b.status
+        BridgeStatus.Down -> Palette.Moss to b.status
         // Never signal failure by colour alone (§ VISUALDESIGN): pair pink with an icon.
         BridgeStatus.Error -> Palette.Pink to "⚠ ${b.status}"
     }
@@ -705,7 +705,7 @@ private fun BridgeRow(b: BridgeState) {
 }
 
 /**
- * A profile picture: the avatar image at [path] if present, else the same kevlar
+ * A profile picture: the avatar image at [path] if present, else the same moss
  * letter tile [ChatsList]'s Nearby rows use, so a node with no photo still reads
  * as itself. Square tile with the machined-metal border, per VISUALDESIGN §3.
  */
@@ -729,10 +729,10 @@ internal fun ProfilePic(path: String?, name: String, size: Int = 34) {
         }
     }
     Box(
-        Modifier.size(size.dp).background(Palette.Kevlar, CrateShape).border(2.dp, Palette.Edge, CrateShape),
+        Modifier.size(size.dp).background(Palette.Moss, CrateShape).border(2.dp, Palette.Edge, CrateShape),
         contentAlignment = Alignment.Center,
     ) {
-        // Amber on kevlar is 4.48:1 — large text only (§1), which a bold initial is.
+        // Amber on moss is 4.27:1 — large text only (§1), which a bold initial is.
         Text(name.firstOrNull()?.uppercase() ?: "?", color = Palette.Amber, fontWeight = FontWeight.Bold)
     }
 }
