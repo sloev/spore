@@ -367,6 +367,61 @@ everywhere:
 Keep these to UI and marketing. `SPEC.md` says "fountain code"; it is a
 specification and other people implement from it.
 
+## 6b. Inspiration — **not normative**
+
+Everything above this heading is a rule. Everything in it is a reference. The
+distinction is the point: this section exists so directional work has somewhere
+to live that is *not* §1, because a mood board filed as a specification is how a
+design language acquires two conflicting palettes and nobody can say which one
+ships.
+
+<p align="center"><a href="spore-inspiration.jpg"><img src="spore-inspiration.jpg" alt="Composite: the SPORE OS design manual poster above four directional UI mockups — site hero, web node identity and empty state, Bridges as list rows, Advanced as grouped rows" width="820" /></a></p>
+
+<p align="center"><em>The integrated design manual, over the four directional
+mockups it summarises. Directional, not pixel-perfect — and not the spec.</em></p>
+
+**The references, named.** Pikuniku, Akira, Meshtastic, Dragon Ball, pastel UI,
+utilitarian field equipment. They agree on more than they disagree: flat
+saturated colour over gradients, heavy confident line weight, hardware that looks
+used rather than styled, and cuteness that is not softness. That combination is
+what §1 encodes, and the feedback that produced these references confirmed the
+language is right — **the problems are execution**: too much text, too much
+variation in control sizes, weak hierarchy, navigation that does not separate
+actions. That diagnosis is what C4/C5/C6/B11 exist to fix.
+
+**The Solarpunk Refinement.** A proposed evolution: the tactical wasteland
+weathering *hopefully* rather than bleakly — moss on the crate, copper oxide on
+the brass, hardware that has been repaired and kept rather than merely survived.
+Its palette sketch is Deep Moss, Copper Oxide, Aged Amber and a Refined Phosphor
+Green, and it drops the neon.
+
+**It is recorded here and is not §1.** Adopting it is a real decision with a real
+cost, and both should be visible before anyone takes it: there is no pink and no
+cyan in that sketch, so *"never put pink on olive"* — the most-repeated rule in
+this document — would cease to have a referent, §3's usage matrix names pink for
+every primary action, the whole contrast table re-grades, and Baud is a pastel
+pink chibi. The mechanics are cheap, because C3 made them cheap: one
+`tokens.json` edit, `design/generate.py` recomputes every ratio and re-checks
+every claim in both directions, three surfaces regenerate. The cost is not the
+work. It is retiring a language mid-refinement and re-opening decisions that are
+already closed.
+
+**What is already being built from it**, because it does not conflict:
+
+- The **Bridges list-row structure** and the grouped **Advanced** sections — filed
+  in ROADMAP's *Screen structures*, and the reason C6 exists.
+- The **icon set** for Identity, Seed, Prekey ring and Offline window, which maps
+  one-to-one onto those Advanced rows.
+- **"Keep it personal. Add loved wear."** Baud stays hand-drawn and slightly worn,
+  and stays out of the way of work (§7).
+- **"A bridge component must feel crafted, not manufactured."** This is a texture
+  and weight argument, not a colour one, and the ammo crate already carries it.
+
+**Handle with the same honesty as everything else.** If a reference here starts
+describing something the app does, promote it into a numbered section with real
+values and a contrast check. Until then it is inspiration, and this document says
+so out loud rather than leaving a reader to guess which half is binding.
+
 ## 7. Checklist
 
 Before shipping a screen:
