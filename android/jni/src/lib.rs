@@ -1551,6 +1551,15 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectOnDelivered(
         });
         r.hub.originate(forwards);
     }
+    // The ANSWER is on the mesh, so the peer is about to punch: punch back now,
+    // not on the next housekeeping tick. Retaking the Direct lock is why this is
+    // a second scope — the mesh send above must not happen under it.
+    if matches!(event, spore::direct::Event::Answering { .. }) {
+        let mut guard = r.direct.lock().unwrap();
+        if let Some(run) = guard.as_mut() {
+            let _ = run.settle();
+        }
+    }
     if event == spore::direct::Event::NotSignal {
         JNI_FALSE
     } else {

@@ -150,9 +150,11 @@ node.send_direct(peer, &offer_bytes, now);
 // Either side, on the plaintext of a delivered DM:
 match sig.on_signal(sender, &plaintext, &[Medium::udp()]) {
     Signal::Offer { peer, accepted } => {
-        let port = open_port_for(&accepted.chosen);          // the runtime's job
-        let (answer_bytes, pipe) = Pipe::answer_with(accepted, my_addr, local, port);
+        // Answer FIRST, open SECOND — see "answer before you open" below.
+        let (answer_bytes, answering) = accepted.answer(my_addr, local);
         node.send_direct(peer, &answer_bytes, now);
+        let port = open_port_for(&chosen);                   // the runtime's job
+        let pipe = answering.over(port);
     }
     Signal::Decline { peer, reply } => node.send_direct(peer, &reply, now),
     Signal::Answered { pending, answer, dial, .. } => {
@@ -170,10 +172,17 @@ while let Some((ty, bytes)) = pipe.poll() { /* … */ }
 Rules this shape enforces:
 
 - **Deciding is the core's; opening is the runtime's.** `accept` chooses without a
-  port; `Pipe::answer_with` derives over the port the runtime then opened. They are
-  split because `UdpPort::connect` needs the peer's locator, which exists only
-  after a candidate has been chosen. `Pipe::answer` fuses both and is usable only
-  when exactly one medium is willing.
+  port; the runtime then opens one. They are split because `UdpPort::connect` needs
+  the peer's locator, which exists only after a candidate has been chosen.
+- **Answer before you open.** The key schedule binds the shared secret, the pipe
+  id, both addresses and the medium — never the socket — so `Accepted::answer`
+  produces the ANSWER with no port at all, and `Answering::over` attaches one
+  afterwards. That ordering is not a style choice: opening a punched candidate
+  *blocks* for a punch window, and the initiator does not begin punching until the
+  ANSWER reaches it, so a responder that opens first puts its whole window before
+  the peer's and the punch can never land. `Pipe::answer_with` still fuses both and
+  is correct only where opening cannot block — a loopback, a LAN socket, a link
+  already up.
 - **`dial` is the responder's own locator**, carried in the ANSWER. `chosen` is a
   candidate from the *initiator's* offer, so an initiator dialling `chosen` would
   dial itself.
@@ -214,8 +223,8 @@ avoided even on TCP.
 |---|---|
 | `SPDR` codec, key schedule, AEAD record, medium selection, `Pipe` | ✅ pure, unit-tested |
 | UDP / TCP adapters | ✅ real sockets, incl. a two-process round trip |
-| Mesh signalling (`Signalling`, `accept`/`answer_with`) | ✅ tested over the real `send_direct`/`on_rx` path |
-| Daemon (`src/cli/direct.rs`) | ✅ two processes negotiate and carry a record |
+| Mesh signalling (`Signalling`, `accept`/`answer`/`over`) | ✅ tested over the real `send_direct`/`on_rx` path |
+| Daemon (`src/cli/direct.rs`) | ✅ two processes negotiate, punch, and carry a record |
 | Android (JNI + Kotlin) | 🧪 compile-checked only — no device has run it |
 | BLE / ESP-NOW adapters, `CLOSE`/`REKEY` | ⬜ not built |
 
@@ -226,7 +235,7 @@ Reachability, by candidate — see [`ROADMAP.md`](ROADMAP.md)'s P-Direct-NAT tra
 | LAN | ✅ |
 | Global IPv6 | ✅ no NAT in front of it |
 | Declared overlay (`direct-also:`) | ✅ already routes |
-| Reflexive + hole punch | ❌ the two punch windows are disjoint by construction; falls back to a plain connect and says so |
+| Reflexive + hole punch | ✅ both ends punch concurrently and report `Via::Punched`; a punch that does not land still falls back to a plain connect and says so |
 | iroh (`direct-iroh:`) | ✅ opt-in; relay posture is never defaulted |
 
 The daemon prints which locators it offers and how each pipe was established, so

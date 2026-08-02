@@ -18,6 +18,24 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Hole punching actually punches.** The last broken rung of the P-Direct-NAT
+  ladder was an ordering bug, not a missing feature: the responder opened its
+  socket *inside* `on_plaintext`, and opening a punched candidate blocks for a
+  2-second punch window. The ANSWER could not go out until that window had already
+  closed, and the initiator does not start punching until the ANSWER reaches it —
+  so the two windows were disjoint **by construction** and no punch could ever
+  land, however long either side waited. Both ends timed out and fell back to a
+  plain connect, which still carries records on a LAN, which is exactly why the
+  bug survived a test that only checked that bytes moved. The responder now
+  answers first and opens second: `Accepted::answer` builds the ANSWER with no
+  port (the key schedule binds the pipe, both addresses and the medium — never the
+  socket), and `Answering::over` attaches the port afterwards, driven by the new
+  `UdpRunner::settle` that a runtime calls the moment the ANSWER is on the mesh.
+  Both native runtimes are wired for it, and `poll` settles too so a runtime that
+  forgets is late rather than broken. The two-runner test now reports
+  `Via::Punched` on **both** ends and finishes in 0.24s instead of 4s — the old
+  4 seconds were two punch windows timing out. Wire unchanged; SPDR unchanged.
+
 - **Learned paths are now purged and capped — they were the one peer-keyed table
   that grew forever.** §4 has specified "Fresh < 3 h; purge 7 d" since v1, but
   `Paths` had `learn` and `fresh` and nothing that removed anything, and it was
