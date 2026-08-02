@@ -41,13 +41,28 @@ Branch protection requires both, plus a Code Owners review, before merge.
 These files define the compatibility surface and may not change while the wire
 format is v1 — regardless of what the crate's own version number says:
 
+**`pr-guard.yml`'s regex is the ground truth; this table mirrors it in full.** It
+listed five of the eight patterns for a while, which is worse than listing none —
+a contributor who checks the table, finds their file absent, and is then refused
+by CI has been told two different things by the same repo.
+
 | File | Freezes |
 |---|---|
-| `tests/api_freeze.rs` | the public API shape + the golden wire/crypto vectors |
+| `tests/**` | the public API shape + the golden wire/crypto vectors |
 | `reference/vectors.json` | the cross-language test vectors (generated) |
+| `reference/test_t0.py` | the conformance check the Tier-0 decoder must keep passing |
 | `bindings/spore.h` | the C ABI symbols |
 | `examples/gen_vectors.rs` | the generator those vectors come from |
+| `examples/worked.rs` | the worked bytes `REBUILD.md` is checked against |
+| `site/seed/*.test.mjs` | the paper-seed tooling's own conformance tests |
+| `web/test.mjs`, `web/ws-test.mjs` | the browser node's end-to-end contract |
 | `.github/workflows/{ci,pr-guard}.yml` | the guards themselves |
+
+**Adding a test to a frozen test file still trips the guard.** That is the guard
+working as designed — it is mechanical precisely so it cannot be argued with — and
+the label is the intended way through. Say in the PR that the change is additive
+and names nothing existing, so a reviewer can confirm it in one look rather than
+diffing a file they assume is untouchable.
 
 Everything the wire format touches — envelope layout, address/ID derivation,
 signing, armor, sealed boxes, encrypted topics — is pinned by `tests/api_freeze.rs`
