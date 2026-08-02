@@ -18,6 +18,29 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Sizes are single-sourced now, not just colours (C5, token half).** C3 made
+  `design/tokens.json` the one place a colour is defined; a button height typed by
+  hand into three files drifts exactly the same way, and nothing was watching. The
+  file gained a `metrics` block — three control sizes (`control` 48, `chip` 32,
+  `row` 56), one padding, one radius, one border, one press-throw, a four-step
+  spacing scale — and `design/generate.py` emits it into `site/style.css`,
+  `web/build-standalone.mjs`, `Chrome.kt` (as `internal object Metrics`) and
+  VISUALDESIGN's table. The "design tokens in sync" CI job therefore guards
+  metrics as well as hexes: hand-typing a `dp` is now as red as hand-typing a hex.
+
+  **No rendered metric changed.** Every value was lifted from what the tree
+  already used — the 48dp touch floor B7 put under `CrateButton`, the 14/9
+  padding, the 2dp `CrateShape`, the 3dp throw, `VGap`'s 8 — so `Chrome.kt`
+  adopting them is a rename, not a redesign. `chip` and `row` are the two
+  exceptions and name controls that do not exist yet, for C5's Kotlin half and C6.
+
+  One guard rides along: the generator **refuses to emit a control shorter than
+  the touch floor unless its role says how it still clears it**. The chip is 32dp
+  on purpose, and B7 put a 48dp floor under every touch target; a generator that
+  emitted the height and stayed quiet would be handing the next person a
+  comfortable way to ship an unreachable control. Verified by removing the
+  explanation and watching the build refuse.
+
 - **The browser can send and open sealed DMs (W1, ABI half).** The core has had
   `send_direct`/`open_dm` — one-shot prekey seal, §7 ratchet when a session
   exists — since 0.6.0, and none of it was reachable from a tab: `wasm.rs`

@@ -76,6 +76,23 @@ const html = `<!doctype html>
     --warn:#ffb000;
     --bad:#ff2a85;
     --mono: ui-monospace, "Cascadia Mono", "Fira Code", Menlo, Consolas, monospace;
+    --control-h:48px;
+    --control-px:14px;
+    --control-py:9px;
+    --chip-h:32px;
+    --chip-px:10px;
+    --chip-py:4px;
+    --row-h:56px;
+    --row-px:12px;
+    --row-py:8px;
+    --radius:2px;
+    --border:2px;
+    --throw:3px;
+    --space-tight:4px;
+    --space-gap:8px;
+    --space-pad:12px;
+    --space-section:16px;
+    --touch-min:48px;
   }
   @media (prefers-color-scheme: light) {
     :root {
