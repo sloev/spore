@@ -543,6 +543,10 @@ def main():
         size = specimen.draw(T, resolve, ratio, grade_of, METRICS,
                              os.path.join(ROOT, "docs/spore-specimen.png"))
         print(f"  ok  docs/spore-specimen.png {size[0]}x{size[1]}")
+        import mockups
+        size = mockups.render(T, resolve, METRICS,
+                              os.path.join(ROOT, "docs/spore-screens.png"))
+        print(f"  ok  docs/spore-screens.png {size[0]}x{size[1]}")
 
 
 if __name__ == "__main__":

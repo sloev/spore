@@ -277,6 +277,30 @@ three names, each within the range this document allows it, or the build fails.
 Adding a fourth means editing `CONTROL_SIZES` in the generator with a reason —
 not typing a number into a screen where nobody will see it again.
 
+### The four screens, rendered
+
+<p align="center"><a href="spore-screens.png"><img src="spore-screens.png" alt="Four rendered screens in the real tokens: the site hero with its five-item nav and one primary action; the web node's persistent identity header with Baud on the empty state; Bridges as uniform rows with one ADD; Advanced as three sections of uniform rows" width="900" /></a></p>
+
+<p align="center"><em><strong>Also generated.</strong> Every colour, control
+height, padding, radius and gap in these comes from <code>tokens.json</code> —
+they show what the tokens <em>produce</em>, not what someone imagined. A mockup
+drawn by hand is out of date the moment a token moves, and nobody notices because
+a picture cannot fail a build.</em></p>
+
+These are the layouts the rules below describe, and the ones ROADMAP's *Screen
+structures* section specifies. Read them together: the matrix says which element,
+the render says where it goes.
+
+Four things to take from them specifically:
+
+- **One primary per screen.** Pink appears exactly once on each — OPEN WEB NODE,
+  ADD BRIDGE. Everything else is secondary or a chip.
+- **Bridges has one ADD, not eight buttons.** The transports that were a stack of
+  full-width olive blocks are uniform rows behind it.
+- **Status is never a sentence.** `alive · 0 peers · 12 stored`, `0 peers`, `7d`.
+- **Nothing is expanded by default.** Advanced is three sections of rows; the long
+  security copy is a row you open, not a wall you scroll past.
+
 ### What each control is for
 
 Normative. The left column is the *purpose*; picking an element for any other

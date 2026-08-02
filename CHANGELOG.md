@@ -18,6 +18,19 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The four canonical screens are rendered from the tokens too.** `design/mockups.py`
+  draws `docs/spore-screens.png`: the site hero, the web node's identity header and
+  empty state, Bridges as uniform rows, and Advanced as grouped sections. Every
+  colour, control height, padding, radius and gap comes from `tokens.json`, so they
+  show what the tokens *produce* rather than what someone imagined — and like the
+  specimen sheet, the drift job guards them. A hand-drawn mockup is out of date the
+  moment a token moves, and nobody notices, because a picture cannot fail a build.
+
+  Three defects found by looking at the render rather than the code: the Advanced
+  panel overflowed its crate, the PAUSE and REMOVE chips overlapped by two pixels
+  because they were spaced by less than a chip height, and the canvas was shorter
+  than the content so the tab bar and captions were drawn off it.
+
 - **The visual guideline is now a generated picture, and the plan has one index.**
   `design/generate.py` draws `docs/spore-specimen.png` from `tokens.json`: every
   swatch with its hex and its **measured** contrast on each base, the one
