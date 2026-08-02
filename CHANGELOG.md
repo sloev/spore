@@ -18,6 +18,31 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Learned paths are now purged and capped — they were the one peer-keyed table
+  that grew forever.** §4 has specified "Fresh < 3 h; purge 7 d" since v1, but
+  `Paths` had `learn` and `fresh` and nothing that removed anything, and it was
+  the one map `enforce_bounds` did not trim (`MAX_PEERS` already bounded
+  `peer_prekeys`, `peer_busy`, `peer_names` and `sessions`). Every signed
+  envelope from a source never seen before added a row that outlived the node, so
+  a long-lived relay on an open mesh grew without limit. `Paths::purge` now runs
+  on the existing sweep and `Paths::trim(MAX_PEERS)` is the backstop for a node
+  meeting sources faster than seven days retires them. Entries between 3 h and
+  7 d still exist without routing, which is what "stale entries still guide
+  custody" meant. Wire unchanged.
+
+- **A far-future expiry can no longer pin the store or the dedup table.** §2 says
+  stores clamp their horizon to 30 d; nothing did. `expiry` is inside the
+  signature so it cannot be edited in flight, but nothing stops an originator
+  minting an envelope that expires next century — and eviction ranks "expired"
+  first, so one that is never expired never reaches that rank and holds its bytes
+  for the life of the node. `Node::store_put` is the single choke point into the
+  store, so one `min` there covers every call site; the clamp is on the store's
+  copy of the expiry and never on the envelope, whose signature still covers the
+  original value and which is served on unchanged. The dedup retain is clamped to
+  the same horizon, because holding an id longer than its bytes is backwards and
+  `MAX_SEEN` evicts nearest-expiry first — unclamped, junk would have been the
+  last thing evicted. Wire unchanged; `reference/vectors.json` byte-identical.
+
 - **The docs were checked against the code rather than against each other, and
   four of them were wrong.** Every file path, API name, constant and config key
   the docs quote was resolved against the crate. SPEC's BLE service UUID named a

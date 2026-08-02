@@ -66,7 +66,7 @@ impl Node {
             ce.flags |= fl::FLOOD;
             level.push((ce.id(), (end - start) as u64));
             self.mark_seen(&ce);
-            self.store_put(&ce);
+            self.store_put(&ce, now);
         }
 
         // Grow interior levels until the remaining ids fit the signed root.
@@ -98,7 +98,7 @@ impl Node {
                 ne.flags |= fl::FLOOD;
                 next.push((ne.id(), covered));
                 self.mark_seen(&ne);
-                self.store_put(&ne);
+                self.store_put(&ne, now);
             }
             level = next;
             depth += 1;
@@ -122,7 +122,7 @@ impl Node {
         let magnet = me.id();
         self.manifests.insert(magnet, manifest);
         self.mark_seen(&me);
-        self.store_put(&me);
+        self.store_put(&me, now);
         let forwards = self.forward_intents(&me, NO_IFACE, now);
         (magnet, forwards)
     }

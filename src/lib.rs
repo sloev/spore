@@ -31,6 +31,33 @@ pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
 pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
 pub const PATH_FRESH_SECS: u32 = 3 * 3600;
 
+/// How long a learned path is kept at all (§4: "Fresh < 3 h; purge 7 d").
+///
+/// Between [`PATH_FRESH_SECS`] and this, a path no longer routes but still counts
+/// as *knowing of* the address, which is what "stale entries still guide custody"
+/// means. Past it the entry is gone.
+///
+/// This exists because it did not: `Paths` had `learn` and `fresh` and nothing
+/// that ever removed anything, and it is the one peer-keyed map
+/// `enforce_bounds` was not trimming — so every signed envelope from an unseen
+/// source added a row that outlived the node. The spec had specified the purge
+/// since v1; only the code was missing.
+pub const PATH_PURGE_SECS: u32 = 7 * 24 * 3600;
+
+/// The furthest ahead a store will hold anything, whatever an envelope's
+/// `expiry` field claims (§2).
+///
+/// Expiry is attacker-chosen — it is inside the signature, so it cannot be
+/// *edited* in flight, but nothing stops an originator from minting an envelope
+/// that expires in the next century. Without this clamp such an envelope is
+/// never "expired", so it never reaches the first rank of the eviction order and
+/// pins its bytes for as long as the node lives.
+///
+/// Equal to [`SEEN_MIN_SECS`] on purpose: §11 states one 30-day figure, and a
+/// store horizon shorter than the dedup floor would drop an envelope while still
+/// refusing to re-accept it.
+pub const MAX_EXPIRY_HORIZON_SECS: u32 = 30 * 24 * 3600;
+
 /// How often a node mints a fresh prekey (§7). One day.
 pub const PREKEY_PERIOD_SECS: u32 = 24 * 3600;
 
@@ -257,6 +284,44 @@ impl Paths {
     }
     fn fresh(&self, a: &Addr, now: u32) -> Option<Path> {
         self.map.get(a)?.iter().find(|p| now.saturating_sub(p.age) < PATH_FRESH_SECS).cloned()
+    }
+
+    /// §4's purge: drop paths older than [`PATH_PURGE_SECS`], and the address
+    /// rows they leave empty.
+    ///
+    /// Nothing here can make the node wrong, only forgetful — a purged path is
+    /// re-learned from the next signed envelope or ANNOUNCE, and unicast with no
+    /// path already has a defined behaviour (§5.5: silent, or flood-fallback
+    /// under custody).
+    fn purge(&mut self, now: u32) {
+        self.map.retain(|_, v| {
+            v.retain(|p| now.saturating_sub(p.age) < PATH_PURGE_SECS);
+            !v.is_empty()
+        });
+    }
+
+    /// Bound the number of addresses held, evicting those whose freshest path is
+    /// oldest. The purge above is the routine mechanism; this is the backstop for
+    /// a node meeting new sources faster than 7 days retires them.
+    fn trim(&mut self, max: usize) {
+        if self.map.len() <= max {
+            return;
+        }
+        let mut by_age: Vec<(Addr, u32)> =
+            self.map.iter().map(|(a, v)| (*a, v.iter().map(|p| p.age).max().unwrap_or(0))).collect();
+        by_age.sort_unstable_by_key(|(_, age)| *age);
+        for (a, _) in by_age.into_iter().take(self.map.len() - max) {
+            self.map.remove(&a);
+        }
+    }
+
+    /// How many addresses have a path. Bounds tests read this.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
 }
 
@@ -1302,6 +1367,76 @@ mod tests {
         assert!(n.acked.len() <= MAX_ACKED, "acked {}", n.acked.len());
         assert!(n.seen.len() <= MAX_SEEN, "seen {}", n.seen.len());
         assert_eq!(n.feed_inbox.len(), MAX_INBOX, "inbox trimmed to the cap");
+    }
+
+    /// `Paths` was the one peer-keyed table with no ceiling and no purge — the
+    /// test above covered four maps and skipped it, which is how it stayed
+    /// unbounded while §4 specified a 7-day purge from v1.
+    #[test]
+    fn learned_paths_are_purged_and_capped() {
+        let now = 1_700_000_000;
+        let mut n = Node::new("n", &[]);
+
+        // Three ages: routable, stale-but-known, and past the purge.
+        let fresh_a = [1u8; 8];
+        let stale_a = [2u8; 8];
+        let dead_a = [3u8; 8];
+        n.paths.learn(fresh_a, 1, None, now);
+        n.paths.learn(stale_a, 1, None, now - PATH_FRESH_SECS - 60);
+        n.paths.learn(dead_a, 1, None, now - PATH_PURGE_SECS - 60);
+
+        // The sweep is interval-gated, so put the clock past it.
+        n.last_sweep = now - SWEEP_INTERVAL_SECS - 1;
+        n.enforce_bounds(now);
+
+        assert!(n.paths.fresh(&fresh_a, now).is_some(), "a fresh path still routes");
+        assert!(n.paths.map.contains_key(&stale_a), "stale entries survive to guide custody (§4)");
+        assert!(n.paths.fresh(&stale_a, now).is_none(), "but they do not route");
+        assert!(!n.paths.map.contains_key(&dead_a), "past PATH_PURGE_SECS the entry is gone");
+
+        // And the backstop, for a node meeting sources faster than 7 d retires
+        // them: every one of these is fresh, so only the cap can bound it.
+        for i in 0..(MAX_PEERS + 500) as u32 {
+            let mut a = [0u8; 8];
+            a[..4].copy_from_slice(&i.to_be_bytes());
+            n.paths.learn(a, 1, None, now);
+        }
+        n.enforce_bounds(now);
+        assert!(n.paths.len() <= MAX_PEERS, "paths {}", n.paths.len());
+    }
+
+    /// §2: a store clamps its horizon to 30 d. `expiry` is inside the signature,
+    /// so it cannot be edited in flight — but nothing stops an originator from
+    /// minting one that expires next century, and an envelope that is never
+    /// "expired" never reaches the first rank of the eviction order.
+    #[test]
+    fn a_far_future_expiry_cannot_pin_the_store_or_the_dedup_table() {
+        let now = 1_700_000_000;
+        let far = now + 40 * 365 * 86400; // ~2065
+        let mut n = Node::new("n", &[]);
+
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, far, b"squatter".to_vec());
+        e.flags |= fl::FLOOD;
+        e.sign(&n.sk);
+        let id = e.id();
+        n.on_rx(&e.wire(), 1, None, now);
+
+        let horizon = now + MAX_EXPIRY_HORIZON_SECS;
+        let stored = n.store.meta(&id).expect("stored");
+        assert_eq!(stored.expiry, horizon, "the store holds it to the horizon, not to {far}");
+        assert_eq!(n.seen[&id], horizon, "and does not hold the id longer than the bytes");
+
+        // The wire is untouched: what was clamped is this node's willingness to
+        // carry it, not the envelope, whose signature still covers `far`.
+        let (decoded, _) = Envelope::decode(&e.wire()).unwrap();
+        assert_eq!(decoded.expiry, far, "the envelope itself is unchanged");
+        assert!(decoded.verify(), "and still verifies");
+
+        // Past the horizon it is ordinary expired stock: the sweep drops the id,
+        // and eviction can reclaim the bytes.
+        n.last_sweep = 0;
+        n.enforce_bounds(horizon + 1);
+        assert!(!n.seen.contains_key(&id), "the dedup entry expires at the horizon");
     }
 
     #[test]

@@ -7,8 +7,20 @@
 use crate::*;
 
 impl Node {
-    pub(crate) fn store_put(&mut self, e: &Envelope) {
-        self.store.put(e.id(), e.wire(), e.expiry, e.stamp(), self.seq, e.dest);
+    /// Put an envelope in the store, holding it no further ahead than §2's
+    /// horizon.
+    ///
+    /// The clamp is on the *store's* copy of the expiry, never on the envelope:
+    /// `expiry` is inside the signature, so rewriting it would invalidate the
+    /// frame we are about to serve to somebody else. What changes is only how
+    /// long *this* node agrees to carry it — which is the node's own business,
+    /// and is what §2's "stores clamp horizon to 30 d" has always said.
+    ///
+    /// Every path into the store goes through here, so this one `min` is the
+    /// whole fix.
+    pub(crate) fn store_put(&mut self, e: &Envelope, now: u32) {
+        let expiry = e.expiry.min(now.saturating_add(MAX_EXPIRY_HORIZON_SECS));
+        self.store.put(e.id(), e.wire(), expiry, e.stamp(), self.seq, e.dest);
         self.seq += 1;
         self.enforce_budget();
     }
@@ -80,7 +92,7 @@ impl Node {
             e.sign(&self.sk);
         }
         self.mark_seen(&e);
-        self.store_put(&e);
+        self.store_put(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }
 
@@ -118,7 +130,7 @@ impl Node {
         let wire = e.wire();
         if wire.len() <= self.mtu {
             self.mark_seen(&e);
-            self.store_put(&e);
+            self.store_put(&e, now);
             return Ok(self.forward_intents(&e, NO_IFACE, now));
         }
 
@@ -137,7 +149,7 @@ impl Node {
         let mut forwards = Vec::new();
         for fr in &frags {
             self.mark_seen(fr);
-            self.store_put(fr);
+            self.store_put(fr, now);
             forwards.append(&mut self.forward_intents(fr, NO_IFACE, now));
         }
         Ok(forwards)
@@ -158,7 +170,7 @@ impl Node {
         }
         let id = e.id();
         self.mark_seen(&e);
-        self.store_put(&e);
+        self.store_put(&e, now);
         self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
         self.forward_intents(&e, NO_IFACE, now)
     }
@@ -209,7 +221,7 @@ impl Node {
         }
         let id = e.id();
         self.mark_seen(&e);
-        self.store_put(&e);
+        self.store_put(&e, now);
         self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
         (id, self.forward_intents(&e, NO_IFACE, now), encrypted)
     }
@@ -306,7 +318,7 @@ impl Node {
         }
         self.rpc_pending.insert(id);
         self.mark_seen(&e);
-        self.store_put(&e);
+        self.store_put(&e, now);
         (id, self.forward_intents(&e, NO_IFACE, now))
     }
 
@@ -325,7 +337,7 @@ impl Node {
             e.sign(&self.sk);
         }
         self.mark_seen(&e);
-        self.store_put(&e);
+        self.store_put(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }
 
@@ -359,7 +371,7 @@ impl Node {
         e.flags |= fl::FLOOD;
         e.sign(&self.sk);
         self.mark_seen(&e);
-        self.store_put(&e);
+        self.store_put(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }
 
