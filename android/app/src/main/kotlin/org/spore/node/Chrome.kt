@@ -102,10 +102,35 @@ internal object Palette {
     val PinkDark = Color(0xFFC2185B)     // 5.20:1 on Paper
     val CyanDark = Color(0xFF00707A)     // 5.17:1 on Paper
 }
+
+/**
+ * Sizing, spacing and shape — the C5 control system, generated from
+ * design/tokens.json. Hand-typing a button height here is a CI failure for the
+ * same reason hand-typing a hex is.
+ */
+internal object Metrics {
+    val ControlH = 48.dp  // primary and secondary buttons, and text fields — one height for all three
+    val ControlPX = 14.dp // horizontal padding
+    val ControlPY = 9.dp  // vertical padding
+    val ChipH = 32.dp     // compact presets and toggles (7D/14D/30D, topics). NEW — must still carry a 48dp touch target
+    val ChipPX = 10.dp    // horizontal padding
+    val ChipPY = 4.dp     // vertical padding
+    val RowH = 56.dp      // list rows for the Bridges/Advanced restructure (C6). NEW
+    val RowPX = 12.dp     // horizontal padding
+    val RowPY = 8.dp      // vertical padding
+    val Radius = 2.dp     // corner radius, everywhere — CrateShape already used it
+    val Border = 2.dp     // control and crate border width
+    val Throw = 3.dp      // the pressed-button offset and its drop shadow
+    val Tight = 4.dp      // within a control
+    val Gap = 8.dp        // between controls — VGap's default
+    val Pad = 12.dp       // inside a crate/card
+    val Section = 16.dp   // between sections
+    val TouchMin = 48.dp  // WCAG/Material floor. `control` and `row` clear it by height; `chip` must be padded out to it.
+}
 // >>> end design tokens <<<
 
 /** Hard-edged everywhere: §3 allows 2 dp and no more. */
-internal val CrateShape = RoundedCornerShape(2.dp)
+internal val CrateShape = RoundedCornerShape(Metrics.Radius)
 
 // The bunker is dark, so dark is the real theme; Field Notes is the printed-manual
 // voice rather than a wash of the same one.
@@ -238,7 +263,7 @@ internal fun Crate(
     edge: Color = Palette.Edge,
     content: @Composable () -> Unit,
 ) {
-    Box(modifier.crate(fill, edge).padding(12.dp)) { content() }
+    Box(modifier.crate(fill, edge).padding(Metrics.Pad)) { content() }
 }
 
 // -- display heading ----------------------------------------------------------
@@ -436,7 +461,7 @@ internal fun CrateButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val throwDp = 3.dp
+    val throwDp = Metrics.Throw
     val down = pressed && enabled
 
     Box(
@@ -454,7 +479,7 @@ internal fun CrateButton(
             }
             // A real touch target, not an invisible hitbox around a smaller-looking
             // button (B7) — every CrateButton was under the 48dp floor before this.
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .sizeIn(minWidth = Metrics.TouchMin, minHeight = Metrics.ControlH)
             .background(if (enabled) face else Palette.Asphalt, CrateShape)
             .border(2.dp, Palette.Edge, CrateShape)
             .radioClickable(interaction, enabled, onClick)
@@ -463,7 +488,7 @@ internal fun CrateButton(
                     Modifier.semantics { this.contentDescription = contentDescription }
                 } else Modifier
             )
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(horizontal = Metrics.ControlPX, vertical = Metrics.ControlPY),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -649,4 +674,4 @@ internal fun HGap(w: Dp = 8.dp) = Spacer(Modifier.width(w))
 
 /** Vertical gap, spelled once. */
 @Composable
-internal fun VGap(h: Dp = 8.dp) = Spacer(Modifier.height(h))
+internal fun VGap(h: Dp = Metrics.Gap) = Spacer(Modifier.height(h))

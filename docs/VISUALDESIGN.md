@@ -108,6 +108,28 @@ palette invites — hot pink stickers on an ammo crate. Put the sticker on a `--
 or `--asphalt` patch instead, or outline it.
 
 Amber on olive is large-text only: headings and buttons, never body copy.
+
+### Controls, spacing and shape (C5)
+
+| Token | Value | CSS | Kotlin | Role |
+|---|---|---|---|---|
+| `control-h` | 48 | `var(--control-h)` | `Metrics.ControlH` | primary and secondary buttons, and text fields — one height for all three |
+| `control-px` | 14 | `var(--control-px)` | `Metrics.ControlPX` | horizontal padding |
+| `control-py` | 9 | `var(--control-py)` | `Metrics.ControlPY` | vertical padding |
+| `chip-h` | 32 | `var(--chip-h)` | `Metrics.ChipH` | compact presets and toggles (7D/14D/30D, topics). NEW — must still carry a 48dp touch target |
+| `chip-px` | 10 | `var(--chip-px)` | `Metrics.ChipPX` | horizontal padding |
+| `chip-py` | 4 | `var(--chip-py)` | `Metrics.ChipPY` | vertical padding |
+| `row-h` | 56 | `var(--row-h)` | `Metrics.RowH` | list rows for the Bridges/Advanced restructure (C6). NEW |
+| `row-px` | 12 | `var(--row-px)` | `Metrics.RowPX` | horizontal padding |
+| `row-py` | 8 | `var(--row-py)` | `Metrics.RowPY` | vertical padding |
+| `radius` | 2 | `var(--radius)` | `Metrics.Radius` | corner radius, everywhere — CrateShape already used it |
+| `border` | 2 | `var(--border)` | `Metrics.Border` | control and crate border width |
+| `throw` | 3 | `var(--throw)` | `Metrics.Throw` | the pressed-button offset and its drop shadow |
+| `space-tight` | 4 | `var(--space-tight)` | `Metrics.Tight` | within a control |
+| `space-gap` | 8 | `var(--space-gap)` | `Metrics.Gap` | between controls — VGap's default |
+| `space-pad` | 12 | `var(--space-pad)` | `Metrics.Pad` | inside a crate/card |
+| `space-section` | 16 | `var(--space-section)` | `Metrics.Section` | between sections |
+| `touch-min` | 48 | `var(--touch-min)` | `Metrics.TouchMin` | WCAG/Material floor. `control` and `row` clear it by height; `chip` must be padded out to it. |
 <!-- >>> end design tokens <<< -->
 
 **`--prose` is not a contrast fix — `--amber` already clears 10.80:1, well past the
@@ -201,6 +223,33 @@ without them. Never put one where a screen reader will read it aloud as garbage 
 `aria-hidden="true"` on the decorative ones.
 
 ## 3. Components
+
+### Three control sizes, and no fourth
+
+Every interactive control is one of exactly three sizes. The values are generated
+into §1's table from `design/tokens.json`; this is what they mean and when to
+reach for each.
+
+| Size | Height | Use |
+|---|---|---|
+| **control** | `control-h` | Primary and secondary buttons, **and text fields**. One height for all three — a field that does not line up with the button beside it is the most visible way a form looks unsystematic. |
+| **chip** | `chip-h` | Compact presets and toggles: offline-window 7D/14D/30D, topic pills. Not a small button — a chip is a *choice among a set*. |
+| **row** | `row-h` | List rows. The unit the Bridges and Advanced restructure is built from. |
+
+Three rules that go with them:
+
+1. **A chip is shorter than the touch floor and must still be reachable.** `chip-h`
+   is deliberately under `touch-min`; padding or `minimumInteractiveComponentSize`
+   has to make up the difference. `design/generate.py` refuses to emit a control
+   below the floor whose role does not say how it clears it — so the gap cannot be
+   forgotten silently, only argued with deliberately.
+2. **No one-off sizes.** If a control needs a fourth height, the design is wrong or
+   the scale is. Change `tokens.json` and let it propagate; do not hand-type a `dp`
+   or a `px` into a screen. It is a CI failure for the same reason a hand-typed hex is.
+3. **Spacing comes from the scale too** — `space-tight` within a control,
+   `space-gap` between controls, `space-pad` inside a crate, `space-section`
+   between sections. Four steps is enough; a fifth is usually two things that
+   should have been the same.
 
 **Container — the ammo crate.** `--panel` fill, 2px `--edge` border, 2px hard offset
 shadow (`4px 4px 0 rgba(0,0,0,.6)`), no blur, no rounding beyond 2px. Optional

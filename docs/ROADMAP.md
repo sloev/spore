@@ -83,7 +83,7 @@ name · **14** Freeze impact (almost always None).
 | **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ✅ done — `design/tokens.json` → `design/generate.py`, CI job "design tokens in sync" | C1 (did it by hand) | W-series |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
 | **C4** | Density & type hierarchy — cut explanatory text, progressive disclosure | High UX | ⬜ todo — see "Track C/B-UI" below | C1, C3, B7 | C6 |
-| **C5** | Control system unification — one button/chip/field size, locked in tokens | High UX | ⬜ todo — the largest of the four: it takes `generate.py` past colour for the first time | C3 | C4, C6 |
+| **C5** | Control system unification — one button/chip/field size, locked in tokens | High UX | 🟡 **token half shipped** (#118) — the scale exists, is generated into all four surfaces and is guarded by the drift job. Kotlin half open: a Chip, a ListRow, and routing the remaining screens through them | C3 | C4, C6 |
 | **C6** | Bridges & Advanced information architecture — group, collapse, list rows | High UX | ⬜ todo | B6, C4, C5 | — |
 | **B11** | Empty-state & status-line diet | Medium UX | ⬜ todo — the sweep-up after C4 | B3, C4 | — |
 | **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
@@ -1111,7 +1111,7 @@ diff of the densest screens.
 
 ---
 
-## C5 — Control system unification  ⬜ todo
+## C5 — Control system unification  🟡 token half shipped (#118)
 
 **Urgency:** High UX · **Depends:** C3, VISUALDESIGN · **Parallel with:** C4, C6 ·
 **Branch:** `ui/c5-control-unification` · **Freeze impact:** none
@@ -1127,8 +1127,23 @@ and small buttons (COPY/SHARE) are shorter and tighter; text fields and the
 offline-window field each carry their own padding. `Chrome.kt` already centralises
 the *components* — what varies is the metrics passed to them, and nothing pins those.
 
+**Shipped in #118 — the token half.** `design/tokens.json` gained a `metrics`
+block; `design/generate.py` emits it into `site/style.css`,
+`web/build-standalone.mjs`, `Chrome.kt` (as `internal object Metrics`) and
+VISUALDESIGN's table, so the "design tokens in sync" job now guards heights,
+paddings, radii and spacing exactly as it guards hexes. `Chrome.kt`'s
+`CrateShape`, `CrateButton`, `Crate` and `VGap` consume them, and every value was
+lifted from what the tree already used — **no rendered metric changed**. The
+generator also refuses to emit a control under the touch floor whose role does not
+say how it still clears it, which is the chip's whole problem stated once.
+
+**Still open — the Kotlin half.** A `Chip` and a `ListRow` primitive, and routing
+the remaining ad-hoc sizes in `NodeScreens.kt` / `ChatScreens.kt` /
+`FeedScreens.kt` through the shared components. That part changes what is on
+screen, so it wants a device and a screenshot diff.
+
 **Steps**
-1. Add a metrics block to `design/tokens.json`: exactly three interactive control
+1. ~~Add a metrics block to `design/tokens.json`~~ *(done)*: exactly three interactive control
    sizes (primary button, secondary/outline at the same height, compact chip),
    one text-field height matching the button, one horizontal padding, one radius,
    one type scale. **This is new ground for the generator** — see the note above.

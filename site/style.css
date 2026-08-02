@@ -27,6 +27,26 @@
   /* No webfont: the standalone node must make zero network requests, and CI
      asserts it. A display face is a system stack or it is nothing. */
   --display: Impact, Haettenschweiler, "Arial Narrow Bold", system-ui, sans-serif;
+
+  /* Controls, spacing and shape — C5. Values in px; the Android side emits
+     the same numbers as dp, which agree at 1x. */
+  --control-h: 48px;     /* primary and secondary buttons, and text fields — one height for all three */
+  --control-px: 14px;    /* horizontal padding */
+  --control-py: 9px;     /* vertical padding */
+  --chip-h: 32px;        /* compact presets and toggles (7D/14D/30D, topics). NEW — must still carry a 48dp touch target */
+  --chip-px: 10px;       /* horizontal padding */
+  --chip-py: 4px;        /* vertical padding */
+  --row-h: 56px;         /* list rows for the Bridges/Advanced restructure (C6). NEW */
+  --row-px: 12px;        /* horizontal padding */
+  --row-py: 8px;         /* vertical padding */
+  --radius: 2px;         /* corner radius, everywhere — CrateShape already used it */
+  --border: 2px;         /* control and crate border width */
+  --throw: 3px;          /* the pressed-button offset and its drop shadow */
+  --space-tight: 4px;    /* within a control */
+  --space-gap: 8px;      /* between controls — VGap's default */
+  --space-pad: 12px;     /* inside a crate/card */
+  --space-section: 16px; /* between sections */
+  --touch-min: 48px;     /* WCAG/Material floor. `control` and `row` clear it by height; `chip` must be padded out to it. */
 }
 
 /* Field Notes — the printed-manual voice. There is no light variant of a CRT in
