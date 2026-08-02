@@ -170,6 +170,45 @@ def check_touch_targets():
             )
 
 
+# The three sizes VISUALDESIGN §3 declares, and their permitted ranges. A range
+# rather than a number because the design brief gives one ("48–52 dp", "32–36 dp")
+# — the exact value is a judgement, the *count* is not.
+CONTROL_SIZES = {
+    "control": (48, 52),
+    "chip": (32, 36),
+    "row": (52, 60),
+}
+
+
+def check_control_sizes():
+    """Exactly three interactive sizes, no more, no fewer, each in its range.
+
+    The whole point of C5 is that a fourth height is how a design stops being a
+    system. Enforcing it here rather than in review means adding one is a
+    deliberate edit to this list with a reason attached, instead of a number that
+    slipped into a screen and was never noticed again.
+    """
+    got = {c["n"]: c["h"] for c in METRICS["controls"]}
+    if set(got) != set(CONTROL_SIZES):
+        extra = sorted(set(got) - set(CONTROL_SIZES))
+        missing = sorted(set(CONTROL_SIZES) - set(got))
+        raise SystemExit(
+            "design tokens: there are exactly three interactive sizes "
+            f"({', '.join(sorted(CONTROL_SIZES))}), and tokens.json disagrees.\n"
+            + (f"  unexpected: {', '.join(extra)}\n" if extra else "")
+            + (f"  missing:    {', '.join(missing)}\n" if missing else "")
+            + "A fourth size is how a design stops being a system. If you mean it,\n"
+            "change CONTROL_SIZES here and say why in VISUALDESIGN §3."
+        )
+    for name, h in sorted(got.items()):
+        lo, hi = CONTROL_SIZES[name]
+        if not lo <= h <= hi:
+            raise SystemExit(
+                f"design tokens: control `{name}` is {h}dp, outside the "
+                f"{lo}–{hi}dp the design language allows for it."
+            )
+
+
 def gen_metrics_css():
     L = ["  /* Controls, spacing and shape — C5. Values in px; the Android side emits",
          "     the same numbers as dp, which agree at 1x. */"]
@@ -486,6 +525,7 @@ def gen_visualdesign_md():
 def main():
     check_contrast()
     check_touch_targets()
+    check_control_sizes()
     write_region(SURFACES["site"]["file"], gen_site_css())
     write_region(SURFACES["standalone"]["file"], gen_standalone_css())
     write_region(SURFACES["android"]["file"], gen_android_kt())

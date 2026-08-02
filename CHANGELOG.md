@@ -18,6 +18,28 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The design language now says what each control is *for*, and the generator
+  enforces that there are only three.** C5 locked the sizes; this locks their
+  use. `VISUALDESIGN.md` §3 gains a normative purpose→element matrix — one
+  visible primary per context, destructive actions always behind a confirm and
+  never signalled by colour alone, live status as a segmented LED plus short mono
+  text rather than a sentence, long explanation never open by default on a
+  working screen — plus the density rules: one instructional sentence per screen,
+  one line per empty state, and a returning user finding the primary action in
+  under three seconds. The front page is plain language only; the aesthetic is in
+  the pixels, not the vocabulary.
+
+  `design/generate.py` now refuses a fourth interactive size, or any of the three
+  outside the range the document allows it. A fourth height is how a design stops
+  being a system, and catching it in review has already failed once — this makes
+  adding one a deliberate edit to the generator with a reason attached rather
+  than a number that slips into a screen and is never noticed again. Verified by
+  adding a fourth and watching the build refuse.
+
+  None of this removes information: the security copy and bridge explanations
+  still exist, one tap away. What changes is that the app stops explaining itself
+  to someone who already knows.
+
 - **Sizes are single-sourced now, not just colours (C5, token half).** C3 made
   `design/tokens.json` the one place a colour is defined; a button height typed by
   hand into three files drifts exactly the same way, and nothing was watching. The
