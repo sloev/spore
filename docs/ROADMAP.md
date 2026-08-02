@@ -82,6 +82,10 @@ name · **14** Freeze impact (almost always None).
 | **C1** | Token parity + forbidden-pair audit | High UX | ✅ merged (#73) | — | B7 |
 | **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ✅ done — `design/tokens.json` → `design/generate.py`, CI job "design tokens in sync" | C1 (did it by hand) | W-series |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
+| **C4** | Density & type hierarchy — cut explanatory text, progressive disclosure | High UX | ⬜ todo — see "Track C/B-UI" below | C1, C3, B7 | C6 |
+| **C5** | Control system unification — one button/chip/field size, locked in tokens | High UX | ⬜ todo — the largest of the four: it takes `generate.py` past colour for the first time | C3 | C4, C6 |
+| **C6** | Bridges & Advanced information architecture — group, collapse, list rows | High UX | ⬜ todo | B6, C4, C5 | — |
+| **B11** | Empty-state & status-line diet | Medium UX | ⬜ todo — the sweep-up after C4 | B3, C4 | — |
 | **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ✅ **shipped**, punch rung 🧪 — the whole ladder: LAN, global IPv6, declared overlay, reflexive + punch (#114 fixed the ordering that kept it from ever landing), iroh as last resort. The punch is proven on loopback only, where there is no NAT to traverse; `HARDWARE.md` row 19 is the two-real-NATs procedure that would settle it. Staged plan under "Product decisions" below | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
@@ -1013,6 +1017,213 @@ feat/spore-direct-pipe
 - Android/ESP32 UI and Codec2-on-pipe can follow as PR8b / separate apps
 - Complements session layer (`src/session.rs`): sessions ride envelopes; Direct rides a sideband port after SPORE signaling
 - Offline sealed-mail windows are **PR0 Part B**; Direct (PR8) does not replace them
+
+---
+
+# Track C/B-UI — Android density, controls, and information architecture
+
+Four specs supplied 2026-08-02, filed here rather than executed: every acceptance
+criterion in them is visual or subjective ("scan time < 3 s", "screenshot diff",
+"feels scannable"), and CI's `apk` job builds the app but cannot look at it. They
+need a person with a device.
+
+**Corrected against the tree before filing.** The specs' `Files` tables name an
+`android/.../ui/{bridges,advanced,connect,chat,feed,components}/*` layout that does
+not exist — the app is flat, `android/app/src/main/kotlin/org/spore/node/*.kt`. The
+real mapping, and the three findings that change the specs' scope:
+
+| Spec says | Actually |
+|---|---|
+| `ui/bridges/*`, `ui/advanced/*`, `ui/connect/*` | all three are **`NodeScreens.kt`** (769 lines) — `BridgesList`, `BridgeRow`, `AdvancedScreen`, `ConnectScreen` |
+| `ui/chat/*` | `ChatScreens.kt` (525) |
+| `ui/feed/*` | `FeedScreens.kt` (336) — `FeedScreen`, `PostCard` |
+| `ui/components/*` — "new or modify" | **`Chrome.kt` (652) already is the component library**: `Crate`, `CrateButton`, `CrateSwitch`, `ToughbookField`, `ToughbookFace`, `SectionLabel`, `Caption`, `DisplayHeading`, `ConfirmDialog`, `LedDot`, `SegmentedLed`, `StickerBadge`, `VGap`/`HGap` |
+
+1. **C5 is smaller than it reads.** The primitives exist and are already shared;
+   what is missing is a **Chip** and a **ListRow**, plus locked metrics. This is
+   "lock and fill two gaps", not "build a control system".
+2. **C6 is partly done.** `BridgeRow` and `BridgesList` already exist, so
+   "active bridges as uniform rows" is a starting point rather than a rewrite.
+   The restructure is real for `AdvancedScreen`.
+3. **C4's "possibly add a density/spacing scale if missing" — it is missing.**
+   `design/tokens.json` holds `dark`, `light`, `fonts`, `contrast`, `surfaces`
+   and **no** spacing, sizing, radius or type scale. So C5's "modify tokens to
+   lock button heights, paddings, radii, type scales" is an *addition*, and it
+   takes `design/generate.py` past colour for the first time: new emit code for
+   three surfaces plus the VISUALDESIGN table, and the "design tokens in sync" CI
+   job then guards metrics as well as hexes. Worth doing — it is the same
+   define-once argument that made C3 worth doing — but it is the largest single
+   piece of work in these four specs and the specs do not say so.
+
+**`B9` does not exist.** C4, C5 and C6 each list it under *Parallel with*, and the
+B-series runs B1–B8, all shipped. Either it was renumbered or it was never
+written; whoever picks these up should not go looking for it. (The C-series
+likewise has no C2.)
+
+**Order.** C5 before C4 before C6: locking the control metrics first means the
+density pass moves text around finished components, and the IA restructure lands
+on both. B11 last — it is the sweep-up after C4 by its own description.
+
+---
+
+## C4 — Density & type hierarchy pass  ⬜ todo
+
+**Urgency:** High UX · **Depends:** C1, C3, B7 · **Parallel with:** B11 ·
+**Branch:** `ui/c4-density-hierarchy` · **Freeze impact:** none
+
+**Why.** Screens open with multi-sentence instructional blocks and repeated status
+lines, so a user who already understands the model scans past the same concepts
+every visit. It reads as a documentation overlay rather than a daily tool.
+Progressive disclosure keeps the honesty — the explanations still exist — while
+restoring scannability.
+
+**Current shape.** Almost every major screen opens with 2–4 lines of prose. Status
+lines ("X envelopes held…", "Bridges relay your signed envelopes…", "no bridges
+yet — SPORE only reaches…") sit above the controls and compete with them. The
+Advanced About/security text is always expanded.
+
+**Steps**
+1. One short headline or single sentence at the top of a screen, maximum.
+   Everything else goes behind an info affordance, a "How this works" expander, or
+   first-run only.
+2. The Advanced About/security blurb becomes a collapsed section (closed by
+   default after first view) or its own screen behind a single "Security model" row.
+3. Every empty-state and status string to ≤ 1 line. Keep the honesty; drop the
+   lecture.
+4. Consistent vertical rhythm from the spacing scale — which C5 has to add first.
+5. Audit each screen against: *can a returning user find the primary action in
+   under three seconds of scanning?*
+
+**Non-goals.** Removing any security or honesty information permanently; colour
+tokens or component shapes (C5); protocol or bridge logic.
+
+**Acceptance**
+- [ ] No screen opens with more than one short sentence of instructional text.
+- [ ] Long security/About copy is behind an expander or a separate screen.
+- [ ] Empty states and status lines are single-line and non-repetitive.
+- [ ] Returning-user scan time for the primary action is subjectively < 3 s.
+- [ ] `VISUALDESIGN.md` records the density rule.
+- [ ] B7 accessibility still passes — large text, font scale, reduced motion.
+
+**Tests.** Manual pass over Chats, Feed, Bridges, Advanced, Connect, Everyone on a
+fresh install and a used one; large-text and reduced-motion recheck; screenshot
+diff of the densest screens.
+
+---
+
+## C5 — Control system unification  ⬜ todo
+
+**Urgency:** High UX · **Depends:** C3, VISUALDESIGN · **Parallel with:** C4, C6 ·
+**Branch:** `ui/c5-control-unification` · **Freeze impact:** none
+
+**Why.** Primary pink buttons, olive full-width blocks, compact chips and text
+fields use inconsistent heights, padding and radii. The variation is itself visual
+noise and makes the UI feel unsystematic. A restrained control system has to exist
+before further screen redesign.
+
+**Current shape.** Pink CTAs (POST, SEND TO PUBLIC) are large; olive actions (AUDIO
+MODEM, MESHTASTIC, SCAN THEIR QR) are full-width and tall; preset chips (7D/14D/30D)
+and small buttons (COPY/SHARE) are shorter and tighter; text fields and the
+offline-window field each carry their own padding. `Chrome.kt` already centralises
+the *components* — what varies is the metrics passed to them, and nothing pins those.
+
+**Steps**
+1. Add a metrics block to `design/tokens.json`: exactly three interactive control
+   sizes (primary button, secondary/outline at the same height, compact chip),
+   one text-field height matching the button, one horizontal padding, one radius,
+   one type scale. **This is new ground for the generator** — see the note above.
+2. Emit them alongside the colours, so the "design tokens in sync" job guards
+   metrics too, and hand-editing a height is a red PR exactly as hand-editing a hex is.
+3. Add the two missing primitives to `Chrome.kt` — a Chip and a ListRow — and
+   route every ad-hoc `Button()`/custom composable through the shared ones.
+4. Re-measure contrast at the new sizes, especially olive on dark.
+
+**Non-goals.** New colours or accents; Bridges/Advanced IA (C6); new interactive
+states.
+
+**Acceptance**
+- [ ] All primary and secondary buttons share one height and one horizontal padding.
+- [ ] Preset chips (offline window, topics) are one component.
+- [ ] Text fields match button height.
+- [ ] No one-off button styles remain.
+- [ ] `VISUALDESIGN.md` lists the three canonical sizes.
+- [ ] Touch targets ≥ 48 dp; large-text mode still usable; token CI job green.
+
+---
+
+## C6 — Bridges & Advanced information architecture  ⬜ todo
+
+**Urgency:** High UX · **Depends:** B6, C4, C5 · **Branch:**
+`ui/c6-bridges-advanced-ia` · **Freeze impact:** none
+
+**Why.** Bridges is a long vertical stack of differently sized full-width buttons
+plus free-text fields; Advanced mixes identity, topics, node stats, seed, prekey
+and offline-window controls with little grouping. Both read as settings dumps.
+List-row + section patterns with progressive disclosure make the power features
+discoverable without constant overload.
+
+**Current shape.** Bridges: header text → NETWORK card (UDP) → a long list of
+full-width olive buttons → several text fields with ADD/JOIN. Advanced: stacked
+cards for Name, Topics, Node, Seed, Prekey Ring, Offline Window, About, each with
+its own internal layout and button sizes. `BridgeRow` and `BridgesList` already
+exist, so the row pattern is a foundation rather than a blank page.
+
+**Steps**
+1. Bridges becomes a grouped list: active bridges as uniform rows (icon, title,
+   status, pause/resume or overflow), and a single "Add bridge" entry opening a
+   bottom sheet or secondary screen with the current options.
+2. Section or collapse the less-common transports (audio, Meshtastic, RNode,
+   Wi-Fi Direct, Nostr) so the default view stays short.
+3. Advanced becomes sections of list rows: Identity (name, photo, address);
+   Security (seed, prekey ring, offline window), each row opening a detail or
+   expander; Node stats (peers, envelopes, store budget) read-only.
+4. Move the long About text fully behind a row or its own screen — completes C4.
+5. Use the C5 controls throughout.
+
+**Non-goals.** Which bridges exist or their start/stop logic; new bridge types;
+crypto or offline-window semantics.
+
+**Acceptance**
+- [ ] Bridges defaults to active bridges as uniform rows plus one "Add" entry.
+- [ ] Advanced is sectioned; no long text permanently expanded.
+- [ ] Every interactive element uses the C5 control system.
+- [ ] No loss of functionality or honesty messaging.
+- [ ] Scannable on a typical phone viewport without scrolling past walls of buttons.
+- [ ] B6's bridge-status enum behaviour does not regress.
+
+**Tests.** Add/pause/resume/remove every bridge type; change name, export ring,
+change offline window, reveal seed with its confirmations; rotation and large text.
+
+---
+
+## B11 — Empty-state & status-line diet  ⬜ todo
+
+**Urgency:** Medium UX · **Depends:** B3, C4 · **Branch:**
+`ui/b11-empty-status-diet` · **Freeze impact:** none
+
+**Why.** Empty states and persistent status lines carry full sentences repeating
+concepts explained elsewhere — "no bridges yet — SPORE only reaches as far as its
+bridges do", "no conversations yet", "13 envelopes held for the mesh". After the
+density pass these become the next source of noise.
+
+**Steps**
+1. Every empty state to one short line plus an optional secondary action.
+2. Envelope/peer counters compact and non-narrative — `65 stored · 0 peers`.
+3. Drop explanations that duplicate C4's progressive-disclosure text.
+4. **Keep the honesty**: public-send confirmation and security warnings stay
+   exactly as clear. Only ambient status language tightens.
+
+**Non-goals.** When empty states appear; softening any security or public-message
+warning.
+
+**Acceptance**
+- [ ] Every empty state is ≤ 1 line of primary text.
+- [ ] Ambient status lines are compact and non-repetitive.
+- [ ] Public-send and security confirmations are unchanged in meaning.
+- [ ] No screen still lectures a returning user.
+
+**Tests.** Fresh-install walkthrough of every empty state; used install with 0
+peers and with peers; notification shade.
 
 ---
 
