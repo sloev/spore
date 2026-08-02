@@ -102,11 +102,14 @@ pub(crate) fn run_config(cfg: Config) {
             }
             println!("  [direct] offering {}", d.offering());
             // Said once, plainly: knowing the outside address is not the same as
-            // being reachable at it, and the punch as wired cannot land (see the
-            // ROADMAP). A global IPv6, where one exists, is the path that needs
-            // neither.
+            // being reachable at it. The punch now runs on both ends at once
+            // (#114) and each pipe reports which it got — `punched` or `no punch,
+            // plain connect` — so this is a statement of what to watch for rather
+            // than a standing disclaimer. A global IPv6, where one exists, still
+            // needs neither.
             eprintln!(
-                "  [direct] note: the punch does not land yet — across NAT, IPv6 is the path that works"
+                "  [direct] note: each pipe prints how it was established; \
+                 `no punch, plain connect` on a reflexive candidate means no path"
             );
             let dial = match cfg.direct_to.as_deref() {
                 None => None,

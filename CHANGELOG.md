@@ -18,6 +18,18 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The punch is 🧪, not ✅, and the daemon no longer says it cannot work.** Two
+  bits of honesty owed after the ordering fix. The daemon printed *"the punch does
+  not land yet"* on every start — true when written, a lie once it landed — and now
+  points at the per-pipe `punched` / `no punch, plain connect` line instead, which
+  is the thing actually worth watching. And the punch's own status is demoted from
+  ✅ to 🧪: every hole-punch test in the tree runs on **loopback**, where there is
+  no NAT to traverse, so a punch that never happened is indistinguishable from one
+  that worked — the precise indistinguishability that hid #101, #103 and the
+  ordering bug itself. `HARDWARE.md` gains row 19, two daemons behind two different
+  consumer routers, as the procedure that would earn the ✅. A real NAT is hardware
+  too.
+
 - **Hole punching actually punches.** The last broken rung of the P-Direct-NAT
   ladder was an ordering bug, not a missing feature: the responder opened its
   socket *inside* `on_plaintext`, and opening a punched candidate blocks for a

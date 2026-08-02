@@ -235,7 +235,7 @@ Reachability, by candidate — see [`ROADMAP.md`](ROADMAP.md)'s P-Direct-NAT tra
 | LAN | ✅ |
 | Global IPv6 | ✅ no NAT in front of it |
 | Declared overlay (`direct-also:`) | ✅ already routes |
-| Reflexive + hole punch | ✅ both ends punch concurrently and report `Via::Punched`; a punch that does not land still falls back to a plain connect and says so |
+| Reflexive + hole punch | 🧪 both ends punch concurrently and report `Via::Punched`, but only on loopback — where there is no NAT, so a punch that never happened looks identical to one that worked. [`HARDWARE.md`](HARDWARE.md) row 19 is the procedure that would make it ✅. A punch that does not land still falls back to a plain connect and says so |
 | iroh (`direct-iroh:`) | ✅ opt-in; relay posture is never defaulted |
 
 The daemon prints which locators it offers and how each pipe was established, so
