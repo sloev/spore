@@ -31,7 +31,7 @@ off len field
 2   1   flags  b0 ENCRYPTED b1 SIGNED b2 FRAGMENT b3 ACKREQ b4 FLOOD b5 SRC8
                b6 RATCHET (0x40, §7)   b7 reserved, MUST be 0
 3   1   hops   remaining relays (default 16; relays clamp incoming to ≤ 16)
-4   4   expiry unix seconds u32 (stores clamp horizon to 30 d — unimplemented here, see ROADMAP)
+4   4   expiry unix seconds u32 (stores clamp horizon to 30 d)
 8   8   dest   address | topic | 0x00×8 = public
 -- if SIGNED: src = 32-B pubkey, or 8-B address if SRC8 --
     2   plen   u16
@@ -50,7 +50,7 @@ Receiver decodes when any received set reaches rank *count* (Gaussian eliminatio
 
 ## 4. Routing state (T2)
 - **Neighbors** (per interface): point-to-point peers + anyone heard via hops=0 ANNOUNCE.
-- **Paths**: `addr → up to 3 of (iface, neighbor, age)`. Learned: (a) the **first copy** of any new signed envelope raced every path and won — its src is reachable via what delivered it; (b) flooded ANNOUNCEs. On broadcast media the interface *is* the direction. Fresh < 3 h; purge 7 d (stale entries still guide custody). *Not implemented here — see [ROADMAP.md](ROADMAP.md) § Conformance gaps.*
+- **Paths**: `addr → up to 3 of (iface, neighbor, age)`. Learned: (a) the **first copy** of any new signed envelope raced every path and won — its src is reachable via what delivered it; (b) flooded ANNOUNCEs. On broadcast media the interface *is* the direction. Fresh < 3 h; purge 7 d (stale entries still guide custody).
 
 **ANNOUNCE** (type 3, signed): payload = `[prekey:32][nt:1][topic×8 ea][np:1][(addr:8, age_min:2) ea][petname…]` — your current encryption prekey (§7), topics you collect, freshest paths. Link HELLO = hops 0; flooded = hops 16.
 

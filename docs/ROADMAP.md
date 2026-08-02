@@ -107,19 +107,20 @@ museum of what was.
 ## Conformance gaps — SPEC rules with no implementation
 
 Found by checking [`SPEC.md`](SPEC.md) against the crate rather than against the
-other docs. Each is a rule this repo *specifies* and does not execute. They are
-recorded rather than deleted from SPEC, because the rule is right and the code is
-what is behind — the opposite of the usual drift.
+other docs: rules this repo *specifies* and does not execute. Recorded rather than
+deleted from SPEC, because the rule is right and the code is what is behind — the
+opposite of the usual drift.
 
-| SPEC | Rule | What the code does | Severity |
-|---|---|---|---|
-| §4 | Paths `purge 7 d` | `Paths` has `learn` and `fresh` only. Nothing purges, and `Paths` is the one peer-keyed map `enforce_bounds` does **not** trim — `MAX_PEERS` bounds `peer_prekeys`, `peer_busy`, `peer_names` and `sessions`, but not `paths`. Every signed envelope from a new source inserts an entry that is never removed. | **unbounded growth**; a long-lived relay on an open mesh grows `paths` without limit |
-| §2 | "stores clamp horizon to 30 d" | No clamp exists. Ingest checks only `e.expiry < now`; `SEEN_MIN_SECS` is a dedup *retain floor* (hold the id ≥ 30 d), which is the opposite operation. An envelope claiming expiry in 2099 is accepted and stored. | store pinning — eviction ranks "expired" first, and such an envelope is never expired |
-| Page 2 | Native nodes run WebRTC **ice-lite** with static ufrag/pwd/fingerprint | No native WebRTC bridge exists; WebRTC is browser-only (`web/transports/webrtc.mjs`). The 90-byte descriptor story has no native half. | planned, not a defect — but the page reads as though it ships |
+| SPEC | Rule | State |
+|---|---|---|
+| §4 | Paths `purge 7 d` | ✅ **shipped** (#113). `Paths::purge` on the sweep, `Paths::trim(MAX_PEERS)` as the backstop. It was the one peer-keyed map `enforce_bounds` did not trim, so every signed envelope from a new source added a row that outlived the node. |
+| §2 | "stores clamp horizon to 30 d" | ✅ **shipped** (#113). One `min` in `Node::store_put`, the single choke point into the store, plus the matching clamp on the dedup retain so an id is never held longer than its bytes. |
+| Page 2 | Native nodes run WebRTC **ice-lite** with static ufrag/pwd/fingerprint | ⬜ open. No native WebRTC bridge exists; WebRTC is browser-only (`web/transports/webrtc.mjs`), so the 90-byte descriptor story has no native half. Planned, not a defect — but the page reads as though it ships, and now says otherwise. |
 
-Fixing the first two is small and local: a cap plus an age filter in `Paths`, and
-one `min` on ingest. Both want a test that fails without them, per the verification
-rule below.
+**Why this section exists.** Two of the three were live defects — unbounded growth
+and store pinning — that no test covered and no doc admitted, because every doc had
+only ever been checked against the other docs. Check new normative text against the
+crate, not against the page that inspired it.
 
 ## Carried forward from shipped PRs (TODO)
 
@@ -1825,7 +1826,7 @@ account, no vendor inbox, no iOS-roadmap guilt.
 
 ---
 
-## D1 — Editorial and architectural review of the documentation — ⬜ todo
+## D1 — Editorial and architectural review of the documentation — ✅ shipped (#111, #112)
 
 **Why.** The docs have grown by accretion — this session alone touched ROADMAP,
 DESIGN, DIRECT, CHANGELOG, DEV_GUIDE, MISSION and VISUALDESIGN — and nobody has
@@ -1849,10 +1850,30 @@ encyclopedia and stays comprehensive.
 maintenance; prefer one definition referenced everywhere over five explanations.
 
 **Acceptance**
-- [ ] Every markdown file classified, with a keep/delete/merge recommendation.
-- [ ] Duplication table: concept → where it appears → where it should live.
-- [ ] Recommended structure and read order for a first-time contributor.
-- [ ] A ranked plan — the first ten commits, by impact.
+- [x] Every markdown file classified, with a keep/delete/merge recommendation.
+      `RESILIENCE.md` was the one deletion; its unique table moved into CONTINUITY.
+- [x] Duplication table: concept → where it appears → where it should live. The
+      live outcome rather than a table: ROADMAP dropped 757 lines of specs for
+      shipped PRs, "not a protocol change" is said once in DIRECT, and
+      VISUALDESIGN says "this document is normative" once rather than twice.
+- [x] Recommended structure and read order for a first-time contributor —
+      `DEV_GUIDE.md` is now almost entirely lookup tables, starting with a
+      by-goal index.
+- [x] A ranked plan — the first ten commits, by impact. Executed rather than
+      filed: eleven commits across #111.
+
+**What the pass did not anticipate.** It was scoped as an *editorial* review —
+duplication, tone, read order — and assumed the docs were mutually consistent and
+merely verbose. They were not. Checking them against the crate instead of against
+each other (#112) found ten claims the tree contradicts, including two record-format
+values in `DIRECT.md` that would have produced an incompatible implementation, and
+a `develop` branch that does not exist being the first instruction a contributor
+reads. Two of the SPEC rules it surfaced were live defects, fixed in #113.
+
+The lesson worth keeping: an editorial pass makes the docs *consistent*, which is
+not the same as *true*, and consistency is the more comfortable of the two to
+achieve. The **Conformance gaps** section at the top of this file is where the
+difference gets recorded from now on.
 
 **Note on doing it well:** this needs the whole docs tree read in one pass, so it
 wants a session with the context budget to actually read them rather than sample

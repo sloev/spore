@@ -59,7 +59,7 @@ impl Node {
         // A HELLO is link-local and immediately superseded by the next one, so it
         // is not worth a store slot or an INV entry; a flooded ANNOUNCE is.
         if hops > 0 {
-            self.store_put(&e);
+            self.store_put(&e, now);
         }
         self.forward_intents(&e, NO_IFACE, now)
     }
@@ -174,6 +174,10 @@ impl Node {
             // embedder, because a forward-secrecy property that each platform has
             // to remember to switch on is one that most platforms will not have.
             self.maybe_rotate_prekey(now);
+            // §4's path purge. On the sweep rather than on every learn, because
+            // it is a scan of the whole table and the table only goes stale with
+            // the clock.
+            self.paths.purge(now);
         }
 
         // Dedup: prefer evicting whatever is nearest to expiring, so the ids most
@@ -199,6 +203,7 @@ impl Node {
             }
         }
 
+        self.paths.trim(MAX_PEERS);
         trim_map(&mut self.peer_prekeys, MAX_PEERS);
         trim_map(&mut self.peer_busy, MAX_PEERS);
         trim_map(&mut self.peer_names, MAX_PEERS);
@@ -226,7 +231,13 @@ impl Node {
         if self.seen.contains_key(&id) || e.expiry < now {
             return Rx::default(); // duplicate or expired -> drop
         }
-        self.seen.insert(id, e.expiry.max(now + SEEN_MIN_SECS));
+        // Retain the id for at least the §11 floor, and never past the §2 store
+        // horizon: holding an *id* longer than we hold its *bytes* is backwards,
+        // and `MAX_SEEN` evicts nearest-expiry first — so an unclamped
+        // far-future expiry would make junk the last thing evicted and let a
+        // flood of it pin the dedup table. Both bounds are the same 30 days.
+        let retain = e.expiry.clamp(now + SEEN_MIN_SECS, now + MAX_EXPIRY_HORIZON_SECS);
+        self.seen.insert(id, retain);
         self.enforce_bounds(now);
 
         // Path learning: the first copy of a signed envelope raced every route
@@ -348,7 +359,7 @@ impl Node {
                     ack.flags |= fl::FLOOD; // receipts flood and teach reverse paths
                     ack.sign(&self.sk);
                     self.mark_seen(&ack);
-                    self.store_put(&ack);
+                    self.store_put(&ack, now);
                     rx.forwards.append(&mut self.forward_intents(&ack, iface, now));
                 }
             }
@@ -382,7 +393,7 @@ impl Node {
         // that §10 caps. Local delivery above already happened regardless.
         if within_quota {
             // Store for later opportunistic sync.
-            self.store_put(e);
+            self.store_put(e, now);
 
             // Relay.
             if allow_forward && e.hops > 0 {
