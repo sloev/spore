@@ -18,6 +18,36 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The design language advances an era: Deep Moss and Copper Oxide.** The
+  Solarpunk Refinement proposed replacing the palette outright — moss, copper
+  oxide, aged amber, a softened phosphor, no pink, no cyan. Its own artwork was
+  the argument against going that far: the before/after shows **the same crate**,
+  weathered differently. Not a new object, so not a new language. Adopted as a
+  refinement, with all four decisions recorded in §6b because a palette nobody can
+  explain is one the next person quietly undoes.
+
+  **Taken:** Kevlar Olive → **Deep Moss** `#3a5a2e`, the one colour carrying
+  "wasteland" most literally now carrying "kept"; and **Copper Oxide** `#b5651d`
+  joins as the warm mid-tone for hardware and wear, which the palette genuinely
+  lacked — between asphalt and amber there was nothing at all.
+
+  **Declined:** softening `--phosphor`, which is 14.59:1 on void, the best
+  contrast in the palette, and means *it worked* — that spends legibility on mood.
+  And dropping pink and cyan: pink is the entire kawaii half of the language, and
+  cyan is the focus ring that §0.2 and B7 make non-negotiable.
+
+  **The refinement made the forbidden pair more forbidden**, which is worth
+  checking rather than hoping for: pink on the crate fill went 2.32:1 → 2.21:1, so
+  "never pink on the moss" survives with a wider margin. Amber moved 4.48 → 4.27,
+  still large-text-only. `design/generate.py` re-graded every pairing in both
+  directions — a pair claimed forbidden that had quietly become readable would
+  have failed the build just as loudly — and the token rename propagated through
+  all three surfaces plus fourteen hand-written references, including two
+  comments that still quoted the old ratios.
+
+  The name survives intact, and more literally than before: Copper Oxide *is* the
+  rust in **Toxic Bubblegum & Rust**.
+
 - **VISUALDESIGN gains an explicitly non-normative Inspiration section, and the
   roadmap gains a hardware track.** A design manual arrived proposing a
   "Solarpunk Refinement" — moss, copper oxide, aged amber, a refined phosphor
