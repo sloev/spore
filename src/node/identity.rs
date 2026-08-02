@@ -178,6 +178,19 @@ impl Node {
     pub fn peer_prekey(&self, a: &Addr) -> Option<[u8; 32]> {
         self.peer_prekeys.get(a).copied()
     }
+
+    /// Would a DM to `a` right now be sealed, rather than going in the clear?
+    ///
+    /// [`Node::send_direct`] seals with a live §7 session if there is one, else a
+    /// one-shot seal to a known prekey, else sends **plaintext** — a node that has
+    /// never heard the peer's ANNOUNCE has no key to seal to. That fallback is
+    /// correct, and invisible, which is the problem: a UI that draws a padlock on
+    /// every DM would be lying on exactly the sends that need saying. This asks
+    /// the same two questions without sending anything, so a caller can tell the
+    /// truth before the user commits.
+    pub fn can_seal_to(&self, a: &Addr) -> bool {
+        self.sessions.get(a).is_some_and(|s| s.can_send()) || self.peer_prekeys.contains_key(a)
+    }
     // ---- prekey ring (§7) -------------------------------------------------
 
     /// Mint a fresh prekey, advertise it, and drop any secret past its lifetime.

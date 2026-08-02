@@ -56,6 +56,27 @@ packs a pointer and length: `(ptr << 32) | len`. JS reads the two halves with
 *delivered* are envelopes addressed to (or subscribed by) this node. `spore.mjs`
 parses that blob back into arrays of `Uint8Array`.
 
+**Sealed mail** is a separate set of calls, and the distinction matters:
+`spore_node_send` is the **raw, unsealed, unsigned** path — the one you use to
+prove a transport carries bytes, not the one a person sends another person. For
+that, `node.sendDirect(dest, payload)` seals to the peer's prekey (or through a §7
+ratchet session, if one exists) and signs.
+
+| Call | For |
+|---|---|
+| `node.announce()` | flood this node's prekey/topics. **Send one on connect** — until a peer has heard it, they have no key to seal to you and will fall back to cleartext |
+| `node.sendDirect(dest, payload)` | a sealed, signed DM |
+| `node.canSealTo(dest)` | *would* that DM actually be sealed? Ask before you promise it |
+| `node.openDm(sender, payload, ratcheted)` | open a delivered DM; `null` if it does not open |
+| `spore.src(env)` | the **authenticated** sender — `null` for unsigned, unverified, or `SRC8` |
+| `spore.flags(env)` | `FLAG_ENCRYPTED`, `FLAG_RATCHET` — the latter picks which scheme `openDm` uses |
+
+Two rules a UI has to follow. **Never draw a padlock unconditionally:**
+`sendDirect` falls back to cleartext when no key is known, correctly and
+silently, so `canSealTo` is what earns the icon. **Key threads on `spore.src`,
+never on a claimed field** — a signed envelope proves its own sender, and
+anything weaker is spoofable.
+
 **The Hub** owns one node and N transports. On `addTransport(t)` it replaces
 `t.receive` so inbound frames route through `node.recv`; deliveries fire
 `onDeliver`, and forwards are `send()` onto every *other* transport (split-horizon).

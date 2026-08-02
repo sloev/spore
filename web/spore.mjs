@@ -102,7 +102,32 @@ class Spore {
     this.ex.spore_free(p, env.length);
     return ok;
   }
+  /** A delivered envelope's flags byte. `ENCRYPTED` (0x01) says the payload is
+   * sealed; `RATCHET` (0x40) says which scheme opens it — pass that as
+   * `ratcheted` to `openDm`. */
+  flags(env) {
+    const p = this._put(env);
+    const f = this.ex.spore_env_flags(p, env.length);
+    this.ex.spore_free(p, env.length);
+    return f;
+  }
+  /** The **authenticated** sender address (8 bytes), or `null`.
+   *
+   * `null` for an unsigned envelope, a signature that does not verify, and
+   * `SRC8` — which carries an address the envelope cannot prove. A thread list
+   * keyed on anything weaker than this is spoofable, so this is the only sender
+   * the UI should ever key on. */
+  src(env) {
+    const p = this._put(env);
+    const out = this._unpack(this.ex.spore_env_src(p, env.length));
+    this.ex.spore_free(p, env.length);
+    return out.length === 8 ? out : null;
+  }
 }
+
+/** Envelope flag bits the DM path needs (§2). */
+export const FLAG_ENCRYPTED = 0x01;
+export const FLAG_RATCHET = 0x40;
 
 class SporeNode {
   constructor(s, ptr) {
@@ -172,6 +197,56 @@ class SporeNode {
     const packed = this.s.ex.spore_node_recv(this.ptr, bp, bytes.length, now());
     this.s.ex.spore_free(bp, bytes.length);
     return this.s._parse(this.s._unpack(packed));
+  }
+
+  /** Build this node's ANNOUNCE (§4) — prekey, topics, petname — to flood.
+   *
+   * Until a peer has heard one of these it has no key to seal to us, so it will
+   * fall back to cleartext. Send one on connect and then on the §5.4b Trickle
+   * schedule (5→80 min, reset on novelty): beaconing is the scheduled duty that
+   * belongs to the runtime rather than the core, because emitting on a transport
+   * is across the boundary the core is defined against. */
+  announce() {
+    const packed = this.s.ex.spore_node_announce(this.ptr, now());
+    return this.s._parse(this.s._unpack(packed)).forwards;
+  }
+
+  /** Send a sealed, signed DM (W1). `send()` above is the raw unsealed path —
+   * the one a protocol implementer uses to prove a transport carries bytes, not
+   * the one a person sends another person.
+   *
+   * Sealing is layered by what this node knows about `dest`: a live §7 ratchet
+   * session, else a one-shot seal to their prekey, else **cleartext**, because a
+   * node that has never heard their ANNOUNCE has no key to seal to. Ask
+   * `canSealTo(dest)` first and say so — never draw a padlock unconditionally. */
+  sendDirect(dest, payload) {
+    const dp = this.s._put(dest);
+    const pp = this.s._put(payload);
+    const packed = this.s.ex.spore_node_send_direct(this.ptr, dp, pp, payload.length, now());
+    this.s.ex.spore_free(dp, dest.length);
+    this.s.ex.spore_free(pp, payload.length);
+    return this.s._parse(this.s._unpack(packed));
+  }
+
+  /** Would a DM to `dest` right now actually be sealed? Ask before promising it. */
+  canSealTo(dest) {
+    const dp = this.s._put(dest);
+    const ok = this.s.ex.spore_node_send_direct_sealed(this.ptr, dp);
+    this.s.ex.spore_free(dp, dest.length);
+    return ok === 1;
+  }
+
+  /** Open a delivered DM. `null` when it does not open — which is a real state,
+   * not a bug: a prekey may have expired past the offline window. Say "couldn't
+   * decrypt this — the key may have expired" rather than dropping it silently. */
+  openDm(sender, sealed, ratcheted) {
+    const sp = this.s._put(sender);
+    const bp = this.s._put(sealed);
+    const packed = this.s.ex.spore_node_open_dm(this.ptr, sp, bp, sealed.length, ratcheted ? 1 : 0, now());
+    this.s.ex.spore_free(sp, sender.length);
+    this.s.ex.spore_free(bp, sealed.length);
+    const out = this.s._unpack(packed);
+    return out.length ? out : null;
   }
 }
 

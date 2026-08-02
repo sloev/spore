@@ -6,7 +6,7 @@
 //   node web/test.mjs
 import fs from 'node:fs';
 import assert from 'node:assert';
-import { loadSpore, Hub, ZERO_DEST } from './spore.mjs';
+import { loadSpore, Hub, ZERO_DEST, FLAG_ENCRYPTED, FLAG_RATCHET } from './spore.mjs';
 import { loopbackPair } from './transports/loopback.mjs';
 
 const wasmPath = new URL('../target/wasm32-unknown-unknown/release/spore.wasm', import.meta.url);
@@ -55,6 +55,56 @@ assert.notDeepStrictEqual(a, b, 'the two nodes have distinct addresses');
   assert.strictEqual(other.restorePrekeyRing(lying), false, 'public/secret mismatch');
   assert.deepStrictEqual(other.prekeyRing(), ring, 'a refused restore changes nothing');
 }
+// W1: the sealed DM path across the wasm boundary. `send()` is the raw unsealed
+// call every earlier test used, so none of them would notice if sealing were
+// broken, absent, or quietly falling back to cleartext.
+{
+  // Nobody has heard anybody's ANNOUNCE yet, so there is no key to seal to and
+  // the node must say so rather than let a UI promise a padlock.
+  assert.strictEqual(hubA.node.canSealTo(b), false, 'no prekey known yet');
+
+  // Meet: each side floods an ANNOUNCE, teaching the other its prekey.
+  for (const [from, to] of [[hubA, hubB], [hubB, hubA]]) {
+    for (const f of from.node.announce()) to.node.recv(f);
+  }
+  assert.strictEqual(hubA.node.canSealTo(b), true, 'B\'s prekey is known now');
+
+  const secret = 'north pier at midnight';
+  const { forwards } = hubA.node.sendDirect(b, new TextEncoder().encode(secret));
+  assert.ok(forwards.length > 0, 'a DM produces something to send');
+
+  // The ciphertext must not contain the plaintext — the check that fails if
+  // sealing silently degrades to cleartext, which is the one failure mode a
+  // round-trip test alone cannot see.
+  for (const f of forwards) {
+    assert.ok(
+      !Buffer.from(f).includes(Buffer.from(secret)),
+      'the wire must not carry the plaintext',
+    );
+  }
+
+  const { delivered } = hubB.node.recv(forwards[0]);
+  assert.strictEqual(delivered.length, 1, 'B is the destination');
+  const env = delivered[0];
+
+  // Key the thread on the *authenticated* sender, never a claimed field.
+  assert.deepStrictEqual(spore.src(env), a, 'the sender proves itself');
+  const flags = spore.flags(env);
+  assert.ok(flags & FLAG_ENCRYPTED, 'and it arrived sealed');
+
+  const opened = hubB.node.openDm(a, spore.payload(env), !!(flags & FLAG_RATCHET));
+  assert.strictEqual(new TextDecoder().decode(opened), secret, 'B opens it');
+
+  // A stranger cannot: wrong sender => no key => null, not a throw and not junk.
+  const stranger = spore.newNode();
+  assert.strictEqual(
+    stranger.openDm(a, spore.payload(env), !!(flags & FLAG_RATCHET)),
+    null,
+    'a node it was not sealed to gets null, honestly',
+  );
+}
+
 console.log('WEB OK — A published, B received + verified over a transport');
+console.log('  DM: sealed, sender authenticated, opened by the recipient only');
 console.log('  node A addr:', Buffer.from(a).toString('hex'));
 console.log('  node B addr:', Buffer.from(b).toString('hex'));

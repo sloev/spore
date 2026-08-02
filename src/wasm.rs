@@ -222,6 +222,113 @@ pub unsafe extern "C" fn spore_node_recv(n: *mut Node, bytes: *const u8, len: us
     pack(blob(forward_wires(rx.forwards), delivered))
 }
 
+// -- encrypted DM (W1) -------------------------------------------------------
+//
+// `spore_node_send` is the raw unsealed, unsigned path — the call a protocol
+// implementer uses to prove a transport carries bytes. It is not what a person
+// sends another person, and until now it was the only send the browser had. The
+// three exports below are the sealed-and-signed path the core has had since #70,
+// finally reachable from a tab.
+//
+// Additive, like every export here: `wasm.rs` is not in `CONTRIBUTING.md`'s
+// frozen list, no wire changes, and a browser that ignores these behaves exactly
+// as it did.
+
+/// Build this node's ANNOUNCE (§4) — prekey, busy byte, topics, petname — as a
+/// `{forwards, delivered}` blob packed into an i64.
+///
+/// Required before anyone can seal to this node, and it was missing: the browser
+/// could *absorb* an inbound ANNOUNCE through `spore_node_recv` and learn a
+/// peer's prekey, but had no way to emit its own. The asymmetry meant a tab could
+/// send sealed mail and never receive any — every peer would fall back to
+/// cleartext for want of a key. Nothing in the UI would have shown it.
+///
+/// Also the §5.4b Trickle beacon a runtime is expected to drive on a timer; see
+/// `SPEC.md`'s runtime contract, which counts beaconing as the one scheduled duty
+/// that lives on the runtime's side of the transport boundary.
+///
+/// # Safety
+/// `n` must be a handle from `spore_node_new`, not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_announce(n: *mut Node, now: u32) -> i64 {
+    let node = &mut *n;
+    pack(blob(forward_wires(node.build_announce(now)), Vec::new()))
+}
+
+/// Send a sealed, signed DM to `dest`. Returns the `{forwards, delivered}` blob
+/// (delivered empty) packed into an i64.
+///
+/// Sealing is automatic and layered by what the node knows about the peer: a live
+/// §7 ratchet session if there is one, else a one-shot seal to their prekey, else
+/// **plaintext** — because a node that has never heard the peer's ANNOUNCE has no
+/// key to seal to. The third word of the result says which happened, so a UI can
+/// tell the truth instead of drawing a padlock unconditionally: see
+/// [`spore_node_send_direct_sealed`].
+///
+/// # Safety
+/// `n` valid; `dest` points to 8 bytes; `payload`/`plen` to the body.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_send_direct(
+    n: *mut Node,
+    dest: *const u8,
+    payload: *const u8,
+    plen: usize,
+    now: u32,
+) -> i64 {
+    let node = &mut *n;
+    let mut d = [0u8; 8];
+    d.copy_from_slice(std::slice::from_raw_parts(dest, 8));
+    let pl = std::slice::from_raw_parts(payload, plen);
+    let (_id, forwards, _encrypted) = node.send_direct(d, pl, now);
+    pack(blob(forward_wires(forwards), Vec::new()))
+}
+
+/// Was the last [`spore_node_send_direct`] actually sealed? `1` yes, `0` no.
+///
+/// Split into its own call rather than packed into the send's return, because the
+/// send already spends its i64 on the forwards blob. A UI **must** consult this:
+/// "encrypted" is a property of what the node knew at that moment, not a setting,
+/// and showing a padlock over an unsealed send is precisely the fake-UI failure
+/// `DEV_GUIDE.md` forbids.
+///
+/// # Safety
+/// `n` valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_send_direct_sealed(n: *mut Node, dest: *const u8) -> u8 {
+    let node = &mut *n;
+    let mut d = [0u8; 8];
+    d.copy_from_slice(std::slice::from_raw_parts(dest, 8));
+    // Asks the same two questions `send_direct` asks, without sending: is there a
+    // ratchet session that can send, or a known prekey to seal to?
+    node.can_seal_to(&d) as u8
+}
+
+/// Open a delivered DM from `sender`. Returns the plaintext packed into an i64,
+/// or an empty blob if it does not open.
+///
+/// `ratcheted` comes from the envelope's `RATCHET` flag — see
+/// [`spore_env_flags`]. An empty result is not an error to surface as a crash: a
+/// prekey may simply have expired past the offline window, which is the honest
+/// "couldn't decrypt this" case the Android app already shows.
+///
+/// # Safety
+/// `n` valid; `sender` points to 8 bytes; `sealed`/`slen` to the payload.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_open_dm(
+    n: *mut Node,
+    sender: *const u8,
+    sealed: *const u8,
+    slen: usize,
+    ratcheted: u32,
+    now: u32,
+) -> i64 {
+    let node = &mut *n;
+    let mut s = [0u8; 8];
+    s.copy_from_slice(std::slice::from_raw_parts(sender, 8));
+    let body = std::slice::from_raw_parts(sealed, slen);
+    pack(node.open_dm(s, body, ratcheted != 0, now).unwrap_or_default())
+}
+
 // -- envelope helpers for the app --------------------------------------------
 
 /// Extract an envelope's payload, packed into an i64 (empty if it doesn't decode).
@@ -245,5 +352,43 @@ pub unsafe extern "C" fn spore_env_verify(ptr: *const u8, len: usize) -> u8 {
     match Envelope::decode(std::slice::from_raw_parts(ptr, len)) {
         Ok((e, _)) => e.verify() as u8,
         Err(_) => 0,
+    }
+}
+
+/// An envelope's `flags` byte, or 0 if it does not decode.
+///
+/// A DM thread needs two bits of it: `ENCRYPTED` says the payload is sealed
+/// rather than plain, and `RATCHET` says which of the two schemes opens it —
+/// the `ratcheted` argument to [`spore_node_open_dm`].
+///
+/// # Safety
+/// `ptr`/`len` describe envelope bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_env_flags(ptr: *const u8, len: usize) -> u8 {
+    match Envelope::decode(std::slice::from_raw_parts(ptr, len)) {
+        Ok((e, _)) => e.flags,
+        Err(_) => 0,
+    }
+}
+
+/// The **authenticated** sender address, packed into an i64 — 8 bytes, or empty.
+///
+/// Empty for an unsigned envelope, for one whose signature does not verify, and
+/// for `SRC8` (which carries an address the envelope cannot prove). Deriving the
+/// address from the public key here, behind a `verify`, is what keeps a thread
+/// list from being spoofable: the alternative is JS trusting a field, and a
+/// signed envelope proving its own sender is the property the whole protocol
+/// rests on.
+///
+/// # Safety
+/// `ptr`/`len` describe envelope bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_env_src(ptr: *const u8, len: usize) -> i64 {
+    let Ok((e, _)) = Envelope::decode(std::slice::from_raw_parts(ptr, len)) else {
+        return pack(Vec::new());
+    };
+    match e.src {
+        crate::Src::Full(pk) if e.verify() => pack(crate::addr_of(&pk).to_vec()),
+        _ => pack(Vec::new()),
     }
 }
