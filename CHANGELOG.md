@@ -18,6 +18,35 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **VISUALDESIGN gains an explicitly non-normative Inspiration section, and the
+  roadmap gains a hardware track.** A design manual arrived proposing a
+  "Solarpunk Refinement" — moss, copper oxide, aged amber, a refined phosphor
+  green replacing the neon — alongside four directional UI mockups. It is
+  recorded as §6b, with a composite of the poster and the mockups, and it is
+  *not* §1. That separation is the whole point: a mood board filed as a
+  specification is how a design language acquires two conflicting palettes and
+  nobody can say which one ships.
+
+  The section states the cost of adopting it rather than leaving it implied.
+  There is no pink and no cyan in that sketch, so "never put pink on olive" —
+  the most-repeated rule in the document — would lose its referent, §3's usage
+  matrix names pink for every primary action, the contrast table re-grades
+  entirely, and Baud is a pastel pink chibi. The mechanics are cheap because C3
+  made them cheap; retiring a language mid-refinement is not.
+
+  Three things from it are already being built, because they do not conflict: the
+  Bridges list-row structure and grouped Advanced sections (C6), the
+  Identity/Seed/Prekey/Offline icon set that maps onto those rows, and "crafted,
+  not manufactured" as a texture argument the ammo crate already carries.
+
+  **Track H** files the hardware and community half as real tracks — lived-in
+  prototype, solar cyberdeck, wear language, community harvest protocol,
+  maintainer culture, organic UI, the solarpunk hub. Their dates are dropped: the
+  poster schedules them Q3 2024 → Q3 2025, all now in the past. They carry
+  `⬜ concept` rather than `⬜ todo`, nothing in the compass depends on them, and
+  no row earns a 🧪 until something exists a person could hold or run — the same
+  honesty rule the radios are held to.
+
 - **The design language now says what each control is *for*, and the generator
   enforces that there are only three.** C5 locked the sizes; this locks their
   use. `VISUALDESIGN.md` §3 gains a normative purpose→element matrix — one

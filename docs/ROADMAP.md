@@ -90,6 +90,7 @@ name · **14** Freeze impact (almost always None).
 | **Site-3** | Site navigation chrome + human/builder paths | High UX | ⬜ todo — today's nav is 9 items against the matrix's 5, and Mission is unreachable from it | Site-2 | — |
 | **WV0** | Web node visual foundation — tokens, identity header, Baud empty states | High UX | ⬜ todo — renamed from the brief's `W0`, which collides with the shipped wasm-API audit | C3, Site-2 | WV1 |
 | **WV1** | Web node IA — distinct surfaces (Mail / Feed / Bridges / Seed) | High UX | ⬜ todo — renamed from the brief's `W1`, which is Encrypted DM and half shipped (#116) | WV0 | — |
+| **Track H** | Hardware, wear language, and community culture — the integrated design manual's non-software half | Hardware / community | ⬜ concept — see "Track H" below. Deliberately not `todo`: nothing in the compass depends on it | — | — |
 | **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ✅ **shipped**, punch rung 🧪 — the whole ladder: LAN, global IPv6, declared overlay, reflexive + punch (#114 fixed the ordering that kept it from ever landing), iroh as last resort. The punch is proven on loopback only, where there is no NAT to traverse; `HARDWARE.md` row 19 is the two-real-NATs procedure that would settle it. Staged plan under "Product decisions" below | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
@@ -1067,6 +1068,45 @@ likewise has no C2.)
 **Order.** C5 before C4 before C6: locking the control metrics first means the
 density pass moves text around finished components, and the IA restructure lands
 on both. B11 last — it is the sweep-up after C4 by its own description.
+
+---
+
+# Track H — hardware, and the people around it
+
+From the integrated design manual (2026-08-02), filed as real tracks at the
+author's direction. Recorded with their dates dropped: the poster schedules these
+Q3 2024 → Q3 2025, all of which are in the past, so the phases are kept and the
+calendar is not. See [`VISUALDESIGN.md`](VISUALDESIGN.md) §6b for the visual
+direction these belong to, which is inspiration rather than spec.
+
+**Read the honesty rule before adding to this track.** Everything here is further
+from a merged PR than anything else in this file, and that is exactly the shape
+`SECURITY_FINDINGS.md` treats as a bug class — claims with nothing behind them.
+So: no row here gets a 🧪 or a ✅ until something exists that a person could hold
+or run, and the software tracks do not depend on any of it.
+
+| ID | Title | Kind | Status | Depends |
+|---|---|---|---|---|
+| **H1** | Lived-in hardware prototype — a reference node in a case somebody would carry | Hardware | ⬜ concept | — |
+| **H2** | Mass-powered cyberdeck console — solar//battery field deployment, the truck-bed build | Hardware | ⬜ concept | H1 |
+| **H3** | Wear language — loved-wear patterns, hand-rubbed brass, repair over replacement | Design/hardware | ⬜ concept | VISUALDESIGN §6b |
+| **H4** | Community harvest protocol — how a group runs and maintains nodes together | Community | ⬜ concept | H1 |
+| **H5** | Maintainer and community culture — the green-ring/keeper identity, contribution norms | Community | ⬜ concept | — |
+| **H6** | Organic UI systems — mycelial texture as an overlay on existing chrome | Design | ⬜ concept | C4, C5, C6 |
+| **H7** | Solarpunk hub concept — the far-future v1.0 surface the rest points at | Design | ⬜ concept | H6, WV1 |
+
+**Why these are here rather than in a wiki.** The engineering plan is where this
+project keeps intent it does not want to lose, and hardware is genuinely part of
+where SPORE is going — a protocol whose whole argument is "runs on anything that
+carries bytes" eventually has to say something about the *anything*. What they are
+not is a promise: `⬜ concept` is a distinct state from `⬜ todo`, and nothing in
+the compass depends on a row in this table.
+
+**H3 and H6 touch the app.** They are the two that could quietly become UI work,
+so they are pinned to their gates: H3 is texture and material, which §6b keeps out
+of §1 until it has real values; H6 is an overlay on chrome that C4/C5/C6 have to
+finish first, because texturing an inconsistent control system makes it harder to
+see, not better.
 
 ---
 
