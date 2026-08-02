@@ -56,6 +56,45 @@ name · **14** Freeze impact (almost always None).
 
 ---
 
+## Where things stand
+
+The one place to look first. Everything below is detail behind these rows.
+
+**The ID schemes, and why there are five.** They accreted, and renaming them all
+would break every cross-reference in this file and in merged PR bodies for no
+gain. So: they stay, and this is the key.
+
+| Prefix | Means | Range |
+|---|---|---|
+| `PR0`–`PR9` | The original engineering PRs — protocol, crypto, bridges, Direct | complete series |
+| `B1`–`B11` | Android UX fixes | **no B9, no B10.** B9 is referenced by C4/C5/C6 as a dependency and does not exist |
+| `C1`–`C6` | Cross-surface design system | **no C2.** `C0…C8` also once named cargo features; that usage is retired |
+| `W0`–`W8` | Web node **capability** — what the browser can do | W0 audit done, W1 DM ABI shipped (#116) |
+| `WV0`–`WV1` | Web node **visual** — what it looks like | renamed off `W0`/`W1` to stop the collision |
+| `Site`, `Site-2`, `Site-3` | The docs site | **no Site-1.** `Site` is the shipped 2026-07 pass |
+| `P-*` | Protocol/foundation tracks | Runtime, Direct-NAT, Mix-Runner, Group-Roster |
+| `H1`–`H7` | Hardware and community | `⬜ concept`, not `⬜ todo` — nothing depends on them |
+
+**The gaps are real and deliberate now.** B9, B10, C2 and Site-1 do not exist and
+never will; they are recorded here so the next person stops looking for them
+rather than assuming a section went missing.
+
+**What is actually next**, in dependency order, ignoring prefix:
+
+1. **C5's Kotlin half** — a `Chip` and a `ListRow`, then route the ad-hoc sizes in
+   `NodeScreens.kt` / `ChatScreens.kt` / `FeedScreens.kt` through them. Everything
+   else in the UI plan sits behind this. *(Token half shipped: #118, #119.)*
+2. **C4** density pass, then **C6** Bridges/Advanced IA, then **B11** status diet.
+3. **Site-2 / Site-3** — buildable and verifiable without a device, unlike the
+   Android work, since `site/build.mjs` fails on a broken link or anchor.
+4. **WV0 / WV1** — the web node, after Site-2 settles the shared language.
+5. **W2 onward** — web node capability, independent of all of the above.
+
+**Two things need a device and cannot be finished here:** every Android
+acceptance criterion in C4/C6/B11 (screenshot diffs, "scan time < 3 s"), and
+`HARDWARE.md` row 19, the two-real-NATs punch verification that would take the
+P-Direct-NAT punch rung from 🧪 to ✅.
+
 ## PR map
 
 | PR | Title | Urgency | Status | Depends | Parallel with |
@@ -1102,6 +1141,14 @@ carries bytes" eventually has to say something about the *anything*. What they a
 not is a promise: `⬜ concept` is a distinct state from `⬜ todo`, and nothing in
 the compass depends on a row in this table.
 
+**H6 is subject to §0.2, and that is not negotiable.** "Dynamic mycelial
+texture" is the phrase in the source manual, and *dynamic* means motion:
+under `prefers-reduced-motion: reduce` — and under Android's
+`ANIMATOR_DURATION_SCALE == 0` — the texture must be completely static, not
+slowed. A CRT flicker is a photosensitivity trigger and so is a breathing
+overlay. Recorded now because it is far easier to design a static-first
+texture than to retrofit one.
+
 **H3 and H6 touch the app.** They are the two that could quietly become UI work,
 so they are pinned to their gates: H3 is texture and material, which §6b keeps out
 of §1 until it has real values; H6 is an overlay on chrome that C4/C5/C6 have to
@@ -1181,12 +1228,10 @@ text, never a sentence.
 
 ## Site and web-node visual tracks (design brief, section C)
 
-| ID | Title | Urgency | Status | Depends |
-|---|---|---|---|---|
-| **Site-2** | Design-language execution — apply the usage matrix and density rules everywhere | High UX | ⬜ todo | C3 |
-| **Site-3** | Site navigation chrome + human/builder paths | High UX | ⬜ todo | Site-2 |
-| **WV0** | Web node visual foundation — tokens, identity header, Baud empty states | High UX | ⬜ todo | C3, Site-2 |
-| **WV1** | Web node IA — distinct surfaces (Mail / Feed / Bridges / Seed) | High UX | ⬜ todo | WV0 |
+These four have their row in the PR map at the top of this file, which is the one
+that carries their status. Repeating the table here is how a plan grows two
+answers to the same question — what remains below is only what the map has no
+room for.
 
 **Renamed from the brief's `W0`/`W1`, which collide with the existing W-series.**
 That series is functional — W0 was the wasm-API audit (done), **W1 is Encrypted
@@ -1246,7 +1291,9 @@ Advanced About/security text is always expanded.
    default after first view) or its own screen behind a single "Security model" row.
 3. Every empty-state and status string to ≤ 1 line. Keep the honesty; drop the
    lecture.
-4. Consistent vertical rhythm from the spacing scale — which C5 has to add first.
+4. Consistent vertical rhythm from the spacing scale — `space-tight` / `gap` /
+   `pad` / `section`, shipped with C5's token half in #118, so this is no longer
+   blocked on anything.
 5. Audit each screen against: *can a returning user find the primary action in
    under three seconds of scanning?*
 
@@ -1540,7 +1587,9 @@ contract. After P-Runtime-1, or folded in if the same PR makes it natural.
 
 ### Explicitly not in this track
 
-Compile-time `max_core` gating (`C0…C8` as cargo features). Recorded as declined
+Compile-time `max_core` gating (cargo features that were sketched as `C0…C8`,
+a name this file now avoids — `C1`–`C6` are the UI tracks and one prefix
+cannot mean two things). Recorded as declined
 rather than forgotten: the ratchet session map lives inline on `Node`, so
 cfg-gating protocol layers out reaches into `lib.rs` instead of excluding files,
 and no shipping runtime needs the binary-size saving yet. Revisit only if a real

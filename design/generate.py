@@ -23,6 +23,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)  # so `import specimen` works from any cwd
 ROOT = os.path.dirname(HERE)
 T = json.load(open(os.path.join(HERE, "tokens.json")))
 
@@ -530,6 +531,18 @@ def main():
     write_region(SURFACES["standalone"]["file"], gen_standalone_css())
     write_region(SURFACES["android"]["file"], gen_android_kt())
     write_region("docs/VISUALDESIGN.md", gen_visualdesign_md())
+
+    # The annotated specimen sheet. Generated like everything else, so the picture
+    # in the design guideline cannot drift from the values it illustrates — a
+    # hand-drawn guideline is wrong within a month and nobody notices.
+    try:
+        import specimen
+    except ImportError:
+        print("  --  specimen sheet skipped (no Pillow); install it to regenerate")
+    else:
+        size = specimen.draw(T, resolve, ratio, grade_of, METRICS,
+                             os.path.join(ROOT, "docs/spore-specimen.png"))
+        print(f"  ok  docs/spore-specimen.png {size[0]}x{size[1]}")
 
 
 if __name__ == "__main__":
