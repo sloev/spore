@@ -12,7 +12,9 @@
 //! same caller here. `std::net` means no wasm; a browser's ladder ends before UDP
 //! anyway (see the P-Direct-NAT track).
 
-use super::{AnyPort, Candidate, Medium, Need, Pipe, RecordType, Reject, Signal, Signalling, UdpPort};
+use super::{
+    Answering, AnyPort, Candidate, Medium, Need, Pipe, RecordType, Reject, Signal, Signalling, UdpPort,
+};
 use crate::Addr;
 use std::collections::HashMap;
 
@@ -65,9 +67,14 @@ impl std::fmt::Display for Via {
 pub enum Event {
     /// Not Direct signalling. The payload is the app's, untouched.
     NotSignal,
-    /// We answered an offer and our end is up. `via` says whether the socket was
-    /// punched open or fell back — see [`Via`].
+    /// Our end is up. `via` says whether the socket was punched open or fell
+    /// back — see [`Via`].
     PipeUp { peer: Addr, pipe_id: [u8; 16], via: Via },
+    /// We accepted an offer and the ANSWER is ready to go. The underlay is *not*
+    /// open yet: send the bytes, then call [`UdpRunner::settle`], which opens it
+    /// and reports [`Event::PipeUp`]. The gap is deliberate — it is what lets our
+    /// punch window overlap the peer's instead of preceding it.
+    Answering { peer: Addr, pipe_id: [u8; 16] },
     /// We could not open the medium that won, so no pipe. The reply, if any, has
     /// already been handed back.
     CannotOpen { peer: Addr, medium: Medium },
@@ -116,6 +123,23 @@ pub struct UdpRunner {
     /// The pipe id currently being punched for. Probes are demultiplexed by it,
     /// so it has to be in hand before [`Self::open`] runs.
     punching: [u8; 16],
+    /// A pipe we have answered but not yet opened the underlay for.
+    ///
+    /// This is the whole punch fix. Opening blocks for a punch window, and the
+    /// initiator does not begin punching until our ANSWER reaches it — so
+    /// opening before answering made the two windows disjoint *by construction*
+    /// and the punch could never land, only time out into a plain connect.
+    /// Answering first parks the keyed half here; [`Self::settle`] opens it once
+    /// the caller has put the ANSWER on the mesh.
+    pending: Option<Pending>,
+}
+
+/// A pipe answered but not yet carried — see [`UdpRunner::settle`].
+struct Pending {
+    peer: Addr,
+    answering: Answering,
+    chosen: Candidate,
+    target: Vec<u8>,
 }
 
 impl UdpRunner {
@@ -132,6 +156,7 @@ impl UdpRunner {
             iroh: None,
             global_v6: crate::bridge::udp::primary_ipv6().map(|a| a.to_string()),
             punching: [0u8; 16],
+            pending: None,
         }
     }
 
@@ -369,18 +394,15 @@ impl UdpRunner {
                 // locator to dial, which is why deciding and opening are split.
                 self.punching = pipe_id;
                 let target = accepted.chosen.locator.clone();
-                // The responder binds its advertised port too, so the locator it
-                // sends back is one the initiator can actually dial — and so the
-                // punch happens on that mapping rather than an ephemeral one.
-                let Some((port, via)) = self.open(&accepted.chosen, &target, self.bind_port) else {
-                    return (None, Event::CannotOpen { peer, medium: accepted.chosen.medium });
-                };
+                let chosen = accepted.chosen.clone();
                 let me = self.sig.me();
                 let local = self.local_locator();
-                let (answer, pipe) = Pipe::answer_with(accepted, me, local.as_bytes(), port);
-                self.pipes.insert(pipe_id, pipe);
-                self.last_via = Some(via);
-                (Some(Outbound { peer, bytes: answer }), Event::PipeUp { peer, pipe_id, via })
+                // Answer *now*, open on the next `settle`. The initiator cannot
+                // start punching until this reaches it, so opening here would put
+                // our punch window entirely before theirs.
+                let (answer, answering) = accepted.answer(me, local.as_bytes());
+                self.pending = Some(Pending { peer, answering, chosen, target });
+                (Some(Outbound { peer, bytes: answer }), Event::Answering { peer, pipe_id })
             }
             Signal::Answered { peer, pending, answer, chosen, dial } => {
                 self.punching = pending.pipe_id();
@@ -400,9 +422,38 @@ impl UdpRunner {
         }
     }
 
+    /// Open the underlay for a pipe we have already answered.
+    ///
+    /// Call it **immediately after putting the ANSWER on the mesh** — that is the
+    /// entire point of the split. For a punched candidate this blocks for a punch
+    /// window, during which the peer, having just received the ANSWER, is
+    /// punching back. `None` if nothing was pending.
+    ///
+    /// [`Self::poll`] calls this too, so a runtime that forgets still completes
+    /// its pipes — a beat later, and with the punch window shifted by however long
+    /// it took to get round to polling. Late is survivable; never is not.
+    pub fn settle(&mut self) -> Option<Event> {
+        let Pending { peer, answering, chosen, target } = self.pending.take()?;
+        let pipe_id = answering.pipe_id();
+        self.punching = pipe_id;
+        // The responder binds its advertised port too, so the locator it sent
+        // back is one the initiator can actually dial — and so the punch happens
+        // on that mapping rather than an ephemeral one.
+        let Some((port, via)) = self.open(&chosen, &target, self.bind_port) else {
+            return Some(Event::CannotOpen { peer, medium: chosen.medium });
+        };
+        self.pipes.insert(pipe_id, answering.over(port));
+        self.last_via = Some(via);
+        Some(Event::PipeUp { peer, pipe_id, via })
+    }
+
     /// Drain every open pipe. The caller decides what a record means; nothing
     /// above the pipe exists in either native runtime yet.
+    ///
+    /// Settles first: a pipe answered but never opened would otherwise sit
+    /// invisible in a runtime that only polls.
     pub fn poll(&mut self) -> Vec<([u8; 16], RecordType, Vec<u8>)> {
+        let _ = self.settle();
         let mut out = Vec::new();
         for (id, pipe) in self.pipes.iter_mut() {
             while let Some((ty, bytes)) = pipe.poll() {
@@ -604,32 +655,39 @@ mod carriage_tests {
         // A offers; B answers. In a runtime these bytes ride send_direct.
         let (offer, _) = a.offer(b_addr, 1_700_000_000);
         let (answer, ev) = b.on_plaintext(a_addr, &offer.bytes, 1_700_000_000);
-        assert!(matches!(ev, Event::PipeUp { .. }), "B opens its end: {ev:?}");
+        assert!(
+            matches!(ev, Event::Answering { .. }),
+            "B answers before it opens — that ordering is the punch fix: {ev:?}"
+        );
         let answer = answer.expect("B replies with an ANSWER");
 
-        let (none, ev) = a.on_plaintext(b_addr, &answer.bytes, 1_700_000_000);
+        // Both ends now punch *at the same time*, which is the entire point and
+        // is why this needs two threads: each `punch` blocks for its window, and
+        // two blocking windows on one thread are by definition disjoint. Two
+        // processes get this for free; a test has to ask for it.
+        //
+        // Before the fix, B opened inside `on_plaintext` — so B's window ran and
+        // timed out *before* the ANSWER was even sent, A's began afterwards, and
+        // no overlap was possible however long either waited. Both ends fell back
+        // to a plain connect, which still carries records on loopback, which is
+        // exactly why the bug survived a test that only checked that bytes moved.
+        let settling = std::thread::spawn(move || {
+            let ev = b.settle().expect("B had a pipe pending");
+            (b, ev)
+        });
+        let (none, a_ev) = a.on_plaintext(b_addr, &answer.bytes, 1_700_000_000);
+        let (mut b, b_ev) = settling.join().expect("B's punch thread");
+
         assert!(none.is_none(), "an answer needs no reply");
-        assert!(matches!(ev, Event::PipeUp { .. }), "A finishes its end: {ev:?}");
-
-        // Pinning today's reality rather than the intent: neither end punched.
-        // The responder's window closes before it sends the ANSWER, so the
-        // initiator's never overlaps it (ROADMAP, P-Direct-NAT step 3). Both fall
-        // back to a plain connect, which is why a record still arrives on
-        // loopback — and why this assertion is the one that will fail, loudly and
-        // in the right place, when the ordering is fixed.
         assert!(
-            matches!(ev, Event::PipeUp { via: Via::FellBack, .. }),
-            "expected the documented fallback; if this now says Punched the \
-             ordering fix landed and this assertion should be inverted: {ev:?}"
+            matches!(a_ev, Event::PipeUp { via: Via::Punched, .. }),
+            "A's end must be punched open, not fallen back to a plain connect: {a_ev:?}"
         );
-
-        // Note the wall time of this test: about 4s, which is two full punch
-        // windows timing out. That is not incidental — see `docs/ROADMAP.md`
-        // P-Direct-NAT step 3: the responder's punch blocks and finishes *before*
-        // the ANSWER is sent, so the two windows are disjoint by construction and
-        // the punch can never land. Both ends fall back to a plain connect, which
-        // is why a record still arrives here. On a LAN that is correct and costs
-        // only the delay; across a NAT it means there is still no path.
+        assert!(
+            matches!(b_ev, Event::PipeUp { via: Via::Punched, .. }),
+            "B's end must be punched open too — one-sided success is the failure \
+             mode TAIL_PROBES exists to prevent: {b_ev:?}"
+        );
 
         // The part that was never checked before: bytes, not key agreement.
         let a_pipe = a.pipes.values_mut().next().expect("A holds a pipe");

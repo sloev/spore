@@ -145,8 +145,24 @@ impl Direct {
         if let Some(o) = out {
             self.send(hub, o);
         }
-        match &event {
-            Event::NotSignal => return false,
+        self.report(&event);
+        // The ANSWER is on the mesh now, so the peer is about to start punching:
+        // this is the moment to punch back, and it is why opening is not done
+        // inside `on_plaintext`. Blocks for a punch window on a punched candidate.
+        if matches!(event, Event::Answering { .. }) {
+            if let Some(settled) = self.run.settle() {
+                self.report(&settled);
+            }
+        }
+        !matches!(event, Event::NotSignal)
+    }
+
+    fn report(&self, event: &Event) {
+        match event {
+            Event::NotSignal => {}
+            Event::Answering { peer, pipe_id } => {
+                eprintln!("  [direct] answered {} for pipe {} — opening", hex8(peer), hex4(pipe_id))
+            }
             Event::PipeUp { peer, pipe_id, via } => {
                 eprintln!("  [direct] pipe {} up with {} ({via})", hex4(pipe_id), hex8(peer))
             }
@@ -163,7 +179,6 @@ impl Direct {
                 eprintln!("  [direct] {} sent an answer that did not verify", hex8(peer))
             }
         }
-        true
     }
 
     fn send(&self, hub: &Shared, out: Outbound) {

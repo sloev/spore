@@ -447,6 +447,57 @@ impl Accepted {
     pub fn pipe_id(&self) -> [u8; 16] {
         self.pipe_id
     }
+
+    /// Responder side, step 2a: derive the keys and build the ANSWER, **without a
+    /// port**.
+    ///
+    /// Split out of [`Pipe::answer_with`] because the key schedule never needed
+    /// one — it binds the shared secret, the domain, the pipe id, both addresses
+    /// and the medium, and nothing about the socket. The port was only ever moved
+    /// into the returned [`Pipe`].
+    ///
+    /// That distinction is what makes hole punching possible at all. Opening a
+    /// UDP port for a punched pipe *blocks* for a punch window, and the initiator
+    /// does not start punching until the ANSWER reaches it — so a responder that
+    /// opens before answering guarantees the two windows are disjoint and the
+    /// punch can never land. Answering first and opening second is not an
+    /// optimisation; it is the difference between a punch and a slow fallback.
+    pub fn answer(self, me: Addr, local: &[u8]) -> (Vec<u8>, Answering) {
+        let (eph_sec, eph_pub) = crate::ratchet::keypair();
+        let shared = dh(&eph_sec, &self.offer_eph);
+        // We are the responder: initiator = the offer's sender, responder = me.
+        let (init_tx, init_rx) = derive(&shared, &self.pipe_id, &self.initiator, &me, &self.chosen.medium);
+        let answering = Answering {
+            tx_key: init_rx, // responder transmits on the initiator's rx key
+            rx_key: init_tx,
+            pipe_id: self.pipe_id,
+        };
+        let answer = Answer::Ok { pipe_id: self.pipe_id, eph_pub, chosen: self.chosen, from: local.to_vec() };
+        (answer.encode(), answering)
+    }
+}
+
+/// A responder's half of a pipe: keyed, but not yet carried by anything.
+///
+/// It exists for the window between "the ANSWER is on its way over the mesh" and
+/// "the underlay is open" — which for a punched candidate is the whole point,
+/// since the punch cannot start until the peer knows to punch back.
+pub struct Answering {
+    tx_key: [u8; 32],
+    rx_key: [u8; 32],
+    pipe_id: [u8; 16],
+}
+
+impl Answering {
+    /// The pipe this half belongs to.
+    pub fn pipe_id(&self) -> [u8; 16] {
+        self.pipe_id
+    }
+
+    /// Attach the port the runtime opened, completing the pipe.
+    pub fn over<P: DatagramPort>(self, port: P) -> Pipe<P> {
+        Pipe { tx_key: self.tx_key, rx_key: self.rx_key, pipe_id: self.pipe_id, tx_seq: 0, port }
+    }
 }
 
 /// Build an OFFER. Free-standing because nothing about proposing a pipe needs a
@@ -680,20 +731,14 @@ impl<P: DatagramPort> Pipe<P> {
     ///
     /// Infallible by construction: the choosing already happened in [`accept`], so
     /// there is no "no medium fits" outcome left to represent here.
+    /// **Only correct when opening the port cannot block** — a loopback, a LAN
+    /// socket, an already-open link. For anything that punches, use
+    /// [`Accepted::answer`] and [`Answering::over`] with the ANSWER sent in
+    /// between; see the note on `Accepted::answer` for why the order decides
+    /// whether a punch can land at all.
     pub fn answer_with(acc: Accepted, me: Addr, local: &[u8], port: P) -> (Vec<u8>, Pipe<P>) {
-        let (eph_sec, eph_pub) = crate::ratchet::keypair();
-        let shared = dh(&eph_sec, &acc.offer_eph);
-        // We are the responder: initiator = the offer's sender, responder = me.
-        let (init_tx, init_rx) = derive(&shared, &acc.pipe_id, &acc.initiator, &me, &acc.chosen.medium);
-        let pipe = Pipe {
-            tx_key: init_rx, // responder transmits on the initiator's rx key
-            rx_key: init_tx,
-            pipe_id: acc.pipe_id,
-            tx_seq: 0,
-            port,
-        };
-        let answer = Answer::Ok { pipe_id: acc.pipe_id, eph_pub, chosen: acc.chosen, from: local.to_vec() };
-        (answer.encode(), pipe)
+        let (bytes, answering) = acc.answer(me, local);
+        (bytes, answering.over(port))
     }
 
     /// Initiator side: consume the responder's ANSWER, derive keys, and open our

@@ -83,7 +83,7 @@ name · **14** Freeze impact (almost always None).
 | **C3** | Generate the design tokens from one source (kills C1's manual re-audit) | Medium — maintenance | ✅ done — `design/tokens.json` → `design/generate.py`, CI job "design tokens in sync" | C1 (did it by hand) | W-series |
 | **Site** | Readability + less generic + more fun UI (à la gitingest.com) | Medium UX | ✅ story cards (#63); contrast pass (#64); copy-code buttons (#65) | — | C1 |
 | **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
-| **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ⬜ todo — see "Product decisions" below for the staged plan | PR8 | — |
+| **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ✅ **shipped** — the whole ladder: LAN, global IPv6, declared overlay, reflexive + punch (#114 fixed the ordering that kept the punch from ever landing), iroh as last resort. Staged plan under "Product decisions" below | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
 | **P-Group-Roster** | Signal-style membership (signed roster, add/remove epochs, sender binding) | Feature / protocol — **not v1, do not fake in UI** | ⬜ future — sealed-topic + honest UX is the shippable answer today | — | — |
 | **W-series** | Web node: browser as a daily-driver peer (Mail/Rooms/Feed/Files/Folder), not a transport demo | Feature / product | ⬜ todo — phased W0–W8, see "Web node as a full daily-driver peer" below | — | — |
@@ -1476,9 +1476,29 @@ negotiated:
 3. **Wire fix landed, wiring landed.** `Answer::Ok` now carries `from`, the
    responder's own locator, and the initiator dials *that* instead of a candidate
    from its own offer; `UdpRunner::open` punches on the socket the pipe then runs
-   on. SPDR is `VERSION = 3`. **Still unproven end to end:** no test yet shows a
-   record crossing between two `UdpRunner`s over real sockets, which is exactly
-   the gap that hid the original bug — see the note below.
+   on. SPDR is `VERSION = 3`.
+
+   **Ordering fix landed — the punch now lands.** Wiring it proved the rung and
+   then failed it: the responder opened *inside* `on_plaintext`, and opening a
+   punched candidate blocks for `punch::WINDOW`. The ANSWER could not leave until
+   that window had closed, and the initiator does not start punching until the
+   ANSWER arrives — so the two windows were disjoint **by construction** and no
+   punch could land however long either side waited. Both ends timed out into a
+   plain connect, which still carries records on a LAN, which is precisely why it
+   survived a test that only checked that bytes moved.
+
+   The responder now answers first and opens second. `Accepted::answer` builds the
+   ANSWER with **no port** — the key schedule binds the pipe id, both addresses and
+   the medium, and never the socket, so nothing forced them together — and
+   `Answering::over` attaches the port afterwards via the new `UdpRunner::settle`,
+   which a runtime calls the instant the ANSWER is on the mesh. `poll` settles too,
+   so a runtime that forgets is late rather than broken.
+
+   The two-runner test now runs both punches on separate threads, because two
+   blocking windows on one thread are disjoint by definition — two processes get
+   that for free and a test has to ask for it. Both ends report `Via::Punched`, and
+   it finishes in **0.24s where it used to take 4s**: those four seconds were two
+   punch windows timing out, in a test that passed.
 
    *(historical)* The punch itself is built and tested (`src/direct/punch.rs`):
    two sides probing at once meet in the middle, a punch nobody answers fails
