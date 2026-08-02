@@ -86,6 +86,10 @@ name · **14** Freeze impact (almost always None).
 | **C5** | Control system unification — one button/chip/field size, locked in tokens | High UX | 🟡 **token half shipped** (#118) — the scale exists, is generated into all four surfaces and is guarded by the drift job. Kotlin half open: a Chip, a ListRow, and routing the remaining screens through them | C3 | C4, C6 |
 | **C6** | Bridges & Advanced information architecture — group, collapse, list rows | High UX | ⬜ todo | B6, C4, C5 | — |
 | **B11** | Empty-state & status-line diet | Medium UX | ⬜ todo — the sweep-up after C4 | B3, C4 | — |
+| **Site-2** | Design-language execution — usage matrix + density everywhere | High UX | ⬜ todo — see "Screen structures" below | C3 | Site-3, WV0 |
+| **Site-3** | Site navigation chrome + human/builder paths | High UX | ⬜ todo — today's nav is 9 items against the matrix's 5, and Mission is unreachable from it | Site-2 | — |
+| **WV0** | Web node visual foundation — tokens, identity header, Baud empty states | High UX | ⬜ todo — renamed from the brief's `W0`, which collides with the shipped wasm-API audit | C3, Site-2 | WV1 |
+| **WV1** | Web node IA — distinct surfaces (Mail / Feed / Bridges / Seed) | High UX | ⬜ todo — renamed from the brief's `W1`, which is Encrypted DM and half shipped (#116) | WV0 | — |
 | **P-Runtime** | Storage (then scheduling) as declared runtime nutrients, not assumptions | Foundation | ✅ **shipped** — P-Runtime-1 storage backend (#87); P-Runtime-2 scheduling contract (#90). See "Runtime nutrients" below | — | unblocked W-series and any thin runtime |
 | **P-Direct-NAT** | Direct NAT traversal: STUN reflexive locators + coordinated hole-punch + relay candidate | Feature / networking | ✅ **shipped**, punch rung 🧪 — the whole ladder: LAN, global IPv6, declared overlay, reflexive + punch (#114 fixed the ordering that kept it from ever landing), iroh as last resort. The punch is proven on loopback only, where there is no NAT to traverse; `HARDWARE.md` row 19 is the two-real-NATs procedure that would settle it. Staged plan under "Product decisions" below | PR8 | — |
 | **P-Mix-Runner** | Example mix operator + app-level anonymity toggle (mix-preferred / mix-only) | Feature — anonymity path operable | ⬜ todo | `src/mix.rs` (have) | — |
@@ -1063,6 +1067,118 @@ likewise has no C2.)
 **Order.** C5 before C4 before C6: locking the control metrics first means the
 density pass moves text around finished components, and the IA restructure lands
 on both. B11 last — it is the sweep-up after C4 by its own description.
+
+---
+
+## Screen structures (design brief, section B)
+
+Concrete targets for C4/C5/C6/B11 and the site/webnode tracks, so the specs above
+are implemented against a shape rather than a taste. Directional mockups exist and
+follow the current tokens; these are the structures they encode.
+
+### Bridges — Android and web node
+
+Replaces the vertical stack of differently sized full-width buttons.
+
+```
+[ BRIDGES                                        0 peers ]
+
+NETWORK
+┌──────────────────────────────────────────────────────┐
+│ ● UDP broadcast          primary subnet  →  on       │
+│                                  [PAUSE]  [REMOVE]   │
+└──────────────────────────────────────────────────────┘
+
+[ ADD A BRIDGE ]   ← secondary, full width; opens a sheet with the
+                     previous options (audio, Meshtastic, RNode,
+                     Wi-Fi Direct, WebSocket, Nostr, …)
+
+(optional, collapsed) More transports
+```
+
+Every active bridge is a uniform `row`. The heterogeneous olive button stack goes
+away entirely — the transports it listed move into the sheet behind **ADD A
+BRIDGE**, which is one secondary control rather than eight.
+
+### Advanced — three crates of uniform rows
+
+- **IDENTITY** — name, photo, address
+- **SECURITY** — Seed (reveal behind a confirm), Prekey ring (export behind a
+  confirm), Offline window (`chip` presets 7D/14D/30D plus custom)
+- **NODE** — peers, envelopes, store budget, as segmented LEDs
+
+The long About text becomes a single **Security model** row that expands or
+navigates. Nothing on this screen is expanded by default.
+
+### Web node — persistent identity header
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ [avatar] Super Sexy Radio    a2b2…80fe  [COPY]           │
+│ alive · 0 peers · 12 stored                    [SHARE]   │
+└──────────────────────────────────────────────────────────┘
+```
+
+Always visible. The status line is the §3 form — segmented LED plus short mono
+text, never a sentence.
+
+### Site homepage
+
+- **Persistent top nav:** Try it · How it works · Get a node · Spec · Mission.
+  Today it renders Home · Spec · Apps · Design · Bridges · Rebuild · Continuity ·
+  Roadmap · Changelog — nine items, different vocabulary, and `MISSION.md` has a
+  `null` nav label so *Mission* is reachable only by direct link. Promoting it
+  means deciding what happens to Design/Bridges/Rebuild/Continuity, which is
+  Site-3's job.
+- **Hero:** bold amber display headline, one short plain sentence, primary pink
+  **OPEN WEB NODE**, secondary **GET A NODE**. The headline and copy already
+  match (`site/home.md` opens *"Messages that still get through"*); the CTA labels
+  and the nav do not.
+- **Three story crates maximum above the fold** — Postcard · Any link · Honest
+  privacy. Everything else in crates behind progressive disclosure.
+
+---
+
+## Site and web-node visual tracks (design brief, section C)
+
+| ID | Title | Urgency | Status | Depends |
+|---|---|---|---|---|
+| **Site-2** | Design-language execution — apply the usage matrix and density rules everywhere | High UX | ⬜ todo | C3 |
+| **Site-3** | Site navigation chrome + human/builder paths | High UX | ⬜ todo | Site-2 |
+| **WV0** | Web node visual foundation — tokens, identity header, Baud empty states | High UX | ⬜ todo | C3, Site-2 |
+| **WV1** | Web node IA — distinct surfaces (Mail / Feed / Bridges / Seed) | High UX | ⬜ todo | WV0 |
+
+**Renamed from the brief's `W0`/`W1`, which collide with the existing W-series.**
+That series is functional — W0 was the wasm-API audit (done), **W1 is Encrypted
+DM, whose ABI half shipped in #116** — and runs to W8. Two different W1s, one
+already half-shipped, is how a plan stops being a single source of truth. `WV`
+for *web-node visual*; the two tracks are genuinely different work and now say so.
+
+---
+
+## Acceptance, across all of the above (section D)
+
+One list, because these are the conditions the whole effort is judged by rather
+than any single PR:
+
+- [ ] Only three interactive control heights exist, in the tokens and in the code.
+      *(tokens: ✅ #118, enforced by `generate.py` since #119. Code: open.)*
+- [ ] Bridges uses uniform list rows; no heterogeneous full-width button stack.
+- [ ] Advanced is sectioned rows, not a tall card stack.
+- [ ] No working screen opens with more than one short instructional sentence.
+- [ ] Status chrome is compact — `0 peers · 65 stored`.
+- [ ] The site has persistent, clear navigation.
+- [ ] The web node has a persistent identity + status header.
+- [ ] Pink never on kevlar; the contrast table is still green. *(enforced by
+      `generate.py` both ways since C3 — a pair claimed forbidden that became
+      readable fails too.)*
+- [ ] Reduced motion is fully static; the standalone still makes zero external
+      requests. *(both already CI-enforced.)*
+- [ ] Baud appears only on empty states and completions.
+
+**Ship it as sequential PRs**, small enough to review and independently
+releasable. The three already merged are the pattern: #118 the token scale, #119
+the usage matrix and its enforcement, and the screen work after them.
 
 ---
 
