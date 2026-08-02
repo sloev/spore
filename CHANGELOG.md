@@ -18,6 +18,30 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The browser can send and open sealed DMs (W1, ABI half).** The core has had
+  `send_direct`/`open_dm` — one-shot prekey seal, §7 ratchet when a session
+  exists — since 0.6.0, and none of it was reachable from a tab: `wasm.rs`
+  exported 15 functions and the only send among them was `Node::send`, the raw
+  unsealed path a protocol implementer uses to prove a transport carries bytes.
+  Six new exports (`announce`, `send_direct`, `send_direct_sealed`, `open_dm`,
+  `env_flags`, `env_src`), wrapped in `web/spore.mjs`. Additive: `wasm.rs` is not
+  a frozen file, the wire does not change, and the build still has **exactly one
+  import**, `env.spore_fill_random`.
+
+  Writing them surfaced two things the W0 audit had not: **`announce` was missing
+  outright**, so a browser node could absorb an inbound ANNOUNCE and learn a
+  peer's prekey but never emit its own — sealed mail out, cleartext in, with
+  nothing on screen to show it. And `send_direct` **falls back to cleartext**
+  when it has no key for the peer, which is correct and silent; `Node::can_seal_to`
+  is new so a UI can ask first rather than draw a padlock unconditionally. The
+  authenticated-sender export refuses `SRC8` and unverified signatures, because a
+  thread list keyed on a claimed field is a spoofable thread list.
+
+  `web/test.mjs` covers it end to end: the ciphertext must not contain the
+  plaintext (the check that fails if sealing ever degrades — confirmed by swapping
+  in the unsealed send), the sender proves itself, the recipient opens it, and a
+  node it was not sealed to gets `null` rather than a throw or junk.
+
 - **The punch is 🧪, not ✅, and the daemon no longer says it cannot work.** Two
   bits of honesty owed after the ordering fix. The daemon printed *"the punch does
   not land yet"* on every start — true when written, a lie once it landed — and now

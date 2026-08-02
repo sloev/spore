@@ -1971,6 +1971,34 @@ mod tests {
         assert!(!enc2, "no prekey yet => signed cleartext, not a silent failure");
     }
 
+    /// `can_seal_to` must agree with what `send_direct` actually does, because a
+    /// UI asks the first and the user gets the second. A padlock drawn over the
+    /// cleartext fallback above is exactly the fake-UI failure the project bans,
+    /// and the fallback is invisible without something to ask.
+    #[test]
+    fn can_seal_to_predicts_whether_a_dm_is_actually_sealed() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        let stranger = Node::new("stranger", &[]);
+
+        // Before hearing anything: no key, so no seal — and it says so.
+        assert!(!a.can_seal_to(&b.addr), "no ANNOUNCE heard yet");
+        let (_, _, sealed) = a.send_direct(b.addr, b"before", now);
+        assert!(!sealed, "and the send agrees");
+
+        meet(&mut a, &mut b, now);
+
+        // After: a key exists, so the seal happens — and it says that too.
+        assert!(a.can_seal_to(&b.addr), "the peer's prekey is known now");
+        let (_, _, sealed) = a.send_direct(b.addr, b"after", now);
+        assert!(sealed, "and the send agrees");
+
+        // A third party nobody has met stays honestly unsealed. Checked because
+        // "have I met anyone at all" would pass every assertion above.
+        assert!(!a.can_seal_to(&stranger.addr), "meeting B says nothing about C");
+    }
+
     // -- Direct signalling over the mesh (PR8c) ------------------------------
 
     fn udp_candidate() -> direct::Candidate {

@@ -1219,10 +1219,12 @@ The Rust core already has everything the plan's feature table needs —
 (encrypted topic membership/rotation), `feed.rs` (topic-scoped microblog), and
 `file.rs`/`bundle.rs`/`node/files.rs` (`publish_file`, `publish_file_sealed`,
 `fetch`, `open_file`, content-addressed manifests — all present, all tested).
-None of it is reachable from the browser: `src/wasm.rs` exports exactly 15
-functions today, covering node lifecycle, raw send/recv, and the prekey ring —
-no DM, no topic, no file, no feed call among them. So **W1 (encrypted DM)
-cannot start with UI work** — it starts with new `wasm.rs` exports, the same
+None of it was reachable from the browser: before W1, `src/wasm.rs` exported
+exactly 15 functions, covering node lifecycle, raw send/recv, and the prekey ring
+— no DM, no topic, no file, no feed call among them. It is now 21: W1 added
+`announce`, `send_direct`, `send_direct_sealed`, `open_dm`, `env_flags` and
+`env_src`. The audit's conclusion held — **W1 could not start with UI work** —
+and it started with new `wasm.rs` exports, the same
 shape as `android/jni`'s existing pattern (an additive C-ABI-style surface
 over the frozen core, itself not part of the frozen contract — confirmed
 against `CONTRIBUTING.md`'s frozen-file list, which names `bindings/spore.h`,
@@ -1313,8 +1315,21 @@ the native bridges (UDP, folder, serial, Tor). Desktop is daemon + UI.
 W0 audit is done (above). Remaining, one PR per phase, same density as the
 B-series:
 
-- **W1** — Encrypted DM: `wasm.rs` exports for `send_direct`/`open_dm`, thread
-  list, compose, delivery honesty (no read receipts).
+- **W1** — Encrypted DM. **ABI half shipped**: `wasm.rs` gains `announce`,
+  `send_direct`, `send_direct_sealed`, `open_dm`, `env_flags`, `env_src`, wrapped
+  in `web/spore.mjs` and covered by `web/test.mjs` (sealed on the wire, sender
+  authenticated, opens for the recipient only, `null` for anyone else). **UI half
+  open**: thread list, compose, delivery honesty (no read receipts).
+
+  Two things the audit did not predict, both found by writing the exports.
+  **`announce` was missing entirely** — a tab could *absorb* an inbound ANNOUNCE
+  and learn a peer's prekey, but never emit its own, so no peer could ever seal
+  *to* the browser. Sealed mail out, cleartext in, and nothing on screen would
+  have shown it. **`send_direct` falls back to cleartext** when no key is known,
+  which is correct and invisible; `Node::can_seal_to` (new) lets a UI ask before
+  promising, so the padlock can be earned rather than drawn unconditionally. The
+  thread list must key on `env_src` — the *authenticated* sender — and not on any
+  claimed field, or it is spoofable.
 - **W2** — Topics: open group join/create + public shout, clearly labeled public.
 - **W3** — Sealed group: shared-key/invite-blob room, "anyone with the key can
   post" banner.
