@@ -18,6 +18,76 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The four canonical screens are rendered from the tokens too.** `design/mockups.py`
+  draws `docs/spore-screens.png`: the site hero, the web node's identity header and
+  empty state, Bridges as uniform rows, and Advanced as grouped sections. Every
+  colour, control height, padding, radius and gap comes from `tokens.json`, so they
+  show what the tokens *produce* rather than what someone imagined — and like the
+  specimen sheet, the drift job guards them. A hand-drawn mockup is out of date the
+  moment a token moves, and nobody notices, because a picture cannot fail a build.
+
+  Three defects found by looking at the render rather than the code: the Advanced
+  panel overflowed its crate, the PAUSE and REMOVE chips overlapped by two pixels
+  because they were spaced by less than a chip height, and the canvas was shorter
+  than the content so the tab bar and captions were drawn off it.
+
+- **The visual guideline is now a generated picture, and the plan has one index.**
+  `design/generate.py` draws `docs/spore-specimen.png` from `tokens.json`: every
+  swatch with its hex and its **measured** contrast on each base, the one
+  forbidden pairing shown beside its correct alternative, the three interactive
+  sizes drawn at their real pixel height with the touch floor marked, and the
+  four-step spacing scale drawn to scale. Nothing in it is typed, so it cannot
+  drift, and the existing "design tokens in sync" job guards it — a guideline
+  whose picture is drawn by hand is wrong within a month and nobody notices.
+
+  ROADMAP gains a **Where things stand** index: what each of the five ID prefixes
+  means, which numbers are permanent gaps (**B9, B10, C2 and Site-1 do not exist**
+  — B9 was being cited as a dependency), and one dependency-ordered list of what
+  is actually next regardless of prefix. Plus the two things that cannot be
+  finished without hardware: the Android screenshot-diff criteria, and
+  `HARDWARE.md` row 19.
+
+  **Four contradictions found and fixed.** Site-2/Site-3/WV0/WV1 were declared
+  twice with different wording and only one copy carrying status — two answers to
+  the same question, which is the failure `DEV_GUIDE.md` bans in so many words.
+  C4 still said the spacing scale was "something C5 has to add first"; it shipped
+  in #118, so C4 was recorded as blocked on work already done. `C0…C8` named
+  cargo features while `C1`–`C6` name UI tracks, so one prefix meant two things
+  in one file. And H6's "dynamic mycelial texture" had no motion gate, when §0.2
+  requires *completely* static under reduced motion — a breathing overlay is a
+  photosensitivity trigger exactly as a CRT flicker is, and it is far easier to
+  design a static-first texture than to retrofit one.
+
+- **The design language advances an era: Deep Moss and Copper Oxide.** The
+  Solarpunk Refinement proposed replacing the palette outright — moss, copper
+  oxide, aged amber, a softened phosphor, no pink, no cyan. Its own artwork was
+  the argument against going that far: the before/after shows **the same crate**,
+  weathered differently. Not a new object, so not a new language. Adopted as a
+  refinement, with all four decisions recorded in §6b because a palette nobody can
+  explain is one the next person quietly undoes.
+
+  **Taken:** Kevlar Olive → **Deep Moss** `#3a5a2e`, the one colour carrying
+  "wasteland" most literally now carrying "kept"; and **Copper Oxide** `#b5651d`
+  joins as the warm mid-tone for hardware and wear, which the palette genuinely
+  lacked — between asphalt and amber there was nothing at all.
+
+  **Declined:** softening `--phosphor`, which is 14.59:1 on void, the best
+  contrast in the palette, and means *it worked* — that spends legibility on mood.
+  And dropping pink and cyan: pink is the entire kawaii half of the language, and
+  cyan is the focus ring that §0.2 and B7 make non-negotiable.
+
+  **The refinement made the forbidden pair more forbidden**, which is worth
+  checking rather than hoping for: pink on the crate fill went 2.32:1 → 2.21:1, so
+  "never pink on the moss" survives with a wider margin. Amber moved 4.48 → 4.27,
+  still large-text-only. `design/generate.py` re-graded every pairing in both
+  directions — a pair claimed forbidden that had quietly become readable would
+  have failed the build just as loudly — and the token rename propagated through
+  all three surfaces plus fourteen hand-written references, including two
+  comments that still quoted the old ratios.
+
+  The name survives intact, and more literally than before: Copper Oxide *is* the
+  rust in **Toxic Bubblegum & Rust**.
+
 - **VISUALDESIGN gains an explicitly non-normative Inspiration section, and the
   roadmap gains a hardware track.** A design manual arrived proposing a
   "Solarpunk Refinement" — moss, copper oxide, aged amber, a refined phosphor
