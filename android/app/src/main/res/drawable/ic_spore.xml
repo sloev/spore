@@ -3,17 +3,36 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- a tiny kawaii spore/mushroom -->
+    <!-- Antenna + Seed: a sturdy radio antenna rising from a seed/soil form.
+         The only SPORE brand icon. No mushroom. See docs/VISUALDESIGN.md §6. -->
+    <!-- Seed/soil base (a grounded half-ellipse) -->
+    <path
+        android:fillColor="#4b5320"
+        android:pathData="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z" />
+    <!-- Soil line under the seed -->
+    <path
+        android:fillColor="#2a2f1c"
+        android:pathData="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z" />
+    <!-- Antenna mast -->
+    <path
+        android:fillColor="#39ff14"
+        android:pathData="M11.3,17h1.4v-9h-1.4Z" />
+    <!-- Antenna tip (broadcast dot) -->
+    <path
+        android:fillColor="#39ff14"
+        android:pathData="M12,3m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+    <!-- Two broadcast waves either side of the tip -->
+    <path
+        android:fillColor="#39ff14"
+        android:pathData="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z" />
+    <path
+        android:fillColor="#39ff14"
+        android:pathData="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z" />
+    <!-- Seed sprout (two small leaves at the base of the mast) -->
     <path
         android:fillColor="#57C785"
-        android:pathData="M12,3C7,3 3.5,6.4 3.5,10.5C3.5,11.1 4,11.5 4.6,11.5L19.4,11.5C20,11.5 20.5,11.1 20.5,10.5C20.5,6.4 17,3 12,3Z" />
+        android:pathData="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z" />
     <path
-        android:fillColor="#3B8C5A"
-        android:pathData="M10.3,11.5h3.4v6.8a1.7,1.7 0 0,1 -3.4,0Z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M9,8m-1,0a1,1 0 1,0 2,0a1,1 0 1,0 -2,0" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M15,8m-1,0a1,1 0 1,0 2,0a1,1 0 1,0 -2,0" />
+        android:fillColor="#57C785"
+        android:pathData="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z" />
 </vector>
