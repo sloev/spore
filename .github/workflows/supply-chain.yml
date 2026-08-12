@@ -24,7 +24,7 @@ jobs:
     name: cargo-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-audit
@@ -46,7 +46,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-deny
@@ -60,7 +60,7 @@ jobs:
     name: bindings in sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # `bindings/generate.py` produces spore.h and the Python/Go/JS wrappers from
       # spec.json. Nothing checked that the committed output still matched, so
       # spec.json or src/ffi.rs could drift from the wrappers silently — and
@@ -78,7 +78,7 @@ jobs:
     name: design tokens in sync
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # `design/generate.py` emits the palette into the docs site's CSS, the
       # standalone node's inlined CSS, Android's Compose Palette and
       # VISUALDESIGN's contrast tables. The same hexes used to be hand-typed in
@@ -102,7 +102,7 @@ jobs:
     name: offline bundle
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       # `CONTINUITY.md` promises a rebuild with no registry, and S-010 was that
       # promise being false. `make-offline-bundle.sh` made it true, but a script
@@ -117,7 +117,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/empty-cargo-home
         run: cargo build --offline --quiet
       - name: Publish the bundle and its checksum
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spore-offline-bundle
           path: |
