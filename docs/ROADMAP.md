@@ -138,7 +138,7 @@ work below is the code half that changes what is on screen.
 | Density & type hierarchy pass (C4) — ≤1 instructional sentence, progressive disclosure | ⬜ todo | Depends C5 Kotlin half |
 | Bridges & Advanced information architecture (C6) — uniform rows, grouped sections | ⬜ todo | Depends C5, C4 |
 | Empty-state & status-line diet (B11) | ⬜ todo | The sweep-up after C4 |
-| Replace mushroom icon with Antenna + Seed on Android | ⬜ todo | `ic_spore.xml` still says "kawaii spore/mushroom" |
+| Replace mushroom icon with Antenna + Seed on Android | ✅ done | `ic_spore.xml` now Antenna + Seed |
 | Replace mushroom icon with Antenna + Seed on web node | ⬜ todo | |
 | Replace mushroom icon with Antenna + Seed on site (favicon, hero, nav) | ⬜ todo | |
 | Persistent identity + status header on web node (WV0) | ⬜ todo | Tokens, identity header, Baud empty states |

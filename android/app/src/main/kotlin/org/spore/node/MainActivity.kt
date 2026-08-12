@@ -104,7 +104,9 @@ internal data object Connect : Screen
 internal fun timeOf(ts: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
 
-/** 🍄 with a brief sparkle whenever the node relays/receives (kawaii heartbeat). */
+/** 📡 with a brief sparkle whenever the node relays/receives (kawaii heartbeat).
+ *  Baud is the mascot (a pastel chibi), but in emoji form the antenna stands in
+ *  for the brand — no mushroom per VISUALDESIGN.md §6. */
 @Composable
 private fun mascot(): String {
     val tick by NodeController.relayTick.collectAsState()
@@ -115,7 +117,7 @@ private fun mascot(): String {
     LaunchedEffect(tick) {
         if (tick != 0L && !still) { sparkle = true; delay(1500); sparkle = false }
     }
-    return if (sparkle) "🍄✨" else "🍄"
+    return if (sparkle) "📡✨" else "📡"
 }
 
 @Composable

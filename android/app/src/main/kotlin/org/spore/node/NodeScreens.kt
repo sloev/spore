@@ -398,7 +398,7 @@ internal fun AdvancedScreen(addr: String) {
             Crate(Modifier.fillMaxWidth()) {
                 Column {
                     DisplayHeading("About", size = 15)
-                    Caption("SPORE — store-and-forward planetary opportunistic relay envelope. This phone is a full node: it signs, relays, and delivers across every enabled bridge. Public domain. 🍄")
+                    Caption("SPORE — store-and-forward planetary opportunistic relay envelope. This phone is a full node: it signs, relays, and delivers across every enabled bridge. Public domain. 📡")
                     VGap(6.dp)
                     val offlineDays = offlineWindowSecs / 86_400
                     Caption("Forward secrecy: the keys others seal mail to (prekeys) rotate on a $offlineDays-day window, and a conversation's keys ratchet forward per message — a key kept to decrypt an out-of-order message is dropped after $offlineDays days too. Losing today's device doesn't expose messages older than that window. Your seed is stored in Android's encrypted preferences and excluded from cloud/adb backup.")
@@ -492,7 +492,7 @@ internal fun BridgesList() {
     LazyColumn(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
         item {
             Caption(
-                "Bridges relay your signed envelopes across every medium at once. 🍄",
+                "Bridges relay your signed envelopes across every medium at once. 📡",
                 Modifier.padding(vertical = 8.dp),
             )
         }
@@ -511,7 +511,7 @@ internal fun BridgesList() {
         if (bridges.isEmpty()) {
             item {
                 Caption(
-                    "no bridges yet 🍄\nadd one below — SPORE only reaches as far as its bridges do",
+                    "no bridges yet 📡\nadd one below — SPORE only reaches as far as its bridges do",
                     Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 )
             }
