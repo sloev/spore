@@ -139,8 +139,8 @@ work below is the code half that changes what is on screen.
 | Bridges & Advanced information architecture (C6) — uniform rows, grouped sections | ⬜ todo | Depends C5, C4 |
 | Empty-state & status-line diet (B11) | ⬜ todo | The sweep-up after C4 |
 | Replace mushroom icon with Antenna + Seed on Android | ✅ done | `ic_spore.xml` now Antenna + Seed |
-| Replace mushroom icon with Antenna + Seed on web node | ⬜ todo | |
-| Replace mushroom icon with Antenna + Seed on site (favicon, hero, nav) | ⬜ todo | |
+| Replace mushroom icon with Antenna + Seed on web node | ✅ done | Favicon (data URI) + header mark in `build-standalone.mjs` |
+| Replace mushroom icon with Antenna + Seed on site (favicon, hero, nav) | ✅ done | `site/antenna-seed.svg` + brand mark in `build.mjs` + `style.css` |
 | Persistent identity + status header on web node (WV0) | ⬜ todo | Tokens, identity header, Baud empty states |
 | Web node IA — distinct surfaces Mail / Feed / Bridges / Seed (WV1) | ⬜ todo | Renamed from brief's W1 (collides with shipped Encrypted DM ABI) |
 | Site design-language execution (Site-2) — usage matrix + density everywhere | ⬜ todo | |
