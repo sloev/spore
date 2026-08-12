@@ -1,16 +1,26 @@
-# Visual design — Neo-Tokyo Tactical Wasteland
+# Visual design — Neo-Tokyo Tactical Wasteland × Solarpunk Cyberdeck
 
 Normative for every SPORE surface: the web node, the Pages site, the Android app.
 Every value here is meant to be pasted into a stylesheet or a Compose theme, and
 every rule is one an implementer can check they followed.
 
-The language, once, because the tokens below encode it: **post-apocalyptic
-survivalist bunker meets hyper-cute anime cyberpunk** — a ruggedised field terminal
-someone has covered in stickers.
+The language, once, because the tokens below encode it: **a lived-in, hopeful,
+practical personal cyberdeck** — a ruggedised field terminal someone has kept
+working, repaired rather than replaced, with moss on the crate and copper on the
+brass. Post-apocalyptic survivalist bunker meets solarpunk hope, not bleak ruin.
+Warm darks; strong phosphor green for "alive"; amber for everyday text; pink
+only for primary actions.
+
+**The primary icon is Antenna + Seed** — a short, sturdy radio antenna rising
+from a simple seed/soil form. It reads as "mesh + living network" at a glance,
+stays sharp at 16 px, and is the *only* mark that stands for SPORE as a brand.
+There are **no mushrooms anywhere** in the icon system; the old spore-cap mark
+is retired. A mono (single-colour) variant is required for favicons and status
+bars; phosphor green + amber on dark surfaces, ink on paper.
 
 <p align="center"><em>The mascot is <strong>Baud</strong> — a pastel chibi in
 tactical web-gear and an eye-patch, holding an oversized LoRa antenna, throwing a
-peace sign. Baud appears at empty states and completions, never in the way of
+peace sign. Baud appears only at empty states and completions, never in the way of
 work.</em></p>
 
 ## Implementation status
@@ -22,6 +32,11 @@ Which surfaces actually consume these tokens:
 | `site/style.css` — the Pages site | ✅ | ✅ |
 | `web/spore-standalone.html` — the browser node | ✅ own token set, same values (C1) | ✅ crate shadow, focus ring; no scanlines/vignette (none implemented — nothing to gate) |
 | Android — `Chrome.kt` + `MainActivity.kt` | ✅ | ✅ crate, Toughbook input, radio switch, segmented LED, stickers, scanlines, reduced motion |
+
+**Icon adoption is tracked in the roadmap's Design Language milestone** — every
+surface replaces the old mushroom icon with Antenna + Seed. Until a surface
+ships the new mark it still carries whatever it had; the rule is the destination,
+not a claim that the work is done.
 
 **Found and fixed by the C1 audit:** this table's `web/spore-standalone.html` row
 used to say "inherits the stylesheet," which was never true — the standalone
@@ -49,7 +64,7 @@ than left for someone to discover as a bug:
   "remove animations" toggle sets. Scanlines, the CRT bloom and the mascot sparkle
   are all gated on it.
 
-The **clack and particle burst** in §3 are deliberately absent: §7 requires sound
+The **clack and particle burst** in §3 are deliberately absent: §8 requires sound
 off until the user enables it, there is no such setting yet, and shipping it
 on-by-default is not a thing to get wrong once.
 
@@ -144,8 +159,8 @@ long-form `<p>`/`<li>`/`<td>` inside `main.doc` — doc pages read start-to-fini
 for minutes at a stretch, which is exactly the fatigue this token trades against.
 Android's `Chrome.kt` Palette keeps full amber deliberately: its body text is chat
 bubbles, captions and single-line status rows, never a multi-paragraph read, so
-there is no comfort problem to solve and adding a second amber-family token would
-be complexity without a payoff. `web/spore-standalone.html`'s longest text is the
+there is no comfort problem to solve and adding a second amber-family token would be
+complexity without a payoff. `web/spore-standalone.html`'s longest text is the
 one `.tag` paragraph under the header — reviewed and left on full `--ink` for the
 same reason. Revisit only if a surface grows genuinely long-form body copy.
 
@@ -164,11 +179,19 @@ Surfaces name their *role*, so a screen can be re-skinned without hunting hex co
 --accent2     = --cyan        focus, selection, secondary action
 --ok          = --phosphor    success, verified, delivered
 --warn        = --amber       caution
---bad         = --pink        failure — pink does double duty; rely on the icon too
+--bad         = --pink         failure — pink does double duty; rely on the icon too
 ```
 
 `--bad` and `--accent` share a hue on purpose: this palette has no red. Failure is
 therefore **never signalled by colour alone** — pair it with an icon and words.
+
+### Colour hierarchy in practice
+
+1. **Phosphor green** → live status, peer counts, active nav, success, "alive"
+2. **Amber** → all primary text, headings, labels
+3. **Pink** → *only* primary actions and critical focus moments
+4. **Moss / Kevlar** → surfaces, secondary buttons, inert chrome
+5. **Copper** → rare, reserved for continuity / seed / offline-window moments
 
 ### Light mode
 
@@ -216,7 +239,7 @@ of it.
 |---|---|
 | Node UI, Android app, logs, status | Full flavour. `[PEER_ACQUIRED] ヽ(・∀・)ﾉ` |
 | Builder docs — Spec, Bridges, Rebuild | Restrained. Styling yes, jargon no; these are read under pressure |
-| **Pages front page** | **Plain language.** `site/home.md` is deliberately written for people who do not build software. It gets the palette, the crates and Baud — it does not get `TACTICAL REPO-SQUISH INITIATED` |
+| **Pages front page / first-run** | **Plain language.** `site/home.md` is deliberately written for people who do not build software. It gets the palette, the crates and Baud — it does not get `TACTICAL REPO-SQUISH INITIATED` |
 
 Kaomoji are punctuation, not content: they follow a message that already made sense
 without them. Never put one where a screen reader will read it aloud as garbage —
@@ -227,14 +250,14 @@ without them. Never put one where a screen reader will read it aloud as garbage 
 ### Three control sizes, and no fourth
 
 Every interactive control is one of exactly three sizes. The values are generated
-into §1's table from `design/tokens.json`; this is what they mean and when to
-reach for each.
+into §1's table from `design/tokens.json`; this is what they mean and when to reach
+for each.
 
 | Size | Height | Use |
 |---|---|---|
-| **control** | `control-h` | Primary and secondary buttons, **and text fields**. One height for all three — a field that does not line up with the button beside it is the most visible way a form looks unsystematic. |
-| **chip** | `chip-h` | Compact presets and toggles: offline-window 7D/14D/30D, topic pills. Not a small button — a chip is a *choice among a set*. |
-| **row** | `row-h` | List rows. The unit the Bridges and Advanced restructure is built from. |
+| **CONTROL** | `control-h` (48) | Primary and secondary buttons, **and text fields**. One height for all three — a field that does not line up with the button beside it is the most visible way a form looks unsystematic. |
+| **CHIP** | `chip-h` (32) | Compact presets and toggles: offline-window 7D/14D/30D, topic pills. Not a small button — a chip is a *choice among a set*. |
+| **ROW** | `row-h` (56) | List rows. The unit the Bridges and Advanced restructure is built from. |
 
 Three rules that go with them:
 
@@ -352,7 +375,29 @@ One source of truth, three consumers.
 When a token changes, it changes in all three or in none. A screenshot in one place
 and a hex code in another is how design languages rot.
 
-## 6. Feature vocabulary
+## 6. Icon system — Antenna + Seed (normative)
+
+**Primary mark:** a short, sturdy radio antenna rising directly from a simplified
+seed/soil form.
+
+- Reads as "mesh + living network" at a glance.
+- Geometric enough to stay sharp at 16 px.
+- Phosphor green + amber on dark surfaces; ink on paper.
+- A **mono (single-colour) variant** is required for favicon and status bar.
+- **Never replace with a mushroom, spore-cap, or literal fungus.** The old
+  mushroom mark is retired; no literal mushrooms appear anywhere in the icon system.
+
+**Secondary mark (optional, very small sizes only):** a condensed "S" monogram
+that can incorporate a tiny antenna detail if needed.
+
+### Placement rules
+
+- App icon / PWA icon / site favicon → Antenna + Seed
+- Top bar / header of Android & web node → Antenna + Seed + wordmark "SPORE"
+- Empty states and loading → may appear small beside Baud, never as the main character
+- Do not decorate random UI elements with the icon
+
+### Feature vocabulary
 
 Consistent names for recurring ideas, so the same thing is called the same thing
 everywhere:
@@ -384,45 +429,94 @@ mockups it summarises. Directional, not pixel-perfect — and not the spec.</em>
 utilitarian field equipment. They agree on more than they disagree: flat
 saturated colour over gradients, heavy confident line weight, hardware that looks
 used rather than styled, and cuteness that is not softness. That combination is
-what §1 encodes, and the feedback that produced these references confirmed the
-language is right — **the problems are execution**: too much text, too much
-variation in control sizes, weak hierarchy, navigation that does not separate
-actions. That diagnosis is what C4/C5/C6/B11 exist to fix.
+what §1 encodes.
 
-**The Solarpunk Refinement.** A proposed evolution: the tactical wasteland
-weathering *hopefully* rather than bleakly — moss on the crate, copper oxide on
+**The Solarpunk Cyberdeck direction is adopted.** The tactical wasteland now
+weathers *hopefully* rather than bleakly — moss on the crate, copper oxide on
 the brass, hardware that has been repaired and kept rather than merely survived.
-Its palette sketch is Deep Moss, Copper Oxide, Aged Amber and a Refined Phosphor
-Green, and it drops the neon.
-
-**It is recorded here and is not §1.** Adopting it is a real decision with a real
-cost, and both should be visible before anyone takes it: there is no pink and no
-cyan in that sketch, so *"never put pink on olive"* — the most-repeated rule in
-this document — would cease to have a referent, §3's usage matrix names pink for
-every primary action, the whole contrast table re-grades, and Baud is a pastel
-pink chibi. The mechanics are cheap, because C3 made them cheap: one
-`tokens.json` edit, `design/generate.py` recomputes every ratio and re-checks
-every claim in both directions, three surfaces regenerate. The cost is not the
-work. It is retiring a language mid-refinement and re-opening decisions that are
-already closed.
-
-**What is already being built from it**, because it does not conflict:
-
-- The **Bridges list-row structure** and the grouped **Advanced** sections — filed
-  in ROADMAP's *Screen structures*, and the reason C6 exists.
-- The **icon set** for Identity, Seed, Prekey ring and Offline window, which maps
-  one-to-one onto those Advanced rows.
-- **"Keep it personal. Add loved wear."** Baud stays hand-drawn and slightly worn,
-  and stays out of the way of work (§7).
-- **"A bridge component must feel crafted, not manufactured."** This is a texture
-  and weight argument, not a colour one, and the ammo crate already carries it.
+It is no longer a "proposed refinement" held outside §1; it is the feeling the
+tokens and component system already encode, and the mockups in
+`docs/design_ideas/` are the directional reference for it. The one thing the
+directional sketches *do not* override is the contrast table: the §1 palette and
+its "never pink on kevlar" rule stay normative, and any sketch that drops pink or
+cyan entirely remains a reference, not a spec change — adopting that would
+re-grade every pair and retire Baud's pink chibi, and that cost has to be paid
+deliberately, not absorbed by filing a mood board.
 
 **Handle with the same honesty as everything else.** If a reference here starts
 describing something the app does, promote it into a numbered section with real
 values and a contrast check. Until then it is inspiration, and this document says
 so out loud rather than leaving a reader to guess which half is binding.
 
-## 7. Checklist
+## 7. Screen structures
+
+Concrete targets for the design-language milestone, so the work is implemented
+against a shape rather than a taste. Directional mockups exist in
+`docs/design_ideas/` and follow the current tokens; these are the structures they
+encode.
+
+### Bridges — Android and web node
+
+Replaces the vertical stack of differently sized full-width buttons.
+
+```
+[ BRIDGES                                        0 peers ]
+
+NETWORK
+┌──────────────────────────────────────────────────────┐
+│ ● UDP broadcast          primary subnet  →  on       │
+│                                  [PAUSE]  [REMOVE]   │
+└──────────────────────────────────────────────────────┘
+
+[ ADD A BRIDGE ]   ← secondary, full width; opens a sheet with the
+                     previous options (audio, Meshtastic, RNode,
+                     Wi-Fi Direct, WebSocket, Nostr, …)
+
+(optional, collapsed) More transports
+```
+
+Every active bridge is a uniform `row`. The heterogeneous olive button stack goes
+away entirely — the transports it listed move into the sheet behind **ADD A
+BRIDGE**, which is one secondary control rather than eight.
+
+### Advanced — three crates of uniform rows
+
+- **IDENTITY** — name, photo, address
+- **SECURITY** — Seed (reveal behind a confirm), Prekey ring (export behind a
+  confirm), Offline window (`chip` presets 7D/14D/30D plus custom)
+- **NODE** — peers, envelopes, store budget, as segmented LEDs
+
+The long About text becomes a single **Security model** row that expands or
+navigates. Nothing on this screen is expanded by default.
+
+### Android / Web node header (persistent identity)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ [Antenna+Seed] SPORE                    [3 peers]        │
+│ [avatar] Petname   address…  [COPY]                       │
+│ alive · 3 peers · 28 stored                    [SHARE]   │
+└──────────────────────────────────────────────────────────┘
+```
+
+Always visible. The status line is the §3 form — segmented LED plus short mono
+text, never a sentence.
+
+### Site homepage
+
+- **Persistent top nav:** Try it · How it works · Get a node · Spec · Mission.
+  Today it renders Home · Spec · Apps · Design · Bridges · Rebuild · Continuity ·
+  Roadmap · Changelog — nine items, different vocabulary, and `MISSION.md` has a
+  `null` nav label so *Mission* is reachable only by direct link. Promoting it
+  means deciding what happens to Design/Bridges/Rebuild/Continuity.
+- **Hero:** bold amber display headline, one short plain sentence, primary pink
+  **OPEN WEB NODE**, secondary **GET A NODE**. The headline and copy already
+  match (`site/home.md` opens *"Messages that still get through"*); the CTA labels
+  and the nav do not.
+- **Three story crates maximum above the fold** — Postcard · Any link · Honest
+  privacy. Everything else in crates behind progressive disclosure.
+
+## 8. Checklist
 
 Before shipping a screen:
 
@@ -434,6 +528,8 @@ Before shipping a screen:
 - [ ] Decorative kaomoji and mascots are `aria-hidden`.
 - [ ] Sound off by default.
 - [ ] Voice matches the zone in §2 — plain language on the front page.
+- [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
+- [ ] Exactly three control sizes used; no one-off heights.
 
 ## Appendix A — Android chat attachments
 

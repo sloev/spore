@@ -230,7 +230,7 @@ pub unsafe extern "C" fn spore_node_recv(n: *mut Node, bytes: *const u8, len: us
 // three exports below are the sealed-and-signed path the core has had since #70,
 // finally reachable from a tab.
 //
-// Additive, like every export here: `wasm.rs` is not in `CONTRIBUTING.md`'s
+// Additive, like every export here: `wasm.rs` is not in `docs/CONTRIBUTING.md`'s
 // frozen list, no wire changes, and a browser that ignores these behaves exactly
 // as it did.
 

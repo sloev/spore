@@ -96,7 +96,7 @@ class NodeService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("🍄 SPORE Communicator")
+            .setContentTitle("📡 SPORE Communicator")
             .setContentText(text)
             .setContentIntent(contentIntent)
             .setSmallIcon(R.drawable.ic_spore)

@@ -36,18 +36,18 @@ const pages = [
   // The findings register belongs on the site — anyone evaluating whether to trust
   // this with their mail should be able to read what was found and fixed without
   // cloning the repo — but households do not need it in the top bar.
-  ['SECURITY.md', 'security-policy.html', null],
+  ['docs/SECURITY.md', 'security-policy.html', null],
   ['docs/SECURITY_FINDINGS.md', 'security.html', null],
-  ['CHANGELOG.md', 'changelog.html', 'Changelog'],
+  ['docs/CHANGELOG.md', 'changelog.html', 'Changelog'],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
   ['docs/VISUALDESIGN.md', 'design-language.html', null],
   ['bindings/README.md', 'bindings.html', null],
   ['reference/README.md', 'reference.html', null],
   ['web/README.md', 'webguide.html', null],
-  ['CONTRIBUTING.md', 'contributing.html', null],
+  ['docs/CONTRIBUTING.md', 'contributing.html', null],
   ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
-  ['MISSION.md', 'mission.html', null],
+  ['docs/MISSION.md', 'mission.html', null],
 ];
 
 // Map a source .md path (as written in links) to its output page.

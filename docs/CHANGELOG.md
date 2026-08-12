@@ -10,7 +10,7 @@ Two conventions specific to this project:
   `cargo run --example gen_vectors` still produces `reference/vectors.json`
   byte-for-byte, so every reference decoder and every v1 peer is unaffected.
 - **Security fixes reference their finding.** `S-0nn` links to
-  [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md), which carries the
+  [`docs/SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md), which carries the
   reproduction, root cause and regression test for each one.
 
 ## Unreleased
@@ -645,7 +645,7 @@ Two conventions specific to this project:
   pump. Config: `iroh` (listen), `iroh: <id>` (dial via relay), or `iroh: <id>@<addr>`
   (dial direct, relay/discovery off). Tested by a two-endpoint localhost QUIC
   round-trip in a dedicated `iroh` CI job. Trust notes (relay phone-home, `EndpointId`
-  ≠ SPORE address) are in [`BRIDGES.md`](docs/BRIDGES.md). **Wire unchanged** — an
+  ≠ SPORE address) are in [`BRIDGES.md`](BRIDGES.md). **Wire unchanged** — an
   underlay, not a protocol change; golden vectors byte-identical.
 - **MSRV floor raised 1.75 → 1.85.** Admitting iroh pulls `zeroize` ≥1.9 (and its
   edition-2024 `zeroize_derive`) into the *core* build via chacha20poly1305/crypto_box,
@@ -995,8 +995,8 @@ things, so rather than let anyone infer it wrongly:
 Freezing the wire at v1 while the software is at 0.1 is not a contradiction. The
 protocol is what peers and reimplementations depend on, and it does not move. The
 software is early and says so: no radio bridge has been verified against real
-hardware — every 🧪 in [`BRIDGES.md`](docs/BRIDGES.md) — and
-[`SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md) carried open items, including
+hardware — every 🧪 in [`BRIDGES.md`](BRIDGES.md) — and
+[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) carried open items, including
 that the one-shot seal had no forward secrecy (S-022, closed in 0.2.0). A 1.0 badge
 would have said otherwise.
 
@@ -1075,7 +1075,7 @@ node running this interoperates with a v1 peer that is simply more permissive.
   the per-source quota or a busy peer's backpressure.
 - Relays **verify a signature before writing identity into local state** (neighbour,
   path and quota tables). Forwarding still does no crypto. Rationale and the cost on
-  constrained hardware: [`docs/DESIGN.md`](docs/DESIGN.md).
+  constrained hardware: [`docs/DESIGN.md`](DESIGN.md).
 
 ### Changed — API
 
