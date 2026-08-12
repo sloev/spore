@@ -86,8 +86,8 @@ jobs:
       - name: Refuse a release with nothing written about it
         run: |
           set -euo pipefail
-          if ! grep -q '^## Unreleased' CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## Unreleased' section to release."
+          if ! grep -q '^## Unreleased' docs/CHANGELOG.md; then
+            echo "::error::docs/CHANGELOG.md has no '## Unreleased' section to release."
             echo "Add one and describe what changed, then bump again."
             exit 1
           fi
@@ -95,7 +95,7 @@ jobs:
           # explanation of what it is for, and a plain "is it non-empty" check
           # counts that as content — which would have cut 0.4.0 with a changelog
           # section consisting of the boilerplate describing changelog sections.
-          entries=$(awk '/^## Unreleased/{f=1; next} /^## /{f=0} f && /^- /' CHANGELOG.md || true)
+          entries=$(awk '/^## Unreleased/{f=1; next} /^## /{f=0} f && /^- /' docs/CHANGELOG.md || true)
           if [ -z "$entries" ]; then
             echo "::error::'## Unreleased' has no entries — write what changed, as '- ' bullets."
             exit 1
@@ -114,7 +114,7 @@ jobs:
           ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
           # Keep the lockfile in step without touching dependency versions.
           cargo update -p spore --offline 2>/dev/null || cargo update -p spore
-          sed -i "0,/^## Unreleased$/s//## ${next} — $(date -u +'%Y-%m-%d')/" CHANGELOG.md
+          sed -i "0,/^## Unreleased$/s//## ${next} — $(date -u +'%Y-%m-%d')/" docs/CHANGELOG.md
           # Leave a fresh Unreleased for the next cycle. The note is an HTML
           # comment, not prose: anything readable sitting beside the bullets gets
           # swept into the published release notes by the retitle above. v0.4.0
@@ -124,9 +124,9 @@ jobs:
           # `&` is the matched heading, re-emitted below the new one. An anchor of
           # `^` would match the start of *every* line and prepend the block to all
           # of them — which it did, until this was dry-run against the real file.
-          sed -i "0,/^## ${next} —/s//## Unreleased\n\n<!-- Add \`- \` bullets here as work merges. This note is a comment so it\n     cannot reach a release page; the bump refuses if there are no bullets. -->\n\n&/" CHANGELOG.md
+          sed -i "0,/^## ${next} —/s//## Unreleased\n\n<!-- Add \`- \` bullets here as work merges. This note is a comment so it\n     cannot reach a release page; the bump refuses if there are no bullets. -->\n\n&/" docs/CHANGELOG.md
           grep -n '^version = ' Cargo.toml | head -1
-          grep -n '^## ' CHANGELOG.md | head -3
+          grep -n '^## ' docs/CHANGELOG.md | head -3
 
       - name: Open the release PR
         env:
@@ -138,7 +138,7 @@ jobs:
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git checkout -b "$branch"
-          git add Cargo.toml Cargo.lock CHANGELOG.md
+          git add Cargo.toml Cargo.lock docs/CHANGELOG.md
           git commit -m "Release ${next}"
           # Force-with-lease: a previous run that got as far as pushing leaves the
           # branch behind, and a retry must not die on it. The branch is bot-owned

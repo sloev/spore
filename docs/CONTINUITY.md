@@ -24,7 +24,7 @@ for the *protocol* surviving even this codebase.
 | **Rebuild** | If this codebase disappeared, could someone who has never seen it write a compatible node? | [`REBUILD.md`](REBUILD.md) |
 | **Reference decoders** | Can I check a real envelope against something I need not trust — no crypto library, no dependency? | [`reference/`](https://github.com/sloev/spore/tree/master/reference) |
 | **Release artifacts** | Can I get a working node *and* the means to rebuild it from one download, with no live infrastructure? | Every [release](https://github.com/sloev/spore/releases) carries `spore-standalone.html` and `spore-offline-bundle.tar.gz` beside the APK — [`APPS.md`](APPS.md) |
-| **The frozen contract** | Will a node built from any of the above still speak to one built today? | `tests/api_freeze.rs` + `reference/vectors.json`, held by [`CONTRIBUTING.md`](../CONTRIBUTING.md)'s freeze rules |
+| **The frozen contract** | Will a node built from any of the above still speak to one built today? | `tests/api_freeze.rs` + `reference/vectors.json`, held by [`CONTRIBUTING.md`](CONTRIBUTING.md)'s freeze rules |
 | **Public domain** | Is there a license, company or maintainer this depends on outliving? | [`LICENSE`](../LICENSE) — no |
 
 A surviving copy — a phone, a saved HTML file, a printed Seed Sheet, a clone, a

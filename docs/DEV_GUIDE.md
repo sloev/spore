@@ -1,7 +1,7 @@
 # Developer guide — a map of the repo
 
-Where things live. [`MISSION.md`](../MISSION.md) is the *why* and the decision
-test; [`CONTRIBUTING.md`](../CONTRIBUTING.md) is the *rules* (freeze, CI,
+Where things live. [`MISSION.md`](MISSION.md) is the *why* and the decision
+test; [`CONTRIBUTING.md`](CONTRIBUTING.md) is the *rules* (freeze, CI,
 branches, releases). Read those once; this one is a lookup table.
 
 ## Start here, by goal
@@ -14,8 +14,8 @@ branches, releases). Read those once; this one is a lookup table.
 | Work on the Android app | `android/README.md`, then `android/app/src/main/kotlin/org/spore/node/` |
 | Work on the docs site | `site/build.mjs` + `site/home.md` |
 | Work on the browser node / wasm | `web/README.md`, `src/wasm.rs` |
-| Check what's shipped vs planned | `CHANGELOG.md` `## Unreleased` and `docs/ROADMAP.md` — see [Status](#status) |
-| Check a security question | `docs/SECURITY_FINDINGS.md`; `SECURITY.md` to report one |
+| Check what's shipped vs planned | `docs/CHANGELOG.md` `## Unreleased` and `docs/ROADMAP.md` — see [Status](#status) |
+| Check a security question | `docs/SECURITY_FINDINGS.md`; `docs/SECURITY.md` to report one |
 | Verify a 🧪 claim | `docs/HARDWARE.md`, `android/TESTING.md` |
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
 | Change a colour | `design/tokens.json` → `python3 design/generate.py` |
@@ -67,7 +67,7 @@ Exactly two places record state, and they answer different questions:
 
 | Source | Says |
 |---|---|
-| `CHANGELOG.md` `## Unreleased` | What has **shipped** since the last release |
+| `docs/CHANGELOG.md` `## Unreleased` | What has **shipped** since the last release |
 | `docs/ROADMAP.md` | What is **planned, in review, or carried forward** |
 
 Check both: a PR can be merged while part of its original scope stays open.
@@ -84,7 +84,7 @@ hardware).
 
 ## Building and testing
 
-`CONTRIBUTING.md` has the full CI command list. This is which commands apply to
+`docs/CONTRIBUTING.md` has the full CI command list. This is which commands apply to
 which part:
 
 | Area | Commands |
@@ -118,7 +118,7 @@ which part:
 
 | Doc | For |
 |---|---|
-| `MISSION.md` | What SPORE is for, and the decision test |
+| `docs/MISSION.md` | What SPORE is for, and the decision test |
 | `docs/SPEC.md` | The wire format — normative |
 | `docs/REBUILD.md` | Reimplementing in another language, with worked bytes |
 | `docs/DESIGN.md` | Application layers, and the core-vs-runtime model |
@@ -127,7 +127,7 @@ which part:
 | `docs/CONTINUITY.md` | SPORE as a seed; what survives, and what guarantees it |
 | `docs/APPS.md` | What to install |
 | `docs/ROADMAP.md` | The engineering plan |
-| `docs/SECURITY_FINDINGS.md` / `SECURITY.md` | Findings register / how to report |
+| `docs/SECURITY_FINDINGS.md` / `docs/SECURITY.md` | Findings register / how to report |
 | `docs/HARDWARE.md` / `android/TESTING.md` | Device evidence |
 | `docs/VISUALDESIGN.md` | The design language |
-| `CONTRIBUTING.md` | Freeze rules, CI, branches, releases |
+| `docs/CONTRIBUTING.md` | Freeze rules, CI, branches, releases |

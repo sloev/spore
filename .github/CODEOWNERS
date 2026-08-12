@@ -4,7 +4,7 @@
 
 *                         @sloev
 
-# Frozen 1.0 contract — the API + wire format. See CONTRIBUTING.md.
+# Frozen 1.0 contract — the API + wire format. See docs/CONTRIBUTING.md.
 /tests/api_freeze.rs      @sloev
 /reference/vectors.json   @sloev
 /bindings/spore.h         @sloev

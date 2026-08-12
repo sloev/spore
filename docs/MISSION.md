@@ -7,7 +7,7 @@ Move messages, files, and live sessions between **devices you control**, over
 a company server and **without lying** about offline, NAT, or anonymity.
 
 The protocol stays **small enough to hold**: a **two-sided A4** (or one clear
-diagram + short pages — see [`docs/spore-v1.png`](docs/spore-v1.png)) that
+diagram + short pages — see [`docs/spore-v1.png`](spore-v1.png)) that
 still matches the wire; **continuity** so a seed and a cold machine can
 rejoin the mesh; **rebuild paths** that do not depend on us existing as a
 company.
@@ -36,8 +36,8 @@ company.
    multi-bridge underlays, content-addressed files, RPC, topics, seal/ratchet.
 2. **A live plane (Direct)** — multi-transport datagrams; signaling in
    envelopes; NAT traversal solved **once** (reflexive candidates, hole-punch,
-   explicit relay). See [`docs/DIRECT.md`](docs/DIRECT.md) and
-   [`docs/ROADMAP.md`](docs/ROADMAP.md)'s P-Direct-NAT track.
+   explicit relay). See [`docs/DIRECT.md`](DIRECT.md) and
+   [`docs/ROADMAP.md`](ROADMAP.md)'s P-Direct-NAT track.
 3. **Façades** — localhost bridges so browsers, mail clients, softphones,
    XMPP, folders, and `spore://` keep working on top of SPORE.
 4. **Nodes people can run** — Android, desktop, browser/wasm, daemon,
@@ -45,20 +45,20 @@ company.
    binding, an OS process, a browser worker, an MCU firmware — each supplying
    the same four **nutrients** (randomness, time, storage, scheduling) across
    the transport boundary. Runtimes vary; the nutrients do not. See
-   [`docs/DESIGN.md`](docs/DESIGN.md)'s "The spore and the soil" for the model
+   [`docs/DESIGN.md`](DESIGN.md)'s "The spore and the soil" for the model
    and the word legend these docs hold to.
 5. **A holdable protocol story** — two-sided A4 / `spore-v1` one-pager that
-   stays true to [`docs/SPEC.md`](docs/SPEC.md); not a 200-page religion to
+   stays true to [`docs/SPEC.md`](SPEC.md); not a 200-page religion to
    *use* the system.
 6. **Continuity** — seeds, Seed Sheet / paper paths, offline standalone node,
-   cold-start without our servers; [`docs/CONTINUITY.md`](docs/CONTINUITY.md)
+   cold-start without our servers; [`docs/CONTINUITY.md`](CONTINUITY.md)
    is product, not a side essay.
 7. **Rebuild without us** — public domain, vectors, reference T0 decoders,
-   [`docs/REBUILD.md`](docs/REBUILD.md)/vendor paths so the mesh outlives any
+   [`docs/REBUILD.md`](REBUILD.md)/vendor paths so the mesh outlives any
    single maintainer.
 
 Pillars 6 and 7 answer different questions on purpose — see
-[`docs/CONTINUITY.md`](docs/CONTINUITY.md) for how they and the reference
+[`docs/CONTINUITY.md`](CONTINUITY.md) for how they and the reference
 decoders and every release's own offline bundle fit together.
 
 Chat UI is **one client**, not the product definition.
@@ -107,10 +107,10 @@ Chat UI is **one client**, not the product definition.
 | Asset | Role |
 |---|---|
 | **Two-sided A4 / spore-v1 diagram** | Whole protocol in one holdable artifact; keep updated when v1 surface changes |
-| **[SPEC](docs/SPEC.md) + [DESIGN](docs/DESIGN.md)** | Implementer truth; not required reading to *send a note* |
-| **[CONTINUITY](docs/CONTINUITY.md)** | Seed, paper, cold start, standalone node, "network without us" |
-| **[REBUILD](docs/REBUILD.md) / [reference](reference/README.md) / vectors** | Independent reimplementation and verify |
-| **[Standalone HTML](web/README.md) / offline bundle** | Run a node with no app store and no CDN |
+| **[SPEC](SPEC.md) + [DESIGN](DESIGN.md)** | Implementer truth; not required reading to *send a note* |
+| **[CONTINUITY](CONTINUITY.md)** | Seed, paper, cold start, standalone node, "network without us" |
+| **[REBUILD](REBUILD.md) / [reference](../reference/README.md) / vectors** | Independent reimplementation and verify |
+| **[Standalone HTML](../web/README.md) / offline bundle** | Run a node with no app store and no CDN |
 | **Public domain** | No license cliff; no corporate kill switch |
 
 Features that cannot be explained without abandoning "small protocol +
@@ -159,6 +159,6 @@ If the answer is fuzzy, **stop** and tighten the design.
 decision test get cut or rewritten.
 
 **Read order for agents:** `MISSION.md` → handoff (if any) →
-[`docs/ROADMAP.md`](docs/ROADMAP.md) + [`CHANGELOG.md`](CHANGELOG.md) →
+[`ROADMAP.md`](ROADMAP.md) + [`CHANGELOG.md`](CHANGELOG.md) →
 SPEC/CONTINUITY only as needed. See also
-[`docs/DEV_GUIDE.md`](docs/DEV_GUIDE.md) for the full repo map.
+[`DEV_GUIDE.md`](DEV_GUIDE.md) for the full repo map.

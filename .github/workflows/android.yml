@@ -280,7 +280,7 @@ jobs:
 
             Every release here also carries the means to rebuild it without this
             repository, this site, or crates.io existing (see
-            [`MISSION.md`](https://github.com/sloev/spore/blob/master/MISSION.md)):
+            [`MISSION.md`](https://github.com/sloev/spore/blob/master/docs/MISSION.md)):
 
             - **[⬇ spore-standalone.html](https://github.com/sloev/spore/releases/download/rolling/spore-standalone.html)**
               — the whole browser node, one file, zero network requests.
@@ -394,7 +394,7 @@ jobs:
             $0 ~ ("^## " v " ") { f = 1; next }
             /^## / { if (f) exit }
             f
-          ' ../CHANGELOG.md > notes.md
+          ' ../docs/CHANGELOG.md > notes.md
           cat >> notes.md <<'NOTE'
 
           ---
@@ -417,7 +417,7 @@ jobs:
 
           Every release also carries the means to rebuild it without this
           repository, this site, or crates.io existing (see
-          [MISSION.md](https://github.com/sloev/spore/blob/master/MISSION.md)):
+          [MISSION.md](https://github.com/sloev/spore/blob/master/docs/MISSION.md)):
           the standalone browser node (`spore-standalone.html`, one file, zero
           network requests) and a source bundle with every dependency vendored
           in (`spore-offline-bundle.tar.gz` — unpack and `cargo build --offline`
@@ -425,7 +425,7 @@ jobs:
           NOTE
           echo "SHA-256 \`$(cut -d' ' -f1 "spore-${tag}.apk.sha256")\`" >> notes.md
           # `gh release create` uploads by basename, so these need no copying —
-          # `../` here is the same relative-to-CWD reference `../CHANGELOG.md`
+          # `../` here is the same relative-to-CWD reference `../docs/CHANGELOG.md`
           # already uses a few lines up. The glob picks up both the versioned
           # and constant-named bundle copies built two steps ago.
           gh release create "$tag" \
@@ -473,7 +473,7 @@ jobs:
             This number versions the **distribution**, not the protocol. The SPORE v1
             wire format and the `spore` crate's API are frozen at 1.x and unaffected
             by it — the table at the top of
-            [CHANGELOG.md](https://github.com/sloev/spore/blob/master/CHANGELOG.md)
+            [CHANGELOG.md](https://github.com/sloev/spore/blob/master/docs/CHANGELOG.md)
             says which number covers what.
 
             Before you rely on it: no radio bridge has been verified against real
@@ -488,7 +488,7 @@ jobs:
 
             Every release also carries the means to rebuild it without this
             repository, this site, or crates.io existing (see
-            [MISSION.md](https://github.com/sloev/spore/blob/master/MISSION.md)):
+            [MISSION.md](https://github.com/sloev/spore/blob/master/docs/MISSION.md)):
             the standalone browser node (`spore-standalone.html`, one file, zero
             network requests) and a source bundle with every dependency vendored
             in (`spore-offline-bundle.tar.gz` — unpack and `cargo build --offline`

@@ -18,11 +18,11 @@ so expect a reply in days rather than hours.
 2. A reproduction. A failing test or a byte sequence beats a description of a code
    path, because several plausible readings of this code have turned out to be
    already handled — see [Investigated and not a
-   finding](docs/SECURITY_FINDINGS.md#investigated-and-not-a-finding).
+   finding](SECURITY_FINDINGS.md#investigated-and-not-a-finding).
 3. Which file and function.
 
 Every accepted finding is written up in
-[`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md) with its reproduction,
+[`docs/SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) with its reproduction,
 root cause, patch, and the test that keeps it fixed. You are welcome to be
 credited there or not, as you prefer.
 
@@ -53,7 +53,7 @@ treated as real findings rather than documentation nits:
   misusing the API. That the *router* can be made to misbehave by one is in scope.
 - **Metadata visible to a bridge.** A bridge sees that traffic happened, its size
   and its timing. Mix mode reduces this and is not Tor. Per-bridge exposure is
-  documented in [`docs/BRIDGES.md`](docs/BRIDGES.md); an undocumented leak is worth
+  documented in [`docs/BRIDGES.md`](BRIDGES.md); an undocumented leak is worth
   reporting, a documented one is a known limitation.
 - **8-byte address collisions.** Addresses are 64-bit hashes. A collision is
   possible with effort, which is why the full public key travels whenever a frame
@@ -64,9 +64,9 @@ treated as real findings rather than documentation nits:
 Report these only if you can show something *worse* than what is written here.
 
 - **Hardware-unverified bridges.** Anything marked 🧪 in
-  [`docs/BRIDGES.md`](docs/BRIDGES.md) has tested codecs and an untested hardware
+  [`docs/BRIDGES.md`](BRIDGES.md) has tested codecs and an untested hardware
   loop. Radio, BLE and audio paths are template-grade until someone runs the
-  procedure in [`docs/HARDWARE.md`](docs/HARDWARE.md) on real devices.
+  procedure in [`docs/HARDWARE.md`](HARDWARE.md) on real devices.
 - **The ratchet and mix layers** have had one bounds review, not a cryptographic
   audit. Nobody has analysed the mix for traffic-analysis resistance beyond its
   size classes.
@@ -74,7 +74,7 @@ Report these only if you can show something *worse* than what is written here.
 - **`with_node` is not reentrant** — an embedder whose closure calls back into the
   hub deadlocks that thread. Documented, not prevented.
 - **The remaining still-open items** are listed at the end of
-  [`docs/SECURITY_FINDINGS.md`](docs/SECURITY_FINDINGS.md). They are carried
+  [`docs/SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md). They are carried
   deliberately and are not secrets.
 
 ## Supported versions

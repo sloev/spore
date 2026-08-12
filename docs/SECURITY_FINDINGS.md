@@ -59,7 +59,7 @@ than fixing a crash, it says so explicitly.
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
-both release plumbing — the checklist step in `CONTRIBUTING.md` is the only guard,
+both release plumbing — the checklist step in `docs/CONTRIBUTING.md` is the only guard,
 which is precisely how S-025 shipped.
 
 Earlier, in #15: five unbounded-read bugs (`kiss_stream`, `bag` ×2, `copyparty`,
@@ -1037,7 +1037,7 @@ cannot drift silently. `Cargo.toml` bumped to `0.2.0` to match the tag that exis
 The tagged release step gained `append_body: true`, so re-running a release build
 adds its caveats under GitHub's generated notes instead of overwriting them.
 
-`CONTRIBUTING.md` gains the step this needed: bump `Cargo.toml` before tagging, and
+`docs/CONTRIBUTING.md` gains the step this needed: bump `Cargo.toml` before tagging, and
 **confirm the release has assets** with `curl -fsI` before announcing it. A tag whose
 build never ran still produces a release page.
 
@@ -1095,7 +1095,7 @@ produces.
 **Freeze impact?** None.
 
 **Tests.** None automated. Same weakness as S-021 and S-025: release plumbing is only
-observable by releasing, and the `curl -fsI` step in `CONTRIBUTING.md` is the only
+observable by releasing, and the `curl -fsI` step in `docs/CONTRIBUTING.md` is the only
 guard. It would not have caught this one, because the link it checks kept working —
 what broke was which of four files the link's neighbours were.
 

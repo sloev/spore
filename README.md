@@ -314,7 +314,7 @@ before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 
 | Path            | What                                               |
 |-----------------|----------------------------------------------------|
-| `MISSION.md`    | what SPORE is for and the decision test every change is weighed against — read first |
+| `docs/MISSION.md`    | what SPORE is for and the decision test every change is weighed against — read first |
 | `src/lib.rs`    | the router kernel: envelope, fountain fragmentation, paths, `Node`, sealing |
 | `src/*.rs`      | one file per layer: `session`, `ratchet`, `mix`, `topic` (KEYROT), `congestion`, `file`, `rpc`, `feed`, `kiss`, `armor` |
 | `src/bridge/`   | one file per bridge (udp, tcp, store, meshtastic, audio, ssb, bag, …) + the `hub` that shares a node across them |
@@ -328,7 +328,7 @@ before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 | `reference/`    | dependency-free Tier-0 decoders (pure-Python parse + verify) + cross-language test vectors |
 | `docs/BRIDGES.md` | bridge reference — status index + a deep dive per protocol (wire format, SPORE mapping, security, specs) |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
-| `CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
+| `docs/CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
 | `docs/DEV_GUIDE.md` | start here to change something — the full repo map, per-area build/test commands, and repo conventions |
 | `docs/DESIGN.md`| the layers above transport: files, sessions, RPC, feeds, ratchet, mix, bridges |
 | `docs/DIRECT.md` | SPORE Direct — the negotiated, non-routed E2E datagram pipe for low-latency media |
