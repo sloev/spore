@@ -104,7 +104,7 @@ that are verified, with honest limits on the ones that aren't.
 | Runtime storage nutrient (`SpillBackend` trait) | ✅ shipped (#87) | Unblocks browser/ESP spill |
 | Runtime scheduling nutrient | ✅ shipped (#90) | Tick contract |
 | demod_out cap (unbounded audio-output queue) | ✅ shipped | Bounded at 64, drops oldest |
-| Conformance: browser↔native over QUIC/WebTransport (reuses iroh path) | ⬜ open | Was "native WebRTC ice-lite bridge". SPEC page 2 reads as though it ships; doc now says otherwise. Native ICE/DTLS/SCTP declined (largest dep this repo would take — see BRIDGES.md §WebRTC). The native half is reachable via the iroh QUIC path already merged (`src/direct/iroh.rs`); a native WebTransport/QUIC adapter would close the gap without a native WebRTC stack |
+| Conformance: browser↔native over QUIC/WebTransport (reuses iroh path) | ⬜ open — **spike validated** | Spike `spikes/001-webtransport-native` confirms feasible: a feature-gated `wtransport`+`quinn` native server + a browser `web/transports/webtransport.mjs` shim, mapping onto `DatagramPort` like `IrohPort`. Constraint: iroh's `noq` QUIC ≠ HTTP/3 WebTransport, so the native side is a *new* QUIC listener, not a reuse of iroh's endpoint — only the `DatagramPort` abstraction and Direct signalling are reused. `rustls`/`ring` already in tree via iroh; `quinn` is net-new (second QUIC stack) — feature-gate like `bridge-iroh` |
 
 **Carried-forward functional gaps (still real, not regressions):**
 
