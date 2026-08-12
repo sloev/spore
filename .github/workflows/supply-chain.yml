@@ -34,7 +34,13 @@ jobs:
         # optional `bridge-iroh` feature, which is off by default and off the shipped
         # binary — the default supply chain never sees it. cargo-deny already exempts
         # it (`unmaintained = "workspace"`); this keeps cargo-audit consistent.
-        run: cargo audit --deny warnings --ignore RUSTSEC-2024-0436
+        #
+        # RUSTSEC-2026-0253: `lru` 0.18.1 has an unsound `LruCache::pop()` (potential
+        # use-after-free if a drop panics). It enters the tree only through the
+        # optional `bridge-iroh` feature (iroh's dependency chain), which is off by
+        # default. Tracked for a real fix upstream; ignored here so a transitive
+        # advisory on an off-by-default feature does not gate every PR.
+        run: cargo audit --deny warnings --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0253
 
   policy:
     name: cargo-deny
