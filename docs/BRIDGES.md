@@ -1696,6 +1696,18 @@ What you lose is NAT traversal between two daemons with no reachable address. Wh
 you have instead: [Tor](#tor) and [I2P](#i2p) both traverse NAT and do it with
 better metadata properties, and either is a `torrc`/SAM config away.
 
+**The path to a native half is QUIC, not WebRTC.** The one place a native WebRTC
+bridge would matter is *browser ↔ native node* — a browser has WebRTC but a daemon
+does not, so the two cannot speak directly today. That gap is better closed with
+[WebTransport](#webtransport) (QUIC datagrams in the browser) on the browser side
+and the **iroh QUIC** path already merged in the core (`src/direct/iroh.rs`,
+`bridge-iroh`) on the native side: the browser's QUIC becomes one more Direct
+medium rather than a special case that pulls in an ICE/DTLS/SCTP stack. Native
+WebRTC is therefore declined outright; a native WebTransport/QUIC adapter is the
+planned answer to the browser↔native conformance gap (see [`ROADMAP.md`](ROADMAP.md)
+M2). Until that adapter exists, the SPEC page-2 "native nodes run ice-lite" line
+reads as more than the tree does, and says so.
+
 The browser and the Android WebView keep WebRTC because there it costs nothing —
 the platform ships the stack. Note that the Android app does not currently *load*
 this transport (its WebView is given `websocket`, `nostr` and `webtorrent`), though

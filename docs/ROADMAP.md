@@ -104,7 +104,7 @@ that are verified, with honest limits on the ones that aren't.
 | Runtime storage nutrient (`SpillBackend` trait) | ✅ shipped (#87) | Unblocks browser/ESP spill |
 | Runtime scheduling nutrient | ✅ shipped (#90) | Tick contract |
 | demod_out cap (unbounded audio-output queue) | ✅ shipped | Bounded at 64, drops oldest |
-| Conformance: native WebRTC ice-lite bridge | ⬜ open | SPEC page 2 reads as though it ships; doc now says otherwise. Planned, not a defect |
+| Conformance: browser↔native over QUIC/WebTransport (reuses iroh path) | ⬜ open | Was "native WebRTC ice-lite bridge". SPEC page 2 reads as though it ships; doc now says otherwise. Native ICE/DTLS/SCTP declined (largest dep this repo would take — see BRIDGES.md §WebRTC). The native half is reachable via the iroh QUIC path already merged (`src/direct/iroh.rs`); a native WebTransport/QUIC adapter would close the gap without a native WebRTC stack |
 
 **Carried-forward functional gaps (still real, not regressions):**
 
@@ -289,7 +289,7 @@ row earns a 🧪 until something exists a person could hold or run. It lives in
 | Track H (H1–H7 hardware/community) | Removed from the plan | `⬜ concept` with no software dependency; lives in VISUALDESIGN §6b as inspiration |
 | Suggested calendar / branch-naming sections | Removed | A milestone plan does not carry a week-by-week calendar that is immediately stale |
 | PR write-up template | Removed | Shipped PRs don't need it; open PRs inherit the milestone's acceptance criteria |
-| Conformance gaps section | Folded into **M2** | One row (native WebRTC ice-lite) remains open and is now in M2 |
+| Conformance gaps section | Folded into **M2** | One row (browser↔native over QUIC/WebTransport) remains open and is now in M2 |
 | Carried-forward (detailed per-PR) | Folded into **M2** carried-forward list | One list, not three per-PR subsections |
 | Plan health check / audit ID index | Removed | Process artefacts of the old PR-map; the milestone structure is the health check |
 | "North star" narrative | Removed | The priority compass + milestone definitions of done say the same thing in less prose |
