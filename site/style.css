@@ -80,7 +80,8 @@ header.site { position: sticky; top: 0; z-index: 10; display: flex; gap: 18px;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(8px); border-bottom: 1px solid var(--edge); }
 .brand { font-weight: 800; letter-spacing: -0.02em; color: var(--accent);
-  text-decoration: none; font-size: 18px; }
+  text-decoration: none; font-size: 18px; display: inline-flex; align-items: center; gap: 6px; }
+.brand-mark { display: block; }
 header.site nav { display: flex; gap: 4px; flex-wrap: wrap; }
 header.site nav a { color: var(--dim); text-decoration: none; font-size: 14px;
   padding: 5px 10px; border-radius: 7px; }
