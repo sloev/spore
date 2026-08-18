@@ -2547,4 +2547,4 @@ sequenceDiagram
     Proxy->>Browser: WebTransport datagrams
 ```
 
-See [PROXY_SETUP.md](PROXY_SETUP.md) for sample configurations.
+See [PROXY_SETUP.md](../docs/PROXY_SETUP.md) for sample configurations.
