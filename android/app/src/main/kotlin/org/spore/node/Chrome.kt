@@ -675,3 +675,150 @@ internal fun HGap(w: Dp = 8.dp) = Spacer(Modifier.width(w))
 /** Vertical gap, spelled once. */
 @Composable
 internal fun VGap(h: Dp = Metrics.Gap) = Spacer(Modifier.height(h))
+
+/**
+ * §3's CHIP: a compact 32dp preset/toggle — topics, time windows, radio
+ * quick-params. Rendered as a small kevlar crate with the throw flattened to 2dp
+ * and a 48dp invisible touch target extending past the visible face so WCAG's
+ * floor is met without a 48dp visual button (C5).
+ *
+ * [selected] flips the face to [activeFill] and ink to [activeInk]; the default
+ * selections use pink-face-with-void-ink to keep pink off kevlar.
+ */
+@Composable
+internal fun Chip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    activeFill: Color = Palette.Pink,
+    activeInk: Color = Palette.Void,
+    inactiveFill: Color = Palette.Kevlar,
+    inactiveInk: Color = Palette.Amber,
+    contentDescription: String? = null,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val down = pressed && enabled
+    val fill = if (selected) activeFill else inactiveFill
+    val ink = if (selected) activeInk else inactiveInk
+    val throwDp = 2.dp
+
+    Box(
+        modifier
+            // Touch target: 48dp min. The visual chip is 32dp; the extra is
+            // invisible padding that carries the clickable area.
+            .sizeIn(minWidth = Metrics.TouchMin, minHeight = Metrics.TouchMin)
+            .padding(end = throwDp, bottom = throwDp)
+            .then(if (down) Modifier.offset(throwDp, throwDp) else Modifier)
+            .drawBehind {
+                if (!down) {
+                    drawRect(
+                        Color.Black.copy(alpha = 0.5f),
+                        Offset(throwDp.toPx(), throwDp.toPx()),
+                        size,
+                    )
+                }
+            }
+            .background(if (enabled) fill else Palette.Asphalt, CrateShape)
+            .border(2.dp, Palette.Edge, CrateShape)
+            .radioClickable(interaction, enabled, onClick)
+            .then(
+                if (contentDescription != null) {
+                    Modifier.semantics { this.contentDescription = contentDescription }
+                } else Modifier
+            )
+            .padding(horizontal = Metrics.ChipPX, vertical = Metrics.ChipPY),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label.uppercase(),
+            modifier = if (contentDescription != null) Modifier.clearAndSetSemantics {} else Modifier,
+            color = if (enabled) ink else Palette.Dim,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                letterSpacing = 0.05.sp,
+            ),
+        )
+    }
+}
+
+/**
+ * A 56dp list row for the Bridges/Advanced restructure (C6): uniform height,
+ * label + value + trailing action. The crate shadow faces right so rows stack
+ * without overlapping shadows.
+ *
+ * [trailing] replaces the default chevron ("›") when non-null. Pass a
+ * [CrateSwitch] for a toggle, a [StickerBadge] for a status badge, or
+ * null to suppress the trailing element entirely.
+ */
+@Composable
+internal fun ListRow(
+    label: String,
+    modifier: Modifier = Modifier,
+    value: String? = null,
+    trailing: @Composable (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val down = pressed && enabled && onClick != null
+    val throwDp = Metrics.Throw
+
+    val rowModifier = modifier
+        .fillMaxWidth()
+        .height(Metrics.RowH)
+        .padding(end = throwDp, bottom = throwDp)
+        .then(if (down) Modifier.offset(throwDp, throwDp) else Modifier)
+        .drawBehind {
+            if (!down) {
+                drawRect(
+                    Color.Black.copy(alpha = 0.6f),
+                    Offset(throwDp.toPx(), throwDp.toPx()),
+                    size,
+                )
+            }
+        }
+        .background(Palette.Asphalt, CrateShape)
+        .border(2.dp, Palette.Edge, CrateShape)
+        .padding(horizontal = Metrics.RowPX, vertical = Metrics.RowPY)
+
+    val clickMod = if (onClick != null) {
+        rowModifier.radioClickable(interaction, enabled, onClick)
+    } else rowModifier
+
+    Row(
+        clickMod,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+            ),
+        )
+        if (value != null) {
+            Caption(value, Modifier.padding(start = 8.dp))
+        }
+        if (trailing != null) {
+            Box(Modifier.padding(start = 8.dp)) { trailing() }
+        } else if (onClick != null) {
+            Text(
+                "›",
+                color = Palette.Dim,
+                style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 16.sp),
+            )
+        }
+    }
+}
