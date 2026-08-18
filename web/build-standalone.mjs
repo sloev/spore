@@ -116,8 +116,91 @@ const html = `<!doctype html>
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
     font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  header, main { max-width:960px; margin:0 auto; padding:0 20px; }
-  header { padding-top:28px; }
+  header.page-header, main { max-width:960px; margin:0 auto; padding:0 20px; }
+  header.page-header { padding-top:28px; }
+
+  /* Persistent header — identity + status chrome (WV0) */
+  .persistent-header {
+    background:var(--panel);
+    border:1px solid var(--edge);
+    border-radius:2px;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.6);
+    padding:12px 16px;
+    margin:0 0 16px;
+    position:sticky;
+    top:0;
+    z-index:100;
+  }
+  .header-brand {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:8px;
+  }
+  .brand-name {
+    font-weight:600;
+    color:var(--accent);
+    font-size:18px;
+  }
+  .peer-count {
+    font-size:12px;
+    color:var(--dim);
+    margin-left:auto;
+  }
+  .header-identity {
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+  .identity-row {
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .avatar-placeholder {
+    font-size:12px;
+    color:var(--dim);
+    border:1px solid var(--edge);
+    border-radius:50%;
+    padding:2px 6px;
+  }
+  .petname {
+    font-weight:600;
+    font-size:14px;
+  }
+  .address {
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--accent2);
+    flex:1;
+  }
+  .copy-button, .share-button {
+    background:transparent;
+    color:var(--ink);
+    border:1px solid var(--edge);
+    border-radius:2px;
+    padding:2px 8px;
+    font-size:11px;
+    cursor:pointer;
+  }
+  .copy-button:hover, .share-button:hover {
+    background:var(--edge);
+  }
+  .status-line {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--dim);
+  }
+  .status-indicator {
+    color:var(--ok);
+  }
+  .stored-count {
+    margin-left:auto;
+  }
+
   h1 { margin:0 0 4px; font-size:26px; letter-spacing:-.02em; display:flex; align-items:center; gap:6px; }
   h1 .s { color:var(--accent); }
   .brand-mark { display:block; flex-shrink:0; }
@@ -172,7 +255,28 @@ const html = `<!doctype html>
 </style>
 </head>
 <body>
-<header>
+<header class="persistent-header">
+  <div class="header-brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#4b5320" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#2a2f1c" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#39ff14" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#39ff14" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#39ff14" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#39ff14" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/><path fill="#57C785" d="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z"/><path fill="#57C785" d="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z"/></svg>
+    <span class="brand-name">SPORE</span>
+    <span class="peer-count" id="peer-count">0 peers</span>
+  </div>
+  <div class="header-identity">
+    <div class="identity-row">
+      <span class="avatar-placeholder">[avatar]</span>
+      <span class="petname" id="petname">Anonymous</span>
+      <span class="address" id="persistent-addr">address\u2026</span>
+      <button class="copy-button" id="copy-addr">COPY</button>
+    </div>
+    <div class="status-line">
+      <span class="status-indicator" id="alive-status">starting\u2026</span>
+      <span class="peer-count-detailed" id="detailed-peers">0 peers</span>
+      <span class="stored-count" id="stored-count">0 stored</span>
+      <button class="share-button" id="share-button">SHARE</button>
+    </div>
+  </div>
+</header>
+<header class="page-header">
   <h1><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#4b5320" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#2a2f1c" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#39ff14" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#39ff14" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#39ff14" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#39ff14" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/><path fill="#57C785" d="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z"/><path fill="#57C785" d="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z"/></svg><span class="s">SPORE</span> — a whole node in one file</h1>
   <p class="tag">This page carries the router (compiled to WebAssembly) and every
      transport inline. It needs no server and no network to start; open it from a
@@ -314,6 +418,14 @@ async function boot() {
     setInterval(saveRing, 60000);
     $('addr').textContent = 'addr ' + hexOf(hub.node.addr());
 
+    // Update persistent header with node identity
+    const addrHex = hexOf(hub.node.addr());
+    $('persistent-addr').textContent = addrHex.substring(0, 8) + '\u2026';
+    $('petname').textContent = restored ? 'Node' : 'Anonymous';
+    $('detailed-peers').textContent = '0 peers';
+    const storeSize = hub.node.storeSize ? hub.node.storeSize() : 0;
+    $('stored-count').textContent = storeSize + ' stored';
+
     hub.onDeliver = (env) => {
       const ok = spore.verify(env);
       let text;
@@ -329,6 +441,11 @@ async function boot() {
 
     $('status').textContent = restored ? 'ready — identity restored' : 'ready — new identity';
     $('status').style.color = 'var(--accent)';
+
+    // Update persistent header status
+    $('alive-status').textContent = 'alive';
+    $('alive-status').style.color = 'var(--ok)';
+
     logLine('sys', 'node ready — ' + (restored ? 'identity restored from local storage' : 'new identity created and saved'));
     wireCompose();
     buildBridgeMenu();
@@ -736,6 +853,32 @@ $('forget').onclick = () => {
   LS.del(K_SEED); LS.del(K_BRIDGES); LS.del(K_TOPICS); LS.del(K_RING);
   location.reload();
 };
+
+// ---- persistent header interactions -----------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  const copyAddrBtn = $('copy-addr');
+  if (copyAddrBtn) {
+    copyAddrBtn.onclick = () => {
+      const addrElement = $('persistent-addr');
+      if (addrElement) {
+        navigator.clipboard.writeText(addrElement.textContent.replace('\u2026', ''))
+          .then(() => {
+            const originalText = copyAddrBtn.textContent;
+            copyAddrBtn.textContent = 'COPIED';
+            setTimeout(() => { copyAddrBtn.textContent = originalText; }, 1000);
+          })
+          .catch(err => { console.error('Failed to copy address:', err); });
+      }
+    };
+  }
+
+  const shareBtn = $('share-button');
+  if (shareBtn) {
+    shareBtn.onclick = () => {
+      alert('Share functionality would be implemented here');
+    };
+  }
+});
 
 // Everything is defined; start the node.
 boot();
