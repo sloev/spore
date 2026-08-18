@@ -293,23 +293,29 @@ const html = `<!doctype html>
   </div>
 </header>
 <main>
-  <section class="card">
-    <h2>This node</h2>
+  <section class="card" id="panel-mail">
+    <h2>Mail</h2>
+    <div id="thread-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px"></div>
     <div class="row">
-      <select id="dest">
-        <option value="public">To: everyone (public)</option>
-        <option value="direct">To: address (hex)</option>
-      </select>
-      <input type="text" id="hex" placeholder="16 hex chars" style="display:none;max-width:220px" />
-      <input type="text" id="msg" placeholder="message…" value="the dam holds" />
-      <button id="send">Send</button>
+      <input type="text" id="dm-hex" placeholder="16 hex addr" style="max-width:180px;min-width:140px" />
+      <input type="text" id="dm-msg" placeholder="message\u2026" />
+      <button id="dm-send">Send DM</button>
+      <span class="cnt" id="dm-seal-state"></span>
+    </div>
+  </section>
+
+  <section class="card" id="panel-broadcast">
+    <h2>Broadcast</h2>
+    <div class="row">
+      <input type="text" id="bcast-msg" placeholder="public message\u2026" />
+      <button id="bcast-send">Send</button>
     </div>
     <div class="row">
       <input type="text" id="topic" placeholder="follow a topic, e.g. spore/news" />
       <button id="sub" class="ghost">Subscribe</button>
       <span class="cnt" id="topics"></span>
     </div>
-    <div class="log" id="log" style="margin-top:12px"></div>
+    <div class="log" id="log" style="margin-top:8px"></div>
   </section>
 
   <section class="card">
@@ -384,9 +390,12 @@ const K_SEED = 'spore.seed', K_BRIDGES = 'spore.bridges', K_TOPICS = 'spore.topi
 // sealed to us. Saving only the seed silently loses inbound mail after a rotation.
 const K_RING = 'spore.ring';
 
+const K_THREADS = 'spore.threads';
+
 let spore, hub;
 let saved = [];      // [{type, fields}] persisted bridges
 let topics = [];     // subscribed topic strings
+let threads = {};    // {hexAddr: [{text, fromMe, ts}]}
 
 // ---- boot the one real node (called last, once every def below exists) -------
 async function boot() {
@@ -428,10 +437,32 @@ async function boot() {
 
     hub.onDeliver = (env) => {
       const ok = spore.verify(env);
+      const flags = spore.flags(env);
+      const isEncrypted = (flags & FLAG_ENCRYPTED) !== 0;
+      const isRatchet = (flags & FLAG_RATCHET) !== 0;
+      const sender = spore.src(env);
       let text;
       try { text = new TextDecoder().decode(spore.payload(env)); }
       catch (e) { text = '<' + spore.payload(env).length + ' bytes>'; }
-      logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
+
+      if (isEncrypted && sender) {
+        // Try to open as DM
+        const opened = hub.node.openDm(sender, env, isRatchet);
+        if (opened !== null) {
+          try { text = new TextDecoder().decode(opened); }
+          catch (e) { text = '<' + opened.length + ' bytes>'; }
+          const hex = hexOf(sender);
+          if (!threads[hex]) threads[hex] = [];
+          threads[hex].push({ text, fromMe: false, ts: Date.now() });
+          LS.set(K_THREADS, JSON.stringify(threads));
+          renderThreadList();
+          logLine('rx', 'DM from ' + hex.substring(0, 8) + ': ' + JSON.stringify(text));
+        } else {
+          logLine('bad', 'could not decrypt DM from ' + hexOf(sender).substring(0, 8) + ' (key may have expired)');
+        }
+      } else {
+        logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
+      }
     };
 
     // Restore followed topics.
@@ -439,14 +470,18 @@ async function boot() {
     for (const t of topics) hub.node.subscribe(t);
     renderTopics();
 
-    $('status').textContent = restored ? 'ready — identity restored' : 'ready — new identity';
+    // Restore DM threads.
+    try { threads = JSON.parse(LS.get(K_THREADS) || '{}'); } catch (e) { threads = {}; }
+    renderThreadList();
+
+    $('status').textContent = restored ? 'ready \u2014 identity restored' : 'ready \u2014 new identity';
     $('status').style.color = 'var(--accent)';
 
     // Update persistent header status
     $('alive-status').textContent = 'alive';
     $('alive-status').style.color = 'var(--ok)';
 
-    logLine('sys', 'node ready — ' + (restored ? 'identity restored from local storage' : 'new identity created and saved'));
+    logLine('sys', 'node ready \u2014 ' + (restored ? 'identity restored from local storage' : 'new identity created and saved'));
     wireCompose();
     buildBridgeMenu();
 
@@ -460,28 +495,83 @@ async function boot() {
   }
 }
 
-// ---- compose / subscribe -----------------------------------------------------
+// ---- DM threads -------------------------------------------------------------
+function saveThreads() { LS.set(K_THREADS, JSON.stringify(threads)); }
+
 function renderTopics() {
   $('topics').textContent = topics.length ? 'following: ' + topics.join(', ') : '';
 }
+
+function renderThreadList() {
+  const el = $('thread-list');
+  const entries = Object.entries(threads).sort((a, b) => {
+    const lastA = a.value.length ? a.value[a.value.length - 1].ts : 0;
+    const lastB = b.value.length ? b.value[b.value.length - 1].ts : 0;
+    return lastB - lastA;
+  });
+  el.innerHTML = entries.length === 0
+    ? '<span class="cnt" style="padding:8px 0">No conversations yet. Paste a 16-hex address and send a DM.</span>'
+    : entries.map(([addr, msgs]) => {
+        const last = msgs[msgs.length - 1];
+        const preview = (last.fromMe ? 'You: ' : '') + (last.text.length > 40 ? last.text.slice(0, 40) + '\u2026' : last.text);
+        const addrShort = addr.slice(0, 8);
+        return '<div class="thread-row" data-addr="' + addr + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--edge);border-radius:2px;cursor:pointer">' +
+          '<span style="font-family:var(--mono);font-size:12px;color:var(--accent2);min-width:80px">' + addrShort + '\u2026</span>' +
+          '<span style="flex:1;font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + preview + '</span>' +
+          '<span style="font-size:10px;color:var(--dim)">' + new Date(last.ts).toLocaleTimeString() + '</span>' +
+        '</div>';
+      }).join('');
+  // Click to fill address
+  for (const row of el.querySelectorAll('.thread-row')) {
+    row.onclick = () => { $('dm-hex').value = row.dataset.addr; };
+  }
+}
+
 function wireCompose() {
-  $('dest').onchange = () => {
-    $('hex').style.display = $('dest').value === 'direct' ? '' : 'none';
-  };
-  const doSend = () => {
-    const text = $('msg').value;
-    if (!text) return;
-    let dest = ZERO_DEST;
-    if ($('dest').value === 'direct') {
-      const h = $('hex').value.trim().replace(/[^0-9a-fA-F]/g, '');
-      if (h.length !== 16) { logLine('bad', 'address needs 16 hex chars'); return; }
-      dest = hexToBytes(h);
+  // DM send
+  const doDm = () => {
+    const hex = $('dm-hex').value.trim().replace(/[^0-9a-fA-F]/g, '');
+    if (hex.length !== 16) { logLine('bad', 'DM address needs 16 hex chars'); return; }
+    const text = $('dm-msg').value.trim();
+    if (!text) { logLine('bad', 'message is empty'); return; }
+    const dest = hexToBytes(hex);
+    // Check if we can seal
+    const canSeal = hub.node.canSealTo(dest);
+    if (!canSeal) {
+      $('dm-seal-state').textContent = '\u26a0 no prekey — will be sent in the clear';
+      $('dm-seal-state').style.color = 'var(--warn)';
+    } else {
+      $('dm-seal-state').textContent = '\u2705 sealed';
+      $('dm-seal-state').style.color = 'var(--ok)';
     }
-    hub.send(dest, new TextEncoder().encode(text));
-    logLine('tx', 'sent ' + JSON.stringify(text) + (dest === ZERO_DEST ? ' to everyone' : ' to ' + hexOf(dest)));
+    // Send as DM (will seal if possible)
+    const payload = new TextEncoder().encode(text);
+    const { forwards } = hub.node.sendDirect(dest, payload);
+    // Dispatch forwards onto transports
+    hub._dispatch(forwards, null);
+    // Record locally (sendDirect returns forwards too)
+    if (!threads[hex]) threads[hex] = [];
+    threads[hex].push({ text, fromMe: true, ts: Date.now() });
+    saveThreads();
+    renderThreadList();
+    logLine('tx', 'DM to ' + hex.substring(0, 8) + ': ' + JSON.stringify(text) + (canSeal ? ' (sealed)' : ' (cleartext)'));
+    $('dm-msg').value = '';
   };
-  $('send').onclick = doSend;
-  $('msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+  $('dm-send').onclick = doDm;
+  $('dm-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doDm(); });
+
+  // Broadcast send (public)
+  const doBcast = () => {
+    const text = $('bcast-msg').value.trim();
+    if (!text) return;
+    hub.send(ZERO_DEST, new TextEncoder().encode(text));
+    logLine('tx', 'broadcast: ' + JSON.stringify(text));
+    $('bcast-msg').value = '';
+  };
+  $('bcast-send').onclick = doBcast;
+  $('bcast-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doBcast(); });
+
+  // Topic subscribe
   $('sub').onclick = () => {
     const t = $('topic').value.trim();
     if (!t || topics.includes(t)) { $('topic').value = ''; return; }
