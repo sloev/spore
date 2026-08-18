@@ -65,7 +65,7 @@ scan = glob.glob(os.path.join(root, "**", "*.md"), recursive=True) + glob.glob(
 for f in scan:
     if os.sep + "node_modules" + os.sep in f or os.sep + "_site" + os.sep in f:
         continue
-    for i, ln in enumerate(open(f, encoding="utf-8"), 1):
+    for i, ln in enumerate(open(f, encoding="utf-8", errors="replace"), 1):
         m = shape_re.search(ln)
         if m:
             rel = os.path.relpath(f, root)
