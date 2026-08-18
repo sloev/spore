@@ -48,6 +48,7 @@ const pages = [
   ['docs/CONTRIBUTING.md', 'contributing.html', null],
   ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
   ['docs/MISSION.md', 'mission.html', null],
+  ['docs/PROXY_SETUP.md', 'proxy-setup.html', null],
 ];
 
 // Map a source .md path (as written in links) to its output page.
