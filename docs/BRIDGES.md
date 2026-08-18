@@ -16,22 +16,25 @@ browser `send`/`receive` shim).
 
 ## Status legend
 
+<details>
+<summary>Understanding the emoji status indicators for each protocol</summary>
+
 The emoji in each protocol's title tells you how far it is:
 
 | Icon | Meaning |
 |---|---|
-| â | **Implemented & tested** â a Rust bridge or JS transport with automated tests in this repo. |
-| ð§ª | **Implemented, not hardware-verified** â the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [`HARDWARE.md`](HARDWARE.md). |
-| ð¡ | **Partial** â a codec, framer, or IP-underlay path is present, but the end-to-end runner is not finished. |
-| âª | **Planned** â a thin shim to write; the shared routing is already done. |
+| ✅ | **Implemented & tested** — a Rust bridge or JS transport with automated tests in this repo. |
+| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [`HARDWARE.md`](HARDWARE.md). |
+| 🟡 | **Partial** — a codec, framer, or IP-underlay path is present, but the end-to-end runner is not finished. |
+| ⚪ | **Planned** — a thin shim to write; the shared routing is already done. |
 
 Throughout, `U` is the **underlay address type** (how a medium names a peer) and
 **Form** is the driver form (`dgram` / `stream` / `store`, see below).
 
 **Bulk budget.** Since files became manifest trees they can be arbitrarily large,
 so any link can be conscripted into hauling one. Each interface may therefore
-register a *bulk budget* â bytes per second of **other people's file chunks** it
-is willing to relay ([`Hub::register_limited`](../src/bridge/hub.rs)) â as a
+register a *bulk budget* — bytes per second of **other people's file chunks** it
+is willing to relay ([`Hub::register_limited`](../src/bridge/hub.rs)) — as a
 leaky bucket that accrues a few seconds of burst.
 
 Only chunks count as bulk. Messages, announces, receipts and **manifests** always
@@ -42,23 +45,27 @@ another path answers. The default for each medium is a constant in that bridge's
 module, so the number and its reasoning stay together; override at runtime with
 `Hub::set_bulk_budget`. Media fast enough not to care (UDP, TCP, WebRTC, the web
 overlays) set no budget at all and are unchanged.
+</details>
 
-## Bridge security â what a bridge is trusted with
+## Bridge security — what a bridge is trusted with
+
+<details>
+<summary>Security principles: What bridges can and cannot do</summary>
 
 **Nothing.** A bridge moves bytes; it is never trusted for authenticity, secrecy
-or honesty. Envelopes are signed and sealed end to end (Â§2, Â§7), ids are content
+or honesty. Envelopes are signed and sealed end to end (§2, §7), ids are content
 hashes, and path learning binds only from *signed* frames. A hostile link can
-drop, delay, replay or reorder â all of which the router already survives â but
+drop, delay, replay or reorder — all of which the router already survives — but
 it cannot forge, read a sealed payload, or make a node believe a false address.
 
 That last one is load-bearing and was, until recently, not actually enforced.
-Bridges learn `SPORE address â underlay address` by snooping, and both learning
-paths â `Neighbors::snoop` and the node's own path table â accepted the `SIGNED`
+Bridges learn `SPORE address → underlay address` by snooping, and both learning
+paths — `Neighbors::snoop` and the node's own path table — accepted the `SIGNED`
 **flag** as proof. A flag is one bit chosen by whoever wrote the frame. Copy a
 victim's *public* key into `src`, set the bit, attach 64 zero bytes, and the
 victim's address bound to your underlay address: every directed send for them
 unicast to you instead. Sealed payloads stayed unreadable, so this stole no
-content â it redirected delivery, which is the same guarantee by a different
+content — it redirected delivery, which is the same guarantee by a different
 door. Both paths now verify the signature, and `Src::Short` (8 bytes of address,
 no key, nothing to verify *against*) teaches nothing at all. A bridge that
 declines to learn falls back to broadcast, which always reaches the peer; a
@@ -75,13 +82,13 @@ The limits, and where they live:
 
 | Bound | Value | Why |
 |---|---|---|
-| `kiss_stream::MAX_FRAME` | 64 KiB | A peer that opens a KISS frame and never closes it. 46Ã the default MTU. |
-| `bag` request header | 16 KiB | A client that never sends the header terminator â `431`. |
-| `bag` request body | 8 MiB | `Content-Length` is a number the client picks â `413`. |
+| `kiss_stream::MAX_FRAME` | 64 KiB | A peer that opens a KISS frame and never closes it. 46× the default MTU. |
+| `bag` request header | 16 KiB | A client that never sends the header terminator → `431`. |
+| `bag` request body | 8 MiB | `Content-Length` is a number the client picks → `413`. |
 | `copyparty` response | 8 MiB body, 16 KiB/line, 100 headers | A share can be compromised or simply broken. |
 | `i2p` control line | 8 KiB | Anything on port 7656 that streams without a newline. |
 | store adoption | 1 MiB/file | A spill directory is on disk, where anything can drop a file. |
-| `spool::MAX_SPOOL_FILE` | 1 MiB/file | A spool is written by someone else by definition â that is what a spool *is*. |
+| `spool::MAX_SPOOL_FILE` | 1 MiB/file | A spool is written by someone else by definition — that is what a spool *is*. |
 
 Two of these bounds are on a **read**, not on a size the sender declared, and the
 distinction is the point:
@@ -95,8 +102,9 @@ distinction is the point:
   one datagram bridge that carries framing state *across* datagrams, so a frame
   may be half-assembled when the next arrives. Where `udp::run_group` can ignore a
   stranger's datagram as one bad envelope, here a stranger's bytes would interleave
-  into a frame the companion is midway through â corrupting a good frame rather
+  into a frame the companion is midway through — corrupting a good frame rather
   than merely adding a bad one. Single-sourcing the framer is what removes it.
+</details>
 
 Two further properties worth stating because they are easy to lose:
 
@@ -111,43 +119,50 @@ Each of these is covered by a test that fails if the bound is removed.
 
 ### Deployer note: what a stamp has to cost
 
+<details>
+<summary>Understanding stamp costs and deployment considerations</summary>
+
 `congestion::STAMP_QUOTA_BYPASS_BITS` is **16**. Mail stamped to at least that
-class skips the per-source quota (Â§10d) and a busy peer's backpressure (Â§10c);
+class skips the per-source quota (§10d) and a busy peer's backpressure (§10c);
 below it, mail still flows but is charged to its source's budget like anything
-else, and stamp still orders eviction and TX priority (Â§10.3).
+else, and stamp still orders eviction and TX priority (§10.3).
 
 This was `stamp > 0`, which bounded nothing. A stamp is the leading zero bits of
 the envelope id, and the id is a hash, so class 1 costs about two tries and half
-of all envelopes have it by accident â measured, 12 of 20 arbitrary junk envelopes
+of all envelopes have it by accident — measured, 12 of 20 arbitrary junk envelopes
 were exempt from the quota by luck alone. SPEC is explicit that "priority is
-bought, not claimed" (Â§2) and that a stamp is "proof of work" (Â§10); the exemption
+bought, not claimed" (§2) and that a stamp is "proof of work" (§10); the exemption
 has to cost something for either sentence to be true.
 
 Consequences a deployer should know:
 
 - **A node running this is stricter than an older one.** It throttles low-class
   stamped traffic that older relays pass. That is a local policy difference, not
-  a wire incompatibility â nothing about the envelope changed, and the two
+  a wire incompatibility — nothing about the envelope changed, and the two
   interoperate.
 - **16 bits is ~65k tries**: milliseconds on a laptop, seconds on a
   microcontroller. Affordable once for a genuinely urgent message, ruinous for a
   flooder paying it per envelope. Raise it on fast networks; lower it (or set it
   to 1) to restore the old permissive behaviour if you need bit-identical
   admission against a 1.0 relay fleet.
-- **`sos` still outranks policy** by convention â that is a routing preference,
+- **`sos` still outranks policy** by convention — that is a routing preference,
   not a quota exemption, and is unaffected.
+</details>
 
-## Bridge privacy â who sees what
+## Bridge privacy — who sees what
+
+<details>
+<summary>Understanding privacy implications of different bridge types</summary>
 
 A bridge cannot forge and cannot read a *sealed* payload. It can always see that
-traffic happened, how big it was, and when â and on some media it can see rather
+traffic happened, how big it was, and when — and on some media it can see rather
 more than that. This section is per-bridge because the honest answer differs a
 lot, and "SPORE is encrypted" is not a useful thing to tell an operator choosing
 between a folder in someone's cloud account and a serial cable.
 
 **The part people get wrong first: a public flood is not encrypted.** Sealing is
 something a *sender* does. An envelope to `ZERO_DEST` or to a plaintext topic
-carries its payload in the clear, by design â and the reason is that there is no
+carries its payload in the clear, by design — and the reason is that there is no
 key to encrypt it to. A public topic's whole job is to be readable by a node that
 joined afterwards, that you have never met, receiving it third-hand; anything
 needing a prior key exchange is not that. (It is *not* that relays must read the
@@ -155,7 +170,7 @@ payload to route: forwarding runs entirely on the header, and sealed unicast
 floods perfectly well with an opaque body.) Signed does not mean secret.
 
 If a message must stay private on a medium anyone can watch, seal it to a
-recipient prekey, or use an encrypted topic (Â§7) â which is a real private group,
+recipient prekey, or use an encrypted topic (§7) — which is a real private group,
 with `topic::rotate` for forward secrecy and `topic::rekey_seal` to evict a member.
 Otherwise assume it is a postcard, because it is one.
 
@@ -163,7 +178,7 @@ Otherwise assume it is a postcard, because it is one.
 |---|---|---|
 | `serial`, `csma` | whoever holds the cable | everything on it; a wire is as private as the room |
 | `spool` (NNCP/UUCP/USB) | the courier or mailer host | the files at rest, for as long as they hold them |
-| `store` / `foldersync` | **everyone with access to that folder** â including a whole cloud account, and its provider | every envelope, plus filenames that are content ids, plus retention you do not control (versioned sync keeps deleted files) |
+| `store` / `foldersync` | **everyone with access to that folder** — including a whole cloud account, and its provider | every envelope, plus filenames that are content ids, plus retention you do not control (versioned sync keeps deleted files) |
 | `copyparty` | the share's operator and its logs | every envelope you post or fetch, plus your access pattern |
 | `bag` (HTTP server) | anyone who can reach the port | whatever is in the store it serves; run it behind NAT, an onion, or auth |
 | `udp` broadcast / `run_group` | **every host on the segment** | all public floods in the clear; join a multicast group and you are an observer |
@@ -180,31 +195,35 @@ Three consequences worth stating outright:
 
 - **A gateway links identities across media.** A node bridging Wi-Fi and LoRa tells
   anyone watching either side that those two populations are connected, and relays
-  timing between them. That is the job â but it means running a gateway is not a
+  timing between them. That is the job — but it means running a gateway is not a
   neutral act, and `mix` mode exists for when it must not be inferable.
 - **"Works offline" is not "works privately".** The media that need no
-  infrastructure â broadcast, radio, sound â are the ones where observation is
+  infrastructure — broadcast, radio, sound — are the ones where observation is
   cheapest. A blackout does not remove eavesdroppers.
 - **Mix mode is not Tor.** It nests sealed envelopes and pads to three size classes
   (`mix::SIZE_CLASSES`), which frustrates casual correlation. Nobody has analysed
   it against a global observer, and it has had no external review. Do not stake
   anything on it that Tor would be the right tool for.
+</details>
 
-## TLS â deliberately not linked in
+## TLS — deliberately not linked in
+
+<details>
+<summary>TLS termination outside the process - Design decision</summary>
 
 Several media on this page speak only TLS: Matrix, XMPP, e-mail, `wss://` Nostr
 relays, most public HTTP shares. SPORE links **no TLS stack**, and that is a
 decision rather than an omission.
 
 **SPORE does not need TLS for security.** Envelopes are signed and sealed
-end-to-end (Â§2, Â§7); a link is assumed hostile whatever it is made of. TLS here
-buys exactly one thing â *permission to talk to a server that insists on it*.
+end-to-end (§2, §7); a link is assumed hostile whatever it is made of. TLS here
+buys exactly one thing — *permission to talk to a server that insists on it*.
 Paying for that with a TLS implementation and its certificate machinery, in a
 project whose premise is that one person can audit and rebuild the whole thing
 from a printed spec, is a bad trade.
 
 So TLS is terminated **outside the process**, the same way sound cards, serial
-line settings and Reticulum itself already are:
+line settings and Reticulum already are:
 
 ```sh
 # HTTPS share -> plaintext on localhost, then point a bridge at the tunnel
@@ -221,7 +240,7 @@ Three consequences worth being explicit about:
   default; `openssl s_client` does not unless told to. Configure it as carefully
   as you would any TLS client, because SPORE cannot check it for you.
 - **The plaintext hop is real.** Bind the tunnel to loopback. On a shared machine
-  that hop is visible to other users â though it carries signed, sealed envelopes,
+  that hop is visible to other users — though it carries signed, sealed envelopes,
   so what leaks is traffic analysis, not content.
 - **TLS alone does not deliver Matrix or XMPP.** Those also need their protocol
   (Matrix's client-server API and JSON, XMPP's XML streams). The tunnel removes
@@ -230,30 +249,35 @@ Three consequences worth being explicit about:
 
 If a single-binary story ever matters more than the dependency budget, the clean
 way in is an optional cargo feature that swaps the tunnel for a pure-Rust TLS
-client â not a default dependency, and not something hand-rolled. **Nobody should
+client — not a default dependency, and not something hand-rolled. **Nobody should
 write their own TLS.**
+</details>
 
 ## Bridge architecture
+
+<details>
+<summary>The core components of every SPORE bridge</summary>
 
 Because the router is medium-independent, **every bridge reduces to the same three
 things**, and all the shared logic already lives in `src/bridge/`:
 
-1. **An address type `U`** â how that medium names a peer (a MAC, an `IP:port`, a
+1. **An address type `U`** — how that medium names a peer (a MAC, an `IP:port`, a
    Meshtastic node number, or `()` for broadcast-only media). Learned and resolved
    by [`bridge::Neighbors<U>`](../src/bridge/neighbors.rs) (SPORE's ARP), which is
    generic over `U`: it snoops the source of inbound frames to bind
-   `spore_addr â U`, resolves a SPORE `dest` to a `U` for directed sends, and ages
+   `spore_addr → U`, resolves a SPORE `dest` to a `U` for directed sends, and ages
    bindings out (`expire`) or drops them on disconnect (`forget`).
-2. **A payload budget (MTU)** â the bridge clamps the shared node's `mtu`, and
+2. **A payload budget (MTU)** — the bridge clamps the shared node's `mtu`, and
    SPORE's fountain fragmentation (`Node::send`) auto-splits to fit. There is no
    per-medium chunking code to write.
-3. **`recv` / `send`** â the *only* platform-specific part. A datagram medium
+3. **`recv` / `send`** — the *only* platform-specific part. A datagram medium
    implements [`bridge::driver::DatagramTransport`](../src/bridge/driver.rs) (just
    `recv`, `send`, optional `mtu`) and gets neighbour learning, resolution, relay,
    and MTU clamping for free from `driver::run_datagram`.
 
 So adding a medium is: **pick `U`, set the MTU, write `recv`/`send`.** Everything
 else is in the lib.
+</details>
 
 ### The three driver forms
 
@@ -2488,25 +2512,29 @@ canonical implementation is linked in its section instead.)
 
 ## E. Bridge implementation checklist
 
+<details>
+<summary>Step-by-step guide for building a new bridge</summary>
+
 Building a new bridge? Work down this list:
 
-1. **Pick the form.** Frames â `dgram`; byte stream â `stream`; shared container â
+1. **Pick the form.** Frames → `dgram`; byte stream → `stream`; shared container →
    `store`. (See [Driver form comparison](#c-driver-form-comparison).)
 2. **Pick `U`.** How does the medium name a peer? Use `()` if it is broadcast-only.
 3. **Set the MTU.** The per-frame payload budget; the fountain fragmenter handles
    the rest. (See [MTU reference](#a-mtu-reference).)
-4. **Write `recv`/`send`** â the only platform-specific code. `dgram`: implement
+4. **Write `recv`/`send`** — the only platform-specific code. `dgram`: implement
    `driver::DatagramTransport` and hand it to `driver::run_datagram`. `stream`: add
    framing (reuse `kiss_stream`). `store`: poll + write items.
 5. **Handle state.** Stateful media call `Neighbors::forget` on disconnect; stateless
    media rely on `expire`.
-6. **Never re-implement routing, dedup, fragmentation, signing, or encryption** â
+6. **Never re-implement routing, dedup, fragmentation, signing, or encryption** —
    they live in the shared node and run identically on every medium.
 7. **Respect medium law.** On amateur bands, send signed-but-unencrypted envelopes.
 8. **Document it here.** Add an index row and a deep-dive section to this file, with
-   the correct status emoji and a real specification reference â the docs-sync guard
+   the correct status emoji and a real specification reference — the docs-sync guard
    (`scripts/check_docs_sync.py`) checks that every implemented bridge appears here
    and that every file/module this doc cites exists.
+</details>
 
 ---
 
@@ -2519,7 +2547,10 @@ failing the build.*
 
 ### WebTransport
 
-**Status**: í ¾í·ª implemented (browser side)
+<details>
+<summary>WebTransport bridge - Browser API for HTTP/3 communication</summary>
+
+**Status**: 🟢 implemented (browser side)
 
 WebTransport is a browser API for sending and receiving data over HTTP/3. SPORE uses it to connect browsers to native nodes via a proxy that terminates TLS and forwards UDP.
 
@@ -2548,3 +2579,4 @@ sequenceDiagram
 ```
 
 See [PROXY_SETUP.md](../docs/PROXY_SETUP.md) for sample configurations.
+</details>
