@@ -293,7 +293,16 @@ const html = `<!doctype html>
   </div>
 </header>
 <main>
-  <section class="card" id="panel-mail">
+  <!-- Tab bar -->
+  <nav class="tab-bar" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--edge);padding-bottom:0">
+    <button class="tab" data-panel="mail" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Mail</button>
+    <button class="tab" data-panel="feed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
+    <button class="tab" data-panel="bridges" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Bridges</button>
+    <button class="tab" data-panel="seed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Seed</button>
+  </nav>
+
+  <!-- Mail panel -->
+  <section class="card panel" id="panel-mail">
     <h2>Mail</h2>
     <div id="thread-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px"></div>
     <div class="row">
@@ -304,11 +313,12 @@ const html = `<!doctype html>
     </div>
   </section>
 
-  <section class="card" id="panel-broadcast">
-    <h2>Broadcast</h2>
+  <!-- Feed panel -->
+  <section class="card panel" id="panel-feed" style="display:none">
+    <h2>Feed</h2>
     <div class="row">
-      <input type="text" id="bcast-msg" placeholder="public message\u2026" />
-      <button id="bcast-send">Send</button>
+      <input type="text" id="bcast-msg" placeholder="shout into the void\u2026" />
+      <button id="bcast-send">Shout</button>
     </div>
     <div class="row">
       <input type="text" id="topic" placeholder="follow a topic, e.g. spore/news" />
@@ -318,7 +328,8 @@ const html = `<!doctype html>
     <div class="log" id="log" style="margin-top:8px"></div>
   </section>
 
-  <section class="card">
+  <!-- Bridges panel -->
+  <section class="card panel" id="panel-bridges" style="display:none">
     <h2>Bridges</h2>
     <p class="note">Each bridge is a real link. The node signs what you send, relays
       what it hears, and delivers what is addressed to it — across every bridge at
@@ -332,7 +343,8 @@ const html = `<!doctype html>
     <div id="bridges"></div>
   </section>
 
-  <section class="card">
+  <!-- Seed panel -->
+  <section class="card panel" id="panel-seed" style="display:none">
     <h2>Seed &amp; memory</h2>
     <p class="note">Save this page and you carry the whole node with you. The button
       re-serialises the running page — wasm and all — into a fresh copy, so one seed
@@ -968,6 +980,31 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Share functionality would be implemented here');
     };
   }
+});
+
+// ---- tab navigation (WV1) ---------------------------------------------------
+function switchTab(name) {
+  const panels = document.querySelectorAll('.panel');
+  for (const p of panels) p.style.display = 'none';
+  const target = document.getElementById('panel-' + name);
+  if (target) target.style.display = '';
+  const tabs = document.querySelectorAll('.tab');
+  for (const t of tabs) {
+    if (t.dataset.panel === name) {
+      t.style.color = 'var(--accent)';
+      t.style.borderBottomColor = 'var(--accent)';
+    } else {
+      t.style.color = 'var(--dim)';
+      t.style.borderBottomColor = 'transparent';
+    }
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  for (const tab of document.querySelectorAll('.tab')) {
+    tab.onclick = () => switchTab(tab.dataset.panel);
+  }
+  // Start on Mail
+  switchTab('mail');
 });
 
 // Everything is defined; start the node.
