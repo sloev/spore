@@ -16,6 +16,9 @@
 __pycache__/
 *.pyc
 
+# Local planning and documentation
+.HERMES/
+
 # Android build outputs
 android/app/src/main/jniLibs/
 android/**/build/
