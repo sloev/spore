@@ -493,6 +493,7 @@ async function boot() {
     // Restore saved bridges.
     try { saved = JSON.parse(LS.get(K_BRIDGES) || '[]'); } catch (e) { saved = []; }
     for (const entry of saved.slice()) spinUp(entry, false);
+    updateBridgesEmptyState();
   } catch (e) {
     $('status').textContent = 'error: ' + e.message;
     $('status').style.color = 'var(--warn)';
@@ -507,6 +508,45 @@ function renderTopics() {
   $('topics').textContent = topics.length ? 'following: ' + topics.join(', ') : '';
 }
 
+// Track bridge count and show Baud empty state when none are active
+function updateBridgesEmptyState() {
+  const container = $('bridges');
+  const existing = container.querySelector('.baud-empty');
+  const hasBridges = container.children.length > (existing ? 1 : 0);
+  if (hasBridges) {
+    if (existing) existing.remove();
+  } else {
+    if (!existing) {
+      const h = document.createElement('div');
+      h.innerHTML = baudEmpty('No bridges yet. Add one above.', 'ADD BRIDGE', 'SHARE INVITE');
+      // Wire the ADD BRIDGE click to focus the add bridge button
+      const addBtn = $('add');
+      if (addBtn) h.querySelectorAll('.cnt')[0]?.addEventListener('click', () => addBtn.focus());
+      container.prepend(h);
+    }
+  }
+}
+
+function baudEmpty(message, action1, action2) {
+  // Baud: a small inline SVG chibi face — pastel pink, antenna, eye-patch
+  // Rendered as data: URI to keep the standalone zero-external-request.
+  const baudSvg = '<svg viewBox="0 0 48 48" width="32" height="32" style="display:block;margin:0 auto 8px">' +
+    '<circle cx="24" cy="24" r="20" fill="#ff2a85" opacity="0.15"/>' +
+    '<line x1="24" y1="4" x2="18" y2="14" stroke="#8a7a4a" stroke-width="2" stroke-linecap="round"/>' +
+    '<line x1="24" y1="4" x2="30" y2="14" stroke="#8a7a4a" stroke-width="2" stroke-linecap="round"/>' +
+    '<circle cx="18" cy="20" r="2" fill="#0a0a0c"/>' +
+    '<circle cx="30" cy="20" r="2" fill="#0a0a0c"/>' +
+    '<path d="M18 28 Q24 34 30 28" stroke="#ff2a85" stroke-width="2" fill="none" stroke-linecap="round"/>' +
+    '</svg>';
+  return '<div class="baud-empty" style="text-align:center;padding:20px 0;color:var(--dim)">' +
+    baudSvg +
+    '<p style="margin:4px 0 10px;font-size:13px">' + message + '</p>' +
+    '<div style="display:flex;gap:6px;justify-content:center">' +
+    (action1 ? '<span class="cnt" style="border:1px solid var(--edge);border-radius:2px;padding:2px 8px;font-size:11px;cursor:pointer">' + action1 + '</span>' : '') +
+    (action2 ? '<span class="cnt" style="border:1px solid var(--edge);border-radius:2px;padding:2px 8px;font-size:11px;cursor:pointer">' + action2 + '</span>' : '') +
+    '</div></div>';
+}
+
 function renderThreadList() {
   const el = $('thread-list');
   const entries = Object.entries(threads).sort((a, b) => {
@@ -515,7 +555,7 @@ function renderThreadList() {
     return lastB - lastA;
   });
   el.innerHTML = entries.length === 0
-    ? '<span class="cnt" style="padding:8px 0">No conversations yet. Paste a 16-hex address and send a DM.</span>'
+    ? baudEmpty('No conversations yet. Paste a 16-hex address and send a DM.')
     : entries.map(([addr, msgs]) => {
         const last = msgs[msgs.length - 1];
         const preview = (last.fromMe ? 'You: ' : '') + (last.text.length > 40 ? last.text.slice(0, 40) + '\u2026' : last.text);
@@ -826,6 +866,7 @@ function spinUp(entry, fresh) {
     if (ui._t) { hub.removeTransport(ui._t); if (ui._t.close) try { ui._t.close(); } catch (e) { /* */ } }
     ui.destroy();
     logLine('sys', 'bridge removed');
+    updateBridgesEmptyState();
   };
 
   if (shouldStartNow(b, fresh)) {
@@ -942,6 +983,19 @@ $('save').onclick = () => {
   a.download = 'spore-standalone.html';
   a.click();
   URL.revokeObjectURL(a.href);
+  // Show Baud completion state briefly
+  const seedPanel = document.getElementById('panel-seed');
+  if (seedPanel) {
+    const existing = seedPanel.querySelector('.baud-complete');
+    if (!existing) {
+      const c = document.createElement('div');
+      c.className = 'baud-complete';
+      c.innerHTML = baudEmpty('Seed saved! This node can regrow from that file.');
+      c.querySelector('.baud-empty').style.padding = '8px 0';
+      seedPanel.querySelector('details')?.after(c);
+      setTimeout(() => c.remove(), 5000);
+    }
+  }
 };
 $('forget').onclick = () => {
   if (!confirm('Forget the saved identity and bridges in this browser? This node will come back as a new stranger.')) return;
