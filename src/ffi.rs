@@ -207,6 +207,9 @@ pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *co
 // -- feed/microblog (L5) ---------------------------------------------------
 
 /// Publish an event to a feed topic.
+///
+/// # Safety
+/// `n` valid; `topic`/`tlen` = UTF-8 topic; `data`/`dlen` = event bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_publish(
@@ -235,6 +238,9 @@ pub unsafe extern "C" fn spore_node_publish(
 }
 
 /// Drain feed events from subscribed topics.
+///
+/// # Safety
+/// `n` is valid.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_poll_feed(n: *mut crate::Node) -> SporeBytes {
