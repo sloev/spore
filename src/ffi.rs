@@ -225,7 +225,9 @@ pub unsafe extern "C" fn spore_node_publish(
         let mut wire = Vec::new();
         for f in fwd {
             match f {
-                crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. } => wire.extend_from_slice(&bytes),
+                crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. } => {
+                    wire.extend_from_slice(&bytes)
+                }
             }
         }
         SporeBytes::from_vec(wire)

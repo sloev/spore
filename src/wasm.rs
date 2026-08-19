@@ -189,7 +189,14 @@ pub unsafe extern "C" fn spore_node_subscribe(n: *mut Node, topic: *const u8, le
 /// # Safety
 /// `n` valid; `topic`/`tlen` = UTF-8 topic; `data`/`dlen` = event bytes.
 #[no_mangle]
-pub unsafe extern "C" fn spore_node_publish(n: *mut Node, topic: *const u8, tlen: usize, data: *const u8, dlen: usize, now: u32) -> i64 {
+pub unsafe extern "C" fn spore_node_publish(
+    n: *mut Node,
+    topic: *const u8,
+    tlen: usize,
+    data: *const u8,
+    dlen: usize,
+    now: u32,
+) -> i64 {
     let node = &mut *n;
     let topic_str = String::from_utf8_lossy(std::slice::from_raw_parts(topic, tlen));
     let event = std::slice::from_raw_parts(data, dlen).to_vec();
