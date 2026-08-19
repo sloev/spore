@@ -325,6 +325,18 @@ const html = `<!doctype html>
       <span class="cnt" id="topics"></span>
     </div>
     <div class="log" id="topic-log" style="margin-top:8px"></div>
+    <details style="margin-top:12px;color:var(--dim);font-size:12px">
+      <summary style="cursor:pointer">Sealed topics (W3)</summary>
+      <p style="margin:4px 0">A sealed topic uses a shared 32-byte key (64 hex chars). Anyone with the key can post and read. No roster.</p>
+      <div class="row">
+        <input type="text" id="sealed-key" placeholder="64 hex key (or leave blank to generate)" style="font-family:var(--mono);font-size:11px" />
+      </div>
+      <div class="row">
+        <input type="text" id="sealed-name" placeholder="sealed topic name, e.g. spore/closed" />
+        <button id="sealed-create" class="ghost">Create/Join</button>
+      </div>
+      <div id="sealed-topics" style="display:flex;flex-direction:column;gap:4px;margin-top:4px"></div>
+    </details>
   </section>
 
   <!-- Bridges panel -->
@@ -401,6 +413,7 @@ const K_RING = 'spore.ring';
 
 const K_THREADS = 'spore.threads';
 const K_TOPIC_LOGS = 'spore.topicLogs';
+const K_SEALED_TOPICS = 'spore.sealedTopics';
 
 let spore, hub;
 let saved = [];      // [{type, fields}] persisted bridges
@@ -408,6 +421,7 @@ let topics = [];     // subscribed topic strings
 let threads = {};    // {hexAddr: [{text, fromMe, ts}]}
 let topicLogs = {};  // {topicName: [{text, from, ts}]}
 let activeTopic = null; // currently viewed topic name
+let sealedTopics = {}; // {topicName: keyHex}
 
 // ---- boot the one real node (called last, once every def below exists) -------
 async function boot() {
@@ -494,9 +508,12 @@ async function boot() {
 
     // Restore topic logs.
     try { topicLogs = JSON.parse(LS.get(K_TOPIC_LOGS) || '{}'); } catch (e) { topicLogs = {}; }
+    // Restore sealed topics.
+    try { sealedTopics = JSON.parse(LS.get(K_SEALED_TOPICS) || '{}'); } catch (e) { sealedTopics = {}; }
     if (topics.length > 0) activeTopic = topics[0];
     renderTopicList();
     renderTopicView();
+    renderSealedTopics();
 
     $('status').textContent = restored ? 'ready \u2014 identity restored' : 'ready \u2014 new identity';
     $('status').style.color = 'var(--accent)';
@@ -696,6 +713,69 @@ function renderTopicView() {
   }).join('');
   logEl.scrollTop = logEl.scrollHeight;
 }
+
+// ---- sealed topics (W3) ---------------------------------------------------
+function renderSealedTopics() {
+  const el = $('sealed-topics');
+  const entries = Object.entries(sealedTopics);
+  if (!entries.length) {
+    el.innerHTML = '<span class="cnt">No sealed topics yet. Create or join one above.</span>';
+    return;
+  }
+  el.innerHTML = entries.map(([name, key]) => {
+    const isActive = name === activeTopic;
+    return '<div class="topic-row" data-topic="' + name + '" data-key="' + key + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid ' + (isActive ? 'var(--accent)' : 'var(--edge)') + ';border-radius:2px;cursor:pointer;background:' + (isActive ? 'var(--panel)' : 'transparent') + '">' +
+      '<span class="badge" style="font-size:9px;border-color:var(--accent);color:var(--accent)">SEALED</span>' +
+      '<span style="flex:1;font-size:13px;color:' + (isActive ? 'var(--accent)' : 'var(--ink)') + '">/' + name + '</span>' +
+      (topicLogs[name] && topicLogs[name].length ? '<span class="cnt">' + topicLogs[name].length + '</span>' : '') +
+    '</div>';
+  }).join('');
+  for (const row of el.querySelectorAll('.topic-row')) {
+    row.onclick = () => {
+      activeTopic = row.dataset.topic;
+      renderTopicView();
+      renderTopicList();
+      renderSealedTopics();
+    };
+  }
+}
+
+// Wire sealed topic create/join
+document.addEventListener('DOMContentLoaded', () => {
+  const sealBtn = $('sealed-create');
+  if (sealBtn) {
+    sealBtn.onclick = () => {
+      const name = $('sealed-name').value.trim();
+      if (!name) { logLine('bad', 'enter a topic name'); return; }
+      let keyHex = $('sealed-key').value.trim().replace(/[^0-9a-fA-F]/g, '');
+      // Generate a key if none provided
+      if (!keyHex) {
+        const k = new Uint8Array(32);
+        crypto.getRandomValues(k);
+        keyHex = hexOf(k);
+        $('sealed-key').value = keyHex;
+      }
+      if (keyHex.length !== 64) { logLine('bad', 'key must be 64 hex chars (32 bytes)'); return; }
+      sealedTopics[name] = keyHex;
+      LS.set(K_SEALED_TOPICS, JSON.stringify(sealedTopics));
+      // Subscribe to the topic
+      if (!topics.includes(name)) {
+        hub.node.subscribe(name);
+        topics.push(name);
+        LS.set(K_TOPICS, JSON.stringify(topics));
+      }
+      if (!topicLogs[name]) topicLogs[name] = [];
+      LS.set(K_TOPIC_LOGS, JSON.stringify(topicLogs));
+      activeTopic = name;
+      renderTopics();
+      renderTopicList();
+      renderSealedTopics();
+      renderTopicView();
+      logLine('sys', 'sealed topic /' + name + ' ready — anyone with the key can read');
+      $('sealed-name').value = '';
+    };
+  }
+});
 
 // ---- bridge registry ---------------------------------------------------------
 // flags: gesture=needs a user gesture to (re)connect; autoReconnect=safe to open

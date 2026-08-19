@@ -392,3 +392,29 @@ pub unsafe extern "C" fn spore_env_src(ptr: *const u8, len: usize) -> i64 {
         _ => pack(Vec::new()),
     }
 }
+
+/// Seal a message under a 32-byte topic key (XChaCha20-Poly1305).
+#[no_mangle]
+pub unsafe extern "C" fn spore_topic_seal(msg: *const u8, msg_len: usize, psk: *const u8) -> i64 {
+    let psk_bytes = std::slice::from_raw_parts(psk, 32);
+    let psk_arr: &[u8; 32] = match psk_bytes.try_into() {
+        Ok(a) => a,
+        Err(_) => return pack(Vec::new()),
+    };
+    let ct = crate::topic_seal(std::slice::from_raw_parts(msg, msg_len), psk_arr);
+    pack(ct)
+}
+
+/// Open a topic-sealed payload with the 32-byte key. Null on failure.
+#[no_mangle]
+pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *const u8) -> i64 {
+    let psk_bytes = std::slice::from_raw_parts(psk, 32);
+    let psk_arr: &[u8; 32] = match psk_bytes.try_into() {
+        Ok(a) => a,
+        Err(_) => return pack(Vec::new()),
+    };
+    match crate::topic_open(std::slice::from_raw_parts(ct, ct_len), psk_arr) {
+        Some(pt) => pack(pt),
+        None => pack(Vec::new()),
+    }
+}

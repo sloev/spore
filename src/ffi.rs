@@ -188,6 +188,7 @@ pub unsafe extern "C" fn spore_open(
 ///
 /// # Safety
 /// `msg`/`msg_len` describe the plaintext; `psk` points to 32 bytes.
+#[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_topic_seal(msg: *const u8, msg_len: usize, psk: *const u8) -> SporeBytes {
     guard(SporeBytes::null(), || SporeBytes::from_vec(topic_seal(slice(msg, msg_len), &arr32(psk))))
@@ -197,6 +198,7 @@ pub unsafe extern "C" fn spore_topic_seal(msg: *const u8, msg_len: usize, psk: *
 ///
 /// # Safety
 /// `ct`/`ct_len` describe the ciphertext; `psk` points to 32 bytes.
+#[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *const u8) -> SporeBytes {
     guard(SporeBytes::null(), || SporeBytes::or_null(topic_open(slice(ct, ct_len), &arr32(psk))))
