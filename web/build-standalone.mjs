@@ -197,9 +197,6 @@ const html = `<!doctype html>
   .status-indicator {
     color:var(--ok);
   }
-  .stored-count {
-    margin-left:auto;
-  }
 
   h1 { margin:0 0 4px; font-size:26px; letter-spacing:-.02em; display:flex; align-items:center; gap:6px; }
   h1 .s { color:var(--accent); }
@@ -270,8 +267,7 @@ const html = `<!doctype html>
     </div>
     <div class="status-line">
       <span class="status-indicator" id="alive-status">starting\u2026</span>
-      <span class="peer-count-detailed" id="detailed-peers">0 peers</span>
-      <span class="stored-count" id="stored-count">0 stored</span>
+      <span id="compact-status" style="margin-left:auto">0 peers \u00b7 0 stored</span>
       <button class="share-button" id="share-button">SHARE</button>
     </div>
   </div>
@@ -303,7 +299,6 @@ const html = `<!doctype html>
 
   <!-- Mail panel -->
   <section class="card panel" id="panel-mail">
-    <h2>Mail</h2>
     <div id="thread-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px"></div>
     <div class="row">
       <input type="text" id="dm-hex" placeholder="16 hex addr" style="max-width:180px;min-width:140px" />
@@ -315,7 +310,6 @@ const html = `<!doctype html>
 
   <!-- Feed panel -->
   <section class="card panel" id="panel-feed" style="display:none">
-    <h2>Feed</h2>
     <div class="row">
       <input type="text" id="bcast-msg" placeholder="shout into the void\u2026" />
       <button id="bcast-send">Shout</button>
@@ -330,12 +324,10 @@ const html = `<!doctype html>
 
   <!-- Bridges panel -->
   <section class="card panel" id="panel-bridges" style="display:none">
-    <h2>Bridges</h2>
-    <p class="note">Each bridge is a real link. The node signs what you send, relays
-      what it hears, and delivers what is addressed to it — across every bridge at
-      once. Some need a permission prompt (mic, serial, Bluetooth) or a relay URL.
-      Bridges you add are remembered; network ones reconnect on load, device ones
-      wait for a click (browsers require a gesture to reopen a port).</p>
+    <details style="margin-bottom:10px;color:var(--dim);font-size:13px">
+      <summary style="cursor:pointer">About bridges</summary>
+      Each bridge is a real link. The node signs what you send, relays what it hears, and delivers what is addressed to it — across every bridge at once. Some need a permission prompt (mic, serial, Bluetooth) or a relay URL.
+    </details>
     <div class="row">
       <select id="btype"></select>
       <button id="add">Add bridge</button>
@@ -345,10 +337,10 @@ const html = `<!doctype html>
 
   <!-- Seed panel -->
   <section class="card panel" id="panel-seed" style="display:none">
-    <h2>Seed &amp; memory</h2>
-    <p class="note">Save this page and you carry the whole node with you. The button
-      re-serialises the running page — wasm and all — into a fresh copy, so one seed
-      makes the next. Identity and bridges live in this browser's local storage.</p>
+    <details style="margin-bottom:10px;color:var(--dim);font-size:13px">
+      <summary style="cursor:pointer">About seeding</summary>
+      The button re-serialises the running page — wasm and all — into a fresh copy. Identity and bridges live in this browser's local storage.
+    </details>
     <div class="row">
       <button id="save">Download a copy</button>
       <button id="forget" class="ghost">Forget saved state</button>
@@ -446,6 +438,7 @@ async function boot() {
     $('detailed-peers').textContent = '0 peers';
     const storeSize = hub.node.storeSize ? hub.node.storeSize() : 0;
     $('stored-count').textContent = storeSize + ' stored';
+    $('compact-status').textContent = '0 peers \u00b7 ' + storeSize + ' stored';
 
     hub.onDeliver = (env) => {
       const ok = spore.verify(env);
