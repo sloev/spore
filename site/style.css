@@ -84,7 +84,7 @@ header.site { position: sticky; top: 0; z-index: 10; display: flex; gap: 18px;
 .brand-mark { display: block; }
 header.site nav { display: flex; gap: 4px; flex-wrap: wrap; }
 header.site nav a { color: var(--dim); text-decoration: none; font-size: 14px;
-  padding: 5px 10px; border-radius: 7px; }
+  padding: 5px 10px; border-radius: 2px; }
 header.site nav a:hover { color: var(--ink); background: var(--panel); }
 header.site nav a.active { color: var(--ink); background: var(--panel); }
 
@@ -97,9 +97,9 @@ main.doc p, main.doc li, main.doc td { color: var(--prose); }
 main.doc a { color: var(--accent2); }
 main.doc code { font-family: var(--mono); font-size: 0.88em;
   background: var(--panel); border: 1px solid var(--edge);
-  border-radius: 5px; padding: 1px 5px; }
+  border-radius: 2px; padding: 1px 5px; }
 main.doc pre { background: var(--panel); border: 1px solid var(--edge);
-  border-radius: 10px; padding: 14px 16px; overflow-x: auto; position: relative; }
+  border-radius: 2px; padding: 14px 16px; overflow-x: auto; position: relative; }
 main.doc pre code { background: none; border: 0; padding: 0; font-size: 13.5px; }
 
 /* One button per code block, injected by the inline script in build.mjs's page()
@@ -109,7 +109,7 @@ main.doc .code-copy {
   position: absolute; top: 8px; right: 8px;
   font: 11px var(--mono); line-height: 1; padding: 5px 9px;
   background: var(--void); color: var(--dim); border: 1px solid var(--edge);
-  border-radius: 6px; cursor: pointer;
+  border-radius: 2px; cursor: pointer;
 }
 main.doc .code-copy:hover { color: var(--ink); border-color: var(--ink); }
 main.doc .code-copy:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
@@ -124,7 +124,7 @@ main.doc th { background: var(--panel); }
 main.doc tr:nth-child(even) td { background: color-mix(in srgb, var(--panel) 50%, transparent); }
 
 main.doc details { background: var(--panel); border: 1px solid var(--edge);
-  border-radius: 10px; padding: 4px 16px; margin: 14px 0; }
+  border-radius: 2px; padding: 4px 16px; margin: 14px 0; }
 main.doc summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
 main.doc img { max-width: 100%; }
 
@@ -176,12 +176,12 @@ footer.site { border-top: 1px solid var(--edge); color: var(--dim);
 /* Share row — front page only. Buttons, not brand badges: no external icon
    fonts or logos to fetch, so the page keeps making zero third-party requests. */
 .share { margin: 28px 0 8px; padding: 18px 20px; background: var(--panel);
-  border: 1px solid var(--edge); border-radius: 12px; }
+  border: 1px solid var(--edge); border-radius: 2px; }
 main.doc .share h2 { margin: 0 0 6px; font-size: 18px; padding: 0; border: 0; }
 .share p { margin: 0 0 14px; color: var(--dim); font-size: 14px; }
 .share-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .share-btn { display: inline-block; font: inherit; font-size: 13.5px; line-height: 1;
-  padding: 8px 12px; border-radius: 999px; border: 1px solid var(--edge);
+  padding: 8px 12px; border-radius: 2px; border: 1px solid var(--edge);
   background: transparent; color: inherit; cursor: pointer; text-decoration: none;
   white-space: nowrap; }
 main.doc a.share-btn { color: inherit; }
@@ -206,7 +206,7 @@ body.page-index main.doc > ul:first-of-type li { margin: 9px 0; }
 
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 10px; }
 main.doc .cta a { text-decoration: none; display: inline-block; font-size: 16px;
-  line-height: 1; padding: 14px 20px; border-radius: 10px; border: 1px solid var(--edge);
+  line-height: 1; padding: 14px 20px; border-radius: 2px; border: 1px solid var(--edge);
   white-space: nowrap; }
 main.doc .cta a.cta-primary { background: var(--accent); border-color: var(--accent);
   color: #08130c; font-weight: 650; }
