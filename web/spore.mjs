@@ -123,6 +123,26 @@ class Spore {
     this.ex.spore_free(p, env.length);
     return out.length === 8 ? out : null;
   }
+
+  /** Seal a message under a 32-byte topic pre-shared key (W3). */
+  topicSeal(msg, psk) {
+    const mp = this._put(msg);
+    const pp = this._put(psk);
+    const out = this._unpack(this.ex.spore_topic_seal(mp, msg.length, pp));
+    this.ex.spore_free(mp, msg.length);
+    this.ex.spore_free(pp, psk.length);
+    return out;
+  }
+
+  /** Open a topic-sealed payload with the 32-byte key. null on failure. */
+  topicOpen(ct, psk) {
+    const cp = this._put(ct);
+    const pp = this._put(psk);
+    const out = this._unpack(this.ex.spore_topic_open(cp, ct.length, pp));
+    this.ex.spore_free(cp, ct.length);
+    this.ex.spore_free(pp, psk.length);
+    return out.length ? out : null;
+  }
 }
 
 /** Envelope flag bits the DM path needs (§2). */
