@@ -16,6 +16,10 @@ fs.mkdirSync(out, { recursive: true });
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
 //
+// Navigation follows VISUALDESIGN.md §7 Site homepage: 5 primary items:
+// Try it · How it works · Get a node · Spec · Mission.
+// Secondary guides are rendered + linkable but kept off the top nav.
+
 // The front page is `site/home.md`, not the README. They have different jobs: a
 // README opens on "what is this and how do I build it" for someone who already
 // arrived at a repository, while the front page has to make sense to someone who
@@ -23,22 +27,20 @@ fs.mkdirSync(out, { recursive: true });
 // the README as `index.html` made the first screen a badge row and a feature
 // table. The README stays as it is on GitHub.
 const pages = [
-  ['site/home.md', 'index.html', 'Home'],
+  ['site/home.md', 'index.html', 'Try it'],
+  ['docs/MISSION.md', 'mission.html', 'How it works'],
+  ['docs/APPS.md', 'apps.html', 'Get a node'],
   ['docs/SPEC.md', 'spec.html', 'Spec'],
-  ['docs/APPS.md', 'apps.html', 'Apps'],
-  ['docs/DESIGN.md', 'design.html', 'Design'],
-  ['docs/BRIDGES.md', 'bridges.html', 'Bridges'],
+  // Secondary guides: rendered + linkable, kept off the top nav
+  ['docs/DESIGN.md', 'design.html', null],
+  ['docs/BRIDGES.md', 'bridges.html', null],
+  ['docs/REBUILD.md', 'rebuild.html', null],
+  ['docs/CONTINUITY.md', 'continuity.html', null],
   ['docs/DIRECT.md', 'direct.html', null],
-  ['docs/REBUILD.md', 'rebuild.html', 'Rebuild'],
-  ['docs/CONTINUITY.md', 'continuity.html', 'Continuity'],
-  ['docs/ROADMAP.md', 'roadmap.html', 'Roadmap'],
-  // Secondary guides: rendered + linkable, kept off the top nav to reduce clutter.
-  // The findings register belongs on the site — anyone evaluating whether to trust
-  // this with their mail should be able to read what was found and fixed without
-  // cloning the repo — but households do not need it in the top bar.
+  ['docs/ROADMAP.md', 'roadmap.html', null],
   ['docs/SECURITY.md', 'security-policy.html', null],
   ['docs/SECURITY_FINDINGS.md', 'security.html', null],
-  ['docs/CHANGELOG.md', 'changelog.html', 'Changelog'],
+  ['docs/CHANGELOG.md', 'changelog.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
   ['docs/VISUALDESIGN.md', 'design-language.html', null],
@@ -47,7 +49,6 @@ const pages = [
   ['web/README.md', 'webguide.html', null],
   ['docs/CONTRIBUTING.md', 'contributing.html', null],
   ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
-  ['docs/MISSION.md', 'mission.html', null],
   ['docs/PROXY_SETUP.md', 'proxy-setup.html', null],
 ];
 
