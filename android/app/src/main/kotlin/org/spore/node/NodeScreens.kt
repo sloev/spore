@@ -490,12 +490,6 @@ internal fun BridgesList() {
     var tx by remember { mutableStateOf("0") }
 
     LazyColumn(Modifier.padding(horizontal = 12.dp).fillMaxSize()) {
-        item {
-            Caption(
-                "Bridges relay your signed envelopes across every medium at once. 📡",
-                Modifier.padding(vertical = 8.dp),
-            )
-        }
         // Grouped the way the mock groups them. The kind string is what the core
         // reports, so the buckets are derived rather than stored — a new bridge
         // kind lands in "Other" instead of vanishing.
@@ -509,12 +503,7 @@ internal fun BridgesList() {
             }
         }
         if (bridges.isEmpty()) {
-            item {
-                Caption(
-                    "no bridges yet 📡\nadd one below — SPORE only reaches as far as its bridges do",
-                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                )
-            }
+            item { Caption("no bridges yet", Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
         }
         listOf("Radio", "Network", "Web", "Other").forEach { name ->
             val rows = groups[name].orEmpty()
@@ -525,6 +514,30 @@ internal fun BridgesList() {
         }
 
         item { SectionLabel("Add a bridge") }
+        // Add bridge section uses Chip toggles and inline input rows — C6
+        item {
+            Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("TCP", selected = false, onClick = {
+                    // Show TCP input inline
+                })
+                Chip("Audio", selected = false, onClick = {
+                    withPerms("Audio modem", listOf(Manifest.permission.RECORD_AUDIO)) { NodeController.enableAudio() }
+                })
+                Chip("Mesh BLE", selected = false, onClick = {
+                    withPerms("Meshtastic BLE", blePerms) { showMeshPick = !showMeshPick }
+                })
+            }
+            Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("RNode BLE", selected = false, onClick = {
+                    withPerms("Reticulum RNode", blePerms) { showRnodePick = !showRnodePick }
+                })
+                Chip("WiFi P2P", selected = false, onClick = {
+                    withPerms("Wi-Fi Direct", wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
+                })
+                Chip("WebSocket", selected = false, onClick = { })
+                Chip("Nostr", selected = false, onClick = { })
+            }
+        }
         item {
             Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToughbookField(tcp, { tcp = it }, Modifier.weight(1f), placeholder = "TCP host:port (blank = listen)")
@@ -532,27 +545,12 @@ internal fun BridgesList() {
                 CrateButton("Add", { NodeController.addTcp(tcp.trim()); tcp = "" })
             }
         }
-        item {
-            CrateButton("Audio modem", {
-                withPerms("Audio modem", listOf(Manifest.permission.RECORD_AUDIO)) { NodeController.enableAudio() }
-            }, Modifier.padding(vertical = 4.dp))
-        }
-        item {
-            CrateButton("Meshtastic (paired BLE)", {
-                withPerms("Meshtastic BLE", blePerms) { showMeshPick = !showMeshPick }
-            }, Modifier.padding(vertical = 4.dp))
-        }
         if (showMeshPick) {
             items(bonded()) { d ->
                 Crate(Modifier.fillMaxWidth().clickable {
                     NodeController.enableMeshtasticBle(ctx, d); showMeshPick = false
-                }) { Text("📻 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Amber) }
+                }) { Text("\uD83D\uDCFB ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Amber) }
             }
-        }
-        item {
-            CrateButton("Reticulum RNode (paired BLE)", {
-                withPerms("Reticulum RNode", blePerms) { showRnodePick = !showRnodePick }
-            }, Modifier.padding(vertical = 4.dp))
         }
         if (showRnodePick) {
             item {
@@ -572,18 +570,13 @@ internal fun BridgesList() {
                         ctx, d, f, b, sf.toIntOrNull() ?: 8, cr.toIntOrNull() ?: 5, tx.toIntOrNull() ?: 0
                     )
                     showRnodePick = false
-                }) { Text("📡 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Amber) }
+                }) { Text("\uD83D\uDCE1 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Amber) }
             }
-        }
-        item {
-            CrateButton("Wi-Fi Direct group", {
-                withPerms("Wi-Fi Direct", wifiP2pPerms) { NodeController.enableWifiDirect(ctx) }
-            }, Modifier.padding(vertical = 4.dp))
         }
         item {
             var ws by remember { mutableStateOf("") }
             Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ToughbookField(ws, { ws = it }, Modifier.weight(1f), placeholder = "WebSocket relay wss://…")
+                ToughbookField(ws, { ws = it }, Modifier.weight(1f), placeholder = "WebSocket wss://\u2026")
                 HGap()
                 CrateButton("Add", { NodeController.addWebSocket(ctx, ws); ws = "" })
             }
@@ -591,7 +584,7 @@ internal fun BridgesList() {
         item {
             var nostr by remember { mutableStateOf("") }
             Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ToughbookField(nostr, { nostr = it }, Modifier.weight(1f), placeholder = "Nostr relay wss://… (rx-only)")
+                ToughbookField(nostr, { nostr = it }, Modifier.weight(1f), placeholder = "Nostr wss://\u2026 (rx-only)")
                 HGap()
                 CrateButton("Add", { NodeController.addNostr(ctx, nostr); nostr = "" })
             }
@@ -675,24 +668,23 @@ private fun BridgeRow(b: BridgeState) {
         BridgeStatus.Connecting -> Palette.Amber to b.status
         BridgeStatus.Down -> Palette.Kevlar to b.status
         // Never signal failure by colour alone (§ VISUALDESIGN): pair pink with an icon.
-        BridgeStatus.Error -> Palette.Pink to "⚠ ${b.status}"
+        BridgeStatus.Error -> Palette.Pink to "\u26a0 ${b.status}"
     }
-    Crate(Modifier.fillMaxWidth()) {
+    val trailing: @Composable (() -> Unit)? = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(b.kind, color = Palette.Amber, fontWeight = FontWeight.Bold)
-                Caption(b.detail)
-            }
-            HGap()
             LedDot(dot)
             HGap(6.dp)
-            // Never colour alone (§1) — the dot is paired with the status word.
             Caption(label)
             if (b.canToggle) {
                 HGap(6.dp)
-                CrateButton(
+                Chip(
                     if (b.enabled) "Pause" else "Resume",
-                    { NodeController.toggleBridge(b) },
+                    selected = b.enabled,
+                    onClick = { NodeController.toggleBridge(b) },
+                    activeFill = Palette.Kevlar,
+                    activeInk = Palette.Amber,
+                    inactiveFill = Palette.Pink,
+                    inactiveInk = Palette.Void,
                     contentDescription = if (b.enabled) "Pause ${b.kind}" else "Resume ${b.kind}",
                 )
             }
@@ -702,6 +694,11 @@ private fun BridgeRow(b: BridgeState) {
             }
         }
     }
+    ListRow(
+        label = b.kind,
+        value = b.detail,
+        trailing = trailing,
+    )
 }
 
 /**
