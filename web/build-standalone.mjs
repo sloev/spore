@@ -292,7 +292,7 @@ const html = `<!doctype html>
   <!-- Tab bar -->
   <nav class="tab-bar" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--edge);padding-bottom:0">
     <button class="tab" data-panel="mail" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Mail</button>
-    <button class="tab" data-panel="feed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
+    <button class="tab" data-panel="feed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Topics</button>
     <button class="tab" data-panel="bridges" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Bridges</button>
     <button class="tab" data-panel="seed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Seed</button>
   </nav>
@@ -308,18 +308,23 @@ const html = `<!doctype html>
     </div>
   </section>
 
-  <!-- Feed panel -->
+  <!-- Topics panel -->
   <section class="card panel" id="panel-feed" style="display:none">
-    <div class="row">
-      <input type="text" id="bcast-msg" placeholder="shout into the void\u2026" />
-      <button id="bcast-send">Shout</button>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <span class="badge open" style="font-size:10px">PUBLIC</span>
+      <span class="cnt">Topics are public — anyone can read them</span>
+    </div>
+    <div id="topic-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="topic-msg" placeholder="message to topic\u2026" />
+      <button id="topic-send">Post</button>
     </div>
     <div class="row">
-      <input type="text" id="topic" placeholder="follow a topic, e.g. spore/news" />
-      <button id="sub" class="ghost">Subscribe</button>
+      <input type="text" id="topic-follow" placeholder="follow a topic, e.g. spore/news" />
+      <button id="sub" class="ghost">Follow</button>
       <span class="cnt" id="topics"></span>
     </div>
-    <div class="log" id="log" style="margin-top:8px"></div>
+    <div class="log" id="topic-log" style="margin-top:8px"></div>
   </section>
 
   <!-- Bridges panel -->
@@ -395,11 +400,14 @@ const K_SEED = 'spore.seed', K_BRIDGES = 'spore.bridges', K_TOPICS = 'spore.topi
 const K_RING = 'spore.ring';
 
 const K_THREADS = 'spore.threads';
+const K_TOPIC_LOGS = 'spore.topicLogs';
 
 let spore, hub;
 let saved = [];      // [{type, fields}] persisted bridges
 let topics = [];     // subscribed topic strings
 let threads = {};    // {hexAddr: [{text, fromMe, ts}]}
+let topicLogs = {};  // {topicName: [{text, from, ts}]}
+let activeTopic = null; // currently viewed topic name
 
 // ---- boot the one real node (called last, once every def below exists) -------
 async function boot() {
@@ -465,6 +473,11 @@ async function boot() {
         } else {
           logLine('bad', 'could not decrypt DM from ' + hexOf(sender).substring(0, 8) + ' (key may have expired)');
         }
+      } else if (ok && !isEncrypted) {
+        // Could be a topic message — check if subject matches a subscribed topic
+        // Topics are sent via hub.send with dest=ZERO_DEST and topic prefix
+        // The spore.mjs send() already handles topic routing.
+        logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
       } else {
         logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
       }
@@ -478,6 +491,12 @@ async function boot() {
     // Restore DM threads.
     try { threads = JSON.parse(LS.get(K_THREADS) || '{}'); } catch (e) { threads = {}; }
     renderThreadList();
+
+    // Restore topic logs.
+    try { topicLogs = JSON.parse(LS.get(K_TOPIC_LOGS) || '{}'); } catch (e) { topicLogs = {}; }
+    if (topics.length > 0) activeTopic = topics[0];
+    renderTopicList();
+    renderTopicView();
 
     $('status').textContent = restored ? 'ready \u2014 identity restored' : 'ready \u2014 new identity';
     $('status').style.color = 'var(--accent)';
@@ -580,7 +599,6 @@ function wireCompose() {
     const text = $('dm-msg').value.trim();
     if (!text) { logLine('bad', 'message is empty'); return; }
     const dest = hexToBytes(hex);
-    // Check if we can seal
     const canSeal = hub.node.canSealTo(dest);
     if (!canSeal) {
       $('dm-seal-state').textContent = '\u26a0 no prekey — will be sent in the clear';
@@ -589,12 +607,9 @@ function wireCompose() {
       $('dm-seal-state').textContent = '\u2705 sealed';
       $('dm-seal-state').style.color = 'var(--ok)';
     }
-    // Send as DM (will seal if possible)
     const payload = new TextEncoder().encode(text);
     const { forwards } = hub.node.sendDirect(dest, payload);
-    // Dispatch forwards onto transports
     hub._dispatch(forwards, null);
-    // Record locally (sendDirect returns forwards too)
     if (!threads[hex]) threads[hex] = [];
     threads[hex].push({ text, fromMe: true, ts: Date.now() });
     saveThreads();
@@ -605,28 +620,81 @@ function wireCompose() {
   $('dm-send').onclick = doDm;
   $('dm-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doDm(); });
 
-  // Broadcast send (public)
-  const doBcast = () => {
-    const text = $('bcast-msg').value.trim();
+  // Topic send
+  const doTopicSend = () => {
+    const text = $('topic-msg').value.trim();
     if (!text) return;
-    hub.send(ZERO_DEST, new TextEncoder().encode(text));
-    logLine('tx', 'broadcast: ' + JSON.stringify(text));
-    $('bcast-msg').value = '';
+    if (!activeTopic) { logLine('bad', 'follow a topic first'); return; }
+    // Send to topic via broadcast — topic routing is handled by the core
+    hub.send(ZERO_DEST, new TextEncoder().encode('/' + activeTopic + ' ' + text));
+    // Record locally
+    if (!topicLogs[activeTopic]) topicLogs[activeTopic] = [];
+    topicLogs[activeTopic].push({ text, from: 'me', ts: Date.now() });
+    LS.set(K_TOPIC_LOGS, JSON.stringify(topicLogs));
+    renderTopicView();
+    logLine('sys', 'posted to ' + activeTopic + ': ' + JSON.stringify(text));
+    $('topic-msg').value = '';
   };
-  $('bcast-send').onclick = doBcast;
-  $('bcast-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doBcast(); });
+  $('topic-send').onclick = doTopicSend;
+  $('topic-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doTopicSend(); });
 
-  // Topic subscribe
+  // Topic follow
   $('sub').onclick = () => {
-    const t = $('topic').value.trim();
-    if (!t || topics.includes(t)) { $('topic').value = ''; return; }
+    const t = $('topic-follow').value.trim();
+    if (!t || topics.includes(t)) { $('topic-follow').value = ''; return; }
     hub.node.subscribe(t);
     topics.push(t);
     LS.set(K_TOPICS, JSON.stringify(topics));
+    if (!topicLogs[t]) topicLogs[t] = [];
+    LS.set(K_TOPIC_LOGS, JSON.stringify(topicLogs));
+    if (!activeTopic) { activeTopic = t; }
     renderTopics();
+    renderTopicView();
+    renderTopicList();
     logLine('sys', 'now following topic ' + JSON.stringify(t));
-    $('topic').value = '';
+    $('topic-follow').value = '';
   };
+}
+
+function renderTopicList() {
+  const el = $('topic-list');
+  if (!topics.length) {
+    el.innerHTML = '<span class="cnt" style="padding:8px 0">No topics yet. Follow one above.</span>';
+    return;
+  }
+  el.innerHTML = topics.map(t => {
+    const isActive = t === activeTopic;
+    return '<div class="topic-row" data-topic="' + t + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid ' + (isActive ? 'var(--ok)' : 'var(--edge)') + ';border-radius:2px;cursor:pointer;background:' + (isActive ? 'var(--panel)' : 'transparent') + '">' +
+      '<span class="badge open" style="font-size:9px;border-color:var(--ok)">PUBLIC</span>' +
+      '<span style="flex:1;font-size:13px;color:' + (isActive ? 'var(--ok)' : 'var(--ink)') + '">/' + t + '</span>' +
+      (topicLogs[t] && topicLogs[t].length ? '<span class="cnt">' + topicLogs[t].length + '</span>' : '') +
+    '</div>';
+  }).join('');
+  for (const row of el.querySelectorAll('.topic-row')) {
+    row.onclick = () => {
+      activeTopic = row.dataset.topic;
+      renderTopicView();
+      renderTopicList();
+    };
+  }
+}
+
+function renderTopicView() {
+  const logEl = $('topic-log');
+  if (!activeTopic) {
+    logEl.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">Select a topic to view messages</span>';
+    return;
+  }
+  const msgs = topicLogs[activeTopic] || [];
+  if (!msgs.length) {
+    logEl.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">No messages in /' + activeTopic + ' yet</span>';
+    return;
+  }
+  logEl.innerHTML = msgs.map(m => {
+    const cls = m.from === 'me' ? 'tx' : 'rx';
+    return '<div class="' + cls + '">' + stamp() + '  ' + (m.from !== 'me' ? '<' + m.from + '> ' : '') + JSON.stringify(m.text) + '</div>';
+  }).join('');
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 // ---- bridge registry ---------------------------------------------------------
