@@ -103,8 +103,8 @@ internal fun FeedScreen(compose: (String) -> Unit) {
                 "New post",
                 { target?.let(compose) },
                 enabled = target != null,
-                face = Palette.Pink,
-                ink = Palette.Void,
+                face = Palette.Yellow,
+                ink = Palette.Paper,
             )
         }
     }
@@ -120,9 +120,9 @@ private fun TopicChip(label: String, selected: Boolean, onClick: () -> Unit) {
         // .selectable (not .clickable) announces selected/unselected to TalkBack —
         // colour alone (pink vs amber) doesn't (B7).
         Modifier.selectable(selected = selected, onClick = onClick, role = Role.Tab).padding(vertical = 2.dp),
-        ink = if (selected) Palette.Pink else Palette.Amber,
-        bg = if (selected) Palette.Void else Palette.Kevlar,
-        edge = if (selected) Palette.Pink else Palette.Edge,
+        ink = if (selected) Palette.Yellow else Palette.Ink,
+        bg = if (selected) Palette.Paper else Palette.Muted,
+        edge = if (selected) Palette.Yellow else Palette.Ink,
     )
 }
 
@@ -136,13 +136,13 @@ private fun PostCard(p: Post) {
     Crate(Modifier.fillMaxWidth()) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(Petnames.label(p.author), Modifier.weight(1f), color = Palette.Amber, fontWeight = FontWeight.Bold)
-                if (p.verified) StickerBadge("🔒 verified", ink = Palette.Phosphor)
-                else StickerBadge("⚠ unverified", ink = Palette.Pink)
+                Text(Petnames.label(p.author), Modifier.weight(1f), color = Palette.Ink, fontWeight = FontWeight.Bold)
+                if (p.verified) StickerBadge("🔒 verified", ink = Palette.Ink)
+                else StickerBadge("⚠ unverified", ink = Palette.Yellow)
             }
             Caption("#${p.topic} · ${timeOf(p.ts)}")
             VGap(6.dp)
-            PostBody(Markdown.render(body, Palette.Amber))
+            PostBody(Markdown.render(body, Palette.Ink))
             if (magnet != null) {
                 VGap(8.dp)
                 InlineImage(magnet, paths[magnet], transfers.firstOrNull { it.magnet == magnet })
@@ -233,7 +233,7 @@ private fun InlineImage(magnet: String, path: String?, transfer: Transfer?) {
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 220.dp)
-                .border(2.dp, Palette.Edge),
+                .border(2.dp, Palette.Ink),
             contentScale = ContentScale.Crop,
         )
     }
@@ -304,7 +304,7 @@ internal fun ComposePost(topic: String, done: () -> Unit) {
             Crate(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(name, color = Palette.Amber, maxLines = 1)
+                        Text(name, color = Palette.Ink, maxLines = 1)
                         Caption("${bytes.size / 1024} KB attached")
                     }
                     CrateButton("Remove", { image = null })
@@ -328,8 +328,8 @@ internal fun ComposePost(topic: String, done: () -> Unit) {
                     else confirm("Image too large for this node's store — post it smaller")
                 },
                 enabled = body.text.isNotBlank() || image != null,
-                face = Palette.Pink,
-                ink = Palette.Void,
+                face = Palette.Yellow,
+                ink = Palette.Paper,
             )
         }
     }

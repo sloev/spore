@@ -423,42 +423,46 @@ def gen_android_kt():
     L.append("/**")
     L.append(" * The §1 tokens, generated from design/tokens.json by design/generate.py.")
     L.append(" *")
-    L.append(" * Ratios are measured, not estimated, and are regenerated with the colour, so")
-    L.append(" * they cannot fall out of step with it. Three numbers per foreground: contrast")
-    L.append(f" * on {', '.join(_kt_name(b) for b in bases)}, in that order (light theme).")
+    L.append(" * HARDBRUT is light-first: the primary members are the light theme, and the")
+    L.append(" * identical names + `Dark` are the dark theme. Two button kinds (Yellow default,")
+    L.append(" * Paper cancel); black ink; zero radius; hard no-blur shadows.")
     L.append(" */")
     L.append("internal object Palette {")
 
+    # Light (primary) — flat names, no suffix.
     decls, comments = [], []
+    names_light = []
     for e in LIGHT["palette"]:
-        decls.append(f"    val {_kt_name(e['n'], 'light')} = {_kt_color(e['hex'])}")
+        decls.append(f"    val {e['kt']} = {_kt_color(e['hex'])}")
+        names_light.append(e['n'])
         if e["n"] in CONTRAST["grades"]:
             rs = [ratio(e["hex"], resolve(b, 'light')) for b in bases]
             c = " / ".join(f"{r:.2f}" for r in rs)
             for base, g in zip(bases, CONTRAST["grades"][e["n"]]):
                 if g == "forbidden":
                     c += f" ← never on {_kt_name(base)}"
-                elif g == "large":
-                    c += f" ({_kt_name(base)} is large-text only)"
         else:
             c = f"{e['label']} — {e['role']}"
         comments.append(c)
+    # Semantic roles only light theme needs (e.g. bg as a flat name).
     for n in cfg["semantic"]:
-        e = LIGHT_S[n]
+        if n in names_light:
+            continue
+        e = LIGHT_S.get(n) or entry(n, "light")
         decls.append(f"    val {_kt_name(n, 'light')} = {_kt_color(resolve(n, 'light'))}")
-        comments.append(e["role"])
+        comments.append(e.get("role", ""))
     L += _align_kt(decls, comments)
 
     L.append("")
-    L.append("    // Dark mode — inverted ink/paper; OnYellow is text on the unchanged yellow face")
+    L.append("    // Dark mode — inverted ink/paper; the yellow accent is unchanged.")
     decls, comments = [], []
-    for n in cfg["light_semantic"]:
+    seen = set()
+    for n in cfg["light_raw"] + cfg["light_semantic"]:
+        if n in seen:
+            continue
+        seen.add(n)
         decls.append(f"    val {_kt_name(n, 'dark')} = {_kt_color(resolve(n, 'dark'))}")
         comments.append(entry(n, 'dark').get("role", ""))
-    for n in cfg["light_raw"]:
-        r = ratio(resolve(n, "dark"), resolve("bg", "dark"))
-        decls.append(f"    val {_kt_name(n, 'dark')} = {_kt_color(resolve(n, 'dark'))}")
-        comments.append(f"{r:.2f}:1 on Bg")
     L += _align_kt(decls, comments)
     L.append("}")
     L += gen_metrics_kt()
