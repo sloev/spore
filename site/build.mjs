@@ -7,6 +7,11 @@ import { marked } from 'marked';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requireHardbrutCss } from '../web/hardbrut-import.mjs';
+
+// HARDBRUT (M7): the framework is imported at build time and inlined, so a
+// change to supernihil/hardbrut shows up on the next `npm ci && node build.mjs`.
+const hardbrutCss = requireHardbrutCss();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, '_site');
@@ -239,12 +244,39 @@ function shareBar() {
 function nav(self) {
   const items = navLinks
     .map(({ dst, label }) => {
-      const active = dst === self ? ' class="active"' : '';
-      return `<a href="${dst}"${active}>${label}</a>`;
+      const active = dst === self ? ' aria-current="page"' : '';
+      return `<li><a href="${dst}"${active}>${label}</a></li>`;
     })
     .join('');
-  return `<nav>${items}</nav>`;
+  return `<ul class="navbar-links">${items}</ul>`;
 }
+
+// Thin SPORE-only layer over HARDBRUT: the docs reading layout, share row,
+// code-copy button, illustrations, and print. Everything else is the framework.
+const siteAdapterCss = `
+/* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
+main.doc.container { max-width: 860px; }
+main.doc { font-size: 0.95rem; }
+.brand-mark { display: inline-block; vertical-align: -3px; margin-right: 0.4rem; }
+.navbar-brand { font-size: 1.7rem; }
+.share { margin: var(--space) 0; padding: var(--space); background: var(--paper); border: var(--border); box-shadow: var(--shadow); }
+.share h2 { margin: 0 0 var(--space-sm); }
+.share p { color: var(--muted); margin: 0 0 var(--space-sm); }
+.share-row { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.share-btn { display: inline-block; padding: 0.4rem 0.8rem; font-size: 0.85rem; text-decoration: none; }
+main.doc .code-copy {
+  position: absolute; top: 8px; right: 8px;
+  font: 11px var(--font-mono); line-height: 1; padding: 4px 9px;
+  background: var(--paper); color: var(--ink); border: var(--border);
+  cursor: pointer; box-shadow: var(--shadow-sm);
+}
+main.doc pre { position: relative; }
+@page { size: A4; margin: 11mm 10mm; }
+@media print {
+  .navbar, .site-footer, nav, .share, main.doc .code-copy { display: none !important; }
+  main.doc { max-width: none; margin: 0; padding: 0; }
+}
+`;
 
 // Minimal escaping for text going into an attribute value.
 const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -303,7 +335,7 @@ function page(title, bodyHtml, self) {
   const desc = descriptions.get(self) || DESC_DEFAULT;
   const url = SHARE.url + (self === 'index.html' ? '' : self);
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-accent="yellow">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -316,18 +348,32 @@ function page(title, bodyHtml, self) {
 <meta property="og:description" content="${attr(desc)}" />
 <meta property="og:url" content="${attr(url)}" />
 <meta name="twitter:card" content="summary" />
-<link rel="stylesheet" href="style.css" />
 <link rel="icon" href="antenna-seed.svg" type="image/svg+xml" />
+<style>
+/* HARDBRUT (imported at build time from supernihil/hardbrut). */
+${hardbrutCss}
+${siteAdapterCss}
+</style>
+<script>
+(function () {
+  var h = document.documentElement;
+  var t = localStorage.getItem('theme');
+  if (!t) t = window.matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light';
+  h.setAttribute('data-theme', t);
+})();
+</script>
 </head>
 <body class="page-${cls}">
-<header class="site">
-  <a class="brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/></svg></a>
+<nav class="navbar">
+  <a class="navbar-brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/></svg>SPORE</a>
   ${nav(self)}
-</header>
-<main class="doc">
+</nav>
+<main class="doc container">
+<section class="section">
 ${bodyHtml}
+</section>
 </main>
-<footer class="site">
+<footer class="site-footer">
   <span>SPORE — store-and-forward planetary opportunistic relay envelope · public domain (Unlicense)</span>
 </footer>
 <script>
