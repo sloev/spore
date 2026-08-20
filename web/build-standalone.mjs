@@ -292,7 +292,8 @@ const html = `<!doctype html>
   <!-- Tab bar -->
   <nav class="tab-bar" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--edge);padding-bottom:0">
     <button class="tab" data-panel="mail" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Mail</button>
-    <button class="tab" data-panel="feed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Topics</button>
+    <button class="tab" data-panel="topics" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Topics</button>
+    <button class="tab" data-panel="feed-stream" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
     <button class="tab" data-panel="bridges" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Bridges</button>
     <button class="tab" data-panel="seed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Seed</button>
   </nav>
@@ -309,7 +310,7 @@ const html = `<!doctype html>
   </section>
 
   <!-- Topics panel -->
-  <section class="card panel" id="panel-feed" style="display:none">
+  <section class="card panel" id="panel-topics" style="display:none">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
       <span class="badge open" style="font-size:10px">PUBLIC</span>
       <span class="cnt">Topics are public — anyone can read them</span>
@@ -337,6 +338,16 @@ const html = `<!doctype html>
       </div>
       <div id="sealed-topics" style="display:flex;flex-direction:column;gap:4px;margin-top:4px"></div>
     </details>
+  </section>
+
+  <!-- Feed panel (W4) -->
+  <section class="card panel" id="panel-feed-stream" style="display:none">
+    <div class="row">
+      <input type="text" id="feed-msg" placeholder="what's happening\u2026" />
+      <input type="text" id="feed-topic" placeholder="topic (default: spore/feed)" style="max-width:180px;min-width:120px" value="spore/feed" />
+      <button id="feed-publish">Publish</button>
+    </div>
+    <div id="feed-list" style="display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:420px;overflow-y:auto"></div>
   </section>
 
   <!-- Bridges panel -->
@@ -422,6 +433,8 @@ let threads = {};    // {hexAddr: [{text, fromMe, ts}]}
 let topicLogs = {};  // {topicName: [{text, from, ts}]}
 let activeTopic = null; // currently viewed topic name
 let sealedTopics = {}; // {topicName: keyHex}
+let feedItems = [];   // [{topic, data, ts}]
+let feedInterval = null;
 
 // ---- boot the one real node (called last, once every def below exists) -------
 async function boot() {
@@ -510,10 +523,17 @@ async function boot() {
     try { topicLogs = JSON.parse(LS.get(K_TOPIC_LOGS) || '{}'); } catch (e) { topicLogs = {}; }
     // Restore sealed topics.
     try { sealedTopics = JSON.parse(LS.get(K_SEALED_TOPICS) || '{}'); } catch (e) { sealedTopics = {}; }
+    // Auto-subscribe to default feed topic
+    if (!topics.includes('spore/feed')) {
+      hub.node.subscribe('spore/feed');
+      topics.push('spore/feed');
+      LS.set(K_TOPICS, JSON.stringify(topics));
+    }
     if (topics.length > 0) activeTopic = topics[0];
     renderTopicList();
     renderTopicView();
     renderSealedTopics();
+    startFeedPoll();
 
     $('status').textContent = restored ? 'ready \u2014 identity restored' : 'ready \u2014 new identity';
     $('status').style.color = 'var(--accent)';
@@ -715,6 +735,58 @@ function renderTopicView() {
 }
 
 // ---- sealed topics (W3) ---------------------------------------------------
+function startFeedPoll() {
+  if (feedInterval) clearInterval(feedInterval);
+  feedInterval = setInterval(() => {
+    if (!hub) return;
+    const events = hub.node.pollFeed();
+    for (const ev of events) {
+      feedItems.unshift({ topic: ev.topic, data: ev.data, ts: Date.now() });
+    }
+    if (feedItems.length > 200) feedItems = feedItems.slice(0, 200);
+    renderFeed();
+  }, 2000);
+}
+
+function renderFeed() {
+  const el = $('feed-list');
+  if (!feedItems.length) {
+    el.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">No feed events yet. Publish one above.</span>';
+    return;
+  }
+  el.innerHTML = feedItems.slice(0, 50).map(item => {
+    let text;
+    try { text = new TextDecoder().decode(item.data); } catch (e) { text = '<' + item.data.length + ' bytes>'; }
+    const topicStr = item.topic && item.topic.length ? item.topic : '(broadcast)';
+    const topicHex = topicStr instanceof Uint8Array ? Array.from(topicStr).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8) : topicStr;
+    return '<div style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;border:1px solid var(--edge);border-radius:2px;font-size:12.5px">' +
+      '<span class="badge open" style="font-size:9px;flex-shrink:0;margin-top:1px">' + (typeof topicHex === 'string' && topicHex.length > 20 ? topicHex.substring(0, 8) + '\u2026' : topicHex) + '</span>' +
+      '<span style="flex:1;color:var(--prose);word-break:break-word">' + JSON.stringify(text) + '</span>' +
+      '<span class="cnt" style="flex-shrink:0">' + new Date(item.ts).toLocaleTimeString() + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+// Wire feed publish
+document.addEventListener('DOMContentLoaded', () => {
+  const feedBtn = $('feed-publish');
+  if (feedBtn) {
+    feedBtn.onclick = () => {
+      const text = $('feed-msg').value.trim();
+      if (!text) return;
+      const topic = $('feed-topic').value.trim() || 'spore/feed';
+      const payload = new TextEncoder().encode(text);
+      hub.node.publish(topic, payload);
+      // Also send via broadcast so it reaches non-subscribers
+      feedItems.unshift({ topic: topic, data: payload, ts: Date.now() });
+      if (feedItems.length > 200) feedItems = feedItems.slice(0, 200);
+      renderFeed();
+      logLine('sys', 'published to ' + topic + ': ' + JSON.stringify(text));
+      $('feed-msg').value = '';
+    };
+  }
+});
+
 function renderSealedTopics() {
   const el = $('sealed-topics');
   const entries = Object.entries(sealedTopics);

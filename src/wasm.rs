@@ -184,6 +184,46 @@ pub unsafe extern "C" fn spore_node_subscribe(n: *mut Node, topic: *const u8, le
     (*n).subscribe(&s);
 }
 
+/// Publish an event to a feed topic (any subscriber can read it).
+///
+/// # Safety
+/// `n` valid; `topic`/`tlen` = UTF-8 topic; `data`/`dlen` = event bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_publish(
+    n: *mut Node,
+    topic: *const u8,
+    tlen: usize,
+    data: *const u8,
+    dlen: usize,
+    now: u32,
+) -> i64 {
+    let node = &mut *n;
+    let topic_str = String::from_utf8_lossy(std::slice::from_raw_parts(topic, tlen));
+    let event = std::slice::from_raw_parts(data, dlen).to_vec();
+    let forwards = node.publish(&topic_str, event, now);
+    pack(blob(forward_wires(forwards), Vec::new()))
+}
+
+/// Drain feed events received on subscribed topics.
+///
+/// Returns packed feed events: `[n:4 BE] [topic_len:4 BE] [topic_bytes] [data_len:4 BE] [data_bytes] ...`
+///
+/// # Safety
+/// `n` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_poll_feed(n: *mut Node) -> i64 {
+    let events = (*n).poll_feed();
+    let mut out = Vec::new();
+    out.extend_from_slice(&(events.len() as u32).to_be_bytes());
+    for ev in &events {
+        out.extend_from_slice(&(ev.topic.len() as u32).to_be_bytes());
+        out.extend_from_slice(&ev.topic);
+        out.extend_from_slice(&(ev.data.len() as u32).to_be_bytes());
+        out.extend_from_slice(&ev.data);
+    }
+    pack(out)
+}
+
 // -- the hot path ------------------------------------------------------------
 
 /// Originate a signed message to `dest` (8 bytes; all-zero = public). Returns a

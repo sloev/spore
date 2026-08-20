@@ -268,6 +268,34 @@ class SporeNode {
     const out = this.s._unpack(packed);
     return out.length ? out : null;
   }
+
+  /** Publish an event to a feed topic. */
+  publish(topic, event, now_sec) {
+    const tp = this.s._put(new TextEncoder().encode(topic));
+    const dp = this.s._put(event);
+    const packed = this.s.ex.spore_node_publish(this.ptr, tp, topic.length, dp, event.length, now_sec || now());
+    this.s.ex.spore_free(tp, topic.length);
+    this.s.ex.spore_free(dp, event.length);
+    return this.s._parse(this.s._unpack(packed));
+  }
+
+  /** Drain feed events from subscribed topics. Returns [{topic, data}]. */
+  pollFeed() {
+    const packed = this.s._unpack(this.s.ex.spore_node_poll_feed(this.ptr));
+    if (!packed.length) return [];
+    const dv = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    let o = 0;
+    const n = dv.getUint32(o, false); o += 4;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const tlen = dv.getUint32(o, false); o += 4;
+      const topic = new TextDecoder().decode(packed.slice(o, o + tlen)); o += tlen;
+      const dlen = dv.getUint32(o, false); o += 4;
+      const data = packed.slice(o, o + dlen); o += dlen;
+      out.push({ topic, data });
+    }
+    return out;
+  }
 }
 
 /**

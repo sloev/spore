@@ -204,6 +204,60 @@ pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *co
     guard(SporeBytes::null(), || SporeBytes::or_null(topic_open(slice(ct, ct_len), &arr32(psk))))
 }
 
+// -- feed/microblog (L5) ---------------------------------------------------
+
+/// Publish an event to a feed topic.
+///
+/// # Safety
+/// `n` valid; `topic`/`tlen` = UTF-8 topic; `data`/`dlen` = event bytes.
+#[cfg(not(target_arch = "wasm32"))]
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_publish(
+    n: *mut crate::Node,
+    topic: *const u8,
+    tlen: usize,
+    data: *const u8,
+    dlen: usize,
+    now: u32,
+) -> SporeBytes {
+    guard(SporeBytes::null(), || {
+        let node = &mut *n;
+        let topic_str = String::from_utf8_lossy(std::slice::from_raw_parts(topic, tlen));
+        let event = std::slice::from_raw_parts(data, dlen).to_vec();
+        let fwd = node.publish(&topic_str, event, now);
+        let mut wire = Vec::new();
+        for f in fwd {
+            match f {
+                crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. } => {
+                    wire.extend_from_slice(&bytes)
+                }
+            }
+        }
+        SporeBytes::from_vec(wire)
+    })
+}
+
+/// Drain feed events from subscribed topics.
+///
+/// # Safety
+/// `n` is valid.
+#[cfg(not(target_arch = "wasm32"))]
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_poll_feed(n: *mut crate::Node) -> SporeBytes {
+    guard(SporeBytes::null(), || {
+        let events = (*n).poll_feed();
+        let mut out = Vec::new();
+        out.extend_from_slice(&(events.len() as u32).to_be_bytes());
+        for ev in &events {
+            out.extend_from_slice(&(ev.topic.len() as u32).to_be_bytes());
+            out.extend_from_slice(&ev.topic);
+            out.extend_from_slice(&(ev.data.len() as u32).to_be_bytes());
+            out.extend_from_slice(&ev.data);
+        }
+        SporeBytes::from_vec(out)
+    })
+}
+
 // -- text armor --------------------------------------------------------------
 
 /// Armor envelope bytes into `~S1.…~` text (UTF-8).
