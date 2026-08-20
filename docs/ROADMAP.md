@@ -269,12 +269,12 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 
 | Task | Status | Notes |
 |---|---|---|
-| Rewrite `design/tokens.json` to HARDBRUT values + regenerate `site/style.css`, `web/build-standalone.mjs`, Android `Chrome.kt`, and VISUALDESIGN's contrast table | ⬜ todo | `design/generate.py` learns the HARDBRUT shape: `--ink #000`, `--paper #fff`, `--bg #fdfaf2`, `--yellow #ffd23f`, `--muted #666`, border 3px, radius 0, hard shadows. CI drift job keeps them in sync |
-| Web node → HARDBRUT (css tokens + components: two buttons, zero radius, hard shadows, restyled header/mascot) | ⬜ todo | Inline `<style>` in `build-standalone.mjs`; keep zero external requests + reduced-motion |
-| Site (`site/style.css` + `build.mjs` + `home.md`) → HARDBRUT | ⬜ todo | Navbar (4px ink bottom border), hero band, cards, details/summary, tables, callouts |
-| Android (`Chrome.kt` + all Compose screens) → HARDBRUT | ⬜ todo | `Modifier.hardShadow` (drawBehind) for zero-blur; two `HardbrutButton` kinds; `HardbrutCard`/`HardbrutTextField`/`HardbrutBadge` per ANDROID.md |
-| Rewrite `docs/VISUALDESIGN.md` to the HARDBRUT language (new tokens, components, contrast, screen structures) | ⬜ todo | Reflects the new spec; the old Neo-Tokyo §1/§3/§7 content is superseded |
-| `docs/ANDROID.md`-style adaptation guide committed into the repo (from `supernihil/hardbrut/ANDROID.md`) | ⬜ todo | So the Android mapping lives in-tree, not on an external page |
+| Rewrite `design/tokens.json` to HARDBRUT values + regenerate `site/style.css`, `web/build-standalone.mjs`, Android `Chrome.kt`, and VISUALDESIGN's contrast table | ✅ shipped | `design/generate.py` inverted to light-first; `--ink #000`, `--paper #fff`, `--bg #fdfaf2`, `--yellow #ffd23f`, `--muted #666`, radius 0, border 3px, throw 5px, plus an `--onyellow` dark-mode token. CI drift job keeps them in sync |
+| Web node → HARDBRUT (css tokens + components: two buttons, zero radius, hard shadows, restyled header/mascot) | ✅ shipped | Inline `<style>` in `build-standalone.mjs`; zero external requests + reduced-motion kept; Baud restyled flat; Antenna+Seed recoloured |
+| Site (`site/style.css` + `build.mjs` + `home.md`) → HARDBRUT | ✅ shipped | Solid paper header + 4px ink bottom border; zero radius; hard `var(--shadow)`; CRT VFX removed; SVG illustrations recoloured |
+| Android (`Chrome.kt` + all Compose screens) → HARDBRUT | ✅ shipped | Flat two-theme Palette (suffixless light + `Dark`-suffixed dark); scanslines/bloom removed; crate = zero-radius paper + hard shadow; two button kinds via `CrateButton` face |
+| Rewrite `docs/VISUALDESIGN.md` to the HARDBRUT language (new tokens, components, contrast, screen structures) | ✅ shipped | Intro, §1 heading, §3 components and §4 VFX rewritten; the old Neo-Tokyo §1/§3/§4 content superseded |
+| Android adaptation guide committed into the repo | ✅ shipped | `docs/HARDBRUT-ANDROID.md` (token mapping, hard-shadow workaround, two button kinds, typography) |
 
 **Definition of done:** all three surfaces render HARDBRUT (cream paper, black
 ink, yellow primary / white cancel, zero radius, hard no-blur shadows held on
