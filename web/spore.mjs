@@ -296,6 +296,53 @@ class SporeNode {
     }
     return out;
   }
+
+  /** Publish a file. Returns the 16-byte magnet id. */
+  publishFile(name, data, dest, now_sec) {
+    const np = this.s._put(new TextEncoder().encode(name));
+    const dp = this.s._put(data);
+    const dst = dest || new Uint8Array(8);
+    const packed = this.s._unpack(this.s.ex.spore_node_publish_file(this.ptr, np, name.length, dp, data.length, dst, now_sec || now()));
+    this.s.ex.spore_free(np, name.length);
+    this.s.ex.spore_free(dp, data.length);
+    const magnet = packed.slice(0, 16);
+    return magnet;
+  }
+
+  /** Fetch a file by magnet (16 bytes). Returns the forwards to dispatch. */
+  fetchFile(magnet, now_sec) {
+    const packed = this.s._unpack(this.s.ex.spore_node_fetch_file(this.ptr, magnet, now_sec || now()));
+    return this.s._parse(packed);
+  }
+
+  /** Get file bytes for a magnet. null if not found. */
+  fileBytes(magnet) {
+    const packed = this.s._unpack(this.s.ex.spore_node_file_bytes(this.ptr, magnet));
+    return packed.length ? packed : null;
+  }
+
+  /** Get filename for a magnet. null if not found. */
+  fileName(magnet) {
+    const packed = this.s._unpack(this.s.ex.spore_node_file_name(this.ptr, magnet));
+    return packed.length ? new TextDecoder().decode(packed) : null;
+  }
+
+  /** List all stored files. Returns [{name, magnet}]. */
+  listFiles() {
+    const packed = this.s._unpack(this.s.ex.spore_node_list_files(this.ptr));
+    if (!packed.length) return [];
+    const dv = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    let o = 0;
+    const n = dv.getUint32(o, false); o += 4;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const nlen = dv.getUint32(o, false); o += 4;
+      const name = new TextDecoder().decode(packed.slice(o, o + nlen)); o += nlen;
+      const magnet = packed.slice(o, o + 16); o += 16;
+      out.push({ name, magnet });
+    }
+    return out;
+  }
 }
 
 /**

@@ -262,6 +262,99 @@ pub unsafe extern "C" fn spore_node_recv(n: *mut Node, bytes: *const u8, len: us
     pack(blob(forward_wires(rx.forwards), delivered))
 }
 
+// -- files (W5) ---------------------------------------------------------------
+
+/// Publish a file from a byte slice. Returns the 16-byte magnet ID packed into an
+/// i64 along with forwards.
+///
+/// # Safety
+/// `n` valid; `name`/`nlen` = UTF-8 filename; `data`/`dlen` = file bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_publish_file(
+    n: *mut Node,
+    name: *const u8,
+    nlen: usize,
+    data: *const u8,
+    dlen: usize,
+    dest: *const u8,
+    now: u32,
+) -> i64 {
+    let node = &mut *n;
+    let n_str = String::from_utf8_lossy(std::slice::from_raw_parts(name, nlen));
+    let bytes = std::slice::from_raw_parts(data, dlen).to_vec();
+    let mut d = [0u8; 8];
+    d.copy_from_slice(std::slice::from_raw_parts(dest, 8));
+    let (magnet, forwards) = node.publish_file(&n_str, bytes.as_slice(), d, now);
+    let mut out = Vec::with_capacity(16 + 4);
+    out.extend_from_slice(&magnet);
+    let fw = forward_wires(forwards);
+    out.extend_from_slice(&(fw.len() as u32).to_be_bytes());
+    for w in &fw {
+        out.extend_from_slice(&(w.len() as u32).to_be_bytes());
+        out.extend_from_slice(w);
+    }
+    pack(out)
+}
+
+/// Fetch a file by its 16-byte magnet ID. Returns forwards to relay.
+///
+/// # Safety
+/// `n` valid; `magnet` points to 16 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_fetch_file(n: *mut Node, magnet: *const u8, now: u32) -> i64 {
+    let node = &mut *n;
+    let mut id = [0u8; 16];
+    id.copy_from_slice(std::slice::from_raw_parts(magnet, 16));
+    let forwards = node.fetch(&id);
+    pack(blob(forward_wires(forwards), Vec::new()))
+}
+
+/// Get the 16-byte magnet ID for a file we've published. Returns zeroed ID
+/// (all 16 bytes zero) if the file is not found.
+///
+/// # Safety
+/// `n` valid; `magnet` points to 16 bytes (returned from publish_file).
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_file_bytes(n: *mut Node, magnet: *const u8) -> i64 {
+    let mut id = [0u8; 16];
+    id.copy_from_slice(std::slice::from_raw_parts(magnet, 16));
+    match (*n).file_bytes(&id) {
+        Some(bytes) => pack(bytes),
+        None => 0,
+    }
+}
+
+/// Get the filename for a magnet. Returns empty on not found.
+///
+/// # Safety
+/// `n` valid; `magnet` points to 16 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_file_name(n: *mut Node, magnet: *const u8) -> i64 {
+    let mut id = [0u8; 16];
+    id.copy_from_slice(std::slice::from_raw_parts(magnet, 16));
+    match (*n).file_name(&id) {
+        Some(name) => pack(name.into_bytes()),
+        None => 0,
+    }
+}
+
+/// List all locally stored files. Returns packed `[n:4 BE] [name_len:4 BE] [name] [magnet:16] ...`
+///
+/// # Safety
+/// `n` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_list_files(n: *mut Node) -> i64 {
+    let files = (*n).complete_file_names();
+    let mut out = Vec::new();
+    out.extend_from_slice(&(files.len() as u32).to_be_bytes());
+    for (name, id) in &files {
+        out.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(id);
+    }
+    pack(out)
+}
+
 // -- encrypted DM (W1) -------------------------------------------------------
 //
 // `spore_node_send` is the raw unsealed, unsigned path — the call a protocol

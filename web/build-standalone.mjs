@@ -294,6 +294,7 @@ const html = `<!doctype html>
     <button class="tab" data-panel="mail" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Mail</button>
     <button class="tab" data-panel="topics" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Topics</button>
     <button class="tab" data-panel="feed-stream" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
+    <button class="tab" data-panel="files" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Files</button>
     <button class="tab" data-panel="bridges" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Bridges</button>
     <button class="tab" data-panel="seed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Seed</button>
   </nav>
@@ -348,6 +349,33 @@ const html = `<!doctype html>
       <button id="feed-publish">Publish</button>
     </div>
     <div id="feed-list" style="display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:420px;overflow-y:auto"></div>
+  </section>
+
+  <!-- Files panel (W5) -->
+  <section class="card panel" id="panel-files" style="display:none">
+    <details style="margin-bottom:8px" open>
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">Publish a file</summary>
+      <div class="row">
+        <input type="text" id="file-name" placeholder="filename.txt" style="max-width:200px;font-family:var(--mono);font-size:12px" />
+        <input type="file" id="file-input" style="flex:1" />
+      </div>
+      <div class="row">
+        <button id="file-publish">Publish</button>
+        <span id="file-result" class="cnt" style="margin-left:8px"></span>
+      </div>
+    </details>
+    <details style="margin-bottom:8px">
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">Fetch by magnet</summary>
+      <div class="row">
+        <input type="text" id="file-magnet" placeholder="paste 32 hex chars (16-byte magnet id)" style="flex:1;font-family:var(--mono);font-size:12px" />
+        <button id="file-fetch">Fetch</button>
+      </div>
+      <div id="file-fetch-result" class="cnt"></div>
+    </details>
+    <details open>
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">Local files</summary>
+      <div id="local-files" style="display:flex;flex-direction:column;gap:4px;margin-top:4px;max-height:280px;overflow-y:auto"></div>
+    </details>
   </section>
 
   <!-- Bridges panel -->
@@ -534,6 +562,7 @@ async function boot() {
     renderTopicView();
     renderSealedTopics();
     startFeedPoll();
+    renderLocalFiles();
 
     $('status').textContent = restored ? 'ready \u2014 identity restored' : 'ready \u2014 new identity';
     $('status').style.color = 'var(--accent)';
@@ -1248,6 +1277,76 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 });
+
+// ---- files (W5) ---------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+  // Publish file
+  const publishBtn = $('file-publish');
+  if (publishBtn) {
+    publishBtn.onclick = () => {
+      const input = $('file-input');
+      const fileNameInput = $('file-name');
+      const file = input.files && input.files[0];
+      if (!file) { logLine('bad', 'Select a file first'); return; }
+      const name = fileNameInput.value.trim() || file.name;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const data = new Uint8Array(reader.result);
+        const magnet = hub.node.publishFile(name, data);
+        const hex = Array.from(magnet).map(b => b.toString(16).padStart(2, '0')).join('');
+        $('file-result').textContent = 'published: ' + hex;
+        logLine('sys', 'published file ' + name + ' with magnet ' + hex);
+        renderLocalFiles();
+      };
+      reader.readAsArrayBuffer(file);
+    };
+  }
+
+  // Fetch file by magnet
+  const fetchBtn = $('file-fetch');
+  if (fetchBtn) {
+    fetchBtn.onclick = () => {
+      const magnetHex = $('file-magnet').value.trim().replace(/[^0-9a-fA-F]/g, '');
+      if (magnetHex.length !== 32) { logLine('bad', 'Magnet needs 32 hex chars'); return; }
+      const magnet = new Uint8Array(16);
+      for (let i = 0; i < 16; i++) magnet[i] = parseInt(magnetHex.substr(i * 2, 2), 16);
+      const fr = hub.node.fetchFile(magnet);
+      $('file-fetch-result').textContent = 'fetch initiated, result: ' + JSON.stringify(fr?.length || 0) + ' forwards';
+      // Poll for the file
+      const poll = setInterval(() => {
+        const bytes = hub.node.fileBytes(magnet);
+        if (bytes) {
+          clearInterval(poll);
+          const name = hub.node.fileName(magnet) || 'unnamed.bin';
+          const blob = new Blob([bytes]);
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = name; a.click();
+          logLine('sys', 'downloaded ' + name + ' (' + bytes.length + ' bytes)');
+          $('file-fetch-result').textContent = 'downloaded ' + name + ' (' + bytes.length + ' bytes)';
+          renderLocalFiles();
+        }
+      }, 1000);
+      setTimeout(() => clearInterval(poll), 30000);
+    };
+  }
+});
+
+function renderLocalFiles() {
+  const el = $('local-files');
+  if (!hub) return;
+  const files = hub.node.listFiles();
+  if (!files.length) {
+    el.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">No files stored locally.</span>';
+    return;
+  }
+  el.innerHTML = files.map(f => {
+    const hex = Array.from(f.magnet).map(b => b.toString(16).padStart(2, '0')).join('');
+    return '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--edge);border-radius:2px;font-size:12px">' +
+      '<span style="flex:1">' + f.name + '</span>' +
+      '<span class="cnt" style="font-size:10px;font-family:var(--mono)">' + hex.substring(0, 16) + '&hellip;</span>' +
+    '</div>';
+  }).join('');
+}
 
 // ---- tab navigation (WV1) ---------------------------------------------------
 function switchTab(name) {
