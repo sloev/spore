@@ -296,6 +296,48 @@ passes.
 
 ---
 
+## Milestone 7 — HARDBRUT as the framework (build-time import), not a copy
+
+**Goal:** stop maintaining a *forked copy* of HARDBRUT inside SPORE's own CSS.
+Today `design/tokens.json` + `generate.py` re-emit a subset of HARDBRUT tokens
+into `site/style.css`, the standalone's inline `<style>`, and Android's
+`Chrome.kt` — a hand-maintained clone that forks the moment `supernihil/hardbrut`
+moves. M7 replaces all of it with the **real `hardbrut.css` vendored at build
+time**, and rebuilds both web surfaces' markup around HARDBRUT's actual classes
+(`.navbar`, `.hero`, `section`, `button`, markdown, `data-accent`, `data-theme`).
+
+**Build-time import (locked).** The web build pulls `hardbrut.css` from
+`supernihil/hardbrut` *during the build* and inlines it into `site/style.css`
+and the standalone. A change to the HARDBRUT repo is reflected on the next
+rebuild — no runtime `@import`, so the standalone keeps its **zero-external-
+request** CI guarantee. The vendoring dir and the remote/ref are pinned and
+documented so the import is reproducible, not a silent network dependency of
+every CI run.
+
+**Android (locked).** The Android app uses HARDBRUT only as the *foundation* of
+the existing Compose theme — it already consumes the tokens; M7 makes the
+Android side regenerate from the same vendored source rather than a hand-edited
+copy, but keeps the Compose primitives (`Chrome.kt`, hard-shadow workaround, two
+button kinds) that XML cannot express.
+
+**Tasks** (each a PR):
+
+| Task | Status | Notes |
+|---|---|---|
+| Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ⬜ todo | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes |
+| Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ⬜ todo | All hand CSS in `build-standalone.mjs`'s inline `<style>` is removed; the SPI/WYSIWYG/(W12) logic is kept, only presentation changes |
+| Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ⬜ todo | `site/style.css` becomes `@import`/inlined `hardbrut.css` + a thin layer for SPORE-only bits (illustrations, Antenna+Seed) |
+| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ⬜ todo | `Chrome.kt` keeps the hard-shadow / two-button primitives; no XML rewrite |
+| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ⬜ todo | One source of truth: `supernihil/hardbrut` |
+
+**Definition of done:** `site/style.css` and the standalone's CSS are the vendored
+`hardbrut.css` (plus a thin SPORE-asset layer), not a fork; editing
+`supernihil/hardbrut` and rebuilding SPORE changes both web surfaces; the
+standalone still makes zero external requests; Antenna + Seed and Baud persist;
+Android keeps its Compose primitives on the same foundation.
+
+---
+
 ## Explicitly out of scope / non-goals (locked)
 
 | Item | Decision |
