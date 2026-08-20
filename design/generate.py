@@ -525,7 +525,9 @@ def main():
     check_touch_targets()
     check_control_sizes()
     write_region(SURFACES["site"]["file"], gen_site_css())
-    write_region(SURFACES["standalone"]["file"], gen_standalone_css())
+    # M7: the standalone node no longer carries a generated token region — it
+    # imports the real HARDBRUT CSS at build time (see web/hardbrut-import.mjs),
+    # so there is nothing for the generator to emit here.
     write_region(SURFACES["android"]["file"], gen_android_kt())
     write_region("docs/VISUALDESIGN.md", gen_visualdesign_md())
 
