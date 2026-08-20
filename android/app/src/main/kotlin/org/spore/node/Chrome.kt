@@ -80,27 +80,23 @@ import androidx.compose.ui.unit.sp
  *
  * Ratios are measured, not estimated, and are regenerated with the colour, so
  * they cannot fall out of step with it. Three numbers per foreground: contrast
- * on Void, Asphalt, Kevlar, in that order.
+ * on Bg, Paper, Ink, in that order (light theme).
  */
 internal object Palette {
-    val Void = Color(0xFF0A0A0C)     // CRT Black — page base, the dark of a powered-down screen
-    val Asphalt = Color(0xFF1A1C20)  // Worn Asphalt — panels, cards, raised surfaces
-    val Kevlar = Color(0xFF4B5320)   // Kevlar Olive — crate fills, inert chrome, disabled states
-    val Amber = Color(0xFFFFB000)    // 10.80 / 9.31 / 4.48 (Kevlar is large-text only)
-    val Phosphor = Color(0xFF39FF14) // 14.59 / 12.58 / 6.06
-    val Pink = Color(0xFFFF2A85)     // 5.58 / 4.81 / 2.32 ← never on Kevlar
-    val Cyan = Color(0xFF00FFFF)     // 15.78 / 13.61 / 6.55
-    val Edge = Color(0xFF2A2F1C)     // borders — olive shifted dark, reads as machined metal
-    val Dim = Color(0xFF8A7A4A)      // de-emphasised text — amber desaturated, 4.68:1 on Void
+    val InkLight = Color(0xFF000000)    // 20.13 / 21.00 / 1.00 ← never on Ink
+    val PaperLight = Color(0xFFFFFFFF)  // Paper — cards on paper
+    val YellowLight = Color(0xFFFFD23F) // 1.38 / 1.44 / 14.54 ← never on Bg ← never on Paper
+    val MutedLight = Color(0xFF666666)  // 5.50 / 5.74 / 3.66 (Ink is large-text only)
+    val Edge = Color(0xFF000000)        // borders and outlines
 
-    // Field Notes (light) — each re-checked to clear 4.5:1 on paper
-    val Paper = Color(0xFFF4F1E8)        // paper base
-    val PaperInk = Color(0xFF1A1C20)     // body and headings
-    val PaperEdge = Color(0xFFD8D2C0)    // borders
-    val AmberDark = Color(0xFF8A5F00)    // 5.00:1 on Paper
-    val PhosphorDark = Color(0xFF1F7A0C) // 4.83:1 on Paper
-    val PinkDark = Color(0xFFC2185B)     // 5.20:1 on Paper
-    val CyanDark = Color(0xFF00707A)     // 5.17:1 on Paper
+    // Dark mode — inverted ink/paper; OnYellow is text on the unchanged yellow face
+    val Bg = Color(0xFF121210)     // page base in dark mode
+    val Ink = Color(0xFFF0F0E8)    // text, borders, chrome in dark mode
+    val Edge = Color(0xFFF0F0E8)   // borders and outlines
+    val Ink = Color(0xFFF0F0E8)    // 16.37:1 on Bg
+    val Paper = Color(0xFF1A1A18)  // 1.08:1 on Bg
+    val Yellow = Color(0xFFFFD23F) // 12.99:1 on Bg
+    val Muted = Color(0xFFA0A090)  // 7.08:1 on Bg
 }
 
 /**
@@ -112,20 +108,20 @@ internal object Metrics {
     val ControlH = 48.dp  // primary and secondary buttons, and text fields — one height for all three
     val ControlPX = 14.dp // horizontal padding
     val ControlPY = 9.dp  // vertical padding
-    val ChipH = 32.dp     // compact presets and toggles (7D/14D/30D, topics). NEW — must still carry a 48dp touch target
+    val ChipH = 32.dp     // compact presets and toggles (offline-window, topics). Must still carry a 48dp touch target
     val ChipPX = 10.dp    // horizontal padding
     val ChipPY = 4.dp     // vertical padding
-    val RowH = 56.dp      // list rows for the Bridges/Advanced restructure (C6). NEW
+    val RowH = 56.dp      // list rows — the unit the Bridges/Advanced restructure is built from
     val RowPX = 12.dp     // horizontal padding
     val RowPY = 8.dp      // vertical padding
-    val Radius = 2.dp     // corner radius, everywhere — CrateShape already used it
-    val Border = 2.dp     // control and crate border width
-    val Throw = 3.dp      // the pressed-button offset and its drop shadow
-    val Tight = 4.dp      // within a control
-    val Gap = 8.dp        // between controls — VGap's default
-    val Pad = 12.dp       // inside a crate/card
-    val Section = 16.dp   // between sections
-    val TouchMin = 48.dp  // WCAG/Material floor. `control` and `row` clear it by height; `chip` must be padded out to it.
+    val Radius = 0.dp     // corner radius — zero. Always. True circles (radio, avatar) are the only exception
+    val Border = 3.dp     // border width — the HARDBRUT outline
+    val Throw = 5.dp      // the hard no-blur drop-shadow offset (5px 5px 0)
+    val Tight = 12.dp     // tighter internal padding (the 12dp step)
+    val Gap = 12.dp       // between controls
+    val Pad = 24.dp       // inside a card / crate (the 24dp step)
+    val Section = 40.dp   // between sections (the 40dp step)
+    val TouchMin = 48.dp  // WCAG/Material floor. control and row clear it by height; chip must be padded out to it.
 }
 // >>> end design tokens <<<
 

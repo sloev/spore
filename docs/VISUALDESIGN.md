@@ -95,34 +95,30 @@ These are not preferences. Break them and CI fails, or someone cannot use the ap
 
 | Token | Hex | Role |
 |---|---|---|
-| `--void` | `#0a0a0c` | CRT Black — page base, the dark of a powered-down screen |
-| `--asphalt` | `#1a1c20` | Worn Asphalt — panels, cards, raised surfaces |
-| `--kevlar` | `#4b5320` | Kevlar Olive — crate fills, inert chrome, disabled states |
-| `--amber` | `#ffb000` | Tactical Amber — primary text, the default signal |
-| `--phosphor` | `#39ff14` | Phosphor Green — success, live links, "it worked" |
-| `--pink` | `#ff2a85` | Radioactive Pink — the kawaii accent, cursor, primary action |
-| `--cyan` | `#00ffff` | Pastel Cyan — secondary accent, focus rings, selection |
+| `--ink` | `#000000` | Ink — text, borders, chrome |
+| `--paper` | `#ffffff` | Paper — cards on paper |
+| `--yellow` | `#ffd23f` | Yellow — primary actions, highlights |
+| `--muted` | `#666666` | Muted — de-emphasised text |
 
 ### Measured contrast
 
-Ratios against each base. **OK** = passes 4.5:1 for body text; **lg** = 3:1, large
-text and UI chrome only; **XX** = fails both. Computed from the hexes above by
-`design/generate.py`, which fails the build if any of them stops matching the
-grade `design/tokens.json` claims for it.
+Ratios against each base (light theme). **OK** = passes 4.5:1 for body text; **lg**
+= 3:1, large text and UI chrome only; **XX** = fails both. Computed from the hexes
+above by `design/generate.py`, which fails the build if any of them stops matching
+the grade `design/tokens.json` claims for it.
 
-| | on `--void` | on `--asphalt` | on `--kevlar` |
+| | on `--bg` | on `--paper` | on `--ink` |
 |---|---|---|---|
-| `--amber` | **OK** 10.80 | **OK** 9.31 | lg 4.48 |
-| `--phosphor` | **OK** 14.59 | **OK** 12.58 | **OK** 6.06 |
-| `--pink` | **OK** 5.58 | **OK** 4.81 | **XX** 2.32 |
-| `--cyan` | **OK** 15.78 | **OK** 13.61 | **OK** 6.55 |
-| `--prose` `#d6af5c` | **OK** 9.56 | **OK** 8.24 | lg 3.97 |
+| `--ink` | **OK** 20.13 | **OK** 21.00 | **XX** 1.00 |
+| `--yellow` | **XX** 1.38 | **XX** 1.44 | **OK** 14.54 |
+| `--muted` | **OK** 5.50 | **OK** 5.74 | lg 3.66 |
 
-**Never put pink on olive.** 2.32:1 is unreadable, and it is the one combination the
-palette invites — hot pink stickers on an ammo crate. Put the sticker on a `--void`
-or `--asphalt` patch instead, or outline it.
+**Never put yellow on cream.** 1.38:1 — the one combination the palette
+invites, and the one nobody can read. Yellow always sits on black ink or owns
+its own solid block, never on the paper base.
 
-Amber on olive is large-text only: headings and buttons, never body copy.
+**Never signal failure by colour alone.** HARDBRUT has no red; failure is an
+icon plus words, always.
 
 ### Controls, spacing and shape (C5)
 
@@ -131,20 +127,20 @@ Amber on olive is large-text only: headings and buttons, never body copy.
 | `control-h` | 48 | `var(--control-h)` | `Metrics.ControlH` | primary and secondary buttons, and text fields — one height for all three |
 | `control-px` | 14 | `var(--control-px)` | `Metrics.ControlPX` | horizontal padding |
 | `control-py` | 9 | `var(--control-py)` | `Metrics.ControlPY` | vertical padding |
-| `chip-h` | 32 | `var(--chip-h)` | `Metrics.ChipH` | compact presets and toggles (7D/14D/30D, topics). NEW — must still carry a 48dp touch target |
+| `chip-h` | 32 | `var(--chip-h)` | `Metrics.ChipH` | compact presets and toggles (offline-window, topics). Must still carry a 48dp touch target |
 | `chip-px` | 10 | `var(--chip-px)` | `Metrics.ChipPX` | horizontal padding |
 | `chip-py` | 4 | `var(--chip-py)` | `Metrics.ChipPY` | vertical padding |
-| `row-h` | 56 | `var(--row-h)` | `Metrics.RowH` | list rows for the Bridges/Advanced restructure (C6). NEW |
+| `row-h` | 56 | `var(--row-h)` | `Metrics.RowH` | list rows — the unit the Bridges/Advanced restructure is built from |
 | `row-px` | 12 | `var(--row-px)` | `Metrics.RowPX` | horizontal padding |
 | `row-py` | 8 | `var(--row-py)` | `Metrics.RowPY` | vertical padding |
-| `radius` | 2 | `var(--radius)` | `Metrics.Radius` | corner radius, everywhere — CrateShape already used it |
-| `border` | 2 | `var(--border)` | `Metrics.Border` | control and crate border width |
-| `throw` | 3 | `var(--throw)` | `Metrics.Throw` | the pressed-button offset and its drop shadow |
-| `space-tight` | 4 | `var(--space-tight)` | `Metrics.Tight` | within a control |
-| `space-gap` | 8 | `var(--space-gap)` | `Metrics.Gap` | between controls — VGap's default |
-| `space-pad` | 12 | `var(--space-pad)` | `Metrics.Pad` | inside a crate/card |
-| `space-section` | 16 | `var(--space-section)` | `Metrics.Section` | between sections |
-| `touch-min` | 48 | `var(--touch-min)` | `Metrics.TouchMin` | WCAG/Material floor. `control` and `row` clear it by height; `chip` must be padded out to it. |
+| `radius` | 0 | `var(--radius)` | `Metrics.Radius` | corner radius — zero. Always. True circles (radio, avatar) are the only exception |
+| `border` | 3 | `var(--border)` | `Metrics.Border` | border width — the HARDBRUT outline |
+| `throw` | 5 | `var(--throw)` | `Metrics.Throw` | the hard no-blur drop-shadow offset (5px 5px 0) |
+| `space-tight` | 12 | `var(--space-tight)` | `Metrics.Tight` | tighter internal padding (the 12dp step) |
+| `space-gap` | 12 | `var(--space-gap)` | `Metrics.Gap` | between controls |
+| `space-pad` | 24 | `var(--space-pad)` | `Metrics.Pad` | inside a card / crate (the 24dp step) |
+| `space-section` | 40 | `var(--space-section)` | `Metrics.Section` | between sections (the 40dp step) |
+| `touch-min` | 48 | `var(--touch-min)` | `Metrics.TouchMin` | WCAG/Material floor. control and row clear it by height; chip must be padded out to it. |
 <!-- >>> end design tokens <<< -->
 
 **`--prose` is not a contrast fix — `--amber` already clears 10.80:1, well past the
