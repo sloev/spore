@@ -167,24 +167,48 @@ checklist, and the mushroom icon is gone from the repo's rendered assets.
 
 ## Milestone 4 — Webnode as daily driver
 
-**Goal:** the browser is a full daily-driver peer (Mail / Feed / Files / Bridges /
-Seed), not a transport demo. The first runtime to consume M1's storage seam and
-the communicator-as-façade pattern.
+**Goal:** the browser is a full daily-driver peer (Chats / Feed / Files /
+Bridges / Seed), not a transport demo. The first runtime to consume M1's storage
+seam and the communicator-as-façade pattern.
+
+**Surfaces (locked IA):** **Chats** (unified: 1:1 DMs + open groups + private
+groups) · **Feed** (personal microblog + subscribed feeds) · **Files** ·
+**Bridges** · **Seed**. The old Mail / Topics / Sealed-Topics panels are merged
+into Chats; the old shared `spore/feed` topic is replaced by per-address feeds.
 
 > **Guardrail:** this stays a *reference* client, not "the" SPORE app. No feature
 > here requires the standalone HTML specifically; a bridge, a Python script, or
 > the daemon CLI must remain equally capable.
 
+**Terminology (locked):** the communication surfaces map to known idioms, not
+protocol jargon. The protocol primitives are unchanged — this is IA and UI only.
+
+| Surface | Protocol primitive | Encryption |
+|---|---|---|
+| One-to-one chat | `send_direct` / `open_dm` | Sealed (prekey / ratchet) |
+| Open group chat | `send(ZERO_DEST, /topic …)` + `subscribe` | None (public) |
+| Private group chat | `topic_seal` / `topic_open` + `subscribe` | PSK (sealed topic) |
+| Microblogging | `publish(feed::<addr>)` + `poll_feed` | None (public) |
+
+Two communication surfaces: **Chats** — a unified list of all conversations
+(1:1, open groups, private groups) with type badges and a new-conversation
+picker — and **Feed** — your personal microblog (`feed::<your_addr>`) plus
+subscribed feeds. Files, Bridges, and Seed remain separate surfaces.
+
 | Task | Status | Notes |
 |---|---|---|
 | Encrypted DM — wasm exports (announce, send_direct, send_direct_sealed, open_dm, env_flags, env_src) | ✅ shipped (#116) | ABI half; sealed on the wire, sender authenticated |
 | Encrypted DM — thread list, compose, delivery honesty (no read receipts) | ✅ shipped (#131) | UI half; thread list, DM compose, honest decrypt |
-| Topics: open group join/create + public shout, clearly labeled public (W2) | ✅ shipped (#139) | Topic list, per-topic log, PUBLIC badge |
-| Sealed group: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm, sealed panel |
-| Feed/microblog: compose to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
+| Open group chat: join/create + public shout, clearly labeled public (W2) | ✅ shipped (#139) | Topic list, per-topic log, PUBLIC badge |
+| Private group chat: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm, sealed panel |
+| Microblog: publish to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
 | Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ✅ shipped | spore_node_publish_file/fetch_file/list_files, Files tab |
+| Chat IA — unified conversation list: 1:1 + open groups + private groups in one list, type badges (🔒 1:1 / 🌐 open / 🔑 sealed), new-conversation picker, merge Mail + Topics + Sealed panels (W9) | ⬜ todo | Web node: 6 tabs → 5 (Chats, Feed, Files, Bridges, Seed). No protocol change |
+| Microblog IA — personal feed (`feed::<your_addr>`), subscribe by address (not shared `spore/feed` topic), merged subscribed-feeds timeline (W10) | ⬜ todo | Per-address feed naming convention; W4 shipped the primitive, this reworks the UI |
+| Formatting + attachments — markdown (bold/italic/code/link) + file/image embed (magnet reference) in both chats and microblog (W11) | ⬜ todo | Client-side markdown render; magnet ref in message text; Android Feed already has markdown |
+| W9–W11 Android parity — Chats list adds sealed groups; Feed adds per-address subscribe; formatting in chats | ⬜ todo | Android Chats already mixes DMs + PUBLIC; add sealed group rows + per-address feed |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
-| Authorized feed polish: invite flow, documented revoke-by-rotation limit (W7) | ⬜ todo | |
+| Authorized feed polish: invite flow, documented revoke-by-rotation limit (W7) | ⬜ todo | Access-controlled feeds; distinct from W10 public microblog |
 | Continuity polish: export seed from new UI, docs updates (W8) | ⬜ todo | |
 
 **UI across runtimes (locked decision):** two UI implementations over three shared
@@ -192,9 +216,11 @@ layers — browser/desktop share the web UI (in-process wasm vs localhost HTTP t
 daemon); Android stays Compose. Desktop is `daemon + web UI`, optionally wrapped in
 Wry (not Tauri). Do not wrap the standalone in a window and call it desktop.
 
-**Definition of done:** two browsers on a LAN can DM, open room, sealed room (with
-key), shout, feed-post, publish + fetch a file — all through the standalone HTML,
-no daemon involved — and still be a full node (store, bridges, same envelopes).
+**Definition of done:** two browsers on a LAN can DM, open group chat, private
+group chat (with key), microblog-post (to their own `feed::<addr>`) and
+subscribe to each other's feeds, publish + fetch a file — all through the
+standalone HTML, no daemon involved — and still be a full node (store, bridges,
+same envelopes). Chats is one unified list; Feed is personal + subscribed.
 
 ---
 
@@ -206,7 +232,7 @@ done.** Nothing here is load-bearing for a credible node.
 | Task | Status | Notes |
 |---|---|---|
 | Ring health UI + Export with FS warning | 🟡 ring health shipped (#67); export polish open | |
-| Group `key_id` divergence badge | ⬜ todo | Warn on mismatch; never claim roster consensus |
+| Private group `key_id` divergence badge | ⬜ todo | Warn on mismatch in a sealed group chat; never claim roster consensus |
 | Boot receiver (optional, default off) | ⬜ todo | |
 | Sound + particles behind a setting, default off | ⬜ todo | Gated by §0.2/§8 |
 | Android bridge list ⊆ BRIDGES.md sync check | ⬜ todo | Honesty check |
@@ -223,7 +249,7 @@ done.** Nothing here is load-bearing for a credible node.
 |---|---|
 | **iOS** | Not a target, ever. State this on `APPS.md` so the expectation dies early. |
 | **Instant delivery with no path** | Impossible under store-and-forward. UI says "no path yet" / fails closed for live media; async fallback (voice note) is fine. |
-| **Group membership consensus protocol** | A shared-key sealed topic is shippable now; a Signal-style roster is a deliberate future protocol project, not a UI feature to fake. |
+| **Group membership consensus protocol** | A shared-key private group chat is shippable now; a Signal-style roster is a deliberate future protocol project, not a UI feature to fake. |
 | **Tor / global anonymity by default** | Optional mix modes only; never silent. Anonymity is an explicit, non-default toggle (mix-preferred / mix-only). |
 | **Multi-file attach, in-app video, post-send edit** | v1 non-goals; tracked in M2 carried-forward. |
 | **Wire / C ABI changes** | Frozen; `allow-frozen-change` for a 2.0 only. |
