@@ -18,6 +18,31 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The web node's communication surfaces are unified and re-named around known
+  idioms (W9, W10, W11).** Mail, Topics, and Sealed Topics collapse into one
+  **Chats** surface — a single list of one-to-one chats, open groups, and
+  private groups, each with a type badge and a new-conversation picker — while
+  **Feed** becomes a personal microblog (`feed::<your_addr>`) you publish to and
+  subscribe to peers by address, replacing the old shared `spore/feed` topic.
+  The tab bar goes from six panels to five (Chats / Feed / Files / Bridges /
+  Seed). No wire, C ABI, or protocol change: every conversation type rides the
+  primitives that already existed — `send_direct`/`open_dm` for 1:1,
+  `publish`/`subscribe` for open groups, `topic_seal`/`topic_open` plus
+  `publish`/`subscribe` for private groups.
+
+  Messages now render inline markdown — bold, italic, code, links — and a
+  `magnet:<32hex>` reference in message text becomes a one-tap download, in both
+  chats and the feed. Rendering is plain-text-first and injection-safe: text is
+  HTML-escaped *before* any markup is introduced, so a hostile message cannot
+  emit raw HTML. The formatter lives in `web/ui/markdown.mjs` and is unit-tested
+  separately.
+
+  `spore_node_poll_feed` now returns each event's **authenticated sender**
+  alongside the topic hash and payload, so the UI can show who said something
+  without trusting a spoofable field; the sender is surfaced as null, never
+  invented, when an envelope carries no full source. Feed events and group
+  messages are demuxed on the topic hash back into the right conversation.
+
 - **VISUALDESIGN gains an explicitly non-normative Inspiration section, and the
   roadmap gains a hardware track.** A design manual arrived proposing a
   "Solarpunk Refinement" — moss, copper oxide, aged amber, a refined phosphor

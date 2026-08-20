@@ -206,7 +206,10 @@ pub unsafe extern "C" fn spore_node_publish(
 
 /// Drain feed events received on subscribed topics.
 ///
-/// Returns packed feed events: `[n:4 BE] [topic_len:4 BE] [topic_bytes] [data_len:4 BE] [data_bytes] ...`
+/// Returns packed feed events. Each event is:
+/// `[from_len:1][from bytes (8 or 0)][topic_len:4 BE][topic_bytes][data_len:4 BE][data_bytes]`,
+/// preceded by the total count `[n:4 BE]`. `from` is the authenticated sender
+/// address, or empty when the envelope carried no full source.
 ///
 /// # Safety
 /// `n` is valid.
@@ -216,6 +219,14 @@ pub unsafe extern "C" fn spore_node_poll_feed(n: *mut Node) -> i64 {
     let mut out = Vec::new();
     out.extend_from_slice(&(events.len() as u32).to_be_bytes());
     for ev in &events {
+        // Sender: 1 length byte then 0 or 8 address bytes.
+        match ev.from {
+            Some(addr) => {
+                out.push(8);
+                out.extend_from_slice(&addr);
+            }
+            None => out.push(0),
+        }
         out.extend_from_slice(&(ev.topic.len() as u32).to_be_bytes());
         out.extend_from_slice(&ev.topic);
         out.extend_from_slice(&(ev.data.len() as u32).to_be_bytes());
@@ -301,7 +312,7 @@ pub unsafe extern "C" fn spore_node_publish_file(
 /// # Safety
 /// `n` valid; `magnet` points to 16 bytes.
 #[no_mangle]
-pub unsafe extern "C" fn spore_node_fetch_file(n: *mut Node, magnet: *const u8, now: u32) -> i64 {
+pub unsafe extern "C" fn spore_node_fetch_file(n: *mut Node, magnet: *const u8, _now: u32) -> i64 {
     let node = &mut *n;
     let mut id = [0u8; 16];
     id.copy_from_slice(std::slice::from_raw_parts(magnet, 16));
