@@ -261,6 +261,10 @@ pub unsafe extern "C" fn spore_node_poll_feed(n: *mut crate::Node) -> SporeBytes
 // -- files (W5) ---------------------------------------------------------------
 
 /// Publish a file from bytes. Returns forwards packed as SporeBytes.
+///
+/// # Safety
+/// `n` is valid; `name`/`data` point to `nlen`/`dlen` readable bytes; `dest`
+/// points to 8 readable bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_publish_file(
@@ -291,6 +295,9 @@ pub unsafe extern "C" fn spore_node_publish_file(
 }
 
 /// Get file bytes for a magnet. SporeBytes::null() if not found.
+///
+/// # Safety
+/// `n` is valid; `magnet` points to 16 readable bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_file_bytes(n: *mut crate::Node, magnet: *const u8) -> SporeBytes {
@@ -300,6 +307,9 @@ pub unsafe extern "C" fn spore_node_file_bytes(n: *mut crate::Node, magnet: *con
 }
 
 /// Get filename for a magnet. SporeBytes::null() if not found.
+///
+/// # Safety
+/// `n` is valid; `magnet` points to 16 readable bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_file_name(n: *mut crate::Node, magnet: *const u8) -> SporeBytes {
