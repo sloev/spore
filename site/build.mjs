@@ -321,7 +321,7 @@ function page(title, bodyHtml, self) {
 </head>
 <body class="page-${cls}">
 <header class="site">
-  <a class="brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#4b5320" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#2a2f1c" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#39ff14" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#39ff14" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#39ff14" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#39ff14" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/><path fill="#57C785" d="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z"/><path fill="#57C785" d="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z"/></svg>SPORE</a>
+  <a class="brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/></svg></a>
   ${nav(self)}
 </header>
 <main class="doc">

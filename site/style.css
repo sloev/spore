@@ -68,29 +68,28 @@ body { margin: 0; background: var(--bg); color: var(--ink);
 
 header.site { position: sticky; top: 0; z-index: 10; display: flex; gap: 18px;
   align-items: center; flex-wrap: wrap; padding: 12px 22px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(8px); border-bottom: 1px solid var(--edge); }
+  background: var(--paper); border-bottom: 4px solid var(--ink); }
 .brand { font-weight: 800; letter-spacing: -0.02em; color: var(--accent);
   text-decoration: none; font-size: 18px; display: inline-flex; align-items: center; gap: 6px; }
 .brand-mark { display: block; }
 header.site nav { display: flex; gap: 4px; flex-wrap: wrap; }
-header.site nav a { color: var(--dim); text-decoration: none; font-size: 14px;
-  padding: 5px 10px; border-radius: 2px; }
-header.site nav a:hover { color: var(--ink); background: var(--panel); }
-header.site nav a.active { color: var(--ink); background: var(--panel); }
+header.site nav a { color: var(--muted); text-decoration: none; font-size: 14px;
+  padding: 5px 10px; border-radius: 0; }
+header.site nav a:hover { color: var(--ink); background: var(--paper); }
+header.site nav a.active { color: var(--ink); background: var(--paper); }
 
 main.doc { max-width: 860px; margin: 0 auto; padding: 32px 22px 80px; }
 main.doc h1 { font-size: 30px; letter-spacing: -0.02em; margin: 8px 0 16px; }
 main.doc h2 { font-size: 22px; margin: 34px 0 12px; padding-bottom: 6px;
   border-bottom: 1px solid var(--edge); }
 main.doc h3 { font-size: 18px; margin: 26px 0 10px; }
-main.doc p, main.doc li, main.doc td { color: var(--prose); }
+main.doc p, main.doc li, main.doc td { color: var(--ink); }
 main.doc a { color: var(--accent2); }
 main.doc code { font-family: var(--mono); font-size: 0.88em;
-  background: var(--panel); border: 1px solid var(--edge);
-  border-radius: 2px; padding: 1px 5px; }
-main.doc pre { background: var(--panel); border: 1px solid var(--edge);
-  border-radius: 2px; padding: 14px 16px; overflow-x: auto; position: relative; }
+  background: var(--paper); border: 1px solid var(--edge);
+  border-radius: 0; padding: 1px 5px; }
+main.doc pre { background: var(--paper); border: 1px solid var(--edge);
+  border-radius: 0; padding: 14px 16px; overflow-x: auto; position: relative; }
 main.doc pre code { background: none; border: 0; padding: 0; font-size: 13.5px; }
 
 /* One button per code block, injected by the inline script in build.mjs's page()
@@ -99,27 +98,27 @@ main.doc pre code { background: none; border: 0; padding: 0; font-size: 13.5px; 
 main.doc .code-copy {
   position: absolute; top: 8px; right: 8px;
   font: 11px var(--mono); line-height: 1; padding: 5px 9px;
-  background: var(--void); color: var(--dim); border: 1px solid var(--edge);
-  border-radius: 2px; cursor: pointer;
+  background: var(--bg); color: var(--muted); border: 1px solid var(--edge);
+  border-radius: 0; cursor: pointer;
 }
 main.doc .code-copy:hover { color: var(--ink); border-color: var(--ink); }
 main.doc .code-copy:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
-main.doc blockquote { margin: 16px 0; padding: 2px 16px; color: var(--dim);
+main.doc blockquote { margin: 16px 0; padding: 2px 16px; color: var(--muted);
   border-left: 3px solid var(--edge); }
 
 /* Wide tables scroll inside their own box; the page never scrolls sideways. */
 .table-wrap, main.doc > table { display: block; overflow-x: auto; }
 main.doc table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
 main.doc th, main.doc td { border: 1px solid var(--edge); padding: 7px 10px; text-align: left; }
-main.doc th { background: var(--panel); }
-main.doc tr:nth-child(even) td { background: color-mix(in srgb, var(--panel) 50%, transparent); }
+main.doc th { background: var(--paper); }
+main.doc tr:nth-child(even) td { background: var(--paper); }
 
-main.doc details { background: var(--panel); border: 1px solid var(--edge);
-  border-radius: 2px; padding: 4px 16px; margin: 14px 0; }
+main.doc details { background: var(--paper); border: 1px solid var(--edge);
+  border-radius: 0; padding: 4px 16px; margin: 14px 0; }
 main.doc summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
 main.doc img { max-width: 100%; }
 
-footer.site { border-top: 1px solid var(--edge); color: var(--dim);
+footer.site { border-top: 1px solid var(--edge); color: var(--muted);
   font-size: 13px; text-align: center; padding: 22px; }
 
 /* --------------------------------------------------------------------------
@@ -166,17 +165,17 @@ footer.site { border-top: 1px solid var(--edge); color: var(--dim);
 
 /* Share row — front page only. Buttons, not brand badges: no external icon
    fonts or logos to fetch, so the page keeps making zero third-party requests. */
-.share { margin: 28px 0 8px; padding: 18px 20px; background: var(--panel);
-  border: 1px solid var(--edge); border-radius: 2px; }
+.share { margin: 28px 0 8px; padding: 18px 20px; background: var(--paper);
+  border: 1px solid var(--edge); border-radius: 0; }
 main.doc .share h2 { margin: 0 0 6px; font-size: 18px; padding: 0; border: 0; }
-.share p { margin: 0 0 14px; color: var(--dim); font-size: 14px; }
+.share p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 .share-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .share-btn { display: inline-block; font: inherit; font-size: 13.5px; line-height: 1;
-  padding: 8px 12px; border-radius: 2px; border: 1px solid var(--edge);
+  padding: 8px 12px; border-radius: 0; border: 1px solid var(--edge);
   background: transparent; color: inherit; cursor: pointer; text-decoration: none;
   white-space: nowrap; }
 main.doc a.share-btn { color: inherit; }
-.share-btn:hover { border-color: currentColor; background: color-mix(in srgb, currentColor 8%, transparent); }
+.share-btn:hover { border-color: currentColor; background: var(--yellow); }
 @media print { .share, main.doc .code-copy { display: none !important; } }
 
 /* ---------------------------------------------------------------------------
@@ -191,81 +190,58 @@ body.page-index main.doc > h1 { font-size: clamp(30px, 5.5vw, 46px); line-height
   border: 0; padding: 0; margin: 8px 0 18px; letter-spacing: -0.02em; }
 /* The paragraph straight after the title is the pitch — it carries the page. */
 body.page-index main.doc > h1 + p { font-size: 18.5px; line-height: 1.55;
-  color: var(--prose); max-width: 40em; }
+  color: var(--ink); max-width: 40em; }
 body.page-index main.doc > ul:first-of-type { max-width: 40em; }
 body.page-index main.doc > ul:first-of-type li { margin: 9px 0; }
 
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 10px; }
 main.doc .cta a { text-decoration: none; display: inline-block; font-size: 16px;
-  line-height: 1; padding: 14px 20px; border-radius: 2px; border: 1px solid var(--edge);
+  line-height: 1; padding: 14px 20px; border-radius: 0; border: 1px solid var(--edge);
   white-space: nowrap; }
 main.doc .cta a.cta-primary { background: var(--accent); border-color: var(--accent);
   color: #08130c; font-weight: 650; }
-main.doc .cta a.cta-secondary { color: var(--ink); background: var(--panel); }
+main.doc .cta a.cta-secondary { color: var(--ink); background: var(--paper); }
 main.doc .cta a:hover { filter: brightness(1.08); }
 main.doc .cta a.cta-secondary:hover { border-color: var(--ink); }
-.cta-note { color: var(--dim); font-size: 14px; margin: 0 0 24px; max-width: 40em; }
+.cta-note { color: var(--muted); font-size: 14px; margin: 0 0 24px; max-width: 40em; }
 
 
 /* ---------------------------------------------------------------------------
-   Ambient VFX and component chrome (docs/VISUALDESIGN.md §3, §4).
-
-   Everything here is decoration and every bit of it is disabled under
-   prefers-reduced-motion. A CRT flicker is a photosensitivity trigger, not a
-   flourish, so `reduce` must render the page completely static — including the
-   text-shadow bloom, which reads as blur rather than glow when it cannot move.
+   HARDBRUT component chrome. No ambient VFX — no scanlines, no vignette, no
+   CRT bloom. The one motion element (button press) is still gated on reduced
+   motion below. Everything else is already static.
    --------------------------------------------------------------------------- */
 
-/* Headers: heavy, dystopian, uppercase. */
+/* Headers: Impact display, uppercase, heavy. */
 main.doc h1, main.doc h2, main.doc h3 {
   font-family: var(--display);
   text-transform: uppercase;
   letter-spacing: -0.02em;
 }
 
-/* CRT bloom, amber and phosphor only, 2px. More turns body copy to mush. */
-main.doc h1, main.doc h2 { text-shadow: 0 0 2px currentColor; }
-
-/* Ammo crate: hard offset shadow, no blur, barely any rounding. */
+/* Hard no-blur shadow on the block elements, HARDBRUT style. */
 main.doc pre, main.doc table, .share {
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
-  border-radius: 2px;
-}
-
-/* Scanlines + vignette, fixed over everything, never intercepting clicks. */
-body::before, body::after {
-  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
-}
-body::before {
-  background: repeating-linear-gradient(
-    to bottom, rgba(0,0,0,.06) 0 1px, transparent 1px 2px);
-}
-body::after {
-  background: radial-gradient(ellipse at center,
-    transparent 55%, rgba(0,0,0,.55) 100%);
+  box-shadow: var(--shadow);
+  border-radius: 0;
 }
 
 /* Focus is never removed, only thickened. */
 main.doc a:focus-visible, .share-btn:focus-visible, header.site nav a:focus-visible {
-  outline: 2px solid var(--accent2);
-  outline-offset: 2px;
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
 }
 
-/* Radio-switch throw: the button moves into its own shadow. */
-.share-btn { box-shadow: 3px 3px 0 rgba(0,0,0,.55); transition: transform .06s, box-shadow .06s; }
-.share-btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 rgba(0,0,0,0); }
+/* Button throw: the button moves into its own hard shadow. */
+.share-btn { box-shadow: var(--shadow-sm); transition: transform .06s, box-shadow .06s; }
+.share-btn:active { transform: translate(3px, 3px); box-shadow: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  body::before, body::after { display: none; }
-  main.doc h1, main.doc h2 { text-shadow: none; }
   * { animation: none !important; transition: none !important; }
   .share-btn:active { transform: none; }
 }
 
 /* Print: none of this survives paper, and the spec is meant to be printed. */
 @media print {
-  body::before, body::after { display: none; }
-  main.doc h1, main.doc h2 { text-shadow: none; }
   main.doc pre, main.doc table { box-shadow: none; }
 }
 /* ---------------------------------------------------------------------------
@@ -292,10 +268,10 @@ body.page-index .story {
 body.page-index .story-card {
   margin: 0;
   padding: 14px 16px 12px;
-  background: var(--panel);
+  background: var(--paper);
   border: 2px solid var(--edge);
-  border-radius: 2px;
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  border-radius: 0;
+  box-shadow: var(--shadow);
   display: grid;
   gap: 10px;
 }
@@ -315,9 +291,9 @@ body.page-index .story-card {
 }
 
 body.page-index .story-art {
-  background: var(--void);
+  background: var(--bg);
   border: 1px solid var(--edge);
-  border-radius: 2px;
+  border-radius: 0;
   min-height: 120px;
   display: flex;
   align-items: center;
@@ -344,11 +320,11 @@ body.page-index .story-card figcaption strong {
   letter-spacing: -0.02em;
   font-size: 1.05rem;
   color: var(--ink);
-  text-shadow: 0 0 2px currentColor;
+  text-shadow: none;
 }
 
 body.page-index .story-lead {
-  color: var(--dim);
+  color: var(--muted);
   font-size: 0.95rem;
   line-height: 1.45;
 }
@@ -358,7 +334,7 @@ body.page-index .story-card > details {
   margin: 0;
   background: transparent;
   border: 1px dashed var(--edge);
-  border-radius: 2px;
+  border-radius: 0;
   padding: 2px 12px;
 }
 
@@ -371,27 +347,27 @@ body.page-index .story-card > details summary {
 body.page-index .story-card > details p {
   font-size: 0.92rem;
   line-height: 1.55;
-  color: var(--prose);
+  color: var(--ink);
 }
 
 /* ---- SVG illustration styles (currentColor + tokens via CSS) ---- */
 
 .ill .node {
-  fill: var(--kevlar);
-  stroke: var(--phosphor);
+  fill: var(--yellow);
+  stroke: var(--ink);
   stroke-width: 2;
 }
 .ill .path {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 1.5;
 }
 .ill .postcard rect {
-  fill: var(--asphalt);
-  stroke: var(--amber);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill .postcard line {
-  stroke: var(--amber);
+  stroke: var(--ink);
   stroke-width: 1.2;
   opacity: 0.85;
 }
@@ -400,49 +376,49 @@ body.page-index .story-card > details p {
 }
 
 .ill .env {
-  fill: var(--asphalt);
-  stroke: var(--cyan);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill .env-flap {
-  stroke: var(--cyan);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill .m circle,
 .ill .m rect {
-  fill: var(--void);
-  stroke: var(--phosphor);
+  fill: var(--bg);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill .m path {
-  stroke: var(--phosphor);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 
 .ill .lock-body {
-  fill: var(--asphalt);
-  stroke: var(--phosphor);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill .lock-shackle {
-  stroke: var(--phosphor);
+  stroke: var(--ink);
   stroke-width: 2;
 }
 .ill .lock-key {
-  fill: var(--phosphor);
+  fill: var(--ink);
 }
 .ill .board {
-  fill: var(--void);
-  stroke: var(--amber);
+  fill: var(--bg);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill .board line {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 1.2;
 }
 .ill .label-priv,
 .ill .label-pub {
-  fill: var(--dim);
+  fill: var(--muted);
   font-size: 11px;
   font-family: var(--mono, ui-monospace, monospace);
 }
@@ -458,7 +434,7 @@ body.page-index .story-card > details p {
 
 @keyframes node-pulse {
   0%, 100% { filter: none; }
-  50% { filter: drop-shadow(0 0 4px var(--phosphor)); }
+  50% { filter: drop-shadow(0 0 4px var(--ink)); }
 }
 
 @keyframes orbit-spin {
@@ -528,10 +504,10 @@ main.doc .story {
 main.doc .story-card {
   margin: 0;
   padding: 14px 16px 12px;
-  background: var(--panel);
+  background: var(--paper);
   border: 2px solid var(--edge);
-  border-radius: 2px;
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+  border-radius: 0;
+  box-shadow: var(--shadow);
   display: grid;
   gap: 10px;
 }
@@ -556,9 +532,9 @@ main.doc .story-card {
 }
 
 main.doc .story-art {
-  background: var(--void);
+  background: var(--bg);
   border: 1px solid var(--edge);
-  border-radius: 2px;
+  border-radius: 0;
   min-height: 110px;
   display: flex;
   align-items: center;
@@ -585,11 +561,11 @@ main.doc .story-card figcaption strong {
   letter-spacing: -0.02em;
   font-size: 1.05rem;
   color: var(--ink);
-  text-shadow: 0 0 2px currentColor;
+  text-shadow: none;
 }
 
 main.doc .story-lead {
-  color: var(--dim);
+  color: var(--muted);
   font-size: 0.95rem;
   line-height: 1.45;
 }
@@ -619,14 +595,14 @@ main.doc .story-cta a.cta-primary {
 
 main.doc .story-cta a.cta-secondary {
   color: var(--ink);
-  background: var(--void);
+  background: var(--bg);
 }
 
 main.doc .story-card > details {
   margin: 0;
   background: transparent;
   border: 1px dashed var(--edge);
-  border-radius: 2px;
+  border-radius: 0;
   padding: 2px 12px;
 }
 
@@ -638,114 +614,114 @@ main.doc .story-card > details summary {
 
 /* Apps illustrations */
 .ill-phone .phone-body {
-  fill: var(--asphalt);
-  stroke: var(--cyan);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 2;
 }
 .ill-phone .phone-screen {
-  fill: var(--void);
+  fill: var(--bg);
   stroke: var(--edge);
 }
-.ill-phone .phone-dot { fill: var(--phosphor); }
+.ill-phone .phone-dot { fill: var(--ink); }
 .ill-phone .phone-wave path {
-  stroke: var(--phosphor);
+  stroke: var(--ink);
   stroke-width: 1.5;
   fill: none;
 }
 
 .ill-html .doc {
-  fill: var(--asphalt);
-  stroke: var(--amber);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill-html .doc-tag {
-  fill: var(--phosphor);
+  fill: var(--ink);
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 22px;
   font-weight: 700;
 }
 .ill-html .doc-line {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 1.5;
 }
-.ill-html .doc-spark circle { fill: var(--pink); }
+.ill-html .doc-spark circle { fill: var(--yellow); }
 
 .ill-daemon .term {
-  fill: var(--void);
+  fill: var(--bg);
   stroke: var(--edge);
   stroke-width: 2;
 }
-.ill-daemon .term-prompt { fill: var(--phosphor); font-family: var(--mono, monospace); font-size: 14px; }
-.ill-daemon .term-cmd { fill: var(--amber); font-family: var(--mono, monospace); font-size: 14px; }
-.ill-daemon .term-cursor { fill: var(--pink); }
-.ill-daemon .term-led { fill: var(--phosphor); }
+.ill-daemon .term-prompt { fill: var(--ink); font-family: var(--mono, monospace); font-size: 14px; }
+.ill-daemon .term-cmd { fill: var(--ink); font-family: var(--mono, monospace); font-size: 14px; }
+.ill-daemon .term-cursor { fill: var(--yellow); }
+.ill-daemon .term-led { fill: var(--ink); }
 
 .ill-sheet .paper {
-  fill: var(--asphalt);
-  stroke: var(--amber);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
-.ill-sheet .paper2 { fill: var(--void); }
-.ill-sheet .qr { fill: var(--phosphor); opacity: 0.85; }
-.ill-sheet .qr-hole { fill: var(--void); }
+.ill-sheet .paper2 { fill: var(--bg); }
+.ill-sheet .qr { fill: var(--ink); opacity: 0.85; }
+.ill-sheet .qr-hole { fill: var(--bg); }
 .ill-sheet .paper-lines {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 1.2;
   fill: none;
 }
 
 /* Continuity illustrations */
 .ill-seed .seed-body {
-  fill: var(--asphalt);
-  stroke: var(--phosphor);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 2;
 }
 .ill-seed .seed-seam {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 1.2;
   fill: none;
 }
 .ill-seed .seed-sprout path {
-  stroke: var(--phosphor);
+  stroke: var(--ink);
   stroke-width: 2;
   fill: none;
 }
 
 .ill-seeds-row .chip rect {
-  fill: var(--void);
-  stroke: var(--cyan);
+  fill: var(--bg);
+  stroke: var(--ink);
   stroke-width: 1.5;
 }
 .ill-seeds-row .chip text {
-  fill: var(--amber);
+  fill: var(--ink);
   font-size: 11px;
   font-family: var(--mono, monospace);
 }
 
 .ill-cold .cold-core {
-  fill: var(--asphalt);
-  stroke: var(--phosphor);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 2;
 }
 .ill-cold .cold-rings circle {
-  stroke: var(--dim);
+  stroke: var(--muted);
   stroke-width: 1.2;
   stroke-dasharray: 4 3;
 }
 .ill-cold .cold-label {
-  fill: var(--phosphor);
+  fill: var(--ink);
   font-size: 12px;
   font-family: var(--mono, monospace);
   font-weight: 700;
 }
 
 .ill-trust .shield {
-  fill: var(--asphalt);
-  stroke: var(--cyan);
+  fill: var(--paper);
+  stroke: var(--ink);
   stroke-width: 2;
 }
 .ill-trust .shield-check {
-  stroke: var(--phosphor);
+  stroke: var(--ink);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
