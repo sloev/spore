@@ -517,10 +517,11 @@ Before shipping a screen:
 - [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
 - [ ] Exactly three control sizes used; no one-off heights.
 
-## Appendix A — Android chat attachments
+## Appendix A — chat attachments
 
 A UX convention that isn't obvious from the code, kept here so a later change doesn't
-undo it by accident (absorbed from the retired `android/UX-ISSUES.md`).
+undo it by accident (absorbed from the retired `android/UX-ISSUES.md`). Implemented on
+Android and on the web reference node; both parse the same two markers.
 
 **The problem it fixed.** The release APK published a file the instant it was picked —
 no staging, so a mis-tap sent a file with no message; it then arrived as its own

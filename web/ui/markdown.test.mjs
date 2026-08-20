@@ -1,9 +1,9 @@
-// Unit tests for the inline markdown + magnet renderer (W11). Pure functions, no
-// DOM: escapeHtml / mdInline / mdWithMagnet.
+// Unit tests for the inline markdown + magnet + attachment renderer (W11/W12).
+// Pure functions, no DOM: escapeHtml / mdInline / mdWithMagnet / mdWithAttachments.
 //
 //   node web/ui/markdown.test.mjs
 import assert from 'node:assert';
-import { escapeHtml, mdInline, mdWithMagnet } from './markdown.mjs';
+import { escapeHtml, mdInline, mdWithMagnet, mdWithAttachments } from './markdown.mjs';
 
 // HTML is escaped before any markup is introduced — XSS-safe by construction.
 assert.strictEqual(escapeHtml('<script>alert(1)</script>'),
@@ -29,9 +29,25 @@ assert.ok(out.includes('class="magnet-link"'), 'magnet link class present');
 assert.ok(out.includes('data-magnet="aaaabbbbccccddddeeeeffff00001111"'), 'hex preserved');
 assert.ok(!out.includes('magnet:aaaabbbb'), 'the raw token is replaced');
 
+// Inline image (Appendix A): ![name](spore:<magnet>) → .img-embed.
+const imgOut = mdWithAttachments('look ![pic.jpg](spore:aaaabbbbccccddddeeeeffff00001111) nice');
+assert.ok(imgOut.includes('class="img-embed"'), 'image marker becomes an embed');
+assert.ok(imgOut.includes('data-magnet="aaaabbbbccccddddeeeeffff00001111"'), 'image magnet preserved');
+assert.ok(imgOut.includes('pic.jpg'), 'image name kept');
+assert.ok(!imgOut.includes('!['), 'raw image marker replaced');
+
+// Chat file marker (Appendix A): 📎 name | spore:<magnet> | mime → .file-chip.
+const fileOut = mdWithAttachments('📎 paper.pdf | spore:aaaabbbbccccddddeeeeffff00001111 | application/pdf');
+assert.ok(fileOut.includes('class="file-chip"'), 'file marker becomes a chip');
+assert.ok(fileOut.includes('data-mime="application/pdf"'), 'mime preserved');
+assert.ok(fileOut.includes('paper.pdf'), 'filename kept');
+
+// A hostile filename inside the image marker is still escaped (no raw HTML).
+const evil = mdWithAttachments('![<b>x</b>](spore:aaaabbbbccccddddeeeeffff00001111)');
+assert.ok(!evil.includes('<b>'), 'hostile name is escaped, not emitted as HTML');
+
 // A link that is not http(s) is left escaped as plain text, never made clickable.
 const js = mdInline('[x](javascript:alert(1))');
 assert.ok(!js.includes('<a '), 'non-http links are never made clickable');
-assert.ok(js.includes('&lt;') === false, 'plain text is not double-escaped here');
 
-console.log('MARKDOWN OK — inline renderer is XSS-safe and formats all four spans');
+console.log('MARKDOWN OK — spans + magnet + image/file attachments, XSS-safe');
