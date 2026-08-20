@@ -33,11 +33,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -53,23 +51,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The Neo-Tokyo Tactical Wasteland chrome, in Compose.
+ * The HARDBRUT chrome, in Compose.
  *
  * [docs/VISUALDESIGN.md](../../../../../../../docs/VISUALDESIGN.md) is normative and
- * this file is its Android consumer. Colour was already implemented; §3's *shapes*
- * — the ammo crate, the Toughbook input, the radio switch, the segmented LED —
- * were not, and the spec's own status table said so. This is that half.
+ * this file is its Android consumer. HARDBRUT is light-first neubrutalism: cream
+ * paper, black ink, yellow actions, zero border-radius (true circles excepted),
+ * hard no-blur shadows that stay on every element and vanish only on press. Two
+ * button kinds — default (yellow) and cancel (white).
  *
  * Two rules from the spec are load-bearing here and easy to undo by accident:
  *
- *  * **Hard edges.** ≤2 dp corners and a 4 dp *hard offset* shadow with no blur.
+ *  * **Hard edges.** Zero-corner radius and a *hard offset* shadow with no blur.
  *    Compose's `Modifier.shadow` draws a blurred elevation shadow, which is the
  *    Material look this language exists to avoid — so the shadow is drawn by hand
- *    in [crate] and [radioFace]. Reach for `shadow()` here and the crate stops
+ *    in [crate] and [CrateButton]. Reach for `shadow()` here and the crate stops
  *    being a crate.
- *  * **Never pink on olive.** 2.32:1, the one pairing §1 forbids outright. It is
- *    also the pairing the palette invites, so [StickerBadge] takes its own
- *    background and the pink variants sit on void.
+ *  * **Never signal failure by colour alone.** HARDBRUT has no red; error and
+ *    danger states pair an icon with words, never rely on a hue.
  */
 
 // -- palette ------------------------------------------------------------------
@@ -78,29 +76,24 @@ import androidx.compose.ui.unit.sp
 /**
  * The §1 tokens, generated from design/tokens.json by design/generate.py.
  *
- * Ratios are measured, not estimated, and are regenerated with the colour, so
- * they cannot fall out of step with it. Three numbers per foreground: contrast
- * on Void, Asphalt, Kevlar, in that order.
+ * HARDBRUT is light-first: the primary members are the light theme, and the
+ * identical names + `Dark` are the dark theme. Two button kinds (Yellow default,
+ * Paper cancel); black ink; zero radius; hard no-blur shadows.
  */
 internal object Palette {
-    val Void = Color(0xFF0A0A0C)     // CRT Black — page base, the dark of a powered-down screen
-    val Asphalt = Color(0xFF1A1C20)  // Worn Asphalt — panels, cards, raised surfaces
-    val Kevlar = Color(0xFF4B5320)   // Kevlar Olive — crate fills, inert chrome, disabled states
-    val Amber = Color(0xFFFFB000)    // 10.80 / 9.31 / 4.48 (Kevlar is large-text only)
-    val Phosphor = Color(0xFF39FF14) // 14.59 / 12.58 / 6.06
-    val Pink = Color(0xFFFF2A85)     // 5.58 / 4.81 / 2.32 ← never on Kevlar
-    val Cyan = Color(0xFF00FFFF)     // 15.78 / 13.61 / 6.55
-    val Edge = Color(0xFF2A2F1C)     // borders — olive shifted dark, reads as machined metal
-    val Dim = Color(0xFF8A7A4A)      // de-emphasised text — amber desaturated, 4.68:1 on Void
+    val Ink = Color(0xFF000000)    // 20.13 / 21.00 / 1.00 ← never on InkDark
+    val Paper = Color(0xFFFFFFFF)  // Paper — cards on paper
+    val Yellow = Color(0xFFFFD23F) // 1.38 / 1.44 / 14.54 ← never on BgDark ← never on PaperDark
+    val Muted = Color(0xFF666666)  // 5.50 / 5.74 / 3.66
+    val Bg = Color(0xFFFDFAF2)     // cream paper base
 
-    // Field Notes (light) — each re-checked to clear 4.5:1 on paper
-    val Paper = Color(0xFFF4F1E8)        // paper base
-    val PaperInk = Color(0xFF1A1C20)     // body and headings
-    val PaperEdge = Color(0xFFD8D2C0)    // borders
-    val AmberDark = Color(0xFF8A5F00)    // 5.00:1 on Paper
-    val PhosphorDark = Color(0xFF1F7A0C) // 4.83:1 on Paper
-    val PinkDark = Color(0xFFC2185B)     // 5.20:1 on Paper
-    val CyanDark = Color(0xFF00707A)     // 5.17:1 on Paper
+    // Dark mode — inverted ink/paper; the yellow accent is unchanged.
+    val InkDark = Color(0xFFF0F0E8)    // text, borders, chrome in dark mode
+    val PaperDark = Color(0xFF1A1A18)  // panels, cards, raised surfaces in dark mode
+    val YellowDark = Color(0xFFFFD23F) // primary actions, highlights — the one colour shared by both themes
+    val MutedDark = Color(0xFFA0A090)  // de-emphasised text
+    val OnYellow = Color(0xFF121210)   // text sitting on the yellow face in dark mode — near-black, not the near-white ink
+    val BgDark = Color(0xFF121210)     // page base in dark mode
 }
 
 /**
@@ -112,55 +105,55 @@ internal object Metrics {
     val ControlH = 48.dp  // primary and secondary buttons, and text fields — one height for all three
     val ControlPX = 14.dp // horizontal padding
     val ControlPY = 9.dp  // vertical padding
-    val ChipH = 32.dp     // compact presets and toggles (7D/14D/30D, topics). NEW — must still carry a 48dp touch target
+    val ChipH = 32.dp     // compact presets and toggles (offline-window, topics). Must still carry a 48dp touch target
     val ChipPX = 10.dp    // horizontal padding
     val ChipPY = 4.dp     // vertical padding
-    val RowH = 56.dp      // list rows for the Bridges/Advanced restructure (C6). NEW
+    val RowH = 56.dp      // list rows — the unit the Bridges/Advanced restructure is built from
     val RowPX = 12.dp     // horizontal padding
     val RowPY = 8.dp      // vertical padding
-    val Radius = 2.dp     // corner radius, everywhere — CrateShape already used it
-    val Border = 2.dp     // control and crate border width
-    val Throw = 3.dp      // the pressed-button offset and its drop shadow
-    val Tight = 4.dp      // within a control
-    val Gap = 8.dp        // between controls — VGap's default
-    val Pad = 12.dp       // inside a crate/card
-    val Section = 16.dp   // between sections
-    val TouchMin = 48.dp  // WCAG/Material floor. `control` and `row` clear it by height; `chip` must be padded out to it.
+    val Radius = 0.dp     // corner radius — zero. Always. True circles (radio, avatar) are the only exception
+    val Border = 3.dp     // border width — the HARDBRUT outline
+    val Throw = 5.dp      // the hard no-blur drop-shadow offset (5px 5px 0)
+    val Tight = 12.dp     // tighter internal padding (the 12dp step)
+    val Gap = 12.dp       // between controls
+    val Pad = 24.dp       // inside a card / crate (the 24dp step)
+    val Section = 40.dp   // between sections (the 40dp step)
+    val TouchMin = 48.dp  // WCAG/Material floor. control and row clear it by height; chip must be padded out to it.
 }
 // >>> end design tokens <<<
 
 /** Hard-edged everywhere: §3 allows 2 dp and no more. */
 internal val CrateShape = RoundedCornerShape(Metrics.Radius)
 
-// The bunker is dark, so dark is the real theme; Field Notes is the printed-manual
-// voice rather than a wash of the same one.
+// HARDBRUT is light-first: cream paper, black ink, yellow actions. Dark is the
+// inverted twin, sharing only the yellow accent.
 internal val SporeLightColors = lightColorScheme(
-    primary = Palette.PinkDark,
-    secondary = Palette.CyanDark,
-    tertiary = Palette.PhosphorDark,
-    background = Palette.Paper,
+    primary = Palette.Yellow,
+    secondary = Palette.Ink,
+    tertiary = Palette.Ink,
+    background = Palette.Bg,
     surface = Palette.Paper,
-    surfaceVariant = Color(0xFFFFFFFF),
-    onBackground = Palette.PaperInk,
-    onSurface = Palette.PaperInk,
-    outline = Palette.PaperEdge,
-    error = Palette.PinkDark,
+    surfaceVariant = Palette.Paper,
+    onBackground = Palette.Ink,
+    onSurface = Palette.Ink,
+    onPrimary = Palette.Ink,
+    outline = Palette.Ink,
+    error = Palette.Ink,
 )
 
 internal val SporeDarkColors = darkColorScheme(
-    primary = Palette.Pink,
-    secondary = Palette.Cyan,
-    tertiary = Palette.Phosphor,
-    background = Palette.Void,
-    surface = Palette.Void,
-    surfaceVariant = Palette.Asphalt,
-    onBackground = Palette.Amber,
-    onSurface = Palette.Amber,
-    onPrimary = Palette.Void,
-    outline = Palette.Edge,
-    // The palette has no red, so error shares the accent hue. Never signal a
-    // failure by colour alone here — pair it with an icon and words (§1).
-    error = Palette.Pink,
+    primary = Palette.YellowDark,
+    secondary = Palette.InkDark,
+    tertiary = Palette.InkDark,
+    background = Palette.BgDark,
+    surface = Palette.PaperDark,
+    surfaceVariant = Palette.PaperDark,
+    onBackground = Palette.InkDark,
+    onSurface = Palette.InkDark,
+    onPrimary = Palette.OnYellow,
+    outline = Palette.InkDark,
+    // HARDBRUT has no red — failure is an icon plus words, never colour alone.
+    error = Palette.InkDark,
 )
 
 /**
@@ -206,33 +199,11 @@ internal fun reducedMotion(): Boolean {
     }
 }
 
-/**
- * §4 scanlines: a 2 dp period, ≤6% black, drawn over the content and never
- * intercepting touches (drawing is not an input target, so this is free here).
- * Static by construction — no animation to disable — but still dropped entirely
- * under reduced motion, since a fixed line grid is itself a shimmer source on an
- * LCD and the spec asks for *completely* static.
- */
-internal fun Modifier.scanlines(enabled: Boolean): Modifier =
-    if (!enabled) this else drawWithContent {
-        drawContent()
-        val period = 2.dp.toPx()
-        var y = 0f
-        while (y < size.height) {
-            drawRect(
-                color = Color.Black.copy(alpha = 0.06f),
-                topLeft = Offset(0f, y),
-                size = Size(size.width, period / 2f),
-            )
-            y += period
-        }
-    }
-
-// -- the ammo crate -----------------------------------------------------------
+// -- the crate ----------------------------------------------------------------
 
 /**
- * §3's container: `--panel` fill, 2 px `--edge` border, 2 px hard offset shadow,
- * no blur, no rounding beyond 2 px.
+ * HARDBRUT's container: paper fill, 3 px ink border, hard no-blur offset shadow,
+ * zero rounding.
  *
  * The shadow is painted into reserved padding rather than outside the layout
  * bounds, so a crate never bleeds over its neighbour in a `Column`. That is why
@@ -240,27 +211,27 @@ internal fun Modifier.scanlines(enabled: Boolean): Modifier =
  * leaves exactly [depth] on the shadow side.
  */
 internal fun Modifier.crate(
-    fill: Color = Palette.Asphalt,
-    edge: Color = Palette.Edge,
-    depth: Dp = 4.dp,
+    fill: Color = Palette.Paper,
+    edge: Color = Palette.Ink,
+    depth: Dp = Metrics.Throw,
 ): Modifier = this
     .padding(end = depth, bottom = depth)
     .drawBehind {
         drawRect(
-            color = Color.Black.copy(alpha = 0.6f),
+            color = Color.Black,
             topLeft = Offset(depth.toPx(), depth.toPx()),
             size = size,
         )
     }
     .background(fill, CrateShape)
-    .border(2.dp, edge, CrateShape)
+    .border(Metrics.Border, edge, CrateShape)
 
 /** A crate as a container. [edge] carries meaning — pink for danger, cyan for focus. */
 @Composable
 internal fun Crate(
     modifier: Modifier = Modifier,
-    fill: Color = Palette.Asphalt,
-    edge: Color = Palette.Edge,
+    fill: Color = Palette.Paper,
+    edge: Color = Palette.Ink,
     content: @Composable () -> Unit,
 ) {
     Box(modifier.crate(fill, edge).padding(Metrics.Pad)) { content() }
@@ -286,7 +257,6 @@ internal fun DisplayHeading(
     color: Color = MaterialTheme.colorScheme.onBackground,
     size: Int = 20,
 ) {
-    val still = reducedMotion()
     Text(
         text.uppercase(),
         modifier,
@@ -294,11 +264,11 @@ internal fun DisplayHeading(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         style = TextStyle(
+            // HARDBRUT: bold uppercase display, no CRT bloom.
             fontFamily = FontFamily.SansSerif,
             fontWeight = FontWeight.Black,
             fontSize = size.sp,
             letterSpacing = (-0.02 * size).sp,
-            shadow = if (still) null else Shadow(color, Offset.Zero, 2f),
         ),
     )
 }
@@ -326,7 +296,7 @@ internal fun ToughbookField(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val border = if (focused) Palette.Cyan else Palette.Edge
+    val border = if (focused) Palette.Ink else Palette.Ink
 
     BasicTextField(
         value = value,
@@ -339,7 +309,7 @@ internal fun ToughbookField(
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurface,
         ),
-        cursorBrush = SolidColor(Palette.Pink), // §3: the cursor is the kawaii accent
+        cursorBrush = SolidColor(Palette.Yellow), // §3: the cursor is the kawaii accent
         interactionSource = interaction,
     ) { inner ->
         ToughbookFace(value, placeholder, border, singleLine, minHeight, inner)
@@ -366,7 +336,7 @@ internal fun ToughbookField(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val border = if (focused) Palette.Cyan else Palette.Edge
+    val border = if (focused) Palette.Ink else Palette.Ink
 
     BasicTextField(
         value = value,
@@ -379,7 +349,7 @@ internal fun ToughbookField(
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurface,
         ),
-        cursorBrush = SolidColor(Palette.Pink),
+        cursorBrush = SolidColor(Palette.Yellow),
         interactionSource = interaction,
     ) { inner ->
         ToughbookFace(value.text, placeholder, border, singleLine, minHeight, inner)
@@ -400,7 +370,7 @@ private fun ToughbookFace(
     Box(
         Modifier
             .fillMaxWidth()
-            .background(Palette.Void, CrateShape)
+            .background(Palette.Paper, CrateShape)
             .border(2.dp, border, CrateShape)
             .drawBehind {
                 // Four screws. Inset by the border so they sit on the face,
@@ -412,7 +382,7 @@ private fun ToughbookFace(
                     Offset(size.width - m - d, m),
                     Offset(m, size.height - m - d),
                     Offset(size.width - m - d, size.height - m - d),
-                ).forEach { drawRect(Palette.Kevlar, it, Size(d, d)) }
+                ).forEach { drawRect(Palette.Muted, it, Size(d, d)) }
             }
             .padding(horizontal = 10.dp, vertical = 10.dp)
             .then(if (singleLine) Modifier else Modifier.height(minHeight)),
@@ -420,7 +390,7 @@ private fun ToughbookFace(
         if (text.isEmpty() && placeholder.isNotEmpty()) {
             Text(
                 placeholder,
-                color = Palette.Dim,
+                color = Palette.Muted,
                 style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
             )
         }
@@ -455,8 +425,8 @@ internal fun CrateButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    face: Color = Palette.Kevlar,
-    ink: Color = Palette.Amber,
+    face: Color = Palette.Muted,
+    ink: Color = Palette.Ink,
     contentDescription: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -480,8 +450,8 @@ internal fun CrateButton(
             // A real touch target, not an invisible hitbox around a smaller-looking
             // button (B7) — every CrateButton was under the 48dp floor before this.
             .sizeIn(minWidth = Metrics.TouchMin, minHeight = Metrics.ControlH)
-            .background(if (enabled) face else Palette.Asphalt, CrateShape)
-            .border(2.dp, Palette.Edge, CrateShape)
+            .background(if (enabled) face else Palette.Paper, CrateShape)
+            .border(2.dp, Palette.Ink, CrateShape)
             .radioClickable(interaction, enabled, onClick)
             .then(
                 if (contentDescription != null) {
@@ -496,7 +466,7 @@ internal fun CrateButton(
             // The description above replaces this text as the accessible name —
             // without clearing it, TalkBack would merge and read both (B7).
             modifier = if (contentDescription != null) Modifier.clearAndSetSemantics {} else Modifier,
-            color = if (enabled) ink else Palette.Dim,
+            color = if (enabled) ink else Palette.Muted,
             style = TextStyle(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
@@ -537,7 +507,7 @@ internal fun SegmentedLed(
     modifier: Modifier = Modifier,
     segments: Int = 8,
     height: Dp = 6.dp,
-    on: Color = Palette.Phosphor,
+    on: Color = Palette.Ink,
 ) {
     val n = segments.coerceAtLeast(1)
     val lit = if (total <= 0) 0 else ((have.toFloat() / total) * n).toInt().coerceIn(0, n)
@@ -547,7 +517,7 @@ internal fun SegmentedLed(
                 Modifier
                     .weight(1f)
                     .height(height)
-                    .background(if (i < lit) on else Palette.Kevlar),
+                    .background(if (i < lit) on else Palette.Muted),
             )
         }
     }
@@ -568,8 +538,8 @@ internal fun SegmentedLed(
 internal fun StickerBadge(
     text: String,
     modifier: Modifier = Modifier,
-    ink: Color = Palette.Amber,
-    bg: Color = Palette.Void,
+    ink: Color = Palette.Ink,
+    bg: Color = Palette.Paper,
     edge: Color = ink,
 ) {
     Text(
@@ -609,13 +579,13 @@ internal fun CrateSwitch(
     Box(
         modifier
             .size(width = 40.dp, height = 22.dp)
-            .background(if (checked) Palette.Phosphor else Palette.Kevlar, CrateShape)
-            .border(2.dp, Palette.Edge, CrateShape)
+            .background(if (checked) Palette.Ink else Palette.Muted, CrateShape)
+            .border(2.dp, Palette.Ink, CrateShape)
             .radioClickable(interaction, enabled) { onCheckedChange(!checked) }
             .padding(2.dp),
         contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
-        Box(Modifier.size(width = 14.dp, height = 14.dp).background(Palette.Void, CrateShape))
+        Box(Modifier.size(width = 14.dp, height = 14.dp).background(Palette.Paper, CrateShape))
     }
 }
 
@@ -625,7 +595,7 @@ internal fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text.uppercase(),
         modifier.padding(top = 10.dp, bottom = 4.dp),
-        color = Palette.Dim,
+        color = Palette.Muted,
         style = TextStyle(
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
@@ -636,7 +606,7 @@ internal fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 
 /** Caption text — the `--dim` role, 4.68:1 on void. */
 @Composable
-internal fun Caption(text: String, modifier: Modifier = Modifier, color: Color = Palette.Dim) {
+internal fun Caption(text: String, modifier: Modifier = Modifier, color: Color = Palette.Muted) {
     Text(
         text,
         modifier,
@@ -662,9 +632,9 @@ internal fun ConfirmDialog(
         onDismissRequest = onDismiss,
         title = { DisplayHeading(title, size = 15) },
         text = { Caption(body) },
-        confirmButton = { CrateButton(confirmLabel, onConfirm, face = Palette.Pink, ink = Palette.Void) },
+        confirmButton = { CrateButton(confirmLabel, onConfirm, face = Palette.Yellow, ink = Palette.Paper) },
         dismissButton = { CrateButton("Cancel", onDismiss) },
-        containerColor = Palette.Asphalt,
+        containerColor = Palette.Paper,
     )
 }
 
@@ -692,10 +662,10 @@ internal fun Chip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    activeFill: Color = Palette.Pink,
-    activeInk: Color = Palette.Void,
-    inactiveFill: Color = Palette.Kevlar,
-    inactiveInk: Color = Palette.Amber,
+    activeFill: Color = Palette.Yellow,
+    activeInk: Color = Palette.Paper,
+    inactiveFill: Color = Palette.Muted,
+    inactiveInk: Color = Palette.Ink,
     contentDescription: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -721,8 +691,8 @@ internal fun Chip(
                     )
                 }
             }
-            .background(if (enabled) fill else Palette.Asphalt, CrateShape)
-            .border(2.dp, Palette.Edge, CrateShape)
+            .background(if (enabled) fill else Palette.Paper, CrateShape)
+            .border(2.dp, Palette.Ink, CrateShape)
             .radioClickable(interaction, enabled, onClick)
             .then(
                 if (contentDescription != null) {
@@ -735,7 +705,7 @@ internal fun Chip(
         Text(
             label.uppercase(),
             modifier = if (contentDescription != null) Modifier.clearAndSetSemantics {} else Modifier,
-            color = if (enabled) ink else Palette.Dim,
+            color = if (enabled) ink else Palette.Muted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(
@@ -785,8 +755,8 @@ internal fun ListRow(
                 )
             }
         }
-        .background(Palette.Asphalt, CrateShape)
-        .border(2.dp, Palette.Edge, CrateShape)
+        .background(Palette.Paper, CrateShape)
+        .border(2.dp, Palette.Ink, CrateShape)
         .padding(horizontal = Metrics.RowPX, vertical = Metrics.RowPY)
 
     val clickMod = if (onClick != null) {
@@ -816,7 +786,7 @@ internal fun ListRow(
         } else if (onClick != null) {
             Text(
                 "›",
-                color = Palette.Dim,
+                color = Palette.Muted,
                 style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 16.sp),
             )
         }

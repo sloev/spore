@@ -71,7 +71,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Caption("your address")
-                    Text(addr, color = Palette.Amber)
+                    Text(addr, color = Palette.Ink)
                 }
                 HGap()
                 CrateButton("Copy", {
@@ -102,10 +102,10 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                             ProfilePic(avatars[p.addr], shown)
                             HGap(10.dp)
                             Column(Modifier.weight(1f)) {
-                                Text(shown, color = Palette.Amber, fontWeight = FontWeight.Bold)
+                                Text(shown, color = Palette.Ink, fontWeight = FontWeight.Bold)
                                 Caption("📡 $ago")
                             }
-                            if (p.hasKey) StickerBadge("🔒 sealed", ink = Palette.Phosphor)
+                            if (p.hasKey) StickerBadge("🔒 sealed", ink = Palette.Ink)
                         }
                     }
                 }
@@ -144,7 +144,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                                 Text(
                                     Petnames.label(peer),
                                     Modifier.weight(1f),
-                                    color = Palette.Amber,
+                                    color = Palette.Ink,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                 )
@@ -302,7 +302,7 @@ internal fun ChatDetail(peer: String) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (s.mime.startsWith("image/")) "🖼" else "📎", Modifier.padding(end = 8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(s.name, color = Palette.Amber, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(s.name, color = Palette.Ink, fontWeight = FontWeight.Bold, maxLines = 1)
                         Caption("${s.bytes.size / 1024} KB · staged, not sent")
                     }
                     CrateButton("✕", { staged = null }, contentDescription = "Remove staged attachment")
@@ -320,10 +320,10 @@ internal fun ChatDetail(peer: String) {
                 { if (peer == Petnames.PUBLIC) confirmPublic = true else performSend() },
                 // Send is live with either text or an attachment.
                 enabled = text.isNotBlank() || staged != null,
-                face = Palette.Pink,
+                face = Palette.Yellow,
                 // Pink face, void ink: 5.58:1. The reverse (pink on olive) is the
                 // one pairing §1 bans outright.
-                ink = Palette.Void,
+                ink = Palette.Paper,
             )
         }
     }
@@ -359,10 +359,10 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
         horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Box(Modifier.widthIn(max = 280.dp)) {
-            Crate(edge = if (mine) Palette.Pink else Palette.Edge) {
+            Crate(edge = if (mine) Palette.Yellow else Palette.Ink) {
                 Column {
                     if (!mine) Caption("${if (m.encrypted) "🔒 " else ""}${Petnames.label(m.peer)}")
-                    if (shownText.isNotEmpty()) Text(shownText, color = Palette.Amber)
+                    if (shownText.isNotEmpty()) Text(shownText, color = Palette.Ink)
                     if (m.magnet != null) {
                         if (shownText.isNotEmpty()) VGap(6.dp)
                         Attachment(m.magnet, m.mime, m.text)
@@ -372,11 +372,11 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
                         Caption(timeOf(m.ts))
                         if (!m.mine && !m.verified) {
                             HGap(6.dp)
-                            StickerBadge("⚠ signature BAD", ink = Palette.Pink)
+                            StickerBadge("⚠ signature BAD", ink = Palette.Yellow)
                         }
                         if (mine && m.id != null) {
                             HGap(6.dp)
-                            if (m.delivered) StickerBadge("✓ delivered", ink = Palette.Phosphor)
+                            if (m.delivered) StickerBadge("✓ delivered", ink = Palette.Ink)
                             else Caption("· sent")
                         }
                     }
@@ -468,7 +468,7 @@ private fun Attachment(magnet: String, mime: String?, body: String) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 220.dp)
-                    .border(2.dp, Palette.Edge)
+                    .border(2.dp, Palette.Ink)
                     .clickable { openAttachment(ctx, magnet, name, mime ?: att?.mime, path) },
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             )
@@ -480,14 +480,14 @@ private fun Attachment(magnet: String, mime: String?, body: String) {
     Row(
         Modifier
             .fillMaxWidth()
-            .border(2.dp, Palette.Edge, CrateShape)
+            .border(2.dp, Palette.Ink, CrateShape)
             .then(if (here) Modifier.clickable { openAttachment(ctx, magnet, name, mime ?: att?.mime, path) } else Modifier)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(if (isImage) "🖼" else "📎", Modifier.padding(end = 8.dp))
         Column(Modifier.weight(1f)) {
-            Text(name, color = Palette.Amber, maxLines = 1)
+            Text(name, color = Palette.Ink, maxLines = 1)
             Caption(if (here) "tap to open" else "fetching…")
         }
     }

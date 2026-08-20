@@ -26,8 +26,8 @@ import androidx.compose.ui.text.withStyle
  */
 object Markdown {
 
-    private val CODE_INK = Palette.Cyan
-    private val LINK_INK = Palette.Phosphor
+    private val CODE_INK = Palette.Ink
+    private val LINK_INK = Palette.Ink
 
     /** Render inline markdown for display. */
     fun render(src: String, base: Color): AnnotatedString = buildAnnotatedString {

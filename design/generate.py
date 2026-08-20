@@ -90,10 +90,13 @@ def check_contrast():
     """Every declared grade must match the computed one. Fail loudly if not."""
     problems = []
     bases = CONTRAST["bases"]
+    # HARDBRUT is light-first: the grades matrix is evaluated against the light
+    # theme (the default), not the dark one.
+    matrix_theme = CONTRAST.get("matrix_theme", "light")
 
     for fg, grades in CONTRAST["grades"].items():
         for base, declared in zip(bases, grades):
-            r = ratio(resolve(fg), resolve(base))
+            r = ratio(resolve(fg, matrix_theme), resolve(base, matrix_theme))
             actual = grade_of(r)
             if actual != declared:
                 problems.append(
@@ -286,24 +289,22 @@ def css_hex(name, theme="dark"):
 # --------------------------------------------------------------- site/style.css
 def gen_site_css():
     cfg = SURFACES["site"]
-    void = resolve("void")
     L = []
-    L.append("/* Neo-Tokyo Tactical Wasteland — see docs/VISUALDESIGN.md, which is normative")
-    L.append("   for the reasoning. The values come from design/tokens.json; change a colour")
-    L.append("   there and run design/generate.py. Editing this block by hand is a CI failure. */")
+    L.append("/* HARDBRUT (supernihil/hardbrut v0.6) — see docs/VISUALDESIGN.md, which is")
+    L.append("   normative for the reasoning. The values come from design/tokens.json; change")
+    L.append("   a colour there and run design/generate.py. Editing this block by hand is a")
+    L.append("   CI failure. Light-first: cream paper, black ink, yellow actions. */")
     L.append(":root {")
-    L.append("  /* Raw palette */")
+    L.append("  /* Palette (light, the default) */")
 
     decls, comments = [], []
-    label_w = max(len(e["label"]) for e in DARK["palette"])
-    for e in DARK["palette"]:
+    label_w = max(len(e["label"]) for e in LIGHT["palette"])
+    for e in LIGHT["palette"]:
         decls.append(f"  --{e['n']}: {e['hex']};")
         c = e["label"]
         if e["n"] in CONTRAST["foregrounds"]:
-            c = f"{c.ljust(label_w)}  {ratio(e['hex'], void):>5.2f}:1 on void"
-        for base, g in zip(CONTRAST["bases"], CONTRAST["grades"].get(e["n"], [])):
-            if g == "forbidden":
-                c += f" — NEVER on {base} ({ratio(e['hex'], resolve(base)):.2f}:1)"
+            r = ratio(e["hex"], resolve("bg", "light"))
+            c = f"{c.ljust(label_w)}  {r:>5.2f}:1 on bg"
         comments.append(c)
     L += _align(decls, comments)
 
@@ -311,16 +312,13 @@ def gen_site_css():
     L.append("  /* Semantic roles */")
     decls, comments = [], []
     for n in cfg["semantic"]:
-        e = DARK_S[n]
+        e = LIGHT_S[n]
         if "ref" in e:
             decls.append(f"  --{n}: var(--{e['ref']});")
             comments.append("")
         else:
-            decls.append(f"  --{n}: {css_hex(n)};")
-            c = e["role"]
-            if n in ("prose", "dim"):
-                c += f", {ratio(resolve(n), void):.2f}:1 on void"
-            comments.append(c)
+            decls.append(f"  --{n}: {css_hex(n, 'light')};")
+            comments.append(e["role"])
     L += _align(decls, comments)
 
     L.append("")
@@ -339,19 +337,17 @@ def gen_site_css():
     L.append("}")
 
     L.append("")
-    L.append("/* Field Notes — the printed-manual voice. There is no light variant of a CRT in")
-    L.append("   a ruined basement, so light mode is a different artefact rather than a wash of")
-    L.append("   the same one. Every colour re-checked to clear 4.5:1 on paper. */")
-    L.append("@media (prefers-color-scheme: light) {")
+    L.append("/* Dark mode — same shape, inverted ink/paper. The yellow accent is the one")
+    L.append("   colour shared by both themes; text sitting on it is near-black (--onyellow),")
+    L.append("   never the near-white ink. */")
+    L.append("@media (prefers-color-scheme: dark) {")
     L.append("  :root {")
     for n in cfg["light_raw"]:
-        L.append(f"    --{n}: {css_hex(n, 'light')};")
+        L.append(f"    --{n}: {css_hex(n, 'dark')};")
     for n in cfg["light_semantic"]:
-        e = LIGHT_S[n]
-        if "ref" in e:
-            L.append(f"    --{n}: var(--{e['ref']});")
-        else:
-            L.append(f"    --{n}: {css_hex(n, 'light')};")
+        L.append(f"    --{n}: {css_hex(n, 'dark')};")
+    # Text that sits on the yellow face in dark mode.
+    L.append(f"    --onyellow: {css_hex('onyellow', 'dark')};")
     L.append("  }")
     L.append("}")
     return "\n".join(L)
@@ -384,24 +380,25 @@ def gen_standalone_css():
     cfg = SURFACES["standalone"]
     L = []
     L.append("  :root {")
-    L.append("    /* Neo-Tokyo Tactical Wasteland (docs/VISUALDESIGN.md §1) — same values as")
-    L.append("       site/style.css, so the docs site and this standalone node read as one")
-    L.append("       design language rather than two unrelated apps sharing a repo. Resolved")
-    L.append("       hexes rather than a raw-plus-semantic indirection: this file ships alone. */")
+    L.append("    /* HARDBRUT (docs/VISUALDESIGN.md §1) — light-first, same values as")
+    L.append("       site/style.css so the docs site and this standalone node read as one")
+    L.append("       design language. Resolved hexes rather than a raw-plus-semantic")
+    L.append("       indirection: this file ships alone. */")
     for n in cfg["semantic"]:
-        L.append(f"    --{n}:{css_hex(n)};")
+        L.append(f"    --{n}:{css_hex(n, 'light')};")
     for f in T["fonts"]:
         if f["n"] in cfg["fonts"]:
             L.append(f"    --{f['n']}: {f['stack']};")
     for name, v, _kt, _c in _metric_rows():
         L.append(f"    --{name}:{v}px;")
     L.append("  }")
-    L.append("  @media (prefers-color-scheme: light) {")
+    L.append("  @media (prefers-color-scheme: dark) {")
     L.append("    :root {")
-    L.append("      /* Field Notes (VISUALDESIGN §1 \"Light mode\") — every colour re-checked")
-    L.append("         to clear 4.5:1 on paper, same as site/style.css's light variant. */")
+    L.append("      /* Dark mode — inverted ink/paper; --onyellow is the near-black text")
+    L.append("         that sits on the unchanged yellow face. */")
     for n in cfg["light_semantic"]:
-        L.append(f"      --{n}:{css_hex(n, 'light')};")
+        L.append(f"      --{n}:{css_hex(n, 'dark')};")
+    L.append(f"      --onyellow:{css_hex('onyellow', 'dark')};")
     L.append("    }")
     L.append("  }")
     return "\n".join(L)
@@ -426,45 +423,46 @@ def gen_android_kt():
     L.append("/**")
     L.append(" * The §1 tokens, generated from design/tokens.json by design/generate.py.")
     L.append(" *")
-    L.append(" * Ratios are measured, not estimated, and are regenerated with the colour, so")
-    L.append(" * they cannot fall out of step with it. Three numbers per foreground: contrast")
-    L.append(f" * on {', '.join(_kt_name(b) for b in bases)}, in that order.")
+    L.append(" * HARDBRUT is light-first: the primary members are the light theme, and the")
+    L.append(" * identical names + `Dark` are the dark theme. Two button kinds (Yellow default,")
+    L.append(" * Paper cancel); black ink; zero radius; hard no-blur shadows.")
     L.append(" */")
     L.append("internal object Palette {")
 
+    # Light (primary) — flat names, no suffix.
     decls, comments = [], []
-    for e in DARK["palette"]:
-        decls.append(f"    val {_kt_name(e['n'])} = {_kt_color(e['hex'])}")
+    names_light = []
+    for e in LIGHT["palette"]:
+        decls.append(f"    val {e['kt']} = {_kt_color(e['hex'])}")
+        names_light.append(e['n'])
         if e["n"] in CONTRAST["grades"]:
-            rs = [ratio(e["hex"], resolve(b)) for b in bases]
+            rs = [ratio(e["hex"], resolve(b, 'light')) for b in bases]
             c = " / ".join(f"{r:.2f}" for r in rs)
             for base, g in zip(bases, CONTRAST["grades"][e["n"]]):
                 if g == "forbidden":
                     c += f" ← never on {_kt_name(base)}"
-                elif g == "large":
-                    c += f" ({_kt_name(base)} is large-text only)"
         else:
             c = f"{e['label']} — {e['role']}"
         comments.append(c)
+    # Semantic roles only light theme needs (e.g. bg as a flat name).
     for n in cfg["semantic"]:
-        e = DARK_S[n]
-        decls.append(f"    val {_kt_name(n)} = {_kt_color(resolve(n))}")
-        c = e["role"]
-        if n == "dim":
-            c += f", {ratio(resolve(n), resolve('void')):.2f}:1 on Void"
-        comments.append(c)
+        if n in names_light:
+            continue
+        e = LIGHT_S.get(n) or entry(n, "light")
+        decls.append(f"    val {_kt_name(n, 'light')} = {_kt_color(resolve(n, 'light'))}")
+        comments.append(e.get("role", ""))
     L += _align_kt(decls, comments)
 
     L.append("")
-    L.append("    // Field Notes (light) — each re-checked to clear 4.5:1 on paper")
+    L.append("    // Dark mode — inverted ink/paper; the yellow accent is unchanged.")
     decls, comments = [], []
-    for n in cfg["light_semantic"]:
-        decls.append(f"    val {_kt_name(n, 'light')} = {_kt_color(resolve(n, 'light'))}")
-        comments.append(LIGHT_S[n].get("role", ""))
-    for n in cfg["light_raw"]:
-        r = ratio(resolve(n, "light"), resolve("bg", "light"))
-        decls.append(f"    val {_kt_name(n, 'light')} = {_kt_color(resolve(n, 'light'))}")
-        comments.append(f"{r:.2f}:1 on Paper")
+    seen = set()
+    for n in cfg["light_raw"] + cfg["light_semantic"]:
+        if n in seen:
+            continue
+        seen.add(n)
+        decls.append(f"    val {_kt_name(n, 'dark')} = {_kt_color(resolve(n, 'dark'))}")
+        comments.append(entry(n, 'dark').get("role", ""))
     L += _align_kt(decls, comments)
     L.append("}")
     L += gen_metrics_kt()
@@ -486,32 +484,32 @@ def gen_visualdesign_md():
     L.append("")
     L.append("| Token | Hex | Role |")
     L.append("|---|---|---|")
-    for e in DARK["palette"]:
+    for e in LIGHT["palette"]:
         L.append(f"| `--{e['n']}` | `{e['hex']}` | {e['label']} — {e['role']} |")
     L.append("")
     L.append("### Measured contrast")
     L.append("")
-    L.append("Ratios against each base. **OK** = passes 4.5:1 for body text; **lg** = 3:1, large")
-    L.append("text and UI chrome only; **XX** = fails both. Computed from the hexes above by")
-    L.append("`design/generate.py`, which fails the build if any of them stops matching the")
-    L.append("grade `design/tokens.json` claims for it.")
+    L.append("Ratios against each base (light theme). **OK** = passes 4.5:1 for body text; **lg**")
+    L.append("= 3:1, large text and UI chrome only; **XX** = fails both. Computed from the hexes")
+    L.append("above by `design/generate.py`, which fails the build if any of them stops matching")
+    L.append("the grade `design/tokens.json` claims for it.")
     L.append("")
     L.append("| | " + " | ".join(f"on `--{b}`" for b in bases) + " |")
     L.append("|---|" + "---|" * len(bases))
     label = {"body": "**OK**", "large": "lg", "forbidden": "**XX**"}
     for fg in CONTRAST["foregrounds"]:
-        e = entry(fg)
-        name = f"`--{fg}` `{e['hex']}`" if fg not in DARK_P else f"`--{fg}`"
+        e = entry(fg, "light")
+        name = f"`--{fg}` `{e['hex']}`" if fg not in LIGHT_P else f"`--{fg}`"
         cells = []
         for b in bases:
-            r = ratio(resolve(fg), resolve(b))
+            r = ratio(resolve(fg, "light"), resolve(b, "light"))
             cells.append(f"{label[grade_of(r)]} {r:.2f}")
         L.append(f"| {name} | " + " | ".join(cells) + " |")
-    # Authored wording, computed numbers: the prose is human ("olive" reads better
+    # Authored wording, computed numbers: the prose is human ("cream" reads better
     # than the token name), but every ratio in it is substituted from the hexes, so
     # a sentence cannot outlive the palette it describes.
     subs = {
-        f"{fg}_on_{b}": f"{ratio(resolve(fg), resolve(b)):.2f}"
+        f"{fg}_on_{b}": f"{ratio(resolve(fg, 'light'), resolve(b, 'light')):.2f}"
         for fg in CONTRAST["foregrounds"]
         for b in bases
     }

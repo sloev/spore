@@ -138,9 +138,6 @@ fun App() {
         var screen by remember { mutableStateOf<Screen>(Chats) }
         val addr by NodeController.address.collectAsState()
         val snackbar = remember { SnackbarHostState() }
-        // Scanlines only in the dark theme: Field Notes is the printed-manual
-        // voice and a CRT artefact on paper is nonsense (§1 light mode).
-        val scan = dark && !reducedMotion()
 
         // System Back mirrors the ← arrow's hierarchy instead of leaving the app
         // from a nested screen: a thread falls to the chats list, a draft post to
@@ -163,7 +160,7 @@ fun App() {
             containerColor = MaterialTheme.colorScheme.background,
         ) { pad ->
             CompositionLocalProvider(LocalSnackbar provides snackbar) {
-                Column(Modifier.padding(pad).fillMaxSize().scanlines(scan)) {
+                Column(Modifier.padding(pad).fillMaxSize()) {
                     ReceivingBar()
                     TransfersBar()
                     when (val s = screen) {
@@ -212,7 +209,7 @@ private fun TopBar(screen: Screen, go: (Screen) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (!screen.showsNav()) {
-            IconTap("←", "Back", color = Palette.Amber) { go(if (screen is Compose) Feed else Chats) }
+            IconTap("←", "Back", color = Palette.Ink) { go(if (screen is Compose) Feed else Chats) }
         }
         Column(Modifier.weight(1f)) {
             DisplayHeading("$m ${screen.title()}")
@@ -228,7 +225,7 @@ private fun TopBar(screen: Screen, go: (Screen) -> Unit) {
             Caption(sub)
         }
         if (screen.showsNav()) {
-            StickerBadge("${peers.size} peers", ink = Palette.Phosphor)
+            StickerBadge("${peers.size} peers", ink = Palette.Ink)
             HGap(6.dp)
             IconTap("👋", "Connect") { go(Connect) }
             IconTap("⚙", "Advanced settings") { go(Advanced) }
@@ -278,12 +275,12 @@ private fun BottomNav(screen: Screen, go: (Screen) -> Unit) {
                         Modifier
                             .size(14.dp)
                             .then(
-                                if (on) Modifier.background(Palette.Pink)
-                                else Modifier.border(1.dp, Palette.Dim)
+                                if (on) Modifier.background(Palette.Yellow)
+                                else Modifier.border(1.dp, Palette.Muted)
                             )
                     )
                     VGap(3.dp)
-                    Caption(label.uppercase(), color = if (on) Palette.Pink else Palette.Dim)
+                    Caption(label.uppercase(), color = if (on) Palette.Yellow else Palette.Muted)
                 }
             }
     }
@@ -306,7 +303,7 @@ private fun TransfersBar() {
             }
         }
         val rest = active.size - 3
-        if (rest > 0) Caption("+$rest more", color = Palette.Dim)
+        if (rest > 0) Caption("+$rest more", color = Palette.Muted)
     }
 }
 

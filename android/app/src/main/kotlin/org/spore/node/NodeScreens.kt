@@ -146,9 +146,9 @@ internal fun ConnectScreen() {
             }
             if (pending.bridges.isNotEmpty()) {
                 item {
-                    Crate(Modifier.fillMaxWidth(), edge = Palette.Pink) {
+                    Crate(Modifier.fillMaxWidth(), edge = Palette.Yellow) {
                         Column {
-                            DisplayHeading("Also join their bridges?", size = 15, color = Palette.Pink)
+                            DisplayHeading("Also join their bridges?", size = 15, color = Palette.Yellow)
                             Caption("Only tick these if you trust the sender: joining connects your node to servers they chose.")
                             pending.bridges.forEach { b ->
                                 Row(
@@ -157,7 +157,7 @@ internal fun ConnectScreen() {
                                     },
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(if (b in chosen) "☑" else "☐", color = Palette.Amber)
+                                    Text(if (b in chosen) "☑" else "☐", color = Palette.Ink)
                                     HGap()
                                     Caption(b)
                                 }
@@ -173,7 +173,7 @@ internal fun ConnectScreen() {
                         if (chosen.isNotEmpty()) NodeController.applyInviteBridges(ctx, chosen.toList())
                         note = "added ${petname.ifBlank { pending.suggestedName }}"
                         found = null
-                    }, face = Palette.Pink, ink = Palette.Void)
+                    }, face = Palette.Yellow, ink = Palette.Paper)
                     CrateButton("Cancel", { found = null })
                 }
             }
@@ -250,7 +250,7 @@ internal fun AdvancedScreen(addr: String) {
                         Column(Modifier.weight(1f)) {
                             Text(
                                 editName.trim().take(32).ifBlank { "…${addr.takeLast(6)}" },
-                                color = Palette.Amber, fontWeight = FontWeight.Bold, maxLines = 1,
+                                color = Palette.Ink, fontWeight = FontWeight.Bold, maxLines = 1,
                             )
                             Caption("this is how you appear to others")
                         }
@@ -291,7 +291,7 @@ internal fun AdvancedScreen(addr: String) {
                     VGap(6.dp)
                     if (topics.isEmpty()) Caption("none followed yet — subscribe from the Feed")
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        topics.take(6).forEach { StickerBadge("#$it", bg = Palette.Void) }
+                        topics.take(6).forEach { StickerBadge("#$it", bg = Palette.Paper) }
                     }
                 }
             }
@@ -324,7 +324,7 @@ internal fun AdvancedScreen(addr: String) {
                         // encrypted store and reading the old plaintext file here
                         // showed "unavailable" on every upgraded install.
                         val seedHex = remember { NodeController.seedHex() ?: "unavailable" }
-                        Text(seedHex, color = Palette.Amber)
+                        Text(seedHex, color = Palette.Ink)
                         VGap(4.dp)
                         CrateButton("Hide", { showSeed = false })
                     }
@@ -353,7 +353,7 @@ internal fun AdvancedScreen(addr: String) {
                         CrateButton("Export ring", { confirmRingExport = true })
                     } else {
                         val ringHex = remember { NodeController.prekeyRingHex() ?: "unavailable" }
-                        Text(ringHex, color = Palette.Amber)
+                        Text(ringHex, color = Palette.Ink)
                         VGap(4.dp)
                         CrateButton("Hide", { showRingExport = false })
                     }
@@ -549,7 +549,7 @@ internal fun BridgesList() {
             items(bonded()) { d ->
                 Crate(Modifier.fillMaxWidth().clickable {
                     NodeController.enableMeshtasticBle(ctx, d); showMeshPick = false
-                }) { Text("\uD83D\uDCFB ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Amber) }
+                }) { Text("\uD83D\uDCFB ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Ink) }
             }
         }
         if (showRnodePick) {
@@ -570,7 +570,7 @@ internal fun BridgesList() {
                         ctx, d, f, b, sf.toIntOrNull() ?: 8, cr.toIntOrNull() ?: 5, tx.toIntOrNull() ?: 0
                     )
                     showRnodePick = false
-                }) { Text("\uD83D\uDCE1 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Amber) }
+                }) { Text("\uD83D\uDCE1 ${try { d.name } catch (_: SecurityException) { null } ?: d.address}", color = Palette.Ink) }
             }
         }
         item {
@@ -664,11 +664,11 @@ private fun classifyBridgeStatus(status: String): BridgeStatus {
 @Composable
 private fun BridgeRow(b: BridgeState) {
     val (dot, label) = when (classifyBridgeStatus(b.status)) {
-        BridgeStatus.Up -> Palette.Phosphor to b.status
-        BridgeStatus.Connecting -> Palette.Amber to b.status
-        BridgeStatus.Down -> Palette.Kevlar to b.status
+        BridgeStatus.Up -> Palette.Ink to b.status
+        BridgeStatus.Connecting -> Palette.Ink to b.status
+        BridgeStatus.Down -> Palette.Muted to b.status
         // Never signal failure by colour alone (§ VISUALDESIGN): pair pink with an icon.
-        BridgeStatus.Error -> Palette.Pink to "\u26a0 ${b.status}"
+        BridgeStatus.Error -> Palette.Yellow to "\u26a0 ${b.status}"
     }
     val trailing: @Composable (() -> Unit)? = {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -681,10 +681,10 @@ private fun BridgeRow(b: BridgeState) {
                     if (b.enabled) "Pause" else "Resume",
                     selected = b.enabled,
                     onClick = { NodeController.toggleBridge(b) },
-                    activeFill = Palette.Kevlar,
-                    activeInk = Palette.Amber,
-                    inactiveFill = Palette.Pink,
-                    inactiveInk = Palette.Void,
+                    activeFill = Palette.Muted,
+                    activeInk = Palette.Ink,
+                    inactiveFill = Palette.Yellow,
+                    inactiveInk = Palette.Paper,
                     contentDescription = if (b.enabled) "Pause ${b.kind}" else "Resume ${b.kind}",
                 )
             }
@@ -719,18 +719,18 @@ internal fun ProfilePic(path: String?, name: String, size: Int = 34) {
             Image(
                 shown.asImageBitmap(),
                 contentDescription = "profile picture",
-                modifier = Modifier.size(size.dp).border(2.dp, Palette.Edge, CrateShape),
+                modifier = Modifier.size(size.dp).border(2.dp, Palette.Ink, CrateShape),
                 contentScale = ContentScale.Crop,
             )
             return
         }
     }
     Box(
-        Modifier.size(size.dp).background(Palette.Kevlar, CrateShape).border(2.dp, Palette.Edge, CrateShape),
+        Modifier.size(size.dp).background(Palette.Muted, CrateShape).border(2.dp, Palette.Ink, CrateShape),
         contentAlignment = Alignment.Center,
     ) {
         // Amber on kevlar is 4.48:1 — large text only (§1), which a bold initial is.
-        Text(name.firstOrNull()?.uppercase() ?: "?", color = Palette.Amber, fontWeight = FontWeight.Bold)
+        Text(name.firstOrNull()?.uppercase() ?: "?", color = Palette.Ink, fontWeight = FontWeight.Bold)
     }
 }
 
