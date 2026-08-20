@@ -243,6 +243,48 @@ done.** Nothing here is load-bearing for a credible node.
 
 ---
 
+## Milestone 6 — HARDBRUT visual language
+
+**Goal:** replace the Neo-Tokyo Tactical Wasteland design language with
+**HARDBRUT** (`supernihil/hardbrut`, v0.6) across all three surfaces — the web
+node, the Pages site, and the Android app. HARDBRUT is a light-first
+neubrutalist system: cream paper `#fdfaf2`, black ink, yellow `#ffd23f` actions,
+**zero border-radius** (except true circles), and hard offset shadows
+(`5px 5px 0 #000`, no blur) that stay on every element and vanish only during a
+press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
+
+**Locked decisions (so the three surfaces cannot drift):**
+
+| Question | Decision |
+|---|---|
+| Does HARDBRUT replace the Neo-Tokyo palette? | **Yes, entirely.** `--void`/`--phosphor`/`--pink-on-olive` and the CRT look are retired. `design/tokens.json` is rewritten to HARDBRUT tokens and regenerated into all three surfaces. |
+| Antenna + Seed icon | **Kept.** It is brand identity, orthogonal to palette; HARDBRUT has no logo opinion. Rendered ink-on-paper (mono) rather than phosphor-on-dark. |
+| Baud mascot | **Kept**, restyled to HARDBRUT (flat black ink, yellow accents, hard outline) — still empty-state/completion only. |
+| Zero external requests / reduced motion | **Unchanged — CI-enforced hard rules.** HARDBRUT already gates motion on `prefers-reduced-motion`; the standalone must stay self-contained (no webfonts, no CDN). |
+| Impact display face | HARDBRUT's `--font-display` is `Impact, "Arial Narrow Bold", Haettenschweiler` — a system stack, no webfont, which satisfies constraint 1 exactly as the old stack did. |
+| The `--prose` long-read token | **Dropped.** HARDBRUT body copy is full ink on paper — already the most readable pairing, no desaturation needed. |
+| "Never pink on olive", the old contrast table | **Retired with the palette.** Replaced by HARDBRUT's own measured pairs (black on `#fdfaf2` ≈ 18.64:1; yellow `#ffd23f` on black ≈ 12.74:1). The generator is updated to assert *these*. |
+
+**Tasks** (each a PR; tokens first, then surfaces, then the spec):
+
+| Task | Status | Notes |
+|---|---|---|
+| Rewrite `design/tokens.json` to HARDBRUT values + regenerate `site/style.css`, `web/build-standalone.mjs`, Android `Chrome.kt`, and VISUALDESIGN's contrast table | ⬜ todo | `design/generate.py` learns the HARDBRUT shape: `--ink #000`, `--paper #fff`, `--bg #fdfaf2`, `--yellow #ffd23f`, `--muted #666`, border 3px, radius 0, hard shadows. CI drift job keeps them in sync |
+| Web node → HARDBRUT (css tokens + components: two buttons, zero radius, hard shadows, restyled header/mascot) | ⬜ todo | Inline `<style>` in `build-standalone.mjs`; keep zero external requests + reduced-motion |
+| Site (`site/style.css` + `build.mjs` + `home.md`) → HARDBRUT | ⬜ todo | Navbar (4px ink bottom border), hero band, cards, details/summary, tables, callouts |
+| Android (`Chrome.kt` + all Compose screens) → HARDBRUT | ⬜ todo | `Modifier.hardShadow` (drawBehind) for zero-blur; two `HardbrutButton` kinds; `HardbrutCard`/`HardbrutTextField`/`HardbrutBadge` per ANDROID.md |
+| Rewrite `docs/VISUALDESIGN.md` to the HARDBRUT language (new tokens, components, contrast, screen structures) | ⬜ todo | Reflects the new spec; the old Neo-Tokyo §1/§3/§7 content is superseded |
+| `docs/ANDROID.md`-style adaptation guide committed into the repo (from `supernihil/hardbrut/ANDROID.md`) | ⬜ todo | So the Android mapping lives in-tree, not on an external page |
+
+**Definition of done:** all three surfaces render HARDBRUT (cream paper, black
+ink, yellow primary / white cancel, zero radius, hard no-blur shadows held on
+every element); Antenna + Seed persists ink-on-paper; Baud is restyled; the
+standalone still makes zero external requests and is fully static under reduced
+motion; the drift job regenerates HARDBRUT tokens into all three surfaces and
+passes.
+
+---
+
 ## Explicitly out of scope / non-goals (locked)
 
 | Item | Decision |
@@ -287,6 +329,7 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 3. **M3 — Design language** (Antenna + Seed, three sizes, density, screen structures)
 4. **M4 — Webnode as daily driver** (first runtime on the storage seam)
 5. **M5 — Polish & hardening** (only after the above)
+6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
