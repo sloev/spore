@@ -260,6 +260,21 @@ const html = `<!doctype html>
   .bridge .bd{ margin-top:10px; display:flex; flex-direction:column; gap:10px; }
   .bridge .bd .row{ margin-top:0; }
   .cnt{ font-size:11px; color:var(--muted); font-family:var(--mono); }
+  /* WYSIWYG toolbar (W12): bold / italic / code / link, above every writer. */
+  .fmt-bar{ display:flex; gap:6px; margin:8px 0 0; }
+  .fmt-bar button.fmt{ font-family:var(--mono); font-size:12px; font-weight:800;
+    min-width:30px; padding:4px 8px; background:var(--paper); color:var(--ink);
+    border:var(--border); border-radius:0; box-shadow:var(--shadow-sm); cursor:pointer; }
+  .fmt-bar button.fmt:hover{ background:var(--yellow); }
+  .preview{ margin-top:8px; padding:8px 10px; border:var(--border); border-radius:0;
+    background:var(--paper); color:var(--ink); font-size:13px; word-break:break-word; }
+  /* Inline embeds (W12): image thumbnails and file chips. */
+  .inline-img{ max-width:100%; max-height:220px; border:var(--border); border-radius:0; display:block; margin:4px 0; }
+  .img-embed{ display:inline-block; border:var(--border); border-radius:0; padding:6px 10px; background:var(--paper); margin:2px 0; }
+  .img-embed .img-name{ font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .file-chip{ display:inline-block; cursor:pointer; border:var(--border); border-radius:0; background:var(--paper);
+    padding:4px 10px; margin:2px 0; font-family:var(--mono); font-size:11.5px; box-shadow:var(--shadow-sm); }
+  .file-chip:hover{ background:var(--yellow); }
   footer{ max-width:960px; margin:0 auto; padding:24px 20px 60px; color:var(--muted); font-size:12.5px; }
   /* Focus is never removed, only thickened (HARDBRUT). */
   a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
@@ -344,11 +359,20 @@ const html = `<!doctype html>
     <div id="chat-view" style="display:none;border:1px solid var(--edge);border-radius:2px;padding:10px">
       <div id="chat-view-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px"></div>
       <div id="chat-msgs" class="log" style="height:240px"></div>
+      <div class="fmt-bar" id="chat-fmt">
+        <button type="button" class="fmt" data-fmt="bold" title="bold">B</button>
+        <button type="button" class="fmt" data-fmt="italic" title="italic">I</button>
+        <button type="button" class="fmt" data-fmt="code" title="code">&lt;/&gt;</button>
+        <button type="button" class="fmt" data-fmt="link" title="link">🔗</button>
+        <button type="button" class="fmt" data-fmt="attach" title="attach a file">📎</button>
+        <button type="button" class="fmt" data-fmt="image" title="attach an image">🖼</button>
+      </div>
       <div class="row" id="chat-compose-row">
         <input type="text" id="chat-input" placeholder="message&#x2026;" />
         <button id="chat-send">Send</button>
         <span class="cnt" id="chat-seal-state"></span>
       </div>
+      <div id="chat-preview" class="preview" style="display:none"></div>
     </div>
   </section>
 
@@ -362,6 +386,14 @@ const html = `<!doctype html>
       <input type="text" id="feed-msg" placeholder="what's happening&#x2026;" />
       <button id="feed-publish">Publish</button>
     </div>
+    <div class="fmt-bar" id="feed-fmt">
+      <button type="button" class="fmt" data-fmt="bold" title="bold">B</button>
+      <button type="button" class="fmt" data-fmt="italic" title="italic">I</button>
+      <button type="button" class="fmt" data-fmt="code" title="code">&lt;/&gt;</button>
+      <button type="button" class="fmt" data-fmt="link" title="link">🔗</button>
+      <button type="button" class="fmt" data-fmt="image" title="attach an image">🖼</button>
+    </div>
+    <div id="feed-preview" class="preview" style="display:none"></div>
     <div class="row">
       <input type="text" id="feed-follow" placeholder="follow a feed: paste a 16-hex address" style="max-width:220px" />
       <button id="feed-follow-btn" class="ghost">Follow</button>
@@ -663,9 +695,11 @@ const CONVO_BADGES = {
   sealed: { label: 'PRIVATE', color: 'var(--accent)' },
 };
 
-// Markdown + magnet rendering (W11) live in web/ui/markdown.mjs, inlined as a
-// module. It holds the escapeHtml / mdInline / mdWithMagnet helpers so the regex
-// backslashes are not rewritten by the template literal that carries this script.
+// Markdown + magnet + attachment rendering (W11/W12) live in web/ui/markdown.mjs,
+// inlined as a module. It holds escapeHtml / mdInline / mdWithMagnet /
+// mdWithAttachments so the regex backslashes are not rewritten by the template
+// literal that carries this script. mdWithAttachments parses the Appendix A
+// markers (image ![name](spore:<magnet>) and file 📎 name | spore:<magnet> | mime).
 
 
 function renderChatList() {
@@ -720,14 +754,15 @@ function renderChatView() {
     msgsEl.innerHTML = c.msgs.map((m) => {
       const cls = m.fromMe ? 'tx' : 'rx';
       const who = m.fromMe ? '' : '<' + escapeHtml(m.from || '?') + '> ';
-      return '<div class="' + cls + '">' + stamp() + '  ' + who + mdWithMagnet(m.text) + '</div>';
+      return '<div class="' + cls + '">' + stamp() + '  ' + who + mdWithAttachments(m.text) + '</div>';
     }).join('');
   }
   msgsEl.scrollTop = msgsEl.scrollHeight;
-  // Wire any magnet links in the history to fetch on click.
+  // Wire any magnet links / embeds in the history to fetch on click.
   for (const a of msgsEl.querySelectorAll('.magnet-link')) {
     a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
   }
+  hydrateEmbeds(msgsEl);
 
   // Composer: for 1:1, mirror the live seal state honestly (never a bare padlock).
   if (c.type === 'dm') {
@@ -850,13 +885,14 @@ function renderFeed() {
     const isMine = item.from === hexOf(hub.node.addr());
     return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--edge);border-radius:2px;font-size:12.5px">' +
       '<span class="badge open" style="font-size:9px;flex-shrink:0;margin-top:1px;border-color:' + (isMine ? 'var(--accent2)' : 'var(--ok)') + ';color:' + (isMine ? 'var(--accent2)' : 'var(--ok)') + '">' + (isMine ? 'you' : author) + '</span>' +
-      '<span style="flex:1;color:var(--ink);word-break:break-word">' + mdWithMagnet(item.text) + '</span>' +
+      '<span style="flex:1;color:var(--ink);word-break:break-word">' + mdWithAttachments(item.text) + '</span>' +
       '<span class="cnt" style="flex-shrink:0">' + new Date(item.ts).toLocaleTimeString() + '</span>' +
     '</div>';
   }).join('');
   for (const a of el.querySelectorAll('.magnet-link')) {
     a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
   }
+  hydrateEmbeds(el);
 }
 
 function fetchMagnetHex(hex) {
@@ -879,11 +915,122 @@ function fetchMagnetHex(hex) {
   setTimeout(() => clearInterval(poll), 30000);
 }
 
+// ---- embeds (W12): inline image thumbnails + file chips ---------------------
+
+// After a render inserts .img-embed / .file-chip spans, hydrate them: turn an
+// image embed into an inline <img> once its bytes are local, and make file chips
+// click-to-download. Purely additive — until the bytes arrive the span shows
+// the filename, not a broken image.
+function hydrateEmbeds(scope) {
+  for (const img of scope.querySelectorAll('.img-embed')) {
+    const magnet = hexToBytes(img.dataset.magnet);
+    const name = img.dataset.name;
+    // Poll for the bytes (they arrive through the mesh transfer path); on hit,
+    // swap the placeholder for an <img> backed by a data: URL.
+    const poll = setInterval(() => {
+      const bytes = hub.node.fileBytes(magnet);
+      if (bytes) {
+        clearInterval(poll);
+        const url = URL.createObjectURL(new Blob([bytes]));
+        const el = document.createElement('img');
+        el.src = url;
+        el.alt = name;
+        el.className = 'inline-img';
+        el.onerror = () => { img.textContent = name + ' (won\u2019t load)'; };
+        img.replaceWith(el);
+      }
+    }, 1000);
+    setTimeout(() => clearInterval(poll), 30000);
+  }
+  for (const chip of scope.querySelectorAll('.file-chip')) {
+    chip.onclick = (e) => { e.preventDefault(); fetchMagnetHex(chip.dataset.magnet); };
+  }
+}
+
+// ---- WYSIWYG toolbar (W12) --------------------------------------------------
+
+// Apply a markdown span to an <input>, wrapping the current selection (or the
+// word under the cursor for code). Kept out of the template-literal hazards by
+// using \x60 for the code fences.
+function applyFmt(input, kind) {
+  const el = input;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? start;
+  let text = el.value;
+
+  const wrap = (a, b) => {
+    el.value = text.slice(0, start) + a + text.slice(start, end) + b + text.slice(end);
+    const sel = start + a.length;
+    el.focus(); el.setSelectionRange(sel, sel + (end - start));
+  };
+
+  switch (kind) {
+    case 'bold': wrap('**', '**'); break;
+    case 'italic': wrap('*', '*'); break;
+    case 'code': wrap('\x60', '\x60'); break;
+    case 'link': {
+      const label = text.slice(start, end) || 'link';
+      wrap('[', '](https://)');
+      break;
+    }
+    case 'attach':
+    case 'image': {
+      // Stage a real file, publish it, and insert the canonical marker:
+      //   image -> ![name](spore:<magnet>)
+      //   file  -> 📎 name | spore:<magnet> | mime   (Appendix A)
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.onchange = async () => {
+        const f = input.files && input.files[0];
+        if (!f) return;
+        const buf = new Uint8Array(await f.arrayBuffer());
+        const magnet = hexOf(hub.node.publishFile(f.name, buf));
+        const marker = kind === 'image'
+          ? '![' + f.name + '](spore:' + magnet + ')'
+          : '📎 ' + f.name + ' | spore:' + magnet + ' | ' + (f.type || 'application/octet-stream');
+        const at = el.selectionStart ?? el.value.length;
+        el.value = el.value.slice(0, at) + ' ' + marker + ' ' + el.value.slice(at);
+        el.dispatchEvent(new Event('input'));
+        logLine('tx', (kind === 'image' ? 'attached image ' : 'attached file ') + f.name + ' (' + buf.length + ' bytes)');
+      };
+      input.click();
+      break;
+    }
+  }
+  el.dispatchEvent(new Event('input'));
+}
+
+// Bind a toolbar (bold/italic/code/link/attach/image) to an input + live preview.
+function wireFormatting(toolbarId, inputId, previewId) {
+  const input = $(inputId);
+  const preview = $(previewId);
+  if (!input || !toolbarId) return;
+  const bar = $(toolbarId);
+  if (!bar) return;
+  for (const btn of bar.querySelectorAll('button.fmt')) {
+    btn.addEventListener('click', () => applyFmt(input, btn.dataset.fmt));
+  }
+  input.addEventListener('input', () => {
+    const t = input.value;
+    if (!t) { if (preview) preview.style.display = 'none'; return; }
+    if (preview) {
+      preview.style.display = 'block';
+      preview.innerHTML = mdWithAttachments(t);
+      for (const a of preview.querySelectorAll('.magnet-link')) {
+        a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
+      }
+      hydrateEmbeds(preview);
+    }
+  });
+}
+
 // ---- compose wiring (W9) --------------------------------------------------
 function wireCompose() {
   const doSend = () => sendChatMessage();
   $('chat-send').onclick = doSend;
   $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+  wireFormatting('chat-fmt', 'chat-input', 'chat-preview');
+  wireFormatting('feed-fmt', 'feed-msg', 'feed-preview');
 
   // New-chat picker toggle.
   $('chat-new').onclick = () => {

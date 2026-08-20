@@ -18,6 +18,19 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The private group *is* the authorized feed, and formatting is WYSIWYG everywhere
+  (W12).** The private group — the sealed, key-gated channel already in the Chats
+  list — is the authorized feed; there is no separate surface. "Member" means
+  "holds the key," never a claimed roster (revocation is key rotation, forward-only,
+  per SPEC §7.1). Every writer (1:1, open group, private group, microblog) now has
+  a formatting toolbar — bold / italic / code / link / attach — with a live preview,
+  and all four render the same markdown + attachment pass. Attachments use the
+  canonical Appendix A markers on both Android and the web node: an image inlines
+  as `![name](spore:<magnet>)` → a thumbnail (bytes localised then shown, filename
+  shown until they arrive); a file attaches as `📎 name | spore:<magnet> | mime` →
+  a chip that downloads on click. A client that does not parse the markers still
+  sees the marker text — a safe fallback. No wire, C ABI, or protocol change.
+
 - **The web node's communication surfaces are unified and re-named around known
   idioms (W9, W10, W11).** Mail, Topics, and Sealed Topics collapse into one
   **Chats** surface — a single list of one-to-one chats, open groups, and
