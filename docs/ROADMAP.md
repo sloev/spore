@@ -182,7 +182,7 @@ the communicator-as-façade pattern.
 | Topics: open group join/create + public shout, clearly labeled public (W2) | ✅ shipped (#139) | Topic list, per-topic log, PUBLIC badge |
 | Sealed group: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm, sealed panel |
 | Feed/microblog: compose to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
-| Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ⬜ todo | |
+| Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ✅ shipped | spore_node_publish_file/fetch_file/list_files, Files tab |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
 | Authorized feed polish: invite flow, documented revoke-by-rotation limit (W7) | ⬜ todo | |
 | Continuity polish: export seed from new UI, docs updates (W8) | ⬜ todo | |
