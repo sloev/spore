@@ -38,6 +38,7 @@ const wasmHash = crypto.createHash('sha256').update(wasmBytes).digest('hex');
 // the serial/BLE transports that use it.
 const modules = [
   inlineModule(read('spore.mjs')),
+  inlineModule(read('ui/markdown.mjs')),
   inlineModule(read('transports/kiss.mjs')),
   inlineModule(read('transports/loopback.mjs')),
   inlineModule(read('transports/websocket.mjs')),
@@ -291,64 +292,63 @@ const html = `<!doctype html>
 <main>
   <!-- Tab bar -->
   <nav class="tab-bar" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--edge);padding-bottom:0">
-    <button class="tab" data-panel="mail" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Mail</button>
-    <button class="tab" data-panel="topics" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Topics</button>
-    <button class="tab" data-panel="feed-stream" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
+    <button class="tab" data-panel="chats" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Chats</button>
+    <button class="tab" data-panel="feed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
     <button class="tab" data-panel="files" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Files</button>
     <button class="tab" data-panel="bridges" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Bridges</button>
     <button class="tab" data-panel="seed" style="flex:1;padding:10px;background:transparent;color:var(--dim);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Seed</button>
   </nav>
 
-  <!-- Mail panel -->
-  <section class="card panel" id="panel-mail">
-    <div id="thread-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px"></div>
-    <div class="row">
-      <input type="text" id="dm-hex" placeholder="16 hex addr" style="max-width:180px;min-width:140px" />
-      <input type="text" id="dm-msg" placeholder="message\u2026" />
-      <button id="dm-send">Send DM</button>
-      <span class="cnt" id="dm-seal-state"></span>
+  <!-- Chats panel: one unified conversation list (W9) -->
+  <section class="card panel" id="panel-chats">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <button id="chat-new" style="font-size:12px;padding:4px 10px">New chat</button>
+      <span class="cnt">One-to-one chats, open groups, and private groups — in one list.</span>
+    </div>
+    <div id="chat-new-picker" style="display:none;border:1px solid var(--edge);border-radius:2px;padding:10px;margin-bottom:8px">
+      <div class="row" style="margin-top:0">
+        <input type="text" id="new-dm-hex" placeholder="16-hex address (1:1)" style="max-width:180px" />
+        <button id="new-dm-btn" class="ghost">Start 1:1</button>
+      </div>
+      <div class="row">
+        <input type="text" id="new-open-name" placeholder="open group name, e.g. spore/news" style="flex:1" />
+        <button id="new-open-btn" class="ghost">Join open group</button>
+      </div>
+      <div class="row">
+        <input type="text" id="new-sealed-name" placeholder="private group name" style="flex:1" />
+        <input type="text" id="new-sealed-key" placeholder="64-hex key (blank = generate)" style="font-family:var(--mono);font-size:11px;max-width:220px" />
+        <button id="new-sealed-btn" class="ghost">Create private</button>
+      </div>
+    </div>
+    <div id="chat-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"></div>
+    <!-- Active conversation thread + composer -->
+    <div id="chat-view" style="display:none;border:1px solid var(--edge);border-radius:2px;padding:10px">
+      <div id="chat-view-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px"></div>
+      <div id="chat-msgs" class="log" style="height:240px"></div>
+      <div class="row" id="chat-compose-row">
+        <input type="text" id="chat-input" placeholder="message&#x2026;" />
+        <button id="chat-send">Send</button>
+        <span class="cnt" id="chat-seal-state"></span>
+      </div>
     </div>
   </section>
 
-  <!-- Topics panel -->
-  <section class="card panel" id="panel-topics" style="display:none">
+  <!-- Feed panel (W10): personal microblog + subscribed feeds -->
+  <section class="card panel" id="panel-feed" style="display:none">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
       <span class="badge open" style="font-size:10px">PUBLIC</span>
-      <span class="cnt">Topics are public — anyone can read them</span>
+      <span class="cnt">Your feed is public. Anyone who knows your address can read it.</span>
     </div>
-    <div id="topic-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
-    <div class="row" style="margin-top:8px">
-      <input type="text" id="topic-msg" placeholder="message to topic\u2026" />
-      <button id="topic-send">Post</button>
-    </div>
-    <div class="row">
-      <input type="text" id="topic-follow" placeholder="follow a topic, e.g. spore/news" />
-      <button id="sub" class="ghost">Follow</button>
-      <span class="cnt" id="topics"></span>
-    </div>
-    <div class="log" id="topic-log" style="margin-top:8px"></div>
-    <details style="margin-top:12px;color:var(--dim);font-size:12px">
-      <summary style="cursor:pointer">Sealed topics (W3)</summary>
-      <p style="margin:4px 0">A sealed topic uses a shared 32-byte key (64 hex chars). Anyone with the key can post and read. No roster.</p>
-      <div class="row">
-        <input type="text" id="sealed-key" placeholder="64 hex key (or leave blank to generate)" style="font-family:var(--mono);font-size:11px" />
-      </div>
-      <div class="row">
-        <input type="text" id="sealed-name" placeholder="sealed topic name, e.g. spore/closed" />
-        <button id="sealed-create" class="ghost">Create/Join</button>
-      </div>
-      <div id="sealed-topics" style="display:flex;flex-direction:column;gap:4px;margin-top:4px"></div>
-    </details>
-  </section>
-
-  <!-- Feed panel (W4) -->
-  <section class="card panel" id="panel-feed-stream" style="display:none">
-    <div class="row">
-      <input type="text" id="feed-msg" placeholder="what's happening\u2026" />
-      <input type="text" id="feed-topic" placeholder="topic (default: spore/feed)" style="max-width:180px;min-width:120px" value="spore/feed" />
+    <div class="row" style="margin-top:0">
+      <input type="text" id="feed-msg" placeholder="what's happening&#x2026;" />
       <button id="feed-publish">Publish</button>
     </div>
-    <div id="feed-list" style="display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:420px;overflow-y:auto"></div>
+    <div class="row">
+      <input type="text" id="feed-follow" placeholder="follow a feed: paste a 16-hex address" style="max-width:220px" />
+      <button id="feed-follow-btn" class="ghost">Follow</button>
+      <span class="cnt" id="feed-following"></span>
+    </div>
+    <div id="feed-list" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:440px;overflow-y:auto"></div>
   </section>
 
   <!-- Files panel (W5) -->
@@ -444,24 +444,30 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode / file:// */ } },
   del(k) { try { localStorage.removeItem(k); } catch (e) { /* */ } },
 };
-const K_SEED = 'spore.seed', K_BRIDGES = 'spore.bridges', K_TOPICS = 'spore.topics';
+const K_SEED = 'spore.seed', K_BRIDGES = 'spore.bridges';
 // The prekey ring is secret material and must be persisted with the seed: the
 // seed restores the identity, the ring restores the ability to open mail already
 // sealed to us. Saving only the seed silently loses inbound mail after a rotation.
 const K_RING = 'spore.ring';
 
-const K_THREADS = 'spore.threads';
-const K_TOPIC_LOGS = 'spore.topicLogs';
-const K_SEALED_TOPICS = 'spore.sealedTopics';
+const K_CONVOS = 'spore.convos';     // unified conversations (W9)
+const K_FEEDS = 'spore.feeds';       // followed feed addresses (W10)
 
 let spore, hub;
 let saved = [];      // [{type, fields}] persisted bridges
-let topics = [];     // subscribed topic strings
-let threads = {};    // {hexAddr: [{text, fromMe, ts}]}
-let topicLogs = {};  // {topicName: [{text, from, ts}]}
-let activeTopic = null; // currently viewed topic name
-let sealedTopics = {}; // {topicName: keyHex}
-let feedItems = [];   // [{topic, data, ts}]
+
+// Unified conversation model (W9). A conversation is one row in the Chats list;
+// its 'type' decides the transport: 1:1 DM, open group, or private group.
+//   key     — unique storage key (hex addr for DMs, '/name' for groups)
+//   type    — 'dm' | 'open' | 'sealed'
+//   name    — display name ('/spore/news', or an 8-hex peer label for a DM)
+//   addr    — 16-hex address (DMs only)
+//   keyHex  — 64-hex PSK (sealed groups only)
+//   msgs    — [{text, fromMe, from, ts}]
+let convos = {};     // {key: conversation}
+let activeChat = null; // current conversation key
+let feedItems = [];   // [{from, topicHash, text, ts}]
+let followedFeeds = []; // subscribed feed addresses (16-hex strings)
 let feedInterval = null;
 
 // ---- boot the one real node (called last, once every def below exists) -------
@@ -509,58 +515,61 @@ async function boot() {
       const isEncrypted = (flags & FLAG_ENCRYPTED) !== 0;
       const isRatchet = (flags & FLAG_RATCHET) !== 0;
       const sender = spore.src(env);
-      let text;
-      try { text = new TextDecoder().decode(spore.payload(env)); }
-      catch (e) { text = '<' + spore.payload(env).length + ' bytes>'; }
 
+      // Only 1:1 DMs arrive here (encrypted, addressed to us). Group and feed
+      // traffic rides the pub/sub layer and is drained by pollFeed(), so there
+      // is no plaintext-broadcast fallback to demux in this handler.
       if (isEncrypted && sender) {
-        // Try to open as DM
         const opened = hub.node.openDm(sender, env, isRatchet);
         if (opened !== null) {
+          let text;
           try { text = new TextDecoder().decode(opened); }
           catch (e) { text = '<' + opened.length + ' bytes>'; }
           const hex = hexOf(sender);
-          if (!threads[hex]) threads[hex] = [];
-          threads[hex].push({ text, fromMe: false, ts: Date.now() });
-          LS.set(K_THREADS, JSON.stringify(threads));
-          renderThreadList();
-          logLine('rx', 'DM from ' + hex.substring(0, 8) + ': ' + JSON.stringify(text));
+          ensureConvo('dm', hex, hex.slice(0, 8) + '\u2026', { addr: hex });
+          convos[hex].msgs.push({ text, fromMe: false, from: hex.slice(0, 8), ts: Date.now() });
+          saveConvos();
+          renderChatList();
+          if (activeChat === hex) renderChatView();
+          logLine('rx', 'DM from ' + hex.slice(0, 8) + ': ' + JSON.stringify(text));
         } else {
-          logLine('bad', 'could not decrypt DM from ' + hexOf(sender).substring(0, 8) + ' (key may have expired)');
+          logLine('bad', 'could not decrypt DM from ' + hexOf(sender).slice(0, 8) + ' (key may have expired)');
         }
-      } else if (ok && !isEncrypted) {
-        // Could be a topic message — check if subject matches a subscribed topic
-        // Topics are sent via hub.send with dest=ZERO_DEST and topic prefix
-        // The spore.mjs send() already handles topic routing.
-        logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
       } else {
-        logLine(ok ? 'rx' : 'bad', 'received ' + JSON.stringify(text) + '  (sig ' + (ok ? 'OK' : 'BAD') + ')');
+        logLine(ok ? 'rx' : 'bad', 'received ' + spore.payload(env).length + ' bytes (sig ' + (ok ? 'OK' : 'BAD') + ') \u2014 not addressed mail');
       }
     };
 
-    // Restore followed topics.
-    try { topics = JSON.parse(LS.get(K_TOPICS) || '[]'); } catch (e) { topics = []; }
-    for (const t of topics) hub.node.subscribe(t);
-    renderTopics();
-
-    // Restore DM threads.
-    try { threads = JSON.parse(LS.get(K_THREADS) || '{}'); } catch (e) { threads = {}; }
-    renderThreadList();
-
-    // Restore topic logs.
-    try { topicLogs = JSON.parse(LS.get(K_TOPIC_LOGS) || '{}'); } catch (e) { topicLogs = {}; }
-    // Restore sealed topics.
-    try { sealedTopics = JSON.parse(LS.get(K_SEALED_TOPICS) || '{}'); } catch (e) { sealedTopics = {}; }
-    // Auto-subscribe to default feed topic
-    if (!topics.includes('spore/feed')) {
-      hub.node.subscribe('spore/feed');
-      topics.push('spore/feed');
-      LS.set(K_TOPICS, JSON.stringify(topics));
+    // Restore conversations (W9) and re-subscribe groups.
+    try { convos = JSON.parse(LS.get(K_CONVOS) || '{}'); } catch (e) { convos = {}; }
+    // One-time migration from the pre-W9 stores so a returning node keeps history.
+    if (Object.keys(convos).length === 0) {
+      try {
+        const oldThreads = JSON.parse(LS.get('spore.threads') || '{}');
+        for (const [hex, msgs] of Object.entries(oldThreads)) {
+          convos[hex] = { type: 'dm', name: hex.slice(0, 8) + '\u2026', addr: hex,
+            msgs: msgs.map((m) => ({ text: m.text, fromMe: m.fromMe, from: m.fromMe ? 'me' : hex.slice(0, 8), ts: m.ts })) };
+        }
+      } catch (e) { /* leave empty */ }
+      try {
+        const oldSealed = JSON.parse(LS.get('spore.sealedTopics') || '{}');
+        for (const [name, keyHex] of Object.entries(oldSealed)) {
+          convos['/' + name] = { type: 'sealed', name: '/' + name, keyHex, msgs: [] };
+        }
+      } catch (e) { /* */ }
     }
-    if (topics.length > 0) activeTopic = topics[0];
-    renderTopicList();
-    renderTopicView();
-    renderSealedTopics();
+    saveConvos();
+    for (const c of Object.values(convos)) {
+      if (c.type !== 'dm' && c.name) hub.node.subscribe(c.name.replace(/^[/]/, ''));
+    }
+
+    // Restore followed feeds (W10).
+    try { followedFeeds = JSON.parse(LS.get(K_FEEDS) || '[]'); } catch (e) { followedFeeds = []; }
+    for (const addr of followedFeeds) hub.node.subscribe(feedTopicOf(addr));
+
+    renderChatList();
+    renderChatView();
+    renderFeedFollowing();
     startFeedPoll();
     renderLocalFiles();
 
@@ -586,297 +595,313 @@ async function boot() {
   }
 }
 
-// ---- DM threads -------------------------------------------------------------
-function saveThreads() { LS.set(K_THREADS, JSON.stringify(threads)); }
+// ---- conversations (W9) ----------------------------------------------------
+// (ensureConvo, saveConvos, feedTopicOf are defined above, near boot.)
 
-function renderTopics() {
-  $('topics').textContent = topics.length ? 'following: ' + topics.join(', ') : '';
-}
+// Type badge metadata: color + label for each conversation kind.
+const CONVO_BADGES = {
+  dm:     { label: '1:1',   color: 'var(--accent2)' },
+  open:   { label: 'OPEN',  color: 'var(--ok)' },
+  sealed: { label: 'PRIVATE', color: 'var(--accent)' },
+};
 
-// Track bridge count and show Baud empty state when none are active
-function updateBridgesEmptyState() {
-  const container = $('bridges');
-  const existing = container.querySelector('.baud-empty');
-  const hasBridges = container.children.length > (existing ? 1 : 0);
-  if (hasBridges) {
-    if (existing) existing.remove();
-  } else {
-    if (!existing) {
-      const h = document.createElement('div');
-      h.innerHTML = baudEmpty('No bridges yet. Add one above.', 'ADD BRIDGE', 'SHARE INVITE');
-      // Wire the ADD BRIDGE click to focus the add bridge button
-      const addBtn = $('add');
-      if (addBtn) h.querySelectorAll('.cnt')[0]?.addEventListener('click', () => addBtn.focus());
-      container.prepend(h);
-    }
-  }
-}
+// Markdown + magnet rendering (W11) live in web/ui/markdown.mjs, inlined as a
+// module. It holds the escapeHtml / mdInline / mdWithMagnet helpers so the regex
+// backslashes are not rewritten by the template literal that carries this script.
 
-function baudEmpty(message, action1, action2) {
-  // Baud: a small inline SVG chibi face — pastel pink, antenna, eye-patch
-  // Rendered as data: URI to keep the standalone zero-external-request.
-  const baudSvg = '<svg viewBox="0 0 48 48" width="32" height="32" style="display:block;margin:0 auto 8px">' +
-    '<circle cx="24" cy="24" r="20" fill="#ff2a85" opacity="0.15"/>' +
-    '<line x1="24" y1="4" x2="18" y2="14" stroke="#8a7a4a" stroke-width="2" stroke-linecap="round"/>' +
-    '<line x1="24" y1="4" x2="30" y2="14" stroke="#8a7a4a" stroke-width="2" stroke-linecap="round"/>' +
-    '<circle cx="18" cy="20" r="2" fill="#0a0a0c"/>' +
-    '<circle cx="30" cy="20" r="2" fill="#0a0a0c"/>' +
-    '<path d="M18 28 Q24 34 30 28" stroke="#ff2a85" stroke-width="2" fill="none" stroke-linecap="round"/>' +
-    '</svg>';
-  return '<div class="baud-empty" style="text-align:center;padding:20px 0;color:var(--dim)">' +
-    baudSvg +
-    '<p style="margin:4px 0 10px;font-size:13px">' + message + '</p>' +
-    '<div style="display:flex;gap:6px;justify-content:center">' +
-    (action1 ? '<span class="cnt" style="border:1px solid var(--edge);border-radius:2px;padding:2px 8px;font-size:11px;cursor:pointer">' + action1 + '</span>' : '') +
-    (action2 ? '<span class="cnt" style="border:1px solid var(--edge);border-radius:2px;padding:2px 8px;font-size:11px;cursor:pointer">' + action2 + '</span>' : '') +
-    '</div></div>';
-}
 
-function renderThreadList() {
-  const el = $('thread-list');
-  const entries = Object.entries(threads).sort((a, b) => {
-    const lastA = a.value.length ? a.value[a.value.length - 1].ts : 0;
-    const lastB = b.value.length ? b.value[b.value.length - 1].ts : 0;
+function renderChatList() {
+  const el = $('chat-list');
+  const entries = Object.entries(convos).sort((a, b) => {
+    const lastA = a[1].msgs.length ? a[1].msgs[a[1].msgs.length - 1].ts : 0;
+    const lastB = b[1].msgs.length ? b[1].msgs[b[1].msgs.length - 1].ts : 0;
     return lastB - lastA;
   });
-  el.innerHTML = entries.length === 0
-    ? baudEmpty('No conversations yet. Paste a 16-hex address and send a DM.')
-    : entries.map(([addr, msgs]) => {
-        const last = msgs[msgs.length - 1];
-        const preview = (last.fromMe ? 'You: ' : '') + (last.text.length > 40 ? last.text.slice(0, 40) + '\u2026' : last.text);
-        const addrShort = addr.slice(0, 8);
-        return '<div class="thread-row" data-addr="' + addr + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--edge);border-radius:2px;cursor:pointer">' +
-          '<span style="font-family:var(--mono);font-size:12px;color:var(--accent2);min-width:80px">' + addrShort + '\u2026</span>' +
-          '<span style="flex:1;font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + preview + '</span>' +
-          '<span style="font-size:10px;color:var(--dim)">' + new Date(last.ts).toLocaleTimeString() + '</span>' +
-        '</div>';
-      }).join('');
-  // Click to fill address
-  for (const row of el.querySelectorAll('.thread-row')) {
-    row.onclick = () => { $('dm-hex').value = row.dataset.addr; };
+  if (!entries.length) {
+    el.innerHTML = baudEmpty('No chats yet. Start a 1:1, join an open group, or create a private group.');
+    return;
+  }
+  el.innerHTML = entries.map(([key, c]) => {
+    const b = CONVO_BADGES[c.type] || CONVO_BADGES.dm;
+    const last = c.msgs.length ? c.msgs[c.msgs.length - 1] : null;
+    const preview = last ? ((last.fromMe ? 'You: ' : '') + (last.text.length > 40 ? last.text.slice(0, 40) + '\u2026' : last.text)) : '';
+    const isActive = key === activeChat;
+    return '<div class="chat-row" data-key="' + escapeHtml(key) + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid ' + (isActive ? 'var(--accent2)' : 'var(--edge)') + ';border-radius:2px;cursor:pointer;background:' + (isActive ? 'var(--panel)' : 'transparent') + '">' +
+      '<span class="badge" style="font-size:9px;border-color:' + b.color + ';color:' + b.color + '">' + b.label + '</span>' +
+      '<span style="font-family:var(--mono);font-size:12px;color:' + (c.type === 'dm' ? 'var(--accent2)' : 'var(--ink)') + ';min-width:84px">' + escapeHtml(c.name) + '</span>' +
+      '<span style="flex:1;font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(preview) + '</span>' +
+      (last ? '<span style="font-size:10px;color:var(--dim)">' + new Date(last.ts).toLocaleTimeString() + '</span>' : '') +
+    '</div>';
+  }).join('');
+  for (const row of el.querySelectorAll('.chat-row')) {
+    row.onclick = () => { activeChat = row.dataset.key; renderChatList(); renderChatView(); };
   }
 }
 
-function wireCompose() {
-  // DM send
-  const doDm = () => {
-    const hex = $('dm-hex').value.trim().replace(/[^0-9a-fA-F]/g, '');
-    if (hex.length !== 16) { logLine('bad', 'DM address needs 16 hex chars'); return; }
-    const text = $('dm-msg').value.trim();
-    if (!text) { logLine('bad', 'message is empty'); return; }
-    const dest = hexToBytes(hex);
-    const canSeal = hub.node.canSealTo(dest);
-    if (!canSeal) {
-      $('dm-seal-state').textContent = '\u26a0 no prekey — will be sent in the clear';
-      $('dm-seal-state').style.color = 'var(--warn)';
-    } else {
-      $('dm-seal-state').textContent = '\u2705 sealed';
-      $('dm-seal-state').style.color = 'var(--ok)';
+function renderChatView() {
+  const view = $('chat-view');
+  const head = $('chat-view-head');
+  const msgsEl = $('chat-msgs');
+  const sealState = $('chat-seal-state');
+  if (!activeChat || !convos[activeChat]) {
+    view.style.display = 'none';
+    return;
+  }
+  const c = convos[activeChat];
+  view.style.display = 'block';
+  const b = CONVO_BADGES[c.type] || CONVO_BADGES.dm;
+  head.innerHTML = '<span class="badge" style="font-size:10px;border-color:' + b.color + ';color:' + b.color + '">' + b.label + '</span>' +
+    '<span style="font-family:var(--mono);font-size:13px;font-weight:600">' + escapeHtml(c.name) + '</span>' +
+    (c.type === 'open' ? '<span class="cnt">anyone can read this</span>' : '') +
+    (c.type === 'sealed' ? '<span class="cnt">anyone with the key can read this</span>' : '') +
+    (c.type === 'dm' ? '<span class="cnt" id="dm-seal-hint"></span>' : '');
+
+  if (!c.msgs.length) {
+    msgsEl.innerHTML = '<span class="cnt" style="display:block;text-align:center;padding:20px 0">No messages yet.</span>';
+  } else {
+    msgsEl.innerHTML = c.msgs.map((m) => {
+      const cls = m.fromMe ? 'tx' : 'rx';
+      const who = m.fromMe ? '' : '<' + escapeHtml(m.from || '?') + '> ';
+      return '<div class="' + cls + '">' + stamp() + '  ' + who + mdWithMagnet(m.text) + '</div>';
+    }).join('');
+  }
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+  // Wire any magnet links in the history to fetch on click.
+  for (const a of msgsEl.querySelectorAll('.magnet-link')) {
+    a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
+  }
+
+  // Composer: for 1:1, mirror the live seal state honestly (never a bare padlock).
+  if (c.type === 'dm') {
+    sealState.textContent = '';
+    const hint = $('dm-seal-hint');
+    if (c.addr) {
+      const dest = hexToBytes(c.addr);
+      const canSeal = hub.node.canSealTo(dest);
+      if (hint) {
+        hint.textContent = canSeal ? '\u2705 sealed' : '\u26a0 no prekey \u2014 will be sent in the clear';
+        hint.style.color = canSeal ? 'var(--ok)' : 'var(--warn)';
+      }
     }
+  } else {
+    sealState.textContent = '';
+  }
+}
+
+function sendChatMessage() {
+  if (!activeChat || !convos[activeChat]) return;
+  const c = convos[activeChat];
+  const text = $('chat-input').value.trim();
+  if (!text) return;
+
+  if (c.type === 'dm') {
+    if (!c.addr) { logLine('bad', 'no address for this chat'); return; }
+    const dest = hexToBytes(c.addr);
+    const canSeal = hub.node.canSealTo(dest);
     const payload = new TextEncoder().encode(text);
     const { forwards } = hub.node.sendDirect(dest, payload);
     hub._dispatch(forwards, null);
-    if (!threads[hex]) threads[hex] = [];
-    threads[hex].push({ text, fromMe: true, ts: Date.now() });
-    saveThreads();
-    renderThreadList();
-    logLine('tx', 'DM to ' + hex.substring(0, 8) + ': ' + JSON.stringify(text) + (canSeal ? ' (sealed)' : ' (cleartext)'));
-    $('dm-msg').value = '';
-  };
-  $('dm-send').onclick = doDm;
-  $('dm-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doDm(); });
-
-  // Topic send
-  const doTopicSend = () => {
-    const text = $('topic-msg').value.trim();
-    if (!text) return;
-    if (!activeTopic) { logLine('bad', 'follow a topic first'); return; }
-    // Send to topic via broadcast — topic routing is handled by the core
-    hub.send(ZERO_DEST, new TextEncoder().encode('/' + activeTopic + ' ' + text));
-    // Record locally
-    if (!topicLogs[activeTopic]) topicLogs[activeTopic] = [];
-    topicLogs[activeTopic].push({ text, from: 'me', ts: Date.now() });
-    LS.set(K_TOPIC_LOGS, JSON.stringify(topicLogs));
-    renderTopicView();
-    logLine('sys', 'posted to ' + activeTopic + ': ' + JSON.stringify(text));
-    $('topic-msg').value = '';
-  };
-  $('topic-send').onclick = doTopicSend;
-  $('topic-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') doTopicSend(); });
-
-  // Topic follow
-  $('sub').onclick = () => {
-    const t = $('topic-follow').value.trim();
-    if (!t || topics.includes(t)) { $('topic-follow').value = ''; return; }
-    hub.node.subscribe(t);
-    topics.push(t);
-    LS.set(K_TOPICS, JSON.stringify(topics));
-    if (!topicLogs[t]) topicLogs[t] = [];
-    LS.set(K_TOPIC_LOGS, JSON.stringify(topicLogs));
-    if (!activeTopic) { activeTopic = t; }
-    renderTopics();
-    renderTopicView();
-    renderTopicList();
-    logLine('sys', 'now following topic ' + JSON.stringify(t));
-    $('topic-follow').value = '';
-  };
+    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now() });
+    saveConvos();
+    renderChatList(); renderChatView();
+    logLine('tx', 'DM to ' + c.addr.slice(0, 8) + (canSeal ? ' (sealed)' : ' (cleartext)'));
+  } else if (c.type === 'open') {
+    const topic = c.name.replace(/^[/]/, '');
+    hub.node.publish(topic, new TextEncoder().encode(text));
+    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now() });
+    saveConvos();
+    renderChatList(); renderChatView();
+    logLine('tx', 'posted to /' + topic);
+  } else if (c.type === 'sealed') {
+    const topic = c.name.replace(/^[/]/, '');
+    const keyBytes = hexToBytes(c.keyHex);
+    const ct = spore.topicSeal(new TextEncoder().encode(text), keyBytes);
+    hub.node.publish(topic, ct);
+    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now() });
+    saveConvos();
+    renderChatList(); renderChatView();
+    logLine('tx', 'posted (sealed) to /' + topic);
+  }
+  $('chat-input').value = '';
 }
 
-function renderTopicList() {
-  const el = $('topic-list');
-  if (!topics.length) {
-    el.innerHTML = '<span class="cnt" style="padding:8px 0">No topics yet. Follow one above.</span>';
-    return;
-  }
-  el.innerHTML = topics.map(t => {
-    const isActive = t === activeTopic;
-    return '<div class="topic-row" data-topic="' + t + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid ' + (isActive ? 'var(--ok)' : 'var(--edge)') + ';border-radius:2px;cursor:pointer;background:' + (isActive ? 'var(--panel)' : 'transparent') + '">' +
-      '<span class="badge open" style="font-size:9px;border-color:var(--ok)">PUBLIC</span>' +
-      '<span style="flex:1;font-size:13px;color:' + (isActive ? 'var(--ok)' : 'var(--ink)') + '">/' + t + '</span>' +
-      (topicLogs[t] && topicLogs[t].length ? '<span class="cnt">' + topicLogs[t].length + '</span>' : '') +
-    '</div>';
-  }).join('');
-  for (const row of el.querySelectorAll('.topic-row')) {
-    row.onclick = () => {
-      activeTopic = row.dataset.topic;
-      renderTopicView();
-      renderTopicList();
-    };
-  }
+// ---- feed (W10): personal microblog + subscribed feeds ---------------------
+function renderFeedFollowing() {
+  $('feed-following').textContent = followedFeeds.length
+    ? 'following ' + followedFeeds.length + ' feed' + (followedFeeds.length === 1 ? '' : 's')
+    : 'you are not following anyone yet';
 }
 
-function renderTopicView() {
-  const logEl = $('topic-log');
-  if (!activeTopic) {
-    logEl.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">Select a topic to view messages</span>';
-    return;
-  }
-  const msgs = topicLogs[activeTopic] || [];
-  if (!msgs.length) {
-    logEl.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">No messages in /' + activeTopic + ' yet</span>';
-    return;
-  }
-  logEl.innerHTML = msgs.map(m => {
-    const cls = m.from === 'me' ? 'tx' : 'rx';
-    return '<div class="' + cls + '">' + stamp() + '  ' + (m.from !== 'me' ? '<' + m.from + '> ' : '') + JSON.stringify(m.text) + '</div>';
-  }).join('');
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-// ---- sealed topics (W3) ---------------------------------------------------
 function startFeedPoll() {
   if (feedInterval) clearInterval(feedInterval);
   feedInterval = setInterval(() => {
     if (!hub) return;
     const events = hub.node.pollFeed();
     for (const ev of events) {
-      feedItems.unshift({ topic: ev.topic, data: ev.data, ts: Date.now() });
+      // The author is the authenticated sender; a null 'from' is never claimed.
+      const from = ev.from ? hexOf(ev.from) : null;
+      const topicHash = hexOf(ev.topic);
+
+      // Demux by topic: a group message lands in its conversation; a feed
+      // event lands in the merged timeline. Both ride the same pub/sub layer.
+      const convo = convoForTopicHash(topicHash);
+      if (convo) {
+        let text;
+        if (convo.type === 'sealed' && convo.keyHex) {
+          const opened = spore.topicOpen(ev.data, hexToBytes(convo.keyHex));
+          text = opened !== null ? new TextDecoder().decode(opened) : '(could not decrypt \u2014 wrong key?)';
+        } else {
+          try { text = new TextDecoder().decode(ev.data); } catch (e) { text = '<' + ev.data.length + ' bytes>'; }
+        }
+        convo.msgs.push({ text, fromMe: false, from: from ? from.slice(0, 8) : '?', ts: Date.now() });
+        saveConvos();
+        renderChatList();
+        if (activeChat !== null && convos[activeChat] === convo) renderChatView();
+        logLine('rx', convo.name + ' <' + (from ? from.slice(0, 8) : '?') + '>: ' + JSON.stringify(text));
+      } else {
+        // A feed post (or an event for a topic we no longer follow).
+        let text;
+        try { text = new TextDecoder().decode(ev.data); } catch (e) { text = '<' + ev.data.length + ' bytes>'; }
+        feedItems.unshift({ from, topic: ev.topic, text, ts: Date.now() });
+      }
     }
     if (feedItems.length > 200) feedItems = feedItems.slice(0, 200);
     renderFeed();
   }, 2000);
 }
 
+// Map a topic hash (hex of the 8-byte topic address) back to the open/sealed
+// conversation it belongs to, if any.
+function convoForTopicHash(topicHash) {
+  for (const c of Object.values(convos)) {
+    if (c.type === 'dm') continue;
+    const name = c.name.replace(/^[/]/, '');
+    if (hexOf(spore.topicOf(name)) === topicHash) return c;
+  }
+  return null;
+}
+
 function renderFeed() {
   const el = $('feed-list');
   if (!feedItems.length) {
-    el.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">No feed events yet. Publish one above.</span>';
+    el.innerHTML = '<span class="cnt" style="padding:20px;display:block;text-align:center">Nothing yet. Publish above, or follow someone.</span>';
     return;
   }
-  el.innerHTML = feedItems.slice(0, 50).map(item => {
-    let text;
-    try { text = new TextDecoder().decode(item.data); } catch (e) { text = '<' + item.data.length + ' bytes>'; }
-    const topicStr = item.topic && item.topic.length ? item.topic : '(broadcast)';
-    const topicHex = topicStr instanceof Uint8Array ? Array.from(topicStr).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 8) : topicStr;
-    return '<div style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;border:1px solid var(--edge);border-radius:2px;font-size:12.5px">' +
-      '<span class="badge open" style="font-size:9px;flex-shrink:0;margin-top:1px">' + (typeof topicHex === 'string' && topicHex.length > 20 ? topicHex.substring(0, 8) + '\u2026' : topicHex) + '</span>' +
-      '<span style="flex:1;color:var(--prose);word-break:break-word">' + JSON.stringify(text) + '</span>' +
+  el.innerHTML = feedItems.slice(0, 60).map((item) => {
+    const author = item.from ? item.from.slice(0, 8) : 'anonymous';
+    const isMine = item.from === hexOf(hub.node.addr());
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--edge);border-radius:2px;font-size:12.5px">' +
+      '<span class="badge open" style="font-size:9px;flex-shrink:0;margin-top:1px;border-color:' + (isMine ? 'var(--accent2)' : 'var(--ok)') + ';color:' + (isMine ? 'var(--accent2)' : 'var(--ok)') + '">' + (isMine ? 'you' : author) + '</span>' +
+      '<span style="flex:1;color:var(--ink);word-break:break-word">' + mdWithMagnet(item.text) + '</span>' +
       '<span class="cnt" style="flex-shrink:0">' + new Date(item.ts).toLocaleTimeString() + '</span>' +
     '</div>';
   }).join('');
-}
-
-// Wire feed publish
-document.addEventListener('DOMContentLoaded', () => {
-  const feedBtn = $('feed-publish');
-  if (feedBtn) {
-    feedBtn.onclick = () => {
-      const text = $('feed-msg').value.trim();
-      if (!text) return;
-      const topic = $('feed-topic').value.trim() || 'spore/feed';
-      const payload = new TextEncoder().encode(text);
-      hub.node.publish(topic, payload);
-      // Also send via broadcast so it reaches non-subscribers
-      feedItems.unshift({ topic: topic, data: payload, ts: Date.now() });
-      if (feedItems.length > 200) feedItems = feedItems.slice(0, 200);
-      renderFeed();
-      logLine('sys', 'published to ' + topic + ': ' + JSON.stringify(text));
-      $('feed-msg').value = '';
-    };
-  }
-});
-
-function renderSealedTopics() {
-  const el = $('sealed-topics');
-  const entries = Object.entries(sealedTopics);
-  if (!entries.length) {
-    el.innerHTML = '<span class="cnt">No sealed topics yet. Create or join one above.</span>';
-    return;
-  }
-  el.innerHTML = entries.map(([name, key]) => {
-    const isActive = name === activeTopic;
-    return '<div class="topic-row" data-topic="' + name + '" data-key="' + key + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid ' + (isActive ? 'var(--accent)' : 'var(--edge)') + ';border-radius:2px;cursor:pointer;background:' + (isActive ? 'var(--panel)' : 'transparent') + '">' +
-      '<span class="badge" style="font-size:9px;border-color:var(--accent);color:var(--accent)">SEALED</span>' +
-      '<span style="flex:1;font-size:13px;color:' + (isActive ? 'var(--accent)' : 'var(--ink)') + '">/' + name + '</span>' +
-      (topicLogs[name] && topicLogs[name].length ? '<span class="cnt">' + topicLogs[name].length + '</span>' : '') +
-    '</div>';
-  }).join('');
-  for (const row of el.querySelectorAll('.topic-row')) {
-    row.onclick = () => {
-      activeTopic = row.dataset.topic;
-      renderTopicView();
-      renderTopicList();
-      renderSealedTopics();
-    };
+  for (const a of el.querySelectorAll('.magnet-link')) {
+    a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
   }
 }
 
-// Wire sealed topic create/join
-document.addEventListener('DOMContentLoaded', () => {
-  const sealBtn = $('sealed-create');
-  if (sealBtn) {
-    sealBtn.onclick = () => {
-      const name = $('sealed-name').value.trim();
-      if (!name) { logLine('bad', 'enter a topic name'); return; }
-      let keyHex = $('sealed-key').value.trim().replace(/[^0-9a-fA-F]/g, '');
-      // Generate a key if none provided
-      if (!keyHex) {
-        const k = new Uint8Array(32);
-        crypto.getRandomValues(k);
-        keyHex = hexOf(k);
-        $('sealed-key').value = keyHex;
-      }
-      if (keyHex.length !== 64) { logLine('bad', 'key must be 64 hex chars (32 bytes)'); return; }
-      sealedTopics[name] = keyHex;
-      LS.set(K_SEALED_TOPICS, JSON.stringify(sealedTopics));
-      // Subscribe to the topic
-      if (!topics.includes(name)) {
-        hub.node.subscribe(name);
-        topics.push(name);
-        LS.set(K_TOPICS, JSON.stringify(topics));
-      }
-      if (!topicLogs[name]) topicLogs[name] = [];
-      LS.set(K_TOPIC_LOGS, JSON.stringify(topicLogs));
-      activeTopic = name;
-      renderTopics();
-      renderTopicList();
-      renderSealedTopics();
-      renderTopicView();
-      logLine('sys', 'sealed topic /' + name + ' ready — anyone with the key can read');
-      $('sealed-name').value = '';
-    };
-  }
-});
+function fetchMagnetHex(hex) {
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) { logLine('bad', 'bad magnet'); return; }
+  const magnet = hexToBytes(hex);
+  logLine('sys', 'fetching magnet ' + hex.slice(0, 8) + '\u2026');
+  const poll = setInterval(() => {
+    const bytes = hub.node.fileBytes(magnet);
+    if (bytes) {
+      clearInterval(poll);
+      const name = hub.node.fileName(magnet) || 'unnamed.bin';
+      const blob = new Blob([bytes]);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      URL.revokeObjectURL(a.href);
+      logLine('sys', 'downloaded ' + name + ' (' + bytes.length + ' bytes)');
+      renderLocalFiles();
+    }
+  }, 1000);
+  setTimeout(() => clearInterval(poll), 30000);
+}
+
+// ---- compose wiring (W9) --------------------------------------------------
+function wireCompose() {
+  const doSend = () => sendChatMessage();
+  $('chat-send').onclick = doSend;
+  $('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+
+  // New-chat picker toggle.
+  $('chat-new').onclick = () => {
+    const p = $('chat-new-picker');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  };
+
+  // 1:1
+  $('new-dm-btn').onclick = () => {
+    const hex = $('new-dm-hex').value.trim().replace(/[^0-9a-fA-F]/g, '');
+    if (hex.length !== 16) { logLine('bad', 'a 1:1 address is 16 hex chars'); return; }
+    ensureConvo('dm', hex, hex.slice(0, 8) + '\u2026', { addr: hex });
+    saveConvos();
+    activeChat = hex;
+    $('new-dm-hex').value = '';
+    renderChatList(); renderChatView();
+  };
+
+  // Open group
+  $('new-open-btn').onclick = () => {
+    const name = $('new-open-name').value.trim().replace(/^[/]/, '');
+    if (!name) { logLine('bad', 'enter a group name'); return; }
+    hub.node.subscribe(name);
+    const key = '/' + name;
+    ensureConvo('open', key, '/' + name);
+    saveConvos();
+    activeChat = key;
+    $('new-open-name').value = '';
+    renderChatList(); renderChatView();
+    logLine('sys', 'joined open group /' + name);
+  };
+
+  // Private (sealed) group
+  $('new-sealed-btn').onclick = () => {
+    const name = $('new-sealed-name').value.trim().replace(/^[/]/, '');
+    if (!name) { logLine('bad', 'enter a group name'); return; }
+    let keyHex = $('new-sealed-key').value.trim().replace(/[^0-9a-fA-F]/g, '');
+    if (!keyHex) { const k = new Uint8Array(32); crypto.getRandomValues(k); keyHex = hexOf(k); $('new-sealed-key').value = keyHex; }
+    if (keyHex.length !== 64) { logLine('bad', 'the key must be 64 hex chars (32 bytes)'); return; }
+    hub.node.subscribe(name);
+    const key = '/' + name;
+    ensureConvo('sealed', key, '/' + name, { keyHex });
+    saveConvos();
+    activeChat = key;
+    $('new-sealed-name').value = '';
+    renderChatList(); renderChatView();
+    logLine('sys', 'private group /' + name + ' ready \u2014 anyone with the key can read');
+  };
+
+  // Feed follow (W10): subscribe to a peer's feed::<addr>.
+  $('feed-follow-btn').onclick = () => {
+    const addr = $('feed-follow').value.trim().replace(/[^0-9a-fA-F]/g, '');
+    if (addr.length !== 16) { logLine('bad', 'a feed address is 16 hex chars'); return; }
+    if (followedFeeds.includes(addr)) { $('feed-follow').value = ''; return; }
+    hub.node.subscribe(feedTopicOf(addr));
+    followedFeeds.push(addr);
+    LS.set(K_FEEDS, JSON.stringify(followedFeeds));
+    renderFeedFollowing();
+    logLine('sys', 'following feed ' + addr.slice(0, 8) + '\u2026');
+    $('feed-follow').value = '';
+  };
+
+  // Feed publish (W10): publish to your own feed::<your_addr>.
+  $('feed-publish').onclick = () => {
+    const text = $('feed-msg').value.trim();
+    if (!text) return;
+    const myAddr = hexOf(hub.node.addr());
+    hub.node.publish(feedTopicOf(myAddr), new TextEncoder().encode(text));
+    feedItems.unshift({ from: myAddr, topic: spore.topicOf(feedTopicOf(myAddr)), text, ts: Date.now() });
+    if (feedItems.length > 200) feedItems = feedItems.slice(0, 200);
+    renderFeed();
+    logLine('tx', 'published to your feed (' + myAddr.slice(0, 8) + '\u2026)');
+    $('feed-msg').value = '';
+  };
+  $('feed-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('feed-publish').onclick(); });
+}
 
 // ---- bridge registry ---------------------------------------------------------
 // flags: gesture=needs a user gesture to (re)connect; autoReconnect=safe to open
@@ -1248,7 +1273,7 @@ $('save').onclick = () => {
 };
 $('forget').onclick = () => {
   if (!confirm('Forget the saved identity and bridges in this browser? This node will come back as a new stranger.')) return;
-  LS.del(K_SEED); LS.del(K_BRIDGES); LS.del(K_TOPICS); LS.del(K_RING);
+  LS.del(K_SEED); LS.del(K_BRIDGES); LS.del(K_RING); LS.del(K_CONVOS); LS.del(K_FEEDS);
   location.reload();
 };
 
@@ -1369,8 +1394,8 @@ document.addEventListener('DOMContentLoaded', () => {
   for (const tab of document.querySelectorAll('.tab')) {
     tab.onclick = () => switchTab(tab.dataset.panel);
   }
-  // Start on Mail
-  switchTab('mail');
+  // Start on Chats
+  switchTab('chats');
 });
 
 // Everything is defined; start the node.

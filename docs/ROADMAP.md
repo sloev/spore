@@ -203,9 +203,9 @@ subscribed feeds. Files, Bridges, and Seed remain separate surfaces.
 | Private group chat: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm, sealed panel |
 | Microblog: publish to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
 | Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ✅ shipped | spore_node_publish_file/fetch_file/list_files, Files tab |
-| Chat IA — unified conversation list: 1:1 + open groups + private groups in one list, type badges (🔒 1:1 / 🌐 open / 🔑 sealed), new-conversation picker, merge Mail + Topics + Sealed panels (W9) | ⬜ todo | Web node: 6 tabs → 5 (Chats, Feed, Files, Bridges, Seed). No protocol change |
-| Microblog IA — personal feed (`feed::<your_addr>`), subscribe by address (not shared `spore/feed` topic), merged subscribed-feeds timeline (W10) | ⬜ todo | Per-address feed naming convention; W4 shipped the primitive, this reworks the UI |
-| Formatting + attachments — markdown (bold/italic/code/link) + file/image embed (magnet reference) in both chats and microblog (W11) | ⬜ todo | Client-side markdown render; magnet ref in message text; Android Feed already has markdown |
+| Chat IA — unified conversation list: 1:1 + open groups + private groups in one list, type badges (1:1 / OPEN / PRIVATE), new-conversation picker, merge Mail + Topics + Sealed panels (W9) | ✅ shipped | Web node: 6 tabs → 5 (Chats, Feed, Files, Bridges, Seed). No protocol change |
+| Microblog IA — personal feed (`feed::<your_addr>`), subscribe by address (not shared `spore/feed` topic), merged subscribed-feeds timeline (W10) | ✅ shipped | Per-address feed naming; poll_feed now returns the authenticated `from`; groups + feeds demux on the topic hash |
+| Formatting + attachments — markdown (bold/italic/code/link) + file embed (magnet reference) in both chats and microblog (W11) | ✅ shipped | Client-side markdown (web/ui/markdown.mjs), XSS-safe (escape-before-markup); magnet:<> renders a download link |
 | W9–W11 Android parity — Chats list adds sealed groups; Feed adds per-address subscribe; formatting in chats | ⬜ todo | Android Chats already mixes DMs + PUBLIC; add sealed group rows + per-address feed |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
 | Authorized feed polish: invite flow, documented revoke-by-rotation limit (W7) | ⬜ todo | Access-controlled feeds; distinct from W10 public microblog |

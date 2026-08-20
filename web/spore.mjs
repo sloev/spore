@@ -124,6 +124,17 @@ class Spore {
     return out.length === 8 ? out : null;
   }
 
+  /** Hash a topic name to its 8-byte address (§2: SHA-256(name)[..8]). */
+  topicOf(name) {
+    const np = this._put(new TextEncoder().encode(name));
+    const p = this.ex.spore_alloc(8);
+    this.ex.spore_topic_of(np, name.length, p);
+    const a = this._u8(p, 8).slice();
+    this.ex.spore_free(p, 8);
+    this.ex.spore_free(np, name.length);
+    return a;
+  }
+
   /** Seal a message under a 32-byte topic pre-shared key (W3). */
   topicSeal(msg, psk) {
     const mp = this._put(msg);
@@ -279,7 +290,7 @@ class SporeNode {
     return this.s._parse(this.s._unpack(packed));
   }
 
-  /** Drain feed events from subscribed topics. Returns [{topic, data}]. */
+  /** Drain feed events from subscribed topics. Returns [{from, topic, data}]. */
   pollFeed() {
     const packed = this.s._unpack(this.s.ex.spore_node_poll_feed(this.ptr));
     if (!packed.length) return [];
@@ -288,11 +299,16 @@ class SporeNode {
     const n = dv.getUint32(o, false); o += 4;
     const out = [];
     for (let i = 0; i < n; i++) {
+      const flen = dv.getUint8(o); o += 1;
+      let from = null;
+      if (flen === 8) { from = packed.slice(o, o + 8); o += 8; }
       const tlen = dv.getUint32(o, false); o += 4;
-      const topic = new TextDecoder().decode(packed.slice(o, o + tlen)); o += tlen;
+      // `topic` is the 8-byte SHA-256 prefix (topic_of), not a name — the caller
+      // maps it back to a followed topic name via `spore.topicOf(name)`.
+      const topic = packed.slice(o, o + tlen); o += tlen;
       const dlen = dv.getUint32(o, false); o += 4;
       const data = packed.slice(o, o + dlen); o += dlen;
-      out.push({ topic, data });
+      out.push({ from, topic, data });
     }
     return out;
   }

@@ -261,6 +261,10 @@ pub unsafe extern "C" fn spore_node_poll_feed(n: *mut crate::Node) -> SporeBytes
 // -- files (W5) ---------------------------------------------------------------
 
 /// Publish a file from bytes. Returns forwards packed as SporeBytes.
+///
+/// # Safety
+/// `n` is valid; `name`/`data` point to `nlen`/`dlen` readable bytes; `dest`
+/// points to 8 readable bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_publish_file(
@@ -279,13 +283,21 @@ pub unsafe extern "C" fn spore_node_publish_file(
         let mut d = [0u8; 8];
         d.copy_from_slice(std::slice::from_raw_parts(dest, 8));
         let (_magnet, forwards) = node.publish_file(&n_str, bytes, d, now);
-        SporeBytes::from_vec(forwards.into_iter().flat_map(|f| match f {
-            crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. } => bytes,
-        }).collect())
+        SporeBytes::from_vec(
+            forwards
+                .into_iter()
+                .flat_map(|f| match f {
+                    crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. } => bytes,
+                })
+                .collect(),
+        )
     })
 }
 
 /// Get file bytes for a magnet. SporeBytes::null() if not found.
+///
+/// # Safety
+/// `n` is valid; `magnet` points to 16 readable bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_file_bytes(n: *mut crate::Node, magnet: *const u8) -> SporeBytes {
@@ -295,12 +307,17 @@ pub unsafe extern "C" fn spore_node_file_bytes(n: *mut crate::Node, magnet: *con
 }
 
 /// Get filename for a magnet. SporeBytes::null() if not found.
+///
+/// # Safety
+/// `n` is valid; `magnet` points to 16 readable bytes.
 #[cfg(not(target_arch = "wasm32"))]
 #[no_mangle]
 pub unsafe extern "C" fn spore_node_file_name(n: *mut crate::Node, magnet: *const u8) -> SporeBytes {
     let mut id = [0u8; 16];
     id.copy_from_slice(std::slice::from_raw_parts(magnet, 16));
-    guard(SporeBytes::null(), || (*n).file_name(&id).map(|s| SporeBytes::from_vec(s.into_bytes())).unwrap_or(SporeBytes::null()))
+    guard(SporeBytes::null(), || {
+        (*n).file_name(&id).map(|s| SporeBytes::from_vec(s.into_bytes())).unwrap_or(SporeBytes::null())
+    })
 }
 
 // -- text armor --------------------------------------------------------------
