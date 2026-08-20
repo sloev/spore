@@ -134,17 +134,17 @@ work below is the code half that changes what is on screen.
 | Design tokens single-sourced + generated into all surfaces (C3) | ✅ shipped | `design/tokens.json` → `generate.py`; CI drift job |
 | Control metrics generated (CONTROL 48 / CHIP 32 / ROW 56) (C5 token half) | ✅ shipped (#118) | Heights/paddings/radii/spacing guarded by drift job |
 | Usage matrix — what each control is *for* (C5 matrix) | ✅ shipped (#119) | Generator enforces the count and the touch-floor rule |
-| Android `Chip` + `ListRow` primitives; route ad-hoc sizes through them (C5 Kotlin half) | ⬜ todo | The part that changes what is on screen; needs a device |
-| Density & type hierarchy pass (C4) — ≤1 instructional sentence, progressive disclosure | ⬜ todo | Depends C5 Kotlin half |
-| Bridges & Advanced information architecture (C6) — uniform rows, grouped sections | ⬜ todo | Depends C5, C4 |
-| Empty-state & status-line diet (B11) | ⬜ todo | The sweep-up after C4 |
+| Android `Chip` + `ListRow` primitives; route ad-hoc sizes through them (C5 Kotlin half) | ✅ shipped (#133) | Chip (32dp preset) + ListRow (56dp row) |
+| Density & type hierarchy pass (C4) — ≤1 instructional sentence, progressive disclosure | ✅ shipped (#134) | Compact status, details disclosure, Mail h2 removed |
+| Bridges & Advanced information architecture (C6) — uniform rows, grouped sections | ✅ shipped (#136) | ListRow-based BridgeRow, Chip toggles |
+| Empty-state & status-line diet (B11) | ✅ shipped (#135) | Baud mascot on all panels, compact status |
 | Replace mushroom icon with Antenna + Seed on Android | ✅ done | `ic_spore.xml` now Antenna + Seed |
 | Replace mushroom icon with Antenna + Seed on web node | ✅ done | Favicon (data URI) + header mark in `build-standalone.mjs` |
 | Replace mushroom icon with Antenna + Seed on site (favicon, hero, nav) | ✅ done | `site/antenna-seed.svg` + brand mark in `build.mjs` + `style.css` |
-| Persistent identity + status header on web node (WV0) | ⬜ todo | Tokens, identity header, Baud empty states |
-| Web node IA — distinct surfaces Mail / Feed / Bridges / Seed (WV1) | ⬜ todo | Renamed from brief's W1 (collides with shipped Encrypted DM ABI) |
-| Site design-language execution (Site-2) — usage matrix + density everywhere | ⬜ todo | |
-| Site navigation chrome + human/builder paths (Site-3) | ⬜ todo | Today 9 nav items vs matrix's 5; Mission unreachable from nav |
+| Persistent identity + status header on web node (WV0) | ✅ shipped (#130) | Tokens, identity header, Baud empty states |
+| Web node IA — distinct surfaces Mail / Feed / Bridges / Seed (WV1) | ✅ shipped (#132) | Tabbed navigation with 5 panels |
+| Site design-language execution (Site-2) — usage matrix + density everywhere | ✅ shipped (#138) | Hard edges everywhere (2px radius) |
+| Site navigation chrome + human/builder paths (Site-3) | ✅ shipped (#137) | 5 nav items: Try it, How it works, Get a node, Spec, Web node |
 
 **Acceptance (across the milestone):**
 
@@ -178,10 +178,10 @@ the communicator-as-façade pattern.
 | Task | Status | Notes |
 |---|---|---|
 | Encrypted DM — wasm exports (announce, send_direct, send_direct_sealed, open_dm, env_flags, env_src) | ✅ shipped (#116) | ABI half; sealed on the wire, sender authenticated |
-| Encrypted DM — thread list, compose, delivery honesty (no read receipts) | ⬜ todo | UI half; key on `env_src` (authenticated sender), not a claimed field |
-| Topics: open group join/create + public shout, clearly labeled public (W2) | ⬜ todo | |
-| Sealed group: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ⬜ todo | No roster — honest UX |
-| Feed/microblog: compose to `feed::<addr>`, follow = subscribe (W4) | ⬜ todo | |
+| Encrypted DM — thread list, compose, delivery honesty (no read receipts) | ✅ shipped (#131) | UI half; thread list, DM compose, honest decrypt |
+| Topics: open group join/create + public shout, clearly labeled public (W2) | ✅ shipped (#139) | Topic list, per-topic log, PUBLIC badge |
+| Sealed group: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm, sealed panel |
+| Feed/microblog: compose to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
 | Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ⬜ todo | |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
 | Authorized feed polish: invite flow, documented revoke-by-rotation limit (W7) | ⬜ todo | |
