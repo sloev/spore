@@ -186,29 +186,40 @@ protocol jargon. The protocol primitives are unchanged — this is IA and UI onl
 | Surface | Protocol primitive | Encryption |
 |---|---|---|
 | One-to-one chat | `send_direct` / `open_dm` | Sealed (prekey / ratchet) |
-| Open group chat | `send(ZERO_DEST, /topic …)` + `subscribe` | None (public) |
-| Private group chat | `topic_seal` / `topic_open` + `subscribe` | PSK (sealed topic) |
+| Open group | `publish` + `subscribe` | None (public) |
+| **Private group** (authorized channel) | `topic_seal` / `topic_open` + `subscribe` | PSK (sealed topic); "member" = key holder |
 | Microblogging | `publish(feed::<addr>)` + `poll_feed` | None (public) |
 
 Two communication surfaces: **Chats** — a unified list of all conversations
-(1:1, open groups, private groups) with type badges and a new-conversation
-picker — and **Feed** — your personal microblog (`feed::<your_addr>`) plus
-subscribed feeds. Files, Bridges, and Seed remain separate surfaces.
+(1:1, open groups, **private groups** — the authorized channel) with type badges
+and a new-conversation picker — and **Feed** — your personal microblog
+(`feed::<your_addr>`) plus subscribed feeds. Files, Bridges, and Seed remain
+separate surfaces.
+
+**Private group vs. public microblog — locked.** A private group *is* an
+authorized feed: posts are sealed with a shared PSK, so "member" means "holds
+the key," never "on a verified roster." There is no separate "authorized feed"
+surface — the private group *in the Chats list* is the authorized channel.
+Revocation is by key rotation and is forward-only (SPEC §7.1): rotation denies
+going-forward reads but cannot recall a copied key, and SPORE holds no member
+list, so a "revoked member" is never claimed. The invite flow shares the key
+blob safely; this and the documented revoke limit are W7.
 
 | Task | Status | Notes |
 |---|---|---|
 | Encrypted DM — wasm exports (announce, send_direct, send_direct_sealed, open_dm, env_flags, env_src) | ✅ shipped (#116) | ABI half; sealed on the wire, sender authenticated |
 | Encrypted DM — thread list, compose, delivery honesty (no read receipts) | ✅ shipped (#131) | UI half; thread list, DM compose, honest decrypt |
 | Open group chat: join/create + public shout, clearly labeled public (W2) | ✅ shipped (#139) | Topic list, per-topic log, PUBLIC badge |
-| Private group chat: shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm, sealed panel |
+| Private group (the authorized channel): shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm; resides in the Chats list, not a separate surface |
 | Microblog: publish to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
 | Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ✅ shipped | spore_node_publish_file/fetch_file/list_files, Files tab |
 | Chat IA — unified conversation list: 1:1 + open groups + private groups in one list, type badges (1:1 / OPEN / PRIVATE), new-conversation picker, merge Mail + Topics + Sealed panels (W9) | ✅ shipped | Web node: 6 tabs → 5 (Chats, Feed, Files, Bridges, Seed). No protocol change |
 | Microblog IA — personal feed (`feed::<your_addr>`), subscribe by address (not shared `spore/feed` topic), merged subscribed-feeds timeline (W10) | ✅ shipped | Per-address feed naming; poll_feed now returns the authenticated `from`; groups + feeds demux on the topic hash |
 | Formatting + attachments — markdown (bold/italic/code/link) + file embed (magnet reference) in both chats and microblog (W11) | ✅ shipped | Client-side markdown (web/ui/markdown.mjs), XSS-safe (escape-before-markup); magnet:<> renders a download link |
-| W9–W11 Android parity — Chats list adds sealed groups; Feed adds per-address subscribe; formatting in chats | ⬜ todo | Android Chats already mixes DMs + PUBLIC; add sealed group rows + per-address feed |
+| WYSIWYG everywhere — a formatting toolbar (bold / italic / code / link) over every writer: 1:1, open group, private group, microblog (W12) | ⬜ todo | Shared toolbar feeding the single chat composer + feed composer; Android parity |
+| W9–W11 Android parity — Chats list adds private groups; Feed adds per-address subscribe; formatting in chats | ⬜ todo | Android Chats already mixes DMs + PUBLIC; add private-group rows + per-address feed |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
-| Authorized feed polish: invite flow, documented revoke-by-rotation limit (W7) | ⬜ todo | Access-controlled feeds; distinct from W10 public microblog |
+| Private-group invite flow + documented revoke-by-rotation limit (W7) | ⬜ todo | Private group *is* the authorized feed; invite = safe key-share; revoke = rotation, forward-only |
 | Continuity polish: export seed from new UI, docs updates (W8) | ⬜ todo | |
 
 **UI across runtimes (locked decision):** two UI implementations over three shared
