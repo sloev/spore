@@ -31,11 +31,20 @@ Two conventions specific to this project:
   SPORE-authored design document to be normative about once the site and the
   standalone import HARDBRUT's real CSS at build time and Android's `Chrome.kt`
   is its Compose consumer; the one non-decorative section (Appendix A's chat
-  attachment marker convention) moves to `docs/DESIGN.md`. `design/generate.py`
-  now parses colour, border, shadow and spacing straight out of the vendored
-  `web/vendor/hardbrut/hardbrut.css` and emits `Chrome.kt`'s `Palette`/`Metrics`
-  from it, catching a real drift in the process: the hand-typed `OnYellow`
-  (`#121210`) never matched HARDBRUT's actual `--accent-ink` (`#000`).
+  attachment marker convention) moves to `docs/DESIGN.md`. Android gets its own
+  vendored HARDBRUT source rather than a CSS reparse:
+  `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` is
+  `supernihil/hardbrut`'s official Compose port, pulled live by
+  `android/hardbrut-sync.py` — same "always latest, pinned ref, no runtime
+  fetch" contract as the web's `hardbrut-sync.mjs`. `design/generate.py` now
+  aliases `Chrome.kt`'s generated `Palette`/`Metrics` straight onto that file's
+  `HardbrutTokens` (light palette, border, shadow, spacing) rather than copying
+  a colour, catching a real drift in the process: the hand-typed `OnYellow`
+  (`#121210`) never matched HARDBRUT's actual `--accent-ink` (`#000`). Dark
+  mode is the one thing the Compose port doesn't define, so the four dark
+  hexes still come from the vendored `hardbrut.css`. `crate()`/`CrateButton`/
+  `Chip`/`ListRow` now draw their static shadow via the vendored `hardShadow()`
+  modifier instead of three copies of the same hand-rolled `drawRect` math.
   `design/tokens.json` keeps only the Android-only control-size table (control/
   chip/row, touch floor) — everything else HARDBRUT has an opinion on is no
   longer duplicated by hand anywhere in the tree. Wire unchanged.

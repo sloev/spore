@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HARDBRUT v0.8 — Neubrutalist CSS. Zero imports. Fonts embedded inline.
+   HARDBRUT v0.9 — Neubrutalist CSS. Zero imports. Fonts embedded inline.
    ========================================================================== */
 
 /* ---- EMBEDDED FONT (Inter 900, latin only — for headings) ---- */
@@ -14,6 +14,7 @@
 
 /* ---- TOKENS ---- */
 :root {
+  color-scheme: light;
   --ink: #000;
   --paper: #fff;
   --bg: #fdfaf2;
@@ -35,7 +36,7 @@
   --space-lg: 2.5rem;
 }
 [data-accent="yellow"]{--accent:#ffd23f;--accent-ink:#000}
-[data-accent="red"]{--accent:#ff4444;--accent-ink:#000}
+[data-accent="red"]{--accent:#ff4444;--accent-ink:#fff}
 [data-accent="blue"]{--accent:#4488ff;--accent-ink:#fff}
 [data-accent="green"]{--accent:#44cc44;--accent-ink:#000}
 [data-accent="pink"]{--accent:#ff66aa;--accent-ink:#000}
@@ -82,7 +83,7 @@ img,svg,video,iframe{max-width:100%;height:auto;display:block}
 img{border:2px solid var(--ink);box-shadow:var(--shadow-sm)}
 figure{margin:var(--space) 0}
 figcaption{font-size:0.85rem;color:var(--muted);margin-top:var(--space-sm)}
-table{width:100%;border-collapse:collapse;margin-bottom:var(--space);border:var(--border);box-shadow:var(--shadow)}
+table{width:100%;max-width:100%;border-collapse:collapse;margin-bottom:var(--space);border:var(--border);box-shadow:var(--shadow);display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
 th,td{border:2px solid var(--ink);padding:0.5rem 0.75rem;text-align:left}
 th{background:var(--ink);color:var(--paper);font-family:var(--font-display);font-weight:900;text-transform:uppercase;font-size:0.82rem;letter-spacing:0.03em}
 tr:nth-child(even) td{background:var(--paper)}
@@ -112,8 +113,8 @@ details>:not(summary):first-child{padding-top:var(--space-sm)}
 
 /* ---- NAVBAR ---- */
 .navbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-sm);padding:var(--space-sm) var(--space);background:var(--paper);border-bottom:4px solid var(--ink);position:sticky;top:0;z-index:100}
-.navbar-brand{font-family:var(--font-display);font-weight:900;font-size:2.2rem;text-transform:uppercase;text-decoration:none;letter-spacing:-0.05em;line-height:1.5;padding:0 0.5rem;border:var(--border);background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow)}
-.navbar-brand:hover{text-decoration:underline;text-underline-offset:4px}
+.navbar-brand{font-family:var(--font-display);font-weight:900;font-size:2.2rem;text-transform:uppercase;text-decoration:none;letter-spacing:-0.05em;line-height:1.5;color:var(--ink)}
+.navbar-brand:hover{background:none;text-decoration:underline;text-underline-offset:4px}
 .navbar-links{display:flex;list-style:none;gap:0.25rem;padding:0;margin:0}
 .navbar-links a{display:inline-block;padding:0.4rem 0.7rem;text-decoration:none;font-family:var(--font-display);font-weight:700;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.03em;border:2px solid transparent;color:var(--ink)}
 .navbar-links a:hover,.navbar-links a[aria-current]{background:var(--accent);border-color:var(--ink);box-shadow:var(--shadow-sm);color:var(--accent-ink)}
@@ -123,7 +124,7 @@ details>:not(summary):first-child{padding-top:var(--space-sm)}
 @media(max-width:640px){.navbar-toggle{display:block}}
 
 /* ---- BUTTONS ---- */
-button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.75rem 1.5rem;font-family:var(--font-display);font-weight:900;font-size:0.95rem;text-transform:uppercase;letter-spacing:0.02em;text-decoration:none;cursor:pointer;border:var(--border);white-space:nowrap;line-height:1;transition:transform 0.1s ease,box-shadow 0.1s ease;background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow)}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.75rem 1.5rem;font-family:var(--font-display);font-weight:900;font-size:0.95rem;text-transform:uppercase;letter-spacing:0.02em;text-decoration:none;cursor:pointer;border:var(--border);text-align:center;overflow-wrap:break-word;line-height:1.2;transition:transform 0.1s ease,box-shadow 0.1s ease;background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow)}
 button.cancel,.btn-cancel{background:var(--paper);color:var(--ink);box-shadow:var(--shadow-sm)}
 button:disabled,.btn:disabled{opacity:0.45;cursor:not-allowed}
 button:hover,.btn:hover,button.cancel:hover,.btn-cancel:hover{transform:translate(-2px,-2px);box-shadow:7px 7px 0 var(--ink)}
@@ -199,9 +200,10 @@ input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;backgr
 @media(prefers-color-scheme:dark){
   :root:not([data-theme="light"]){--ink:#f0f0e8;--paper:#1a1a18;--bg:#121210;--muted:#a0a090}
 }
-[data-theme="dark"]{--ink:#f0f0e8;--paper:#1a1a18;--bg:#121210;--muted:#a0a090}
-[data-theme="light"]{--ink:#000;--paper:#fff;--bg:#fdfaf2;--muted:#666}
+[data-theme="dark"]{--ink:#f0f0e8;--paper:#1a1a18;--bg:#121210;--muted:#a0a090;color-scheme:dark}
+[data-theme="light"]{--ink:#000;--paper:#fff;--bg:#fdfaf2;--muted:#666;color-scheme:light}
 @media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){color-scheme:dark}
   :root:not([data-theme="light"]) body{color:var(--ink);background:var(--bg)}
   :root:not([data-theme="light"]) a:hover{color:var(--accent-ink)}
   :root:not([data-theme="light"]) ::selection{color:var(--accent-ink)}
@@ -209,14 +211,14 @@ input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;backgr
   :root:not([data-theme="light"]) pre{background:var(--paper)}
   :root:not([data-theme="light"]) blockquote{background:var(--paper)}
   :root:not([data-theme="light"]) input,:root:not([data-theme="light"]) textarea,:root:not([data-theme="light"]) select{background:var(--paper);color:var(--ink)}
-    :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
+  :root:not([data-theme="light"]) .navbar-brand{color:var(--ink)}
+  :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
   :root:not([data-theme="light"]) .navbar-links a[aria-current]{color:var(--accent-ink)}
   :root:not([data-theme="light"]) button:not(.cancel):not(.theme-toggle):not(.navbar-toggle),:root:not([data-theme="light"]) .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
   :root:not([data-theme="light"]) button.cancel,:root:not([data-theme="light"]) .btn-cancel{color:var(--ink)}
   :root:not([data-theme="light"]) .theme-toggle{color:var(--ink);background:var(--paper)}
   :root:not([data-theme="light"]) .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
   :root:not([data-theme="light"]) .badge,:root:not([data-theme="light"]) .callout,:root:not([data-theme="light"]) .message{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) th{color:var(--accent-ink)}
   :root:not([data-theme="light"]) tr:nth-child(even) td{background:var(--paper)}
   :root:not([data-theme="light"]) tr:nth-child(odd) td{background:var(--bg)}
   :root:not([data-theme="light"]) input[type="checkbox"],:root:not([data-theme="light"]) input[type="radio"]{background:var(--paper)}
@@ -228,6 +230,7 @@ input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;backgr
 [data-theme="dark"] pre{background:var(--paper)}
 [data-theme="dark"] blockquote{background:var(--paper)}
 [data-theme="dark"] input,[data-theme="dark"] textarea,[data-theme="dark"] select{background:var(--paper);color:var(--ink)}
+[data-theme="dark"] .navbar-brand{color:var(--ink)}
 [data-theme="dark"] .navbar-links a{color:var(--ink)}
 [data-theme="dark"] .navbar-links a[aria-current]{color:var(--accent-ink)}
 [data-theme="dark"] button:not(.cancel):not(.theme-toggle):not(.navbar-toggle),[data-theme="dark"] .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
@@ -235,7 +238,6 @@ input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;backgr
 [data-theme="dark"] .theme-toggle{color:var(--ink);background:var(--paper)}
 [data-theme="dark"] .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
 [data-theme="dark"] .badge,[data-theme="dark"] .callout,[data-theme="dark"] .message{color:var(--accent-ink)}
-[data-theme="dark"] th{color:var(--accent-ink)}
 [data-theme="dark"] tr:nth-child(even) td{background:var(--paper)}
 [data-theme="dark"] tr:nth-child(odd) td{background:var(--bg)}
 [data-theme="dark"] input[type="checkbox"],[data-theme="dark"] input[type="radio"]{background:var(--paper)}

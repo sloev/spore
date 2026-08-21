@@ -312,18 +312,25 @@ time**, and rebuilds both web surfaces' markup around HARDBRUT's actual classes
 (`.navbar`, `.hero`, `section`, `button`, markdown, `data-accent`, `data-theme`).
 
 **Build-time import (locked).** The web build pulls `hardbrut.css` from
-`supernihil/hardbrut` *during the build* and inlines it into `site/style.css`
-and the standalone. A change to the HARDBRUT repo is reflected on the next
+`supernihil/hardbrut` *during the build* and inlines it into the Pages site
+(`site/build.mjs`) and the standalone (`build-standalone.mjs`) — there is no
+`site/style.css` anymore. A change to the HARDBRUT repo is reflected on the next
 rebuild — no runtime `@import`, so the standalone keeps its **zero-external-
 request** CI guarantee. The vendoring dir and the remote/ref are pinned and
 documented so the import is reproducible, not a silent network dependency of
 every CI run.
 
-**Android (locked).** The Android app uses HARDBRUT only as the *foundation* of
-the existing Compose theme — it already consumes the tokens; M7 makes the
-Android side regenerate from the same vendored source rather than a hand-edited
-copy, but keeps the Compose primitives (`Chrome.kt`, hard-shadow workaround, two
-button kinds) that XML cannot express.
+**Android (locked).** Compose has no CSS to `@import`, so Android gets its own
+vendored source instead: `android/app/src/main/kotlin/org/spore/node/vendor/
+Hardbrut.kt`, `supernihil/hardbrut`'s official Compose port, pulled live by
+`android/hardbrut-sync.py` — same "always latest, pinned ref, no runtime fetch"
+contract as the CSS side. `Chrome.kt`'s tokens alias that file's `HardbrutTokens`
+directly; only dark mode (which that file doesn't define) still comes from the
+vendored CSS. `Chrome.kt` keeps the Compose primitives that XML cannot express
+and that the drop-in file doesn't provide — press-feedback shadows, touch
+targets, `Chip`/`ListRow`/`ToughbookField`/`CrateSwitch`/`SegmentedLed` — but
+now builds their static shadow-drawing on the vendored `hardShadow()` rather
+than a third hand-rolled copy of the same offset-rect math.
 
 **Tasks** (each a PR):
 
@@ -332,14 +339,18 @@ button kinds) that XML cannot express.
 | Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ✅ shipped (#146) | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes. `ref: 'main'` — HARDBRUT latest is always the source of truth; `node web/hardbrut-sync.mjs` re-pulls the committed vendored copy on demand (build itself never fetches live, so CI stays deterministic and the standalone stays zero-request) |
 | Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ✅ shipped (#146) | `build-standalone.mjs`'s inline `<style>` is HARDBRUT + a minimal app-shell adapter (tab bar, log, WYSIWYG toolbar — concepts HARDBRUT has no equivalent for); the SPI/WYSIWYG/(W12) logic is unchanged, presentation only |
 | Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ✅ shipped (#147 + this pass) | `site/style.css` deleted outright (not kept as an `@import` shell); `site/build.mjs` inlines vendored `hardbrut.css` + a thin adapter (doc reading width, code-copy button, print). Markup rebuilt on `.navbar`/`.hero`/`.grid`/`.card`/`.btn`/`.cluster`; a working `.navbar-toggle` + `.open` toggle script makes the nav responsive on mobile. All hand-drawn `<svg>` story-card illustrations (home, Apps, Continuity) removed — cards are plain HARDBRUT `.card`s, text only. Antenna+Seed brand mark and the Baud mascot are not illustrations and stay |
-| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | `design/generate.py` now parses `web/vendor/hardbrut/hardbrut.css`'s `:root`/`[data-theme="dark"]` blocks directly and emits `Chrome.kt`'s `Palette` from them — no hand-typed second copy. Caught a real drift in the process: the old hand-typed `OnYellow` (`#121210`) didn't match HARDBRUT's actual `--accent-ink` (`#000`). `Chrome.kt` keeps its hard-shadow / two-button primitives; no XML rewrite |
-| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ✅ shipped | `gen_site_css`, `gen_standalone_css`, `gen_visualdesign_md`, the WCAG contrast-checking machinery, and the `site`/`standalone` `tokens.json` surface entries are all gone — there's no SPORE-authored contrast claim left to protect. `tokens.json` keeps only the Android-only control-size table (control/chip/row heights, touch floor), which has no HARDBRUT source to regenerate from. The "design tokens in sync" CI job now has two steps: `node web/hardbrut-sync.mjs` verifies the vendored copy matches the pinned `main` ref (the one job allowed to touch the network), then `design/generate.py` verifies Android's `Palette` matches that vendored copy |
+| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | Android gets its own vendored HARDBRUT source, not a CSS reparse: `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` is `supernihil/hardbrut`'s official Compose port, pulled by `android/hardbrut-sync.py` from the live `https://supernihil.github.io/hardbrut/Hardbrut.kt` (always latest, same as the web's `ref: 'main'`). `Chrome.kt`'s generated `Palette`/`Metrics` alias its `HardbrutTokens` object directly for the light palette and every border/shadow/spacing metric — not a copied colour. That file has no dark-mode variant, so `design/generate.py` still parses the vendored `hardbrut.css`'s `[data-theme="dark"]` block for just the four dark hexes — the one gap between the two vendored sources. Caught a real drift in the process: the old hand-typed `OnYellow` (`#121210`) didn't match HARDBRUT's actual `--accent-ink` (`#000`). `crate()`/`CrateButton`/`Chip`/`ListRow` now draw their hard shadow via the vendored `hardShadow()` modifier instead of hand-rolled `drawRect` calls; `Chrome.kt` keeps the press-feedback and touch-target logic the drop-in file doesn't have, and its other product-specific primitives (`Chip`, `ListRow`, `ToughbookField`, `CrateSwitch`, `SegmentedLed`, `ConfirmDialog`) — no XML rewrite |
+| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ✅ shipped | `gen_site_css`, `gen_standalone_css`, `gen_visualdesign_md`, the WCAG contrast-checking machinery, and the `site`/`standalone` `tokens.json` surface entries are all gone — there's no SPORE-authored contrast claim left to protect. `tokens.json` keeps only the Android-only control-size table (control/chip/row heights, touch floor), which has no HARDBRUT source to regenerate from. The "design tokens in sync" CI job now has two steps: `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` verify both vendored copies match their pinned refs (the one job allowed to touch the network), then `design/generate.py` verifies Android's `Palette` matches them |
 
 **Definition of done:** `site/build.mjs` and the standalone's CSS are the vendored
 `hardbrut.css` (plus a thin SPORE-asset layer), not a fork; editing
-`supernihil/hardbrut` and rebuilding SPORE changes both web surfaces; the
-standalone still makes zero external requests; Antenna + Seed and Baud persist;
-Android keeps its Compose primitives on the same foundation.
+`supernihil/hardbrut` and rebuilding SPORE changes all three surfaces — the two
+web surfaces on the next `hardbrut-sync.mjs` + rebuild, Android on the next
+`hardbrut-sync.py` + `design/generate.py`; the standalone still makes zero
+external requests; Antenna + Seed and Baud persist; Android's `Chrome.kt`
+aliases the vendored `Hardbrut.kt`'s tokens and shadow primitive rather than
+maintaining its own copy, keeping only the product-specific primitives (touch
+targets, press feedback, `Chip`/`ListRow`/etc.) that file doesn't provide.
 
 ---
 

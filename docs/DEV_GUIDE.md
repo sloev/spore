@@ -18,7 +18,7 @@ branches, releases). Read those once; this one is a lookup table.
 | Check a security question | `docs/SECURITY_FINDINGS.md`; `docs/SECURITY.md` to report one |
 | Verify a 🧪 claim | `docs/HARDWARE.md`, `android/TESTING.md` |
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
-| Change a colour | Edit upstream `supernihil/hardbrut`, then `node web/hardbrut-sync.mjs` → `python3 design/generate.py` (Android) |
+| Change a colour | Edit upstream `supernihil/hardbrut`, then `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` → `python3 design/generate.py` (Android) |
 | Change an Android-only size (control/chip/row/touch floor) | `design/tokens.json` → `python3 design/generate.py` |
 | Decide core vs runtime | `docs/DESIGN.md` § "The spore and the soil". Platform-specific means runtime, not `src/` |
 
@@ -29,7 +29,7 @@ branches, releases). Read those once; this one is a lookup table.
 | `src/` | The core crate: router kernel, protocol layers, every bridge. Frozen wire format. Detail below. |
 | `src/main.rs` | Demo + YAML config loader (`spore.example.yaml`) running a daemon's bridges on one node. |
 | `bindings/` | Generated Python / Go / JS wrappers over the C ABI, plus the `spec.json` they generate from. |
-| `design/` | `generate.py` parses colour/border/shadow/spacing straight out of the vendored `web/vendor/hardbrut/hardbrut.css` and emits Android's `Chrome.kt` `Palette`/`Metrics` — no SPORE-authored copy of the hexes. `tokens.json` keeps only the Android-only control-size table (control/chip/row, touch floor), which HARDBRUT has no equivalent of. The docs site and the standalone node need no generated block at all — both import the vendored CSS directly (`web/hardbrut-import.mjs`). |
+| `design/` | `generate.py` aliases Android's `Chrome.kt` `Palette`/`Metrics` onto `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt`'s `HardbrutTokens` (light palette, border, shadow, spacing) and parses the four dark-mode hexes from `web/vendor/hardbrut/hardbrut.css` — the one thing the Compose port doesn't define. No SPORE-authored copy of a colour anywhere. `tokens.json` keeps only the Android-only control-size table (control/chip/row, touch floor), which HARDBRUT has no equivalent of. The docs site and the standalone node need no generated block at all — both import the vendored CSS directly (`web/hardbrut-import.mjs`). |
 | `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), `hardbrut-import.mjs`/`hardbrut-sync.mjs` (vendors HARDBRUT's real CSS at build time), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
 | `site/` | The Pages generator (`build.mjs`, HARDBRUT classes only, no hand-authored CSS) and `site/seed/` (printable paper-seed tooling). |
 | `android/` | `android/jni/` is an additive Rust crate exposing an opaque-handle C ABI to Kotlin — checkable with plain `cargo check`. `android/app/…/node/` is the Kotlin app, which needs the SDK/NDK. |
@@ -96,7 +96,7 @@ which part:
 | Android app UI | Android Studio or SDK/NDK + `gradle`. See `android/README.md`. |
 | Docs site | `cd site && npm install && node build.mjs` — fails on a broken internal link, so it is a real check. `node seed/*.test.mjs` covers the paper-seed tooling. |
 | C ABI / bindings | `python3 bindings/generate.py` after changing `spec.json`. Never hand-edit `bindings/{python,go,node}/`. |
-| Design tokens | `node web/hardbrut-sync.mjs` after HARDBRUT upstream moves; `python3 design/generate.py` after that or after changing `tokens.json`'s Android sizing table. CI fails on drift in either. |
+| Design tokens | `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` after HARDBRUT upstream moves; `python3 design/generate.py` after that or after changing `tokens.json`'s Android sizing table. CI fails on drift in any of these. |
 | Fuzz | `cargo fuzz run <target>` from `fuzz/` (nightly + `cargo-fuzz`). |
 | Vectors | `cargo run --example gen_vectors > reference/vectors.json`, then `python3 reference/test_t0.py` and `python3 scripts/check_docs_sync.py`. |
 
