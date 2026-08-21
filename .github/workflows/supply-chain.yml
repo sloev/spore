@@ -79,12 +79,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # `design/generate.py` emits the palette into the docs site's CSS, the
-      # standalone node's inlined CSS, Android's Compose Palette and
-      # VISUALDESIGN's contrast tables. The same hexes used to be hand-typed in
-      # each, with the WCAG ratios re-typed as comments beside them — so a
-      # palette change meant a manual four-way audit, and the ratios could
-      # silently stop describing the colours they sat next to.
+      # `design/generate.py` emits the palette into Android's Compose Palette.
+      # (The docs site and the standalone node no longer take a generated
+      # block — both import HARDBRUT's real CSS at build time instead; see
+      # `web/hardbrut-import.mjs`. There is no SPORE-authored design document
+      # to keep in sync — HARDBRUT upstream is normative.)
       #
       # The script also fails on its own if a pairing stops matching the grade
       # tokens.json claims for it, in either direction: a colour that is no
@@ -92,11 +91,11 @@ jobs:
       - name: Regenerate and diff
         run: |
           python3 design/generate.py
-          if ! git diff --exit-code -- design/ site/ web/ android/ docs/; then
+          if ! git diff --exit-code -- design/ android/; then
             echo "::error::design tokens are stale — run: python3 design/generate.py"
             exit 1
           fi
-          echo "every surface matches design/tokens.json"
+          echo "Android's Palette matches design/tokens.json"
 
   offline:
     name: offline bundle

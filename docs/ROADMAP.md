@@ -24,9 +24,11 @@ spec here; the code is the truth.
   label.
 - **Honesty over polish:** 🧪 markers, "Still open", served-vs-fetching language, and
   **no fake UI** — never a control whose backend is missing.
-- **[`VISUALDESIGN.md`](VISUALDESIGN.md) is normative** for colour, contrast, motion,
-  components, icon system (Antenna + Seed), and the three control sizes. Never pink on
-  olive/kevlar (measured 2.32:1). Never signal failure by colour alone.
+- **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for colour, contrast,
+  motion and components — SPORE no longer maintains its own design-language document;
+  `web/vendor/hardbrut/hardbrut.css` is vendored at build time and trusted as-is. The
+  one SPORE-specific rule HARDBRUT has no opinion on: the icon system is Antenna +
+  Seed. Never signal failure by colour alone.
 - **Zero external network requests** in `web/spore-standalone.html` (CI greps for it).
 - Motion fully static under reduced motion / `ANIMATOR_DURATION_SCALE == 0`. Sound and
   particle bursts stay **off** until the user enables them.
@@ -123,7 +125,9 @@ exclusion + migration). Direct connects on a LAN and degrades honestly on a WAN.
 ## Milestone 3 — Design language implementation
 
 **Goal:** every surface adopts Antenna + Seed, the three control sizes, the density
-rules, and the screen structures in [`VISUALDESIGN.md`](VISUALDESIGN.md) §7.
+rules, and the screen structures the design language called for at the time.
+Superseded by **Milestone 6** (HARDBRUT); kept here as a historical record — the
+old SPORE-authored design document this milestone shipped is retired.
 
 This is a **first-class milestone**, not scattered "nice-to-have" items. The
 tokens already exist and are generated (C3/C5-token half shipped #118/#119); the
@@ -155,13 +159,14 @@ work below is the code half that changes what is on screen.
 - [ ] Status chrome is compact — `0 peers · 65 stored`.
 - [ ] The site has persistent, clear navigation.
 - [ ] The web node has a persistent identity + status header.
-- [ ] Pink never on kevlar; the contrast table is still green.
 - [ ] Reduced motion is fully static; the standalone still makes zero external requests.
 - [ ] Baud appears only on empty states and completions.
 - [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
 
-**Definition of done:** a screenshot of every surface passes the VISUALDESIGN §8
-checklist, and the mushroom icon is gone from the repo's rendered assets.
+**Definition of done:** every surface passes visual review and the mushroom icon is
+gone from the repo's rendered assets. (Historical: at the time this milestone shipped,
+the checklist lived in the now-retired `docs/VISUALDESIGN.md` §8; superseded by M6/M7,
+which hold HARDBRUT upstream normative instead.)
 
 ---
 
@@ -387,8 +392,10 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
 milestone: every row is `⬜ concept`, nothing in the compass depends on it, and no
-row earns a 🧪 until something exists a person could hold or run. It lives in
-[`VISUALDESIGN.md`](VISUALDESIGN.md) §6b as inspiration, not in this plan as a promise.
+row earns a 🧪 until something exists a person could hold or run. It was written up
+as inspiration in the now-retired `docs/VISUALDESIGN.md` §6b, not in this plan as a
+promise; no replacement doc is planned — HARDBRUT upstream has no opinion on
+hardware/community concepts, so there is nothing for it to be normative about.
 
 ---
 

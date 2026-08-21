@@ -3,12 +3,14 @@
 
     python3 design/generate.py
 
-One palette, two remaining consumers: Android's Compose `Palette` and
-VISUALDESIGN's contrast tables. (The docs site and the standalone node no
-longer take a generated token block — both import HARDBRUT's real CSS at
-build time instead; see `web/hardbrut-import.mjs`.) Each is written between
-marker comments; everything outside the markers is left alone, because these
-files are mostly hand-written and only their token block is not.
+One palette, one remaining consumer: Android's Compose `Palette`. (The docs
+site and the standalone node no longer take a generated token block — both
+import HARDBRUT's real CSS at build time instead; see
+`web/hardbrut-import.mjs`. There is no more SPORE-authored design document —
+HARDBRUT upstream is normative for colour, contrast and components; this
+script only computes and checks.) Written between marker comments;
+everything outside the markers is left alone, because the file is mostly
+hand-written and only its token block is not.
 
 Contrast ratios are **computed here, never typed**. `tokens.json` declares what
 each pairing is supposed to be (`body` ≥4.5:1, `large` ≥3:1, or `forbidden`) and
@@ -175,9 +177,9 @@ def check_touch_targets():
             )
 
 
-# The three sizes VISUALDESIGN §3 declares, and their permitted ranges. A range
-# rather than a number because the design brief gives one ("48–52 dp", "32–36 dp")
-# — the exact value is a judgement, the *count* is not.
+# The three interactive sizes SPORE settled on for Android, and their permitted
+# ranges. A range rather than a number because the original brief gave one
+# ("48–52 dp", "32–36 dp") — the exact value is a judgement, the *count* is not.
 CONTROL_SIZES = {
     "control": (48, 52),
     "chip": (32, 36),
@@ -203,7 +205,7 @@ def check_control_sizes():
             + (f"  unexpected: {', '.join(extra)}\n" if extra else "")
             + (f"  missing:    {', '.join(missing)}\n" if missing else "")
             + "A fourth size is how a design stops being a system. If you mean it,\n"
-            "change CONTROL_SIZES here and say why in VISUALDESIGN §3."
+            "change CONTROL_SIZES here and say why in the commit message."
         )
     for name, h in sorted(got.items()):
         lo, hi = CONTROL_SIZES[name]
@@ -235,14 +237,6 @@ def gen_metrics_kt():
         comments.append(comment)
     L += _align_kt(decls, comments)
     L.append("}")
-    return L
-
-
-def gen_metrics_md():
-    L = ["", "### Controls, spacing and shape (C5)", "",
-         "| Token | Value | CSS | Kotlin | Role |", "|---|---|---|---|---|"]
-    for name, v, kt, comment in _metric_rows():
-        L.append(f"| `{name}` | {v} | `var(--{name})` | `Metrics.{kt}` | {comment} |")
     return L
 
 
@@ -382,50 +376,6 @@ def _align_kt(decls, comments):
     ]
 
 
-# ----------------------------------------------------------- VISUALDESIGN.md
-def gen_visualdesign_md():
-    bases = CONTRAST["bases"]
-    L = []
-    L.append("### Tokens")
-    L.append("")
-    L.append("| Token | Hex | Role |")
-    L.append("|---|---|---|")
-    for e in LIGHT["palette"]:
-        L.append(f"| `--{e['n']}` | `{e['hex']}` | {e['label']} — {e['role']} |")
-    L.append("")
-    L.append("### Measured contrast")
-    L.append("")
-    L.append("Ratios against each base (light theme). **OK** = passes 4.5:1 for body text; **lg**")
-    L.append("= 3:1, large text and UI chrome only; **XX** = fails both. Computed from the hexes")
-    L.append("above by `design/generate.py`, which fails the build if any of them stops matching")
-    L.append("the grade `design/tokens.json` claims for it.")
-    L.append("")
-    L.append("| | " + " | ".join(f"on `--{b}`" for b in bases) + " |")
-    L.append("|---|" + "---|" * len(bases))
-    label = {"body": "**OK**", "large": "lg", "forbidden": "**XX**"}
-    for fg in CONTRAST["foregrounds"]:
-        e = entry(fg, "light")
-        name = f"`--{fg}` `{e['hex']}`" if fg not in LIGHT_P else f"`--{fg}`"
-        cells = []
-        for b in bases:
-            r = ratio(resolve(fg, "light"), resolve(b, "light"))
-            cells.append(f"{label[grade_of(r)]} {r:.2f}")
-        L.append(f"| {name} | " + " | ".join(cells) + " |")
-    # Authored wording, computed numbers: the prose is human ("cream" reads better
-    # than the token name), but every ratio in it is substituted from the hexes, so
-    # a sentence cannot outlive the palette it describes.
-    subs = {
-        f"{fg}_on_{b}": f"{ratio(resolve(fg, 'light'), resolve(b, 'light')):.2f}"
-        for fg in CONTRAST["foregrounds"]
-        for b in bases
-    }
-    for note in CONTRAST["prose_notes"]:
-        L.append("")
-        L.append(note.format(**subs))
-    L += gen_metrics_md()
-    return "\n".join(L)
-
-
 def main():
     check_contrast()
     check_touch_targets()
@@ -436,7 +386,6 @@ def main():
     # for either. Android still consumes a generated `Palette` until it moves
     # to the same vendored source (M7 task 4).
     write_region(SURFACES["android"]["file"], gen_android_kt())
-    write_region("docs/VISUALDESIGN.md", gen_visualdesign_md())
 
 
 if __name__ == "__main__":

@@ -94,7 +94,7 @@ cargo build --release --lib --target wasm32-unknown-unknown && node web/test.mjs
 ( cd site && npm install && node seed/fountain.test.mjs && node seed/seedsheet.test.mjs )
 ( cd site && node build.mjs )        # also fails on a broken internal link or anchor
 python3 bindings/generate.py && git diff --exit-code bindings/
-python3 design/generate.py  && git diff --exit-code site/style.css web/build-standalone.mjs android docs/VISUALDESIGN.md
+python3 design/generate.py  && git diff --exit-code android
 ```
 
 The last two are the "bindings in sync" and "design tokens in sync" gates in

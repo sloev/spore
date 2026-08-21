@@ -53,8 +53,9 @@ import androidx.compose.ui.unit.sp
 /**
  * The HARDBRUT chrome, in Compose.
  *
- * [docs/VISUALDESIGN.md](../../../../../../../docs/VISUALDESIGN.md) is normative and
- * this file is its Android consumer. HARDBRUT is light-first neubrutalism: cream
+ * HARDBRUT (`supernihil/hardbrut`) upstream is normative; this file is its Android
+ * consumer — there is no SPORE-authored design document to defer to instead.
+ * HARDBRUT is light-first neubrutalism: cream
  * paper, black ink, yellow actions, zero border-radius (true circles excepted),
  * hard no-blur shadows that stay on every element and vanish only on press. Two
  * button kinds — default (yellow) and cancel (white).

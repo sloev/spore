@@ -21,8 +21,8 @@ fs.mkdirSync(out, { recursive: true });
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
 //
-// Navigation follows VISUALDESIGN.md §7 Site homepage: 5 primary items:
-// Try it · How it works · Get a node · Spec · Mission.
+// Navigation: 5 primary items — Try it · How it works · Get a node · Spec ·
+// Mission.
 // Secondary guides are rendered + linkable but kept off the top nav.
 
 // The front page is `site/home.md`, not the README. They have different jobs: a
@@ -48,7 +48,6 @@ const pages = [
   ['docs/CHANGELOG.md', 'changelog.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
-  ['docs/VISUALDESIGN.md', 'design-language.html', null],
   ['bindings/README.md', 'bindings.html', null],
   ['reference/README.md', 'reference.html', null],
   ['web/README.md', 'webguide.html', null],
@@ -88,7 +87,6 @@ const titles = new Map([
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
   ['direct.html', 'SPORE — Direct: low-latency E2E pipes'],
-  ['design-language.html', 'SPORE — visual design language'],
   ['bindings.html', 'SPORE — language bindings'],
   ['reference.html', 'SPORE — reference decoders'],
   ['webguide.html', 'SPORE — the browser node'],
@@ -451,7 +449,7 @@ for (const [src, dst, label] of pages) {
   console.log(`rendered ${src} -> _site/${dst}`);
 }
 
-// Ship the Antenna + Seed favicon (the only brand icon — see docs/VISUALDESIGN.md §6).
+// Ship the Antenna + Seed favicon (the only brand icon).
 fs.writeFileSync(path.join(out, 'antenna-seed.svg'), fs.readFileSync(path.join(root, 'site/antenna-seed.svg')));
 console.log('wrote _site/antenna-seed.svg');
 

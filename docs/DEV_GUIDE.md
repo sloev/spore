@@ -28,7 +28,7 @@ branches, releases). Read those once; this one is a lookup table.
 | `src/` | The core crate: router kernel, protocol layers, every bridge. Frozen wire format. Detail below. |
 | `src/main.rs` | Demo + YAML config loader (`spore.example.yaml`) running a daemon's bridges on one node. |
 | `bindings/` | Generated Python / Go / JS wrappers over the C ABI, plus the `spec.json` they generate from. |
-| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into Android's `Chrome.kt` and the token table in `docs/VISUALDESIGN.md`, and computes WCAG ratios rather than trusting typed ones. The docs site and the standalone node no longer take a generated block — both import the real `hardbrut.css` at build time (`web/hardbrut-import.mjs`). |
+| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into Android's `Chrome.kt`, and computes WCAG ratios rather than trusting typed ones. The docs site and the standalone node no longer take a generated block — both import the real `hardbrut.css` at build time (`web/hardbrut-import.mjs`). |
 | `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), `hardbrut-import.mjs`/`hardbrut-sync.mjs` (vendors HARDBRUT's real CSS at build time), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
 | `site/` | The Pages generator (`build.mjs`, HARDBRUT classes only, no hand-authored CSS) and `site/seed/` (printable paper-seed tooling). |
 | `android/` | `android/jni/` is an additive Rust crate exposing an opaque-handle C ABI to Kotlin — checkable with plain `cargo check`. `android/app/…/node/` is the Kotlin app, which needs the SDK/NDK. |
@@ -107,8 +107,9 @@ which part:
 - **No fake UI.** A control that does not do what it visually claims — a toggle
   with no backend, a status that cannot be false, a 🧪 claim with no device
   behind it — either does not ship, or ships visibly disabled with a reason.
-- **`docs/VISUALDESIGN.md` is normative** for anything a person looks at, and
-  names which surfaces consume it. Keep that table honest.
+- **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for anything a person
+  looks at. SPORE keeps no design-language document of its own — `web/vendor/hardbrut/`
+  is vendored at build time and trusted as-is.
 - **Docs MUST NOT drift from code.** Documented byte values live once, generated,
   in `reference/vectors.json`. CI enforces it.
 - **Branch model:** `master` is protected; work happens on a topic branch off it
@@ -129,5 +130,4 @@ which part:
 | `docs/ROADMAP.md` | The engineering plan |
 | `docs/SECURITY_FINDINGS.md` / `docs/SECURITY.md` | Findings register / how to report |
 | `docs/HARDWARE.md` / `android/TESTING.md` | Device evidence |
-| `docs/VISUALDESIGN.md` | The design language |
 | `docs/CONTRIBUTING.md` | Freeze rules, CI, branches, releases |
