@@ -79,23 +79,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # `design/generate.py` emits the palette into Android's Compose Palette.
-      # (The docs site and the standalone node no longer take a generated
-      # block — both import HARDBRUT's real CSS at build time instead; see
-      # `web/hardbrut-import.mjs`. There is no SPORE-authored design document
-      # to keep in sync — HARDBRUT upstream is normative.)
-      #
-      # The script also fails on its own if a pairing stops matching the grade
-      # tokens.json claims for it, in either direction: a colour that is no
-      # longer readable, or a "forbidden" pair that has quietly become fine.
+      # The vendored copy is what every build actually reads (CI and
+      # `file://` both stay offline); this is the one job allowed to touch
+      # the network, so it can catch upstream HARDBRUT drifting out from
+      # under the pinned `main` ref before a build silently ships a stale copy.
+      - name: Vendored HARDBRUT is current with the pinned ref
+        run: |
+          node web/hardbrut-sync.mjs
+          if ! git diff --exit-code -- web/vendor/hardbrut/hardbrut.css; then
+            echo "::error::web/vendor/hardbrut/hardbrut.css is stale — run: node web/hardbrut-sync.mjs"
+            exit 1
+          fi
+          echo "vendored hardbrut.css matches the pinned ref"
+      # `design/generate.py` parses that vendored CSS and emits Android's
+      # Compose Palette from it — not a second hand-typed copy of the same
+      # hexes. The docs site and the standalone node need no such step; both
+      # import the vendored CSS directly at build time (`web/hardbrut-import.mjs`).
+      # There is no SPORE-authored design document to keep in sync — HARDBRUT
+      # upstream is normative.
       - name: Regenerate and diff
         run: |
           python3 design/generate.py
           if ! git diff --exit-code -- design/ android/; then
-            echo "::error::design tokens are stale — run: python3 design/generate.py"
+            echo "::error::Android's Palette is stale — run: python3 design/generate.py"
             exit 1
           fi
-          echo "Android's Palette matches design/tokens.json"
+          echo "Android's Palette matches the vendored hardbrut.css"
 
   offline:
     name: offline bundle

@@ -301,7 +301,7 @@ passes.
 
 ---
 
-## Milestone 7 — HARDBRUT as the framework (build-time import), not a copy
+## Milestone 7 — HARDBRUT as the framework (build-time import), not a copy ✅
 
 **Goal:** stop maintaining a *forked copy* of HARDBRUT inside SPORE's own CSS.
 Today `design/tokens.json` + `generate.py` re-emit a subset of HARDBRUT tokens
@@ -332,8 +332,8 @@ button kinds) that XML cannot express.
 | Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ✅ shipped (#146) | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes. `ref: 'main'` — HARDBRUT latest is always the source of truth; `node web/hardbrut-sync.mjs` re-pulls the committed vendored copy on demand (build itself never fetches live, so CI stays deterministic and the standalone stays zero-request) |
 | Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ✅ shipped (#146) | `build-standalone.mjs`'s inline `<style>` is HARDBRUT + a minimal app-shell adapter (tab bar, log, WYSIWYG toolbar — concepts HARDBRUT has no equivalent for); the SPI/WYSIWYG/(W12) logic is unchanged, presentation only |
 | Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ✅ shipped (#147 + this pass) | `site/style.css` deleted outright (not kept as an `@import` shell); `site/build.mjs` inlines vendored `hardbrut.css` + a thin adapter (doc reading width, code-copy button, print). Markup rebuilt on `.navbar`/`.hero`/`.grid`/`.card`/`.btn`/`.cluster`; a working `.navbar-toggle` + `.open` toggle script makes the nav responsive on mobile. All hand-drawn `<svg>` story-card illustrations (home, Apps, Continuity) removed — cards are plain HARDBRUT `.card`s, text only. Antenna+Seed brand mark and the Baud mascot are not illustrations and stay |
-| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ⬜ todo | `Chrome.kt` keeps the hard-shadow / two-button primitives; no XML rewrite |
-| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | 🟡 partial | Site's half done: `gen_site_css`/`gen_standalone_css` and the `site`/`standalone` `tokens.json` surface entries are gone; `design/generate.py` now only emits Android's `Palette` + VISUALDESIGN's contrast tables. Waiting on the Android row above before the drift job itself can be rewritten to "vendored css matches the pinned ref" |
+| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | `design/generate.py` now parses `web/vendor/hardbrut/hardbrut.css`'s `:root`/`[data-theme="dark"]` blocks directly and emits `Chrome.kt`'s `Palette` from them — no hand-typed second copy. Caught a real drift in the process: the old hand-typed `OnYellow` (`#121210`) didn't match HARDBRUT's actual `--accent-ink` (`#000`). `Chrome.kt` keeps its hard-shadow / two-button primitives; no XML rewrite |
+| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ✅ shipped | `gen_site_css`, `gen_standalone_css`, `gen_visualdesign_md`, the WCAG contrast-checking machinery, and the `site`/`standalone` `tokens.json` surface entries are all gone — there's no SPORE-authored contrast claim left to protect. `tokens.json` keeps only the Android-only control-size table (control/chip/row heights, touch floor), which has no HARDBRUT source to regenerate from. The "design tokens in sync" CI job now has two steps: `node web/hardbrut-sync.mjs` verifies the vendored copy matches the pinned `main` ref (the one job allowed to touch the network), then `design/generate.py` verifies Android's `Palette` matches that vendored copy |
 
 **Definition of done:** `site/build.mjs` and the standalone's CSS are the vendored
 `hardbrut.css` (plus a thin SPORE-asset layer), not a fork; editing
@@ -388,6 +388,7 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 4. **M4 — Webnode as daily driver** (first runtime on the storage seam)
 5. **M5 — Polish & hardening** (only after the above)
 6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
+7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
