@@ -1,6 +1,7 @@
-// Vendored, byte-for-byte from https://supernihil.github.io/hardbrut/Hardbrut.kt —
-// do not hand-edit. Re-pull with `python3 android/hardbrut-sync.py`; the only
-// change on the way in is this header and the `package` line below.
+// Vendored from https://supernihil.github.io/hardbrut/Hardbrut.kt — do not hand-edit.
+// Re-pull with `python3 android/hardbrut-sync.py`; the only changes on the way
+// in are this header, the `package` line below, and the two compile fixes for
+// real upstream bugs the script documents and applies (see its own docstring).
 //
 // Hardbrut.kt — HARDBRUT design system for Jetpack Compose
 // Drop this file into your Android project. One dependency: Compose.
@@ -14,7 +15,9 @@ package org.spore.node.vendor
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,7 +29,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextTransform
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -112,7 +114,6 @@ fun HardbrutButton(
             TextStyle(
                 fontWeight = FontWeight.ExtraBold,
                 fontSize = 15.sp,
-                textTransform = TextTransform.Uppercase,
                 letterSpacing = 0.3.sp,
                 color = fg.copy(alpha = alpha)
             )
