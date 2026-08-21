@@ -31,7 +31,7 @@ Which surfaces actually consume these tokens:
 | Surface | Tokens | Chrome (hard shadows, reduced-motion) |
 
 |---|---|---|
-| `site/style.css` — the Pages site | ✅ | ✅ |
+| `site/build.mjs` — the Pages site (vendored `hardbrut.css`, inlined) | ✅ | ✅ |
 | `web/spore-standalone.html` — the browser node | ✅ own token set, same values | ✅ hard shadows, zero radius, Impact headings |
 | Android — `Chrome.kt` + `MainActivity.kt` | ✅ | ✅ crate, hard shadow, two button kinds, zero radius |
 
@@ -354,8 +354,8 @@ One source of truth, three consumers.
 
 | Surface | How it consumes the tokens |
 |---|---|
-| `site/style.css` | CSS custom properties on `:root`, names exactly as §1 |
-| `web/spore-standalone.html` | Same properties, inlined — no external stylesheet |
+| `site/build.mjs` | Vendors HARDBRUT's real `hardbrut.css` at build time and inlines it, plus a thin SPORE adapter — no hand-authored token CSS |
+| `web/spore-standalone.html` | Same vendored `hardbrut.css`, inlined — no external stylesheet |
 | Android (Compose) | [`Chrome.kt`](../android/app/src/main/kotlin/org/spore/node/Chrome.kt) — a generated `Palette` object, then `SporeLightColors` / `SporeDarkColors` mapping it onto Material 3. `--edge` → `outline`, `--panel` → `surfaceVariant`, `--accent` → `primary`, `--accent2` → `secondary` |
 
 When a token changes, it changes in all three or in none. A screenshot in one place

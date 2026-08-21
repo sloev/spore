@@ -35,7 +35,7 @@
   --space-lg: 2.5rem;
 }
 [data-accent="yellow"]{--accent:#ffd23f;--accent-ink:#000}
-[data-accent="red"]{--accent:#ff4444;--accent-ink:#fff}
+[data-accent="red"]{--accent:#ff4444;--accent-ink:#000}
 [data-accent="blue"]{--accent:#4488ff;--accent-ink:#fff}
 [data-accent="green"]{--accent:#44cc44;--accent-ink:#000}
 [data-accent="pink"]{--accent:#ff66aa;--accent-ink:#000}
@@ -112,8 +112,8 @@ details>:not(summary):first-child{padding-top:var(--space-sm)}
 
 /* ---- NAVBAR ---- */
 .navbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-sm);padding:var(--space-sm) var(--space);background:var(--paper);border-bottom:4px solid var(--ink);position:sticky;top:0;z-index:100}
-.navbar-brand{font-family:var(--font-display);font-weight:900;font-size:2.2rem;text-transform:uppercase;text-decoration:none;letter-spacing:-0.05em;line-height:1.5;color:var(--ink)}
-.navbar-brand:hover{background:none;text-decoration:underline;text-underline-offset:4px}
+.navbar-brand{font-family:var(--font-display);font-weight:900;font-size:2.2rem;text-transform:uppercase;text-decoration:none;letter-spacing:-0.05em;line-height:1.5;padding:0 0.5rem;border:var(--border);background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow)}
+.navbar-brand:hover{text-decoration:underline;text-underline-offset:4px}
 .navbar-links{display:flex;list-style:none;gap:0.25rem;padding:0;margin:0}
 .navbar-links a{display:inline-block;padding:0.4rem 0.7rem;text-decoration:none;font-family:var(--font-display);font-weight:700;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.03em;border:2px solid transparent;color:var(--ink)}
 .navbar-links a:hover,.navbar-links a[aria-current]{background:var(--accent);border-color:var(--ink);box-shadow:var(--shadow-sm);color:var(--accent-ink)}
@@ -209,8 +209,7 @@ input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;backgr
   :root:not([data-theme="light"]) pre{background:var(--paper)}
   :root:not([data-theme="light"]) blockquote{background:var(--paper)}
   :root:not([data-theme="light"]) input,:root:not([data-theme="light"]) textarea,:root:not([data-theme="light"]) select{background:var(--paper);color:var(--ink)}
-  :root:not([data-theme="light"]) .navbar-brand{color:var(--ink)}
-  :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
+    :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
   :root:not([data-theme="light"]) .navbar-links a[aria-current]{color:var(--accent-ink)}
   :root:not([data-theme="light"]) button:not(.cancel):not(.theme-toggle):not(.navbar-toggle),:root:not([data-theme="light"]) .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
   :root:not([data-theme="light"]) button.cancel,:root:not([data-theme="light"]) .btn-cancel{color:var(--ink)}
@@ -229,7 +228,6 @@ input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;backgr
 [data-theme="dark"] pre{background:var(--paper)}
 [data-theme="dark"] blockquote{background:var(--paper)}
 [data-theme="dark"] input,[data-theme="dark"] textarea,[data-theme="dark"] select{background:var(--paper);color:var(--ink)}
-[data-theme="dark"] .navbar-brand{color:var(--ink)}
 [data-theme="dark"] .navbar-links a{color:var(--ink)}
 [data-theme="dark"] .navbar-links a[aria-current]{color:var(--accent-ink)}
 [data-theme="dark"] button:not(.cancel):not(.theme-toggle):not(.navbar-toggle),[data-theme="dark"] .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}

@@ -324,13 +324,13 @@ button kinds) that XML cannot express.
 
 | Task | Status | Notes |
 |---|---|---|
-| Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ⬜ todo | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes |
-| Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ⬜ todo | All hand CSS in `build-standalone.mjs`'s inline `<style>` is removed; the SPI/WYSIWYG/(W12) logic is kept, only presentation changes |
-| Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ⬜ todo | `site/style.css` becomes `@import`/inlined `hardbrut.css` + a thin layer for SPORE-only bits (illustrations, Antenna+Seed) |
+| Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ✅ shipped (#146) | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes. `ref: 'main'` — HARDBRUT latest is always the source of truth; `node web/hardbrut-sync.mjs` re-pulls the committed vendored copy on demand (build itself never fetches live, so CI stays deterministic and the standalone stays zero-request) |
+| Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ✅ shipped (#146) | `build-standalone.mjs`'s inline `<style>` is HARDBRUT + a minimal app-shell adapter (tab bar, log, WYSIWYG toolbar — concepts HARDBRUT has no equivalent for); the SPI/WYSIWYG/(W12) logic is unchanged, presentation only |
+| Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ✅ shipped (#147 + this pass) | `site/style.css` deleted outright (not kept as an `@import` shell); `site/build.mjs` inlines vendored `hardbrut.css` + a thin adapter (doc reading width, code-copy button, print). Markup rebuilt on `.navbar`/`.hero`/`.grid`/`.card`/`.btn`/`.cluster`; a working `.navbar-toggle` + `.open` toggle script makes the nav responsive on mobile. All hand-drawn `<svg>` story-card illustrations (home, Apps, Continuity) removed — cards are plain HARDBRUT `.card`s, text only. Antenna+Seed brand mark and the Baud mascot are not illustrations and stay |
 | Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ⬜ todo | `Chrome.kt` keeps the hard-shadow / two-button primitives; no XML rewrite |
-| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ⬜ todo | One source of truth: `supernihil/hardbrut` |
+| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | 🟡 partial | Site's half done: `gen_site_css`/`gen_standalone_css` and the `site`/`standalone` `tokens.json` surface entries are gone; `design/generate.py` now only emits Android's `Palette` + VISUALDESIGN's contrast tables. Waiting on the Android row above before the drift job itself can be rewritten to "vendored css matches the pinned ref" |
 
-**Definition of done:** `site/style.css` and the standalone's CSS are the vendored
+**Definition of done:** `site/build.mjs` and the standalone's CSS are the vendored
 `hardbrut.css` (plus a thin SPORE-asset layer), not a fork; editing
 `supernihil/hardbrut` and rebuilding SPORE changes both web surfaces; the
 standalone still makes zero external requests; Antenna + Seed and Baud persist;

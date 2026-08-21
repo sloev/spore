@@ -28,9 +28,9 @@ branches, releases). Read those once; this one is a lookup table.
 | `src/` | The core crate: router kernel, protocol layers, every bridge. Frozen wire format. Detail below. |
 | `src/main.rs` | Demo + YAML config loader (`spore.example.yaml`) running a daemon's bridges on one node. |
 | `bindings/` | Generated Python / Go / JS wrappers over the C ABI, plus the `spec.json` they generate from. |
-| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into its three surfaces — `site/style.css`, `web/build-standalone.mjs`, `android/…/Chrome.kt` — plus the token table in `docs/VISUALDESIGN.md`, and computes WCAG ratios rather than trusting typed ones. |
-| `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
-| `site/` | The Pages generator (`build.mjs`), `site/seed/` (printable paper-seed tooling), and `site/style.css`, whose token block is generated. |
+| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into Android's `Chrome.kt` and the token table in `docs/VISUALDESIGN.md`, and computes WCAG ratios rather than trusting typed ones. The docs site and the standalone node no longer take a generated block — both import the real `hardbrut.css` at build time (`web/hardbrut-import.mjs`). |
+| `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), `hardbrut-import.mjs`/`hardbrut-sync.mjs` (vendors HARDBRUT's real CSS at build time), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
+| `site/` | The Pages generator (`build.mjs`, HARDBRUT classes only, no hand-authored CSS) and `site/seed/` (printable paper-seed tooling). |
 | `android/` | `android/jni/` is an additive Rust crate exposing an opaque-handle C ABI to Kotlin — checkable with plain `cargo check`. `android/app/…/node/` is the Kotlin app, which needs the SDK/NDK. |
 | `reference/` | Dependency-free Tier-0 decoders (pure Python, no crypto libs) plus `vectors.json`, the generated cross-language vectors everything is checked against. |
 | `tests/` | `api_freeze.rs` — what makes the freeze mechanical rather than a promise. |

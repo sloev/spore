@@ -3,10 +3,12 @@
 
     python3 design/generate.py
 
-One palette, four consumers: the docs site's CSS, the standalone node's inlined
-CSS, Android's Compose `Palette`, and VISUALDESIGN's contrast tables. Each is
-written between marker comments; everything outside the markers is left alone,
-because these files are mostly hand-written and only their token block is not.
+One palette, two remaining consumers: Android's Compose `Palette` and
+VISUALDESIGN's contrast tables. (The docs site and the standalone node no
+longer take a generated token block — both import HARDBRUT's real CSS at
+build time instead; see `web/hardbrut-import.mjs`.) Each is written between
+marker comments; everything outside the markers is left alone, because these
+files are mostly hand-written and only their token block is not.
 
 Contrast ratios are **computed here, never typed**. `tokens.json` declares what
 each pairing is supposed to be (`body` ≥4.5:1, `large` ≥3:1, or `forbidden`) and
@@ -286,73 +288,6 @@ def css_hex(name, theme="dark"):
     return e.get("css") or resolve(name, theme)
 
 
-# --------------------------------------------------------------- site/style.css
-def gen_site_css():
-    cfg = SURFACES["site"]
-    L = []
-    L.append("/* HARDBRUT (supernihil/hardbrut v0.6) — see docs/VISUALDESIGN.md, which is")
-    L.append("   normative for the reasoning. The values come from design/tokens.json; change")
-    L.append("   a colour there and run design/generate.py. Editing this block by hand is a")
-    L.append("   CI failure. Light-first: cream paper, black ink, yellow actions. */")
-    L.append(":root {")
-    L.append("  /* Palette (light, the default) */")
-
-    decls, comments = [], []
-    label_w = max(len(e["label"]) for e in LIGHT["palette"])
-    for e in LIGHT["palette"]:
-        decls.append(f"  --{e['n']}: {e['hex']};")
-        c = e["label"]
-        if e["n"] in CONTRAST["foregrounds"]:
-            r = ratio(e["hex"], resolve("bg", "light"))
-            c = f"{c.ljust(label_w)}  {r:>5.2f}:1 on bg"
-        comments.append(c)
-    L += _align(decls, comments)
-
-    L.append("")
-    L.append("  /* Semantic roles */")
-    decls, comments = [], []
-    for n in cfg["semantic"]:
-        e = LIGHT_S[n]
-        if "ref" in e:
-            decls.append(f"  --{n}: var(--{e['ref']});")
-            comments.append("")
-        else:
-            decls.append(f"  --{n}: {css_hex(n, 'light')};")
-            comments.append(e["role"])
-    L += _align(decls, comments)
-
-    L.append("")
-    for f in T["fonts"]:
-        if f["n"] not in cfg["fonts"]:
-            continue
-        if f.get("note"):
-            wrapped = _wrap(f["note"], 74)
-            for i, line in enumerate(wrapped):
-                prefix = "  /* " if i == 0 else "     "
-                suffix = " */" if i == len(wrapped) - 1 else ""
-                L.append(f"{prefix}{line}{suffix}")
-        L.append(f"  --{f['n']}: {f['stack']};")
-    L.append("")
-    L += gen_metrics_css()
-    L.append("}")
-
-    L.append("")
-    L.append("/* Dark mode — same shape, inverted ink/paper. The yellow accent is the one")
-    L.append("   colour shared by both themes; text sitting on it is near-black (--onyellow),")
-    L.append("   never the near-white ink. */")
-    L.append("@media (prefers-color-scheme: dark) {")
-    L.append("  :root {")
-    for n in cfg["light_raw"]:
-        L.append(f"    --{n}: {css_hex(n, 'dark')};")
-    for n in cfg["light_semantic"]:
-        L.append(f"    --{n}: {css_hex(n, 'dark')};")
-    # Text that sits on the yellow face in dark mode.
-    L.append(f"    --onyellow: {css_hex('onyellow', 'dark')};")
-    L.append("  }")
-    L.append("}")
-    return "\n".join(L)
-
-
 def _align(decls, comments):
     """Pad declarations so their trailing comments line up."""
     width = max(len(d) for d in decls) + 1
@@ -373,35 +308,6 @@ def _wrap(text, width):
     if cur:
         lines.append(cur)
     return lines
-
-
-# ------------------------------------------------- web/build-standalone.mjs
-def gen_standalone_css():
-    cfg = SURFACES["standalone"]
-    L = []
-    L.append("  :root {")
-    L.append("    /* HARDBRUT (docs/VISUALDESIGN.md §1) — light-first, same values as")
-    L.append("       site/style.css so the docs site and this standalone node read as one")
-    L.append("       design language. Resolved hexes rather than a raw-plus-semantic")
-    L.append("       indirection: this file ships alone. */")
-    for n in cfg["semantic"]:
-        L.append(f"    --{n}:{css_hex(n, 'light')};")
-    for f in T["fonts"]:
-        if f["n"] in cfg["fonts"]:
-            L.append(f"    --{f['n']}: {f['stack']};")
-    for name, v, _kt, _c in _metric_rows():
-        L.append(f"    --{name}:{v}px;")
-    L.append("  }")
-    L.append("  @media (prefers-color-scheme: dark) {")
-    L.append("    :root {")
-    L.append("      /* Dark mode — inverted ink/paper; --onyellow is the near-black text")
-    L.append("         that sits on the unchanged yellow face. */")
-    for n in cfg["light_semantic"]:
-        L.append(f"      --{n}:{css_hex(n, 'dark')};")
-    L.append(f"      --onyellow:{css_hex('onyellow', 'dark')};")
-    L.append("    }")
-    L.append("  }")
-    return "\n".join(L)
 
 
 # ---------------------------------------------------------------- Chrome.kt
@@ -524,10 +430,11 @@ def main():
     check_contrast()
     check_touch_targets()
     check_control_sizes()
-    write_region(SURFACES["site"]["file"], gen_site_css())
-    # M7: the standalone node no longer carries a generated token region — it
-    # imports the real HARDBRUT CSS at build time (see web/hardbrut-import.mjs),
-    # so there is nothing for the generator to emit here.
+    # M7: the docs site and the standalone node no longer carry a generated
+    # token region — both import the real HARDBRUT CSS at build time (see
+    # web/hardbrut-import.mjs), so there is nothing for the generator to emit
+    # for either. Android still consumes a generated `Palette` until it moves
+    # to the same vendored source (M7 task 4).
     write_region(SURFACES["android"]["file"], gen_android_kt())
     write_region("docs/VISUALDESIGN.md", gen_visualdesign_md())
 
