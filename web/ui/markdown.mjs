@@ -5,7 +5,7 @@
 // Rendering is plain-text-first and injection-safe: the input is HTML-escaped
 // *before* any markup is introduced, so a hostile message cannot emit raw HTML.
 //
-// Attachments (Appendix A of docs/VISUALDESIGN.md) are two application-level
+// Attachments (Appendix A of docs/DESIGN.md) are two application-level
 // markers, kept canonical:
 //   chat file  : 📎 <filename> | spore:<magnet> | <mime>
 //   image      : ![name](spore:<magnet>)   (feed posts and any inline image)

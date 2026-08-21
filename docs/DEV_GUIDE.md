@@ -18,7 +18,8 @@ branches, releases). Read those once; this one is a lookup table.
 | Check a security question | `docs/SECURITY_FINDINGS.md`; `docs/SECURITY.md` to report one |
 | Verify a 🧪 claim | `docs/HARDWARE.md`, `android/TESTING.md` |
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
-| Change a colour | `design/tokens.json` → `python3 design/generate.py` |
+| Change a colour | Edit upstream `supernihil/hardbrut`, then `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` → `python3 design/generate.py` (Android) |
+| Change an Android-only size (control/chip/row/touch floor) | `design/tokens.json` → `python3 design/generate.py` |
 | Decide core vs runtime | `docs/DESIGN.md` § "The spore and the soil". Platform-specific means runtime, not `src/` |
 
 ## Repo map
@@ -28,9 +29,9 @@ branches, releases). Read those once; this one is a lookup table.
 | `src/` | The core crate: router kernel, protocol layers, every bridge. Frozen wire format. Detail below. |
 | `src/main.rs` | Demo + YAML config loader (`spore.example.yaml`) running a daemon's bridges on one node. |
 | `bindings/` | Generated Python / Go / JS wrappers over the C ABI, plus the `spec.json` they generate from. |
-| `design/` | `tokens.json` (every colour, once) → `generate.py`. Emits the palette into its three surfaces — `site/style.css`, `web/build-standalone.mjs`, `android/…/Chrome.kt` — plus the token table in `docs/VISUALDESIGN.md`, and computes WCAG ratios rather than trusting typed ones. |
-| `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
-| `site/` | The Pages generator (`build.mjs`), `site/seed/` (printable paper-seed tooling), and `site/style.css`, whose token block is generated. |
+| `design/` | `generate.py` aliases Android's `Chrome.kt` `Palette`/`Metrics` onto `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt`'s `HardbrutTokens` (light palette, border, shadow, spacing) and parses the four dark-mode hexes from `web/vendor/hardbrut/hardbrut.css` — the one thing the Compose port doesn't define. No SPORE-authored copy of a colour anywhere. `tokens.json` keeps only the Android-only control-size table (control/chip/row, touch floor), which HARDBRUT has no equivalent of. The docs site and the standalone node need no generated block at all — both import the vendored CSS directly (`web/hardbrut-import.mjs`). |
+| `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), `hardbrut-import.mjs`/`hardbrut-sync.mjs` (vendors HARDBRUT's real CSS at build time), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
+| `site/` | The Pages generator (`build.mjs`, HARDBRUT classes only, no hand-authored CSS) and `site/seed/` (printable paper-seed tooling). |
 | `android/` | `android/jni/` is an additive Rust crate exposing an opaque-handle C ABI to Kotlin — checkable with plain `cargo check`. `android/app/…/node/` is the Kotlin app, which needs the SDK/NDK. |
 | `reference/` | Dependency-free Tier-0 decoders (pure Python, no crypto libs) plus `vectors.json`, the generated cross-language vectors everything is checked against. |
 | `tests/` | `api_freeze.rs` — what makes the freeze mechanical rather than a promise. |
@@ -95,7 +96,7 @@ which part:
 | Android app UI | Android Studio or SDK/NDK + `gradle`. See `android/README.md`. |
 | Docs site | `cd site && npm install && node build.mjs` — fails on a broken internal link, so it is a real check. `node seed/*.test.mjs` covers the paper-seed tooling. |
 | C ABI / bindings | `python3 bindings/generate.py` after changing `spec.json`. Never hand-edit `bindings/{python,go,node}/`. |
-| Design tokens | `python3 design/generate.py` after changing `tokens.json`. CI fails on drift. |
+| Design tokens | `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` after HARDBRUT upstream moves; `python3 design/generate.py` after that or after changing `tokens.json`'s Android sizing table. CI fails on drift in any of these. |
 | Fuzz | `cargo fuzz run <target>` from `fuzz/` (nightly + `cargo-fuzz`). |
 | Vectors | `cargo run --example gen_vectors > reference/vectors.json`, then `python3 reference/test_t0.py` and `python3 scripts/check_docs_sync.py`. |
 
@@ -107,8 +108,9 @@ which part:
 - **No fake UI.** A control that does not do what it visually claims — a toggle
   with no backend, a status that cannot be false, a 🧪 claim with no device
   behind it — either does not ship, or ships visibly disabled with a reason.
-- **`docs/VISUALDESIGN.md` is normative** for anything a person looks at, and
-  names which surfaces consume it. Keep that table honest.
+- **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for anything a person
+  looks at. SPORE keeps no design-language document of its own — `web/vendor/hardbrut/`
+  is vendored at build time and trusted as-is.
 - **Docs MUST NOT drift from code.** Documented byte values live once, generated,
   in `reference/vectors.json`. CI enforces it.
 - **Branch model:** `master` is protected; work happens on a topic branch off it
@@ -129,5 +131,4 @@ which part:
 | `docs/ROADMAP.md` | The engineering plan |
 | `docs/SECURITY_FINDINGS.md` / `docs/SECURITY.md` | Findings register / how to report |
 | `docs/HARDWARE.md` / `android/TESTING.md` | Device evidence |
-| `docs/VISUALDESIGN.md` | The design language |
 | `docs/CONTRIBUTING.md` | Freeze rules, CI, branches, releases |

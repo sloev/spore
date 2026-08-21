@@ -18,6 +18,37 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Milestone 7 complete: HARDBRUT is the framework everywhere, not a copy — and
+  SPORE stops writing its own design-language document.** `site/style.css` (786
+  hand-authored lines) is deleted outright; the docs site runs entirely on the
+  vendored `hardbrut.css` plus a ~15-line adapter for the few things HARDBRUT
+  doesn't define (doc reading width, the code-copy button, print). All 11
+  hand-drawn `<svg>` story-card illustrations (home, Apps, Continuity) are gone,
+  replaced by plain HARDBRUT `.card`s — text carries the content, not decoration.
+  `.cta`/`.share-btn` custom classes are HARDBRUT's own `.btn`/`.btn-cancel`/
+  `.cluster` now, and the mobile nav toggle finally has the glue JS it was
+  missing. `docs/VISUALDESIGN.md` is retired — there is nothing left for a
+  SPORE-authored design document to be normative about once the site and the
+  standalone import HARDBRUT's real CSS at build time and Android's `Chrome.kt`
+  is its Compose consumer; the one non-decorative section (Appendix A's chat
+  attachment marker convention) moves to `docs/DESIGN.md`. Android gets its own
+  vendored HARDBRUT source rather than a CSS reparse:
+  `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` is
+  `supernihil/hardbrut`'s official Compose port, pulled live by
+  `android/hardbrut-sync.py` — same "always latest, pinned ref, no runtime
+  fetch" contract as the web's `hardbrut-sync.mjs`. `design/generate.py` now
+  aliases `Chrome.kt`'s generated `Palette`/`Metrics` straight onto that file's
+  `HardbrutTokens` (light palette, border, shadow, spacing) rather than copying
+  a colour, catching a real drift in the process: the hand-typed `OnYellow`
+  (`#121210`) never matched HARDBRUT's actual `--accent-ink` (`#000`). Dark
+  mode is the one thing the Compose port doesn't define, so the four dark
+  hexes still come from the vendored `hardbrut.css`. `crate()`/`CrateButton`/
+  `Chip`/`ListRow` now draw their static shadow via the vendored `hardShadow()`
+  modifier instead of three copies of the same hand-rolled `drawRect` math.
+  `design/tokens.json` keeps only the Android-only control-size table (control/
+  chip/row, touch floor) — everything else HARDBRUT has an opinion on is no
+  longer duplicated by hand anywhere in the tree. Wire unchanged.
+
 - **The private group *is* the authorized feed, and formatting is WYSIWYG everywhere
   (W12).** The private group — the sealed, key-gated channel already in the Chats
   list — is the authorized feed; there is no separate surface. "Member" means

@@ -4,8 +4,8 @@ package org.spore.node
  * Chats: the thread list, and one conversation.
  *
  * Message bubbles are crates, right-aligned when mine. Sent and received differ by
- * border colour *and* side — docs/VISUALDESIGN.md section 1 forbids signalling by
- * colour alone, and the alignment is what carries it otherwise.
+ * border colour *and* side — never signal by colour alone (ROADMAP hard rule), and
+ * the alignment is what carries it otherwise.
  */
 
 import android.content.Intent

@@ -21,8 +21,8 @@ fs.mkdirSync(out, { recursive: true });
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
 //
-// Navigation follows VISUALDESIGN.md §7 Site homepage: 5 primary items:
-// Try it · How it works · Get a node · Spec · Mission.
+// Navigation: 5 primary items — Try it · How it works · Get a node · Spec ·
+// Mission.
 // Secondary guides are rendered + linkable but kept off the top nav.
 
 // The front page is `site/home.md`, not the README. They have different jobs: a
@@ -48,7 +48,6 @@ const pages = [
   ['docs/CHANGELOG.md', 'changelog.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
-  ['docs/VISUALDESIGN.md', 'design-language.html', null],
   ['bindings/README.md', 'bindings.html', null],
   ['reference/README.md', 'reference.html', null],
   ['web/README.md', 'webguide.html', null],
@@ -88,7 +87,6 @@ const titles = new Map([
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
   ['direct.html', 'SPORE — Direct: low-latency E2E pipes'],
-  ['design-language.html', 'SPORE — visual design language'],
   ['bindings.html', 'SPORE — language bindings'],
   ['reference.html', 'SPORE — reference decoders'],
   ['webguide.html', 'SPORE — the browser node'],
@@ -181,16 +179,18 @@ function shareBar() {
   const buttons = links
     .map(([label, href, title]) =>
       href
-        ? `<a class="share-btn" href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${label}</a>`
-        : `<button class="share-btn" type="button" data-share="${label}" title="${title}">${label}</button>`
+        ? `<a class="btn btn-cancel" href="${href}" title="${title}" target="_blank" rel="noopener noreferrer">${label}</a>`
+        : `<button class="btn btn-cancel" type="button" data-share="${label}" title="${title}">${label}</button>`
     )
     .join('');
 
-  return `<section class="share" aria-label="Share SPORE">
+  return `<section class="share card" aria-label="Share SPORE">
+  <div class="card-body">
   <h2>Pass it on</h2>
-  <p>Continuity is just redundancy that outlives its sources — and it only works
+  <p class="text-muted">Continuity is just redundancy that outlives its sources — and it only works
   if the copies are already scattered before they're needed.</p>
-  <div class="share-row">${buttons}</div>
+  <div class="cluster">${buttons}</div>
+  </div>
 </section>
 <script>
 (function () {
@@ -248,22 +248,17 @@ function nav(self) {
       return `<li><a href="${dst}"${active}>${label}</a></li>`;
     })
     .join('');
-  return `<ul class="navbar-links">${items}</ul>`;
+  return `<ul class="navbar-links" id="nav-links">${items}</ul>`;
 }
 
-// Thin SPORE-only layer over HARDBRUT: the docs reading layout, share row,
-// code-copy button, illustrations, and print. Everything else is the framework.
+// Thin SPORE-only layer over HARDBRUT: everything here is a rule HARDBRUT does
+// not ship (docs reading width, the per-code-block copy button, print) — no
+// component is redefined, and nothing here duplicates a HARDBRUT class.
 const siteAdapterCss = `
 /* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
 main.doc.container { max-width: 860px; }
 main.doc { font-size: 0.95rem; }
-.brand-mark { display: inline-block; vertical-align: -3px; margin-right: 0.4rem; }
-.navbar-brand { font-size: 1.7rem; }
-.share { margin: var(--space) 0; padding: var(--space); background: var(--paper); border: var(--border); box-shadow: var(--shadow); }
-.share h2 { margin: 0 0 var(--space-sm); }
-.share p { color: var(--muted); margin: 0 0 var(--space-sm); }
-.share-row { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
-.share-btn { display: inline-block; padding: 0.4rem 0.8rem; font-size: 0.85rem; text-decoration: none; }
+.brand-mark { display: inline-block; vertical-align: -5px; margin-right: 0.4rem; }
 main.doc .code-copy {
   position: absolute; top: 8px; right: 8px;
   font: 11px var(--font-mono); line-height: 1; padding: 4px 9px;
@@ -366,6 +361,7 @@ ${siteAdapterCss}
 <body class="page-${cls}">
 <nav class="navbar">
   <a class="navbar-brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/></svg>SPORE</a>
+  <button class="navbar-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">☰</button>
   ${nav(self)}
 </nav>
 <main class="doc container">
@@ -406,6 +402,20 @@ ${bodyHtml}
   });
 })();
 </script>
+<script>
+(function () {
+  // Mobile nav: HARDBRUT's .navbar-toggle/.navbar-links CSS contract is a
+  // hidden toggle button + an .open class below 640px; this is the one line
+  // of glue JS the framework leaves to the page.
+  var toggle = document.querySelector('.navbar-toggle');
+  var links = document.getElementById('nav-links');
+  if (!toggle || !links) return;
+  toggle.addEventListener('click', function () {
+    var open = links.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+})();
+</script>
 </body>
 </html>`;
 }
@@ -439,11 +449,7 @@ for (const [src, dst, label] of pages) {
   console.log(`rendered ${src} -> _site/${dst}`);
 }
 
-// Ship the stylesheet.
-fs.writeFileSync(path.join(out, 'style.css'), fs.readFileSync(path.join(root, 'site/style.css')));
-console.log('wrote _site/style.css');
-
-// Ship the Antenna + Seed favicon (the only brand icon — see docs/VISUALDESIGN.md §6).
+// Ship the Antenna + Seed favicon (the only brand icon).
 fs.writeFileSync(path.join(out, 'antenna-seed.svg'), fs.readFileSync(path.join(root, 'site/antenna-seed.svg')));
 console.log('wrote _site/antenna-seed.svg');
 

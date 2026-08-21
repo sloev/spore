@@ -651,7 +651,7 @@ private fun classifyBridgeStatus(status: String): BridgeStatus {
  * One bridge: an LED dot, the kind, its status line, and — for a bridge this app
  * can actually stop — Pause/Resume and Remove controls.
  *
- * `canStop` is the honest gate (§ VISUALDESIGN / audit "no fake UI"): every
+ * `canStop` is the honest gate (ROADMAP hard rule "no fake UI"): every
  * bridge kind gets a real Remove now (PR2 carried forward gave the core-owned
  * UDP/TCP bridges a stop hook too, not just the Kotlin-driven ones), but the
  * flag stays rather than assuming every future kind can be — a bridge we
@@ -667,7 +667,7 @@ private fun BridgeRow(b: BridgeState) {
         BridgeStatus.Up -> Palette.Ink to b.status
         BridgeStatus.Connecting -> Palette.Ink to b.status
         BridgeStatus.Down -> Palette.Muted to b.status
-        // Never signal failure by colour alone (§ VISUALDESIGN): pair pink with an icon.
+        // Never signal failure by colour alone (ROADMAP hard rule): pair yellow with an icon.
         BridgeStatus.Error -> Palette.Yellow to "\u26a0 ${b.status}"
     }
     val trailing: @Composable (() -> Unit)? = {
@@ -704,7 +704,7 @@ private fun BridgeRow(b: BridgeState) {
 /**
  * A profile picture: the avatar image at [path] if present, else the same kevlar
  * letter tile [ChatsList]'s Nearby rows use, so a node with no photo still reads
- * as itself. Square tile with the machined-metal border, per VISUALDESIGN §3.
+ * as itself. Square tile with the HARDBRUT border.
  */
 @Composable
 internal fun ProfilePic(path: String?, name: String, size: Int = 34) {

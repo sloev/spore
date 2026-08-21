@@ -79,24 +79,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # `design/generate.py` emits the palette into the docs site's CSS, the
-      # standalone node's inlined CSS, Android's Compose Palette and
-      # VISUALDESIGN's contrast tables. The same hexes used to be hand-typed in
-      # each, with the WCAG ratios re-typed as comments beside them — so a
-      # palette change meant a manual four-way audit, and the ratios could
-      # silently stop describing the colours they sat next to.
-      #
-      # The script also fails on its own if a pairing stops matching the grade
-      # tokens.json claims for it, in either direction: a colour that is no
-      # longer readable, or a "forbidden" pair that has quietly become fine.
+      # The vendored copies are what every build actually reads (CI and
+      # `file://` both stay offline); this is the one job allowed to touch
+      # the network, so it can catch upstream HARDBRUT drifting out from
+      # under the pinned `main` ref before a build silently ships a stale copy.
+      # Two vendored sources, one per platform: the real CSS for the web, the
+      # official Compose port for Android.
+      - name: Vendored HARDBRUT is current with the pinned ref
+        run: |
+          node web/hardbrut-sync.mjs
+          python3 android/hardbrut-sync.py
+          if ! git diff --exit-code -- web/vendor/hardbrut/hardbrut.css android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt; then
+            echo "::error::a vendored HARDBRUT copy is stale — run: node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py"
+            exit 1
+          fi
+          echo "both vendored HARDBRUT copies match the pinned ref"
+      # design/generate.py aliases that vendored Compose port's tokens into
+      # Chrome.kt's Palette/Metrics (not a second hand-typed copy), and parses
+      # the vendored CSS for the four dark-mode hexes the Compose port doesn't
+      # define. The docs site and the standalone node need no such step; both
+      # import the vendored CSS directly at build time (`web/hardbrut-import.mjs`).
+      # There is no SPORE-authored design document to keep in sync — HARDBRUT
+      # upstream is normative.
       - name: Regenerate and diff
         run: |
           python3 design/generate.py
-          if ! git diff --exit-code -- design/ site/ web/ android/ docs/; then
-            echo "::error::design tokens are stale — run: python3 design/generate.py"
+          if ! git diff --exit-code -- design/ android/; then
+            echo "::error::Android's Palette is stale — run: python3 design/generate.py"
             exit 1
           fi
-          echo "every surface matches design/tokens.json"
+          echo "Android's Palette matches the vendored HARDBRUT sources"
 
   offline:
     name: offline bundle

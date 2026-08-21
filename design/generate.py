@@ -1,157 +1,137 @@
 #!/usr/bin/env python3
-"""Generate the design tokens into every surface that renders them.
+"""Regenerate Chrome.kt's `Palette`/`Metrics` from SPORE's two vendored HARDBRUT sources.
 
     python3 design/generate.py
 
-One palette, four consumers: the docs site's CSS, the standalone node's inlined
-CSS, Android's Compose `Palette`, and VISUALDESIGN's contrast tables. Each is
-written between marker comments; everything outside the markers is left alone,
-because these files are mostly hand-written and only their token block is not.
+Two vendored copies of the same upstream design system, each authoritative
+for what it covers:
 
-Contrast ratios are **computed here, never typed**. `tokens.json` declares what
-each pairing is supposed to be (`body` ≥4.5:1, `large` ≥3:1, or `forbidden`) and
-this script checks the declaration both ways: a pair claimed readable that isn't
-fails the build, and so does a pair claimed forbidden that has quietly become
-readable. That is the whole point — the palette cannot drift away from its own
-accessibility claims without CI noticing.
+- `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` — the
+  official Compose port (`android/hardbrut-sync.py` re-pulls it). Authoritative
+  for the light palette and every border/shadow/spacing metric; Chrome.kt's
+  generated region just aliases its `HardbrutTokens` object — not a copied
+  colour.
+- `web/vendor/hardbrut/hardbrut.css` (`web/hardbrut-sync.mjs`) — the real CSS,
+  used everywhere on the web. `Hardbrut.kt` has no dark-mode variant at all, so
+  this script parses the CSS's `[data-theme="dark"]` block for the four dark
+  hexes Android needs and the Compose port does not provide — the one gap
+  between the two vendored sources.
+
+The three interactive control sizes (control/chip/row) and the touch-target
+floor are SPORE's own Android product decision, not a HARDBRUT concept — a
+desktop-first design system has no touch-target opinion — so
+`design/tokens.json` keeps just that table, and this script still enforces
+"exactly three sizes, each in range" and "nothing under the touch floor
+without saying why."
 
 CI runs this and diffs; see the "design tokens in sync" job.
 """
 import json
 import os
 import re
-import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 T = json.load(open(os.path.join(HERE, "tokens.json")))
-
-DARK, LIGHT = T["dark"], T["light"]
-CONTRAST = T["contrast"]
-SURFACES = T["surfaces"]
 METRICS = T["metrics"]
-BODY = CONTRAST["thresholds"]["body"]
-LARGE = CONTRAST["thresholds"]["large"]
+
+HARDBRUT_CSS = os.path.join(ROOT, "web/vendor/hardbrut/hardbrut.css")
+CHROME_KT = "android/app/src/main/kotlin/org/spore/node/Chrome.kt"
 
 
-# ----------------------------------------------------------------- WCAG maths
-def _channel(c):
-    c /= 255.0
-    return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+# ------------------------------------------- parse the four dark hexes (CSS)
+def _hex6(h):
+    """#abc -> #aabbcc; already-6-digit hexes pass through unchanged."""
+    h = h.strip()
+    m = re.fullmatch(r"#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])", h)
+    return "#" + "".join(c * 2 for c in m.groups()) if m else h
 
 
-def luminance(hex_):
-    h = hex_.lstrip("#")
-    r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
-    return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
+def _vars(block):
+    """Parse `--name: value;` declarations. HARDBRUT's minified CSS sometimes
+    omits the trailing `;` on the last declaration in a block, so this splits
+    on `;` rather than requiring one after every declaration."""
+    out = {}
+    for decl in block.split(";"):
+        decl = decl.strip()
+        if not decl.startswith("--") or ":" not in decl:
+            continue
+        k, v = decl[2:].split(":", 1)
+        out[k.strip()] = v.strip()
+    return out
 
 
-def ratio(fg, bg):
-    """WCAG 2.x contrast ratio. Symmetric, so argument order is a convention."""
-    a, b = luminance(fg), luminance(bg)
-    hi, lo = max(a, b), min(a, b)
-    return (hi + 0.05) / (lo + 0.05)
-
-
-def grade_of(r):
-    return "body" if r >= BODY else ("large" if r >= LARGE else "forbidden")
-
-
-# ------------------------------------------------------------- token lookup
-def _index(entries):
-    return {e["n"]: e for e in entries}
-
-
-DARK_P, DARK_S = _index(DARK["palette"]), _index(DARK["semantic"])
-LIGHT_P, LIGHT_S = _index(LIGHT["palette"]), _index(LIGHT["semantic"])
-
-
-def resolve(name, theme="dark"):
-    """Hex for a token name, following `ref` chains and light-mode overrides."""
-    pal, sem = (DARK_P, DARK_S) if theme == "dark" else (LIGHT_P, LIGHT_S)
-    if name in pal:
-        return pal[name]["hex"]
-    if name in sem:
-        e = sem[name]
-        return e["hex"] if "hex" in e else resolve(e["ref"], theme)
-    # A light surface may reuse a dark token it never overrides (e.g. kevlar).
-    if theme == "light":
-        return resolve(name, "dark")
-    raise KeyError(f"unknown token: {name}")
-
-
-def entry(name, theme="dark"):
-    pal, sem = (DARK_P, DARK_S) if theme == "dark" else (LIGHT_P, LIGHT_S)
-    return pal.get(name) or sem.get(name) or {}
-
-
-# ------------------------------------------------------------------- checks
-def check_contrast():
-    """Every declared grade must match the computed one. Fail loudly if not."""
-    problems = []
-    bases = CONTRAST["bases"]
-    # HARDBRUT is light-first: the grades matrix is evaluated against the light
-    # theme (the default), not the dark one.
-    matrix_theme = CONTRAST.get("matrix_theme", "light")
-
-    for fg, grades in CONTRAST["grades"].items():
-        for base, declared in zip(bases, grades):
-            r = ratio(resolve(fg, matrix_theme), resolve(base, matrix_theme))
-            actual = grade_of(r)
-            if actual != declared:
-                problems.append(
-                    f"  {fg} on {base}: {r:.2f}:1 is '{actual}', "
-                    f"tokens.json declares '{declared}'"
-                )
-
-    for chk in CONTRAST["extra"]:
-        theme = chk.get("theme", "dark")
-        r = ratio(resolve(chk["fg"], theme), resolve(chk["on"], theme))
-        actual = grade_of(r)
-        if actual != chk["grade"]:
-            problems.append(
-                f"  {chk['fg']} on {chk['on']} ({theme}): {r:.2f}:1 is "
-                f"'{actual}', tokens.json declares '{chk['grade']}'"
-            )
-        if chk.get("aaa") and r < 7.0:
-            problems.append(
-                f"  {chk['fg']} on {chk['on']} ({theme}): {r:.2f}:1 is "
-                f"below the 7:1 AAA floor it is documented as clearing"
-            )
-
-    if problems:
-        sys.stderr.write(
-            "design tokens: contrast declarations no longer match the hexes.\n"
-            + "\n".join(problems)
-            + "\n\nEither fix the colour or update tokens.json's grade — but do\n"
-            "not ship a palette whose own accessibility claims are false.\n"
+def parse_hardbrut_dark():
+    """The four dark-mode hexes HARDBRUT's Compose port doesn't define."""
+    css = open(HARDBRUT_CSS, encoding="utf-8").read()
+    m = re.search(r'\[data-theme="dark"\]\s*\{([^}]*)\}', css)
+    if not m:
+        raise SystemExit(
+            "design tokens: could not find HARDBRUT's [data-theme=\"dark\"] block "
+            f"in {HARDBRUT_CSS} — did the upstream file's format change? Re-vendor "
+            "with `node web/hardbrut-sync.mjs` and check by hand."
         )
-        raise SystemExit(1)
+    dark = _vars(m.group(1))
+    for k in ("ink", "paper", "bg", "muted"):
+        if k not in dark:
+            raise SystemExit(f'design tokens: HARDBRUT\'s [data-theme="dark"] is missing --{k}')
+    return {k: _hex6(v) for k, v in dark.items()}
 
 
-# ---------------------------------------------------------------- metrics (C5)
+DARK = parse_hardbrut_dark()
+
+
+def _kt_color(hex_):
+    return f"Color(0xFF{hex_.lstrip('#').upper()})"
+
+
+# ---------------------------------------------------------------- metrics
 #
-# Colour was single-sourced first (C3). These are the other half of the same
-# argument: a button height hand-typed in three files drifts exactly the way a
-# hex hand-typed in three files drifts, and the drift job cannot see it unless
-# the value is generated. Every number here already existed somewhere in the
-# tree — `chip` and `row` are the two exceptions, and they name controls that do
-# not exist yet, for C5 and C6 to build against.
+# `control`/`chip`/`row` (and the touch floor) are SPORE's own Android sizing
+# decisions — HARDBRUT ships no touch-target concept to source them from.
+# `radius`/`border`/`throw` and the spacing steps *are* HARDBRUT tokens, and
+# the vendored Compose port already types them as `Dp` — so those rows alias
+# `HardbrutTokens` directly rather than parsing anything.
 
 
 def _metric_rows():
-    """(name, value, kt-name, comment) for every metric, in emit order."""
+    """(name, kt-expression, kt-name, comment) for every metric, in emit order."""
     rows = []
     for c in METRICS["controls"]:
-        rows.append((f"{c['n']}-h", c["h"], f"{c['kt']}H", c["role"]))
-        rows.append((f"{c['n']}-px", c["px"], f"{c['kt']}PX", "horizontal padding"))
-        rows.append((f"{c['n']}-py", c["py"], f"{c['kt']}PY", "vertical padding"))
-    for e in METRICS["shape"]:
-        rows.append((e["n"], e["v"], e["kt"], e["role"]))
-    for e in METRICS["space"]:
-        rows.append((f"space-{e['n']}", e["v"], e["kt"], e["role"]))
+        rows.append((f"{c['n']}-h", f"{c['h']}.dp", f"{c['kt']}H", c["role"]))
+        rows.append((f"{c['n']}-px", f"{c['px']}.dp", f"{c['kt']}PX", "horizontal padding"))
+        rows.append((f"{c['n']}-py", f"{c['py']}.dp", f"{c['kt']}PY", "vertical padding"))
+    rows.append((
+        "radius", "0.dp", "Radius",
+        "corner radius — zero, always. Neither vendored HARDBRUT source defines "
+        "one; it simply never sets one (true circles are the only exception)",
+    ))
+    rows.append((
+        "border", "HardbrutTokens.Border", "Border",
+        "border width — HARDBRUT's Border",
+    ))
+    rows.append((
+        "throw", "HardbrutTokens.Shadow", "Throw",
+        "the hard no-blur drop-shadow offset — HARDBRUT's Shadow",
+    ))
+    rows.append((
+        "space-tight", "HardbrutTokens.SpaceSm", "Tight",
+        "tighter internal padding — HARDBRUT's SpaceSm",
+    ))
+    rows.append((
+        "space-gap", "HardbrutTokens.SpaceSm", "Gap",
+        "between controls — HARDBRUT's SpaceSm",
+    ))
+    rows.append((
+        "space-pad", "HardbrutTokens.Space", "Pad",
+        "inside a card / crate — HARDBRUT's Space",
+    ))
+    rows.append((
+        "space-section", "HardbrutTokens.SpaceLg", "Section",
+        "between sections — HARDBRUT's SpaceLg",
+    ))
     t = METRICS["touch"]
-    rows.append(("touch-min", t["min"], t["kt"], t["role"]))
+    rows.append(("touch-min", f"{t['min']}.dp", t["kt"], t["role"]))
     return rows
 
 
@@ -173,9 +153,9 @@ def check_touch_targets():
             )
 
 
-# The three sizes VISUALDESIGN §3 declares, and their permitted ranges. A range
-# rather than a number because the design brief gives one ("48–52 dp", "32–36 dp")
-# — the exact value is a judgement, the *count* is not.
+# The three interactive sizes SPORE settled on for Android, and their permitted
+# ranges. A range rather than a number because the original brief gave one
+# ("48–52 dp", "32–36 dp") — the exact value is a judgement, the *count* is not.
 CONTROL_SIZES = {
     "control": (48, 52),
     "chip": (32, 36),
@@ -186,10 +166,10 @@ CONTROL_SIZES = {
 def check_control_sizes():
     """Exactly three interactive sizes, no more, no fewer, each in its range.
 
-    The whole point of C5 is that a fourth height is how a design stops being a
-    system. Enforcing it here rather than in review means adding one is a
-    deliberate edit to this list with a reason attached, instead of a number that
-    slipped into a screen and was never noticed again.
+    The whole point of this system is that a fourth height is how a design
+    stops being a system. Enforcing it here rather than in review means adding
+    one is a deliberate edit to this list with a reason attached, instead of a
+    number that slipped into a screen and was never noticed again.
     """
     got = {c["n"]: c["h"] for c in METRICS["controls"]}
     if set(got) != set(CONTROL_SIZES):
@@ -201,59 +181,36 @@ def check_control_sizes():
             + (f"  unexpected: {', '.join(extra)}\n" if extra else "")
             + (f"  missing:    {', '.join(missing)}\n" if missing else "")
             + "A fourth size is how a design stops being a system. If you mean it,\n"
-            "change CONTROL_SIZES here and say why in VISUALDESIGN §3."
+            "change CONTROL_SIZES here and say why in the commit message."
         )
     for name, h in sorted(got.items()):
         lo, hi = CONTROL_SIZES[name]
         if not lo <= h <= hi:
             raise SystemExit(
                 f"design tokens: control `{name}` is {h}dp, outside the "
-                f"{lo}–{hi}dp the design language allows for it."
+                f"{lo}–{hi}dp SPORE's Android sizing allows for it."
             )
 
 
-def gen_metrics_css():
-    L = ["  /* Controls, spacing and shape — C5. Values in px; the Android side emits",
-         "     the same numbers as dp, which agree at 1x. */"]
-    decls, comments = [], []
-    for name, v, _kt, comment in _metric_rows():
-        decls.append(f"  --{name}: {v}px;")
-        comments.append(comment)
-    L += _align(decls, comments)
-    return L
-
-
 def gen_metrics_kt():
-    L = ["", "/**", " * Sizing, spacing and shape — the C5 control system, generated from",
-         " * design/tokens.json. Hand-typing a button height here is a CI failure for the",
-         " * same reason hand-typing a hex is.", " */", "internal object Metrics {"]
+    L = ["", "/**", " * Sizing, spacing and shape — control/chip/row are SPORE's own Android",
+         " * decision (design/tokens.json); radius/border/throw/spacing alias the vendored",
+         " * `vendor/Hardbrut.kt`'s `HardbrutTokens`. Hand-typing a button height or a",
+         " * shadow offset here is a CI failure for the same reason hand-typing a hex is.",
+         " */", "internal object Metrics {"]
     decls, comments = [], []
-    for _name, v, kt, comment in _metric_rows():
-        decls.append(f"    val {kt} = {v}.dp")
+    for _name, expr, kt, comment in _metric_rows():
+        decls.append(f"    val {kt} = {expr}")
         comments.append(comment)
     L += _align_kt(decls, comments)
     L.append("}")
     return L
 
 
-def gen_metrics_md():
-    L = ["", "### Controls, spacing and shape (C5)", "",
-         "| Token | Value | CSS | Kotlin | Role |", "|---|---|---|---|---|"]
-    for name, v, kt, comment in _metric_rows():
-        L.append(f"| `{name}` | {v} | `var(--{name})` | `Metrics.{kt}` | {comment} |")
-    return L
-
-
 # ------------------------------------------------------------ region writing
 MARKERS = {
-    ".css": ("/* >>> design tokens: generated by design/generate.py — do not edit <<< */",
-             "/* >>> end design tokens <<< */"),
-    ".mjs": ("  /* >>> design tokens: generated by design/generate.py — do not edit <<< */",
-             "  /* >>> end design tokens <<< */"),
     ".kt": ("// >>> design tokens: generated by design/generate.py — do not edit <<<",
             "// >>> end design tokens <<<"),
-    ".md": ("<!-- >>> design tokens: generated by design/generate.py — do not edit <<< -->",
-            "<!-- >>> end design tokens <<< -->"),
 }
 
 
@@ -280,195 +237,6 @@ def write_region(relpath, body):
         print(f"  ok  {relpath}")
 
 
-def css_hex(name, theme="dark"):
-    """Hex as the CSS should spell it (#fff, not #ffffff, where declared)."""
-    e = entry(name, theme)
-    return e.get("css") or resolve(name, theme)
-
-
-# --------------------------------------------------------------- site/style.css
-def gen_site_css():
-    cfg = SURFACES["site"]
-    L = []
-    L.append("/* HARDBRUT (supernihil/hardbrut v0.6) — see docs/VISUALDESIGN.md, which is")
-    L.append("   normative for the reasoning. The values come from design/tokens.json; change")
-    L.append("   a colour there and run design/generate.py. Editing this block by hand is a")
-    L.append("   CI failure. Light-first: cream paper, black ink, yellow actions. */")
-    L.append(":root {")
-    L.append("  /* Palette (light, the default) */")
-
-    decls, comments = [], []
-    label_w = max(len(e["label"]) for e in LIGHT["palette"])
-    for e in LIGHT["palette"]:
-        decls.append(f"  --{e['n']}: {e['hex']};")
-        c = e["label"]
-        if e["n"] in CONTRAST["foregrounds"]:
-            r = ratio(e["hex"], resolve("bg", "light"))
-            c = f"{c.ljust(label_w)}  {r:>5.2f}:1 on bg"
-        comments.append(c)
-    L += _align(decls, comments)
-
-    L.append("")
-    L.append("  /* Semantic roles */")
-    decls, comments = [], []
-    for n in cfg["semantic"]:
-        e = LIGHT_S[n]
-        if "ref" in e:
-            decls.append(f"  --{n}: var(--{e['ref']});")
-            comments.append("")
-        else:
-            decls.append(f"  --{n}: {css_hex(n, 'light')};")
-            comments.append(e["role"])
-    L += _align(decls, comments)
-
-    L.append("")
-    for f in T["fonts"]:
-        if f["n"] not in cfg["fonts"]:
-            continue
-        if f.get("note"):
-            wrapped = _wrap(f["note"], 74)
-            for i, line in enumerate(wrapped):
-                prefix = "  /* " if i == 0 else "     "
-                suffix = " */" if i == len(wrapped) - 1 else ""
-                L.append(f"{prefix}{line}{suffix}")
-        L.append(f"  --{f['n']}: {f['stack']};")
-    L.append("")
-    L += gen_metrics_css()
-    L.append("}")
-
-    L.append("")
-    L.append("/* Dark mode — same shape, inverted ink/paper. The yellow accent is the one")
-    L.append("   colour shared by both themes; text sitting on it is near-black (--onyellow),")
-    L.append("   never the near-white ink. */")
-    L.append("@media (prefers-color-scheme: dark) {")
-    L.append("  :root {")
-    for n in cfg["light_raw"]:
-        L.append(f"    --{n}: {css_hex(n, 'dark')};")
-    for n in cfg["light_semantic"]:
-        L.append(f"    --{n}: {css_hex(n, 'dark')};")
-    # Text that sits on the yellow face in dark mode.
-    L.append(f"    --onyellow: {css_hex('onyellow', 'dark')};")
-    L.append("  }")
-    L.append("}")
-    return "\n".join(L)
-
-
-def _align(decls, comments):
-    """Pad declarations so their trailing comments line up."""
-    width = max(len(d) for d in decls) + 1
-    out = []
-    for d, c in zip(decls, comments):
-        out.append(f"{d.ljust(width)}/* {c} */" if c else d)
-    return out
-
-
-def _wrap(text, width):
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        if cur and len(cur) + 1 + len(w) > width:
-            lines.append(cur)
-            cur = w
-        else:
-            cur = f"{cur} {w}".strip()
-    if cur:
-        lines.append(cur)
-    return lines
-
-
-# ------------------------------------------------- web/build-standalone.mjs
-def gen_standalone_css():
-    cfg = SURFACES["standalone"]
-    L = []
-    L.append("  :root {")
-    L.append("    /* HARDBRUT (docs/VISUALDESIGN.md §1) — light-first, same values as")
-    L.append("       site/style.css so the docs site and this standalone node read as one")
-    L.append("       design language. Resolved hexes rather than a raw-plus-semantic")
-    L.append("       indirection: this file ships alone. */")
-    for n in cfg["semantic"]:
-        L.append(f"    --{n}:{css_hex(n, 'light')};")
-    for f in T["fonts"]:
-        if f["n"] in cfg["fonts"]:
-            L.append(f"    --{f['n']}: {f['stack']};")
-    for name, v, _kt, _c in _metric_rows():
-        L.append(f"    --{name}:{v}px;")
-    L.append("  }")
-    L.append("  @media (prefers-color-scheme: dark) {")
-    L.append("    :root {")
-    L.append("      /* Dark mode — inverted ink/paper; --onyellow is the near-black text")
-    L.append("         that sits on the unchanged yellow face. */")
-    for n in cfg["light_semantic"]:
-        L.append(f"      --{n}:{css_hex(n, 'dark')};")
-    L.append(f"      --onyellow:{css_hex('onyellow', 'dark')};")
-    L.append("    }")
-    L.append("  }")
-    return "\n".join(L)
-
-
-# ---------------------------------------------------------------- Chrome.kt
-def _kt_name(name, theme="dark"):
-    e = entry(name, theme)
-    if "kt" in e:
-        return e["kt"]
-    return "".join(p.capitalize() for p in name.split("-"))
-
-
-def _kt_color(hex_):
-    return f"Color(0xFF{hex_.lstrip('#').upper()})"
-
-
-def gen_android_kt():
-    cfg = SURFACES["android"]
-    bases = CONTRAST["bases"]
-    L = []
-    L.append("/**")
-    L.append(" * The §1 tokens, generated from design/tokens.json by design/generate.py.")
-    L.append(" *")
-    L.append(" * HARDBRUT is light-first: the primary members are the light theme, and the")
-    L.append(" * identical names + `Dark` are the dark theme. Two button kinds (Yellow default,")
-    L.append(" * Paper cancel); black ink; zero radius; hard no-blur shadows.")
-    L.append(" */")
-    L.append("internal object Palette {")
-
-    # Light (primary) — flat names, no suffix.
-    decls, comments = [], []
-    names_light = []
-    for e in LIGHT["palette"]:
-        decls.append(f"    val {e['kt']} = {_kt_color(e['hex'])}")
-        names_light.append(e['n'])
-        if e["n"] in CONTRAST["grades"]:
-            rs = [ratio(e["hex"], resolve(b, 'light')) for b in bases]
-            c = " / ".join(f"{r:.2f}" for r in rs)
-            for base, g in zip(bases, CONTRAST["grades"][e["n"]]):
-                if g == "forbidden":
-                    c += f" ← never on {_kt_name(base)}"
-        else:
-            c = f"{e['label']} — {e['role']}"
-        comments.append(c)
-    # Semantic roles only light theme needs (e.g. bg as a flat name).
-    for n in cfg["semantic"]:
-        if n in names_light:
-            continue
-        e = LIGHT_S.get(n) or entry(n, "light")
-        decls.append(f"    val {_kt_name(n, 'light')} = {_kt_color(resolve(n, 'light'))}")
-        comments.append(e.get("role", ""))
-    L += _align_kt(decls, comments)
-
-    L.append("")
-    L.append("    // Dark mode — inverted ink/paper; the yellow accent is unchanged.")
-    decls, comments = [], []
-    seen = set()
-    for n in cfg["light_raw"] + cfg["light_semantic"]:
-        if n in seen:
-            continue
-        seen.add(n)
-        decls.append(f"    val {_kt_name(n, 'dark')} = {_kt_color(resolve(n, 'dark'))}")
-        comments.append(entry(n, 'dark').get("role", ""))
-    L += _align_kt(decls, comments)
-    L.append("}")
-    L += gen_metrics_kt()
-    return "\n".join(L)
-
-
 def _align_kt(decls, comments):
     width = max(len(d) for d in decls) + 1
     return [
@@ -476,60 +244,68 @@ def _align_kt(decls, comments):
     ]
 
 
-# ----------------------------------------------------------- VISUALDESIGN.md
-def gen_visualdesign_md():
-    bases = CONTRAST["bases"]
+# ---------------------------------------------------------------- Chrome.kt
+# (light Kotlin name, kt-expression aliasing HardbrutTokens, role comment).
+# `AccentYellow` maps to `Yellow` for continuity with the palette Android
+# already had; every other name matches the HardbrutTokens field it aliases.
+PALETTE_FIELDS = [
+    ("Ink", "HardbrutTokens.Ink", "text, borders, chrome"),
+    ("Paper", "HardbrutTokens.Paper", "cards on paper"),
+    ("Yellow", "HardbrutTokens.AccentYellow.first",
+     "primary actions, highlights — the one colour shared by both themes"),
+    ("Muted", "HardbrutTokens.Muted", "de-emphasised text"),
+    ("Bg", "HardbrutTokens.Background", "page base"),
+]
+
+
+def gen_android_kt():
     L = []
-    L.append("### Tokens")
+    L.append("/**")
+    L.append(" * HARDBRUT's palette. The light half aliases the vendored Compose port")
+    L.append(" * (`vendor/Hardbrut.kt`'s `HardbrutTokens`) directly — not a copied colour.")
+    L.append(" * The dark half has no equivalent there (that file defines no dark-mode")
+    L.append(" * variant), so design/generate.py parses it from the vendored `hardbrut.css`")
+    L.append(" * instead — the one gap between SPORE's two vendored HARDBRUT sources.")
+    L.append(" *")
+    L.append(" * HARDBRUT is light-first: the primary members are the light theme, and the")
+    L.append(" * identical names + `Dark` are the dark theme. Two button kinds (Yellow default,")
+    L.append(" * Paper cancel); black ink; zero radius; hard no-blur shadows.")
+    L.append(" */")
+    L.append("internal object Palette {")
+
+    decls, comments = [], []
+    for kt, expr, role in PALETTE_FIELDS:
+        decls.append(f"    val {kt} = {expr}")
+        comments.append(role)
+    L += _align_kt(decls, comments)
+
     L.append("")
-    L.append("| Token | Hex | Role |")
-    L.append("|---|---|---|")
-    for e in LIGHT["palette"]:
-        L.append(f"| `--{e['n']}` | `{e['hex']}` | {e['label']} — {e['role']} |")
-    L.append("")
-    L.append("### Measured contrast")
-    L.append("")
-    L.append("Ratios against each base (light theme). **OK** = passes 4.5:1 for body text; **lg**")
-    L.append("= 3:1, large text and UI chrome only; **XX** = fails both. Computed from the hexes")
-    L.append("above by `design/generate.py`, which fails the build if any of them stops matching")
-    L.append("the grade `design/tokens.json` claims for it.")
-    L.append("")
-    L.append("| | " + " | ".join(f"on `--{b}`" for b in bases) + " |")
-    L.append("|---|" + "---|" * len(bases))
-    label = {"body": "**OK**", "large": "lg", "forbidden": "**XX**"}
-    for fg in CONTRAST["foregrounds"]:
-        e = entry(fg, "light")
-        name = f"`--{fg}` `{e['hex']}`" if fg not in LIGHT_P else f"`--{fg}`"
-        cells = []
-        for b in bases:
-            r = ratio(resolve(fg, "light"), resolve(b, "light"))
-            cells.append(f"{label[grade_of(r)]} {r:.2f}")
-        L.append(f"| {name} | " + " | ".join(cells) + " |")
-    # Authored wording, computed numbers: the prose is human ("cream" reads better
-    # than the token name), but every ratio in it is substituted from the hexes, so
-    # a sentence cannot outlive the palette it describes.
-    subs = {
-        f"{fg}_on_{b}": f"{ratio(resolve(fg, 'light'), resolve(b, 'light')):.2f}"
-        for fg in CONTRAST["foregrounds"]
-        for b in bases
-    }
-    for note in CONTRAST["prose_notes"]:
-        L.append("")
-        L.append(note.format(**subs))
-    L += gen_metrics_md()
+    L.append("    // Dark mode — inverted ink/paper; the yellow accent is unchanged. Ink/")
+    L.append("    // Paper/Muted/Bg come from the vendored hardbrut.css's [data-theme=\"dark\"]")
+    L.append("    // block (HardbrutTokens has no dark-mode variant to alias here).")
+    decls, comments = [], []
+    decls.append(f"    val InkDark = {_kt_color(DARK['ink'])}")
+    comments.append("text, borders, chrome")
+    decls.append(f"    val PaperDark = {_kt_color(DARK['paper'])}")
+    comments.append("cards on paper")
+    decls.append("    val YellowDark = HardbrutTokens.AccentYellow.first")
+    comments.append("primary actions, highlights — the one colour shared by both themes")
+    decls.append(f"    val MutedDark = {_kt_color(DARK['muted'])}")
+    comments.append("de-emphasised text")
+    decls.append(f"    val BgDark = {_kt_color(DARK['bg'])}")
+    comments.append("page base")
+    decls.append("    val OnYellow = HardbrutTokens.AccentYellow.second")
+    comments.append("text sitting on the yellow face — unchanged between themes")
+    L += _align_kt(decls, comments)
+    L.append("}")
+    L += gen_metrics_kt()
     return "\n".join(L)
 
 
 def main():
-    check_contrast()
     check_touch_targets()
     check_control_sizes()
-    write_region(SURFACES["site"]["file"], gen_site_css())
-    # M7: the standalone node no longer carries a generated token region — it
-    # imports the real HARDBRUT CSS at build time (see web/hardbrut-import.mjs),
-    # so there is nothing for the generator to emit here.
-    write_region(SURFACES["android"]["file"], gen_android_kt())
-    write_region("docs/VISUALDESIGN.md", gen_visualdesign_md())
+    write_region(CHROME_KT, gen_android_kt())
 
 
 if __name__ == "__main__":

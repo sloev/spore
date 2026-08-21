@@ -106,7 +106,7 @@ internal fun timeOf(ts: Long): String =
 
 /** 📡 with a brief sparkle whenever the node relays/receives (kawaii heartbeat).
  *  Baud is the mascot (a pastel chibi), but in emoji form the antenna stands in
- *  for the brand — no mushroom per VISUALDESIGN.md §6. */
+ *  for the brand — Antenna + Seed is the only brand icon, never a mushroom. */
 @Composable
 private fun mascot(): String {
     val tick by NodeController.relayTick.collectAsState()

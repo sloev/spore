@@ -823,3 +823,49 @@ Every layer is additive and endpoint-only. The transport underneath never learns
 they exist — which is exactly why a 200-byte LoRa link, a QR code, or a human
 reading armor aloud remains a first-class peer for all of them.
 </details>
+
+## Appendix A — chat attachments
+
+A UX convention that isn't obvious from the code, kept here so a later change doesn't
+undo it by accident (absorbed from the retired `android/UX-ISSUES.md`, and before that
+from the now-retired `docs/VISUALDESIGN.md`). Implemented on Android and on the web
+reference node; both parse the same two markers.
+
+**The problem it fixed.** The release APK published a file the instant it was picked —
+no staging, so a mis-tap sent a file with no message; it then arrived as its own
+contextless bubble with no preview and no way to open it.
+
+**The marker (application convention).** An attachment travels as two envelopes: the
+file's manifest+chunks (the existing publish path, sealed to the peer when known), and a
+normal DATA body whose **last line** is the canonical marker:
+
+```
+📎 <filename> | spore:<hex-magnet> | <mime>
+```
+
+- Matched by `Markdown.parseAttach`, regex **`(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$`**.
+- Application-level only: relays and non-SPORE clients see opaque UTF-8, and a client
+  that doesn't parse it just shows the marker text — a reasonable fallback.
+- Distinct from the feed's image form `![name](spore:<magnet>)`, which has nowhere to
+  carry a mime type; chat needs the mime to choose image-preview vs file-chip.
+
+**One bubble, both sides.** The sender's `sendTextWithAttachment` publishes the file then
+sends the marker body via the shared `sendBody`, stamping `magnet`+`mime` onto its own
+`Msg` (local bytes are cached immediately — our own file never comes back through the
+mesh). The receiver's `route()` parses the marker and stamps `magnet`+`mime` onto the
+received `Msg`; the manifest envelope's "incoming file…" bubble is suppressed for sealed
+files, and `pumpFiles`' "received…" bubble is suppressed when a message already
+references the magnet — so the attachment is **one** bubble, not three.
+
+**Preview & Open.** Images decode with `inSampleSize` (cap 1080 px) on `Dispatchers.IO`
+via `produceState` — a phone photo decoded whole for a 220 dp row costs ~100 MB of heap.
+Open copies the bytes into `cacheDir/attachments/<magnet>` (reclaimable) and shares a
+`FileProvider` `content://` URI with a one-shot read grant — **never** a `file://` path
+and never the private store directly (`res/xml/file_paths.xml` lists exactly
+`attachments/`).
+
+**Scope.** Only sealed DM attachments get the single merged bubble, because only they are
+guaranteed a marker sender; a **public/unsealed** file with no marker still shows the
+legacy "incoming/received" status bubbles. Non-goals (v1): multiple files per send,
+ExoPlayer audio/video playback, editing after send. Opening an *arbitrary received file*
+(vs a cached attachment) is still open — see the ROADMAP.

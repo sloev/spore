@@ -24,9 +24,11 @@ spec here; the code is the truth.
   label.
 - **Honesty over polish:** 🧪 markers, "Still open", served-vs-fetching language, and
   **no fake UI** — never a control whose backend is missing.
-- **[`VISUALDESIGN.md`](VISUALDESIGN.md) is normative** for colour, contrast, motion,
-  components, icon system (Antenna + Seed), and the three control sizes. Never pink on
-  olive/kevlar (measured 2.32:1). Never signal failure by colour alone.
+- **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for colour, contrast,
+  motion and components — SPORE no longer maintains its own design-language document;
+  `web/vendor/hardbrut/hardbrut.css` is vendored at build time and trusted as-is. The
+  one SPORE-specific rule HARDBRUT has no opinion on: the icon system is Antenna +
+  Seed. Never signal failure by colour alone.
 - **Zero external network requests** in `web/spore-standalone.html` (CI greps for it).
 - Motion fully static under reduced motion / `ANIMATOR_DURATION_SCALE == 0`. Sound and
   particle bursts stay **off** until the user enables them.
@@ -123,7 +125,9 @@ exclusion + migration). Direct connects on a LAN and degrades honestly on a WAN.
 ## Milestone 3 — Design language implementation
 
 **Goal:** every surface adopts Antenna + Seed, the three control sizes, the density
-rules, and the screen structures in [`VISUALDESIGN.md`](VISUALDESIGN.md) §7.
+rules, and the screen structures the design language called for at the time.
+Superseded by **Milestone 6** (HARDBRUT); kept here as a historical record — the
+old SPORE-authored design document this milestone shipped is retired.
 
 This is a **first-class milestone**, not scattered "nice-to-have" items. The
 tokens already exist and are generated (C3/C5-token half shipped #118/#119); the
@@ -155,13 +159,14 @@ work below is the code half that changes what is on screen.
 - [ ] Status chrome is compact — `0 peers · 65 stored`.
 - [ ] The site has persistent, clear navigation.
 - [ ] The web node has a persistent identity + status header.
-- [ ] Pink never on kevlar; the contrast table is still green.
 - [ ] Reduced motion is fully static; the standalone still makes zero external requests.
 - [ ] Baud appears only on empty states and completions.
 - [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
 
-**Definition of done:** a screenshot of every surface passes the VISUALDESIGN §8
-checklist, and the mushroom icon is gone from the repo's rendered assets.
+**Definition of done:** every surface passes visual review and the mushroom icon is
+gone from the repo's rendered assets. (Historical: at the time this milestone shipped,
+the checklist lived in the now-retired `docs/VISUALDESIGN.md` §8; superseded by M6/M7,
+which hold HARDBRUT upstream normative instead.)
 
 ---
 
@@ -296,7 +301,7 @@ passes.
 
 ---
 
-## Milestone 7 — HARDBRUT as the framework (build-time import), not a copy
+## Milestone 7 — HARDBRUT as the framework (build-time import), not a copy ✅
 
 **Goal:** stop maintaining a *forked copy* of HARDBRUT inside SPORE's own CSS.
 Today `design/tokens.json` + `generate.py` re-emit a subset of HARDBRUT tokens
@@ -307,34 +312,45 @@ time**, and rebuilds both web surfaces' markup around HARDBRUT's actual classes
 (`.navbar`, `.hero`, `section`, `button`, markdown, `data-accent`, `data-theme`).
 
 **Build-time import (locked).** The web build pulls `hardbrut.css` from
-`supernihil/hardbrut` *during the build* and inlines it into `site/style.css`
-and the standalone. A change to the HARDBRUT repo is reflected on the next
+`supernihil/hardbrut` *during the build* and inlines it into the Pages site
+(`site/build.mjs`) and the standalone (`build-standalone.mjs`) — there is no
+`site/style.css` anymore. A change to the HARDBRUT repo is reflected on the next
 rebuild — no runtime `@import`, so the standalone keeps its **zero-external-
 request** CI guarantee. The vendoring dir and the remote/ref are pinned and
 documented so the import is reproducible, not a silent network dependency of
 every CI run.
 
-**Android (locked).** The Android app uses HARDBRUT only as the *foundation* of
-the existing Compose theme — it already consumes the tokens; M7 makes the
-Android side regenerate from the same vendored source rather than a hand-edited
-copy, but keeps the Compose primitives (`Chrome.kt`, hard-shadow workaround, two
-button kinds) that XML cannot express.
+**Android (locked).** Compose has no CSS to `@import`, so Android gets its own
+vendored source instead: `android/app/src/main/kotlin/org/spore/node/vendor/
+Hardbrut.kt`, `supernihil/hardbrut`'s official Compose port, pulled live by
+`android/hardbrut-sync.py` — same "always latest, pinned ref, no runtime fetch"
+contract as the CSS side. `Chrome.kt`'s tokens alias that file's `HardbrutTokens`
+directly; only dark mode (which that file doesn't define) still comes from the
+vendored CSS. `Chrome.kt` keeps the Compose primitives that XML cannot express
+and that the drop-in file doesn't provide — press-feedback shadows, touch
+targets, `Chip`/`ListRow`/`ToughbookField`/`CrateSwitch`/`SegmentedLed` — but
+now builds their static shadow-drawing on the vendored `hardShadow()` rather
+than a third hand-rolled copy of the same offset-rect math.
 
 **Tasks** (each a PR):
 
 | Task | Status | Notes |
 |---|---|---|
-| Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ⬜ todo | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes |
-| Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ⬜ todo | All hand CSS in `build-standalone.mjs`'s inline `<style>` is removed; the SPI/WYSIWYG/(W12) logic is kept, only presentation changes |
-| Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ⬜ todo | `site/style.css` becomes `@import`/inlined `hardbrut.css` + a thin layer for SPORE-only bits (illustrations, Antenna+Seed) |
-| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ⬜ todo | `Chrome.kt` keeps the hard-shadow / two-button primitives; no XML rewrite |
-| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ⬜ todo | One source of truth: `supernihil/hardbrut` |
+| Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ✅ shipped (#146) | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes. `ref: 'main'` — HARDBRUT latest is always the source of truth; `node web/hardbrut-sync.mjs` re-pulls the committed vendored copy on demand (build itself never fetches live, so CI stays deterministic and the standalone stays zero-request) |
+| Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ✅ shipped (#146) | `build-standalone.mjs`'s inline `<style>` is HARDBRUT + a minimal app-shell adapter (tab bar, log, WYSIWYG toolbar — concepts HARDBRUT has no equivalent for); the SPI/WYSIWYG/(W12) logic is unchanged, presentation only |
+| Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ✅ shipped (#147 + this pass) | `site/style.css` deleted outright (not kept as an `@import` shell); `site/build.mjs` inlines vendored `hardbrut.css` + a thin adapter (doc reading width, code-copy button, print). Markup rebuilt on `.navbar`/`.hero`/`.grid`/`.card`/`.btn`/`.cluster`; a working `.navbar-toggle` + `.open` toggle script makes the nav responsive on mobile. All hand-drawn `<svg>` story-card illustrations (home, Apps, Continuity) removed — cards are plain HARDBRUT `.card`s, text only. Antenna+Seed brand mark and the Baud mascot are not illustrations and stay |
+| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | Android gets its own vendored HARDBRUT source, not a CSS reparse: `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` is `supernihil/hardbrut`'s official Compose port, pulled by `android/hardbrut-sync.py` from the live `https://supernihil.github.io/hardbrut/Hardbrut.kt` (always latest, same as the web's `ref: 'main'`). `Chrome.kt`'s generated `Palette`/`Metrics` alias its `HardbrutTokens` object directly for the light palette and every border/shadow/spacing metric — not a copied colour. That file has no dark-mode variant, so `design/generate.py` still parses the vendored `hardbrut.css`'s `[data-theme="dark"]` block for just the four dark hexes — the one gap between the two vendored sources. Caught a real drift in the process: the old hand-typed `OnYellow` (`#121210`) didn't match HARDBRUT's actual `--accent-ink` (`#000`). `crate()`/`CrateButton`/`Chip`/`ListRow` now draw their hard shadow via the vendored `hardShadow()` modifier instead of hand-rolled `drawRect` calls; `Chrome.kt` keeps the press-feedback and touch-target logic the drop-in file doesn't have, and its other product-specific primitives (`Chip`, `ListRow`, `ToughbookField`, `CrateSwitch`, `SegmentedLed`, `ConfirmDialog`) — no XML rewrite. The vendored file as published doesn't compile against AndroidX Compose (`TextTransform` doesn't exist in this Compose BOM; `HardbrutTextField` uses `BasicTextField`/`onFocusChanged` without importing either) — `android/hardbrut-sync.py`'s `COMPILE_FIXES` patches both narrowly on the way in and fails loudly if either stops applying cleanly; drop them once fixed upstream |
+| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ✅ shipped | `gen_site_css`, `gen_standalone_css`, `gen_visualdesign_md`, the WCAG contrast-checking machinery, and the `site`/`standalone` `tokens.json` surface entries are all gone — there's no SPORE-authored contrast claim left to protect. `tokens.json` keeps only the Android-only control-size table (control/chip/row heights, touch floor), which has no HARDBRUT source to regenerate from. The "design tokens in sync" CI job now has two steps: `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` verify both vendored copies match their pinned refs (the one job allowed to touch the network), then `design/generate.py` verifies Android's `Palette` matches them |
 
-**Definition of done:** `site/style.css` and the standalone's CSS are the vendored
+**Definition of done:** `site/build.mjs` and the standalone's CSS are the vendored
 `hardbrut.css` (plus a thin SPORE-asset layer), not a fork; editing
-`supernihil/hardbrut` and rebuilding SPORE changes both web surfaces; the
-standalone still makes zero external requests; Antenna + Seed and Baud persist;
-Android keeps its Compose primitives on the same foundation.
+`supernihil/hardbrut` and rebuilding SPORE changes all three surfaces — the two
+web surfaces on the next `hardbrut-sync.mjs` + rebuild, Android on the next
+`hardbrut-sync.py` + `design/generate.py`; the standalone still makes zero
+external requests; Antenna + Seed and Baud persist; Android's `Chrome.kt`
+aliases the vendored `Hardbrut.kt`'s tokens and shadow primitive rather than
+maintaining its own copy, keeping only the product-specific primitives (touch
+targets, press feedback, `Chip`/`ListRow`/etc.) that file doesn't provide.
 
 ---
 
@@ -383,12 +399,15 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 4. **M4 — Webnode as daily driver** (first runtime on the storage seam)
 5. **M5 — Polish & hardening** (only after the above)
 6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
+7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
 milestone: every row is `⬜ concept`, nothing in the compass depends on it, and no
-row earns a 🧪 until something exists a person could hold or run. It lives in
-[`VISUALDESIGN.md`](VISUALDESIGN.md) §6b as inspiration, not in this plan as a promise.
+row earns a 🧪 until something exists a person could hold or run. It was written up
+as inspiration in the now-retired `docs/VISUALDESIGN.md` §6b, not in this plan as a
+promise; no replacement doc is planned — HARDBRUT upstream has no opinion on
+hardware/community concepts, so there is nothing for it to be normative about.
 
 ---
 
