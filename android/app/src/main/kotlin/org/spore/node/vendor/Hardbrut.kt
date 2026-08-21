@@ -1,7 +1,7 @@
 // Vendored from https://supernihil.github.io/hardbrut/Hardbrut.kt — do not hand-edit.
 // Re-pull with `python3 android/hardbrut-sync.py`; the only changes on the way
-// in are this header, the `package` line below, and the two compile fixes for
-// real upstream bugs the script documents and applies (see its own docstring).
+// in are this header, the `package` line below, and the compile fixes for real
+// upstream bugs the script documents and applies (see its own docstring).
 //
 // Hardbrut.kt — HARDBRUT design system for Jetpack Compose
 // Drop this file into your Android project. One dependency: Compose.
@@ -16,6 +16,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.*
