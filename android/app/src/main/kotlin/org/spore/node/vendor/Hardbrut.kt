@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 
 // =====================================================================
 // TOKENS — match CSS :root variables
@@ -394,6 +395,68 @@ fun HardbrutChip(
             ) { onClick() }
             .padding(horizontal = 12.dp, vertical = 5.dp)
     )
+}
+
+// =====================================================================
+// TAB ROW — panel switching is left to the caller (a when/if on the
+// selected index), same as CSS leaves [hidden] toggling to the caller.
+// =====================================================================
+@Composable
+@Suppress("DEPRECATION_ERROR") // rememberRipple: still the only ripple API that resolves against compose-bom 2024.09.02
+fun HardbrutTabRow(
+    tabs: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    accent: Color = HardbrutTokens.AccentYellow.first,
+    accentInk: Color = HardbrutTokens.AccentYellow.second
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        tabs.forEachIndexed { index, label ->
+            val isSelected = index == selected
+            val bg = if (isSelected) accent else HardbrutTokens.Paper
+            val fg = if (isSelected) accentInk else HardbrutTokens.Ink
+            val interactionSource = remember { MutableInteractionSource() }
+
+            Text(
+                text = label.uppercase(),
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 13.sp,
+                letterSpacing = 0.3.sp,
+                color = fg,
+                modifier = Modifier
+                    .hardShadow(HardbrutTokens.ShadowSm)
+                    .border(2.dp, HardbrutTokens.Ink)
+                    .background(bg)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = rememberRipple(color = HardbrutTokens.Ink.copy(alpha = 0.15f))
+                    ) { onSelect(index) }
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+            )
+        }
+    }
+}
+
+// =====================================================================
+// DIALOG — a custom-styled Dialog window, not AlertDialog: Material3's
+// AlertDialog imposes its own shape/elevation defaults that fight the
+// zero-radius/hard-shadow look, same reason every other composable here
+// is built from primitives instead of wrapping a Material3 component.
+// =====================================================================
+@Composable
+fun HardbrutDialog(
+    onDismissRequest: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Dialog(onDismissRequest = onDismissRequest) {
+        Column(
+            modifier = Modifier
+                .hardShadow(HardbrutTokens.ShadowLg)
+                .border(HardbrutTokens.Border, HardbrutTokens.Ink)
+                .background(HardbrutTokens.Paper)
+                .padding(HardbrutTokens.Space)
+        ) { content() }
+    }
 }
 
 // =====================================================================

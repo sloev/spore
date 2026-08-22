@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -49,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.spore.node.vendor.HardbrutDialog
 import org.spore.node.vendor.HardbrutTokens
 import org.spore.node.vendor.hardShadow
 
@@ -621,8 +621,11 @@ internal fun Caption(text: String, modifier: Modifier = Modifier, color: Color =
 
 /**
  * A modal yes/no for an action that can't be taken back — a PUBLIC broadcast, say.
- * The confirm button carries the pink CTA (pink face, void ink — never pink on
- * kevlar); Cancel is the quiet default and dismissing the dialog also cancels.
+ * The confirm button is the default yellow face; Cancel is the quiet default and
+ * dismissing the dialog also cancels. Built on the vendored `HardbrutDialog`
+ * rather than Material3's `AlertDialog`, same reasoning as [crate]'s `hardShadow`:
+ * Material3's own dialog chrome (rounded corners, its own elevation) fights the
+ * zero-radius, hard-shadow look everywhere else.
  */
 @Composable
 internal fun ConfirmDialog(
@@ -632,14 +635,16 @@ internal fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { DisplayHeading(title, size = 15) },
-        text = { Caption(body) },
-        confirmButton = { CrateButton(confirmLabel, onConfirm, face = Palette.Yellow, ink = Palette.Paper) },
-        dismissButton = { CrateButton("Cancel", onDismiss) },
-        containerColor = Palette.Paper,
-    )
+    HardbrutDialog(onDismissRequest = onDismiss) {
+        DisplayHeading(title, size = 15)
+        VGap(6.dp)
+        Caption(body)
+        VGap(Metrics.Pad)
+        Row(horizontalArrangement = Arrangement.spacedBy(Metrics.Gap)) {
+            CrateButton(confirmLabel, onConfirm, face = Palette.Yellow, ink = Palette.Paper)
+            CrateButton("Cancel", onDismiss)
+        }
+    }
 }
 
 /** Horizontal gap, spelled once. */
