@@ -25,8 +25,8 @@ Four ways to run the same node. Pick by what the machine in front of you has.
 <p class="text-muted">One HTML file — wasm + UI + transports. Zero network until you add a bridge.</p>
 </div>
 <div class="card-footer cluster">
-<a class="btn" href="spore-standalone.html">Open standalone</a>
-<a class="btn btn-cancel" href="demo/">Live demo</a>
+<a class="btn" href="demo/">Open standalone</a>
+<a class="btn btn-cancel" href="demo/" download="spore-standalone.html">Download</a>
 </div></div></div>
 
 <div class="col-3"><div class="card"><div class="card-body">

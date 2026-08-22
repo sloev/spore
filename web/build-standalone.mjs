@@ -69,14 +69,14 @@ ${hardbrutCss}
 /* ---- SPORE adapter — app-shell styles HARDBRUT does not define. Uses only
    HARDBRUT tokens; never redefines them. Kept minimal on purpose. ---- */
 :root {
-  /* Back-compat aliases so existing markup/JS var() lookups keep working. */
-  --edge: var(--ink);
+  /* Back-compat aliases so existing markup/JS var() lookups keep working.
+     --edge/--mono are gone — every call site now spells the real HARDBRUT
+     token (--ink/--font-mono) directly. */
   --accent2: var(--accent);
   --yellow: var(--accent);
   --ok: var(--ink);
   --warn: var(--accent);
   --bad: var(--ink);
-  --mono: var(--font-mono);
   --display: var(--font-display);
   --border-w: 3px;
   --control-h: 48px;
@@ -96,6 +96,11 @@ ${hardbrutCss}
 .identity-row, .status-line { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
 .peer-count, .address, .status-line { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
 .petname { font-weight: 800; }
+.avatar-placeholder {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: var(--border); background: var(--bg);
+  font-family: var(--font-display); font-weight: 900; font-size: 0.8rem; flex-shrink: 0;
+}
 
 /* The terminal log. */
 .log { font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg);
@@ -140,7 +145,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
   </div>
   <div class="header-identity">
     <div class="identity-row">
-      <span class="avatar-placeholder">[avatar]</span>
+      <span class="avatar-placeholder" id="avatar-mono" aria-hidden="true"></span>
       <span class="petname" id="petname">Anonymous</span>
       <span class="address" id="persistent-addr">address\u2026</span>
       <button class="copy-button" id="copy-addr">COPY</button>
@@ -152,8 +157,8 @@ mark { background: var(--accent); color: var(--accent-ink); }
     </div>
   </div>
 </header>
-<header class="page-header">
-  <h1><span class="s">SPORE</span> — a whole node in one file</h1>
+<div class="page-header">
+  <h1>A whole node in one file</h1>
   <p class="tag">One file, one node — no server, no network needed to start. Add a
      bridge below to reach other copies.</p>
   <div class="bar">
@@ -162,7 +167,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
     <span class="pill">ed25519 + ChaCha20-Poly1305</span>
     <span class="pill" title="SHA-256 of the embedded wasm">wasm ${wasmHash.slice(0, 16)}…</span>
   </div>
-</header>
+</div>
 <main>
   <!-- Tab bar — HARDBRUT's .tab-list/.tab, aria-selected drives the fill (#9) -->
   <nav class="tab-list" role="tablist">
@@ -179,7 +184,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
       <button id="chat-new" style="font-size:12px;padding:4px 10px">New chat</button>
       <span class="cnt">One-to-one chats, open groups, and private groups — in one list.</span>
     </div>
-    <div id="chat-new-picker" style="display:none;border:1px solid var(--edge);border-radius:2px;padding:10px;margin-bottom:8px">
+    <div id="chat-new-picker" style="display:none;border:1px solid var(--ink);padding:10px;margin-bottom:8px">
       <div class="row" style="margin-top:0">
         <input type="text" id="new-dm-hex" placeholder="16-hex address (1:1)" style="max-width:180px" />
         <button id="new-dm-btn" class="ghost">Start 1:1</button>
@@ -190,13 +195,13 @@ mark { background: var(--accent); color: var(--accent-ink); }
       </div>
       <div class="row">
         <input type="text" id="new-sealed-name" placeholder="private group name" style="flex:1" />
-        <input type="text" id="new-sealed-key" placeholder="64-hex key (blank = generate)" style="font-family:var(--mono);font-size:11px;max-width:220px" />
+        <input type="text" id="new-sealed-key" placeholder="64-hex key (blank = generate)" style="font-family:var(--font-mono);font-size:11px;max-width:220px" />
         <button id="new-sealed-btn" class="ghost">Create private</button>
       </div>
     </div>
     <div id="chat-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"></div>
     <!-- Active conversation thread + composer -->
-    <div id="chat-view" style="display:none;border:1px solid var(--edge);border-radius:2px;padding:10px">
+    <div id="chat-view" style="display:none;border:1px solid var(--ink);padding:10px">
       <div id="chat-view-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px"></div>
       <div id="chat-msgs" class="log" style="height:240px"></div>
       <div class="fmt-bar" id="chat-fmt">
@@ -247,7 +252,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
     <details style="margin-bottom:8px" open>
       <summary style="cursor:pointer;font-weight:600;font-size:13px">Publish a file</summary>
       <div class="row">
-        <input type="text" id="file-name" placeholder="filename.txt" style="max-width:200px;font-family:var(--mono);font-size:12px" />
+        <input type="text" id="file-name" placeholder="filename.txt" style="max-width:200px;font-family:var(--font-mono);font-size:12px" />
         <input type="file" id="file-input" style="flex:1" />
       </div>
       <div class="row">
@@ -258,7 +263,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
     <details style="margin-bottom:8px">
       <summary style="cursor:pointer;font-weight:600;font-size:13px">Fetch by magnet</summary>
       <div class="row">
-        <input type="text" id="file-magnet" placeholder="paste 32 hex chars (16-byte magnet id)" style="flex:1;font-family:var(--mono);font-size:12px" />
+        <input type="text" id="file-magnet" placeholder="paste 32 hex chars (16-byte magnet id)" style="flex:1;font-family:var(--font-mono);font-size:12px" />
         <button id="file-fetch">Fetch</button>
       </div>
       <div id="file-fetch-result" class="cnt"></div>
@@ -403,6 +408,7 @@ async function boot() {
     const addrHex = hexOf(hub.node.addr());
     $('persistent-addr').textContent = addrHex.substring(0, 8) + '\u2026';
     $('petname').textContent = restored ? 'Node' : 'Anonymous';
+    $('avatar-mono').textContent = restored ? 'N' : 'A';
     const storeSize = hub.node.storeSize ? hub.node.storeSize() : 0;
     $('compact-status').textContent = '0 peers \u00b7 ' + storeSize + ' stored';
 
@@ -553,9 +559,9 @@ function renderChatList() {
     const last = c.msgs.length ? c.msgs[c.msgs.length - 1] : null;
     const preview = last ? ((last.fromMe ? 'You: ' : '') + (last.text.length > 40 ? last.text.slice(0, 40) + '\u2026' : last.text)) : '';
     const isActive = key === activeChat;
-    return '<div class="chat-row" data-key="' + escapeHtml(key) + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid ' + (isActive ? 'var(--accent2)' : 'var(--edge)') + ';border-radius:2px;cursor:pointer;background:' + (isActive ? 'var(--paper)' : 'transparent') + '">' +
+    return '<div class="chat-row" data-key="' + escapeHtml(key) + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid ' + (isActive ? 'var(--accent2)' : 'var(--ink)') + ';cursor:pointer;background:' + (isActive ? 'var(--paper)' : 'transparent') + '">' +
       '<span class="badge" style="font-size:9px;border-color:' + b.color + ';color:' + b.color + '">' + b.label + '</span>' +
-      '<span style="font-family:var(--mono);font-size:12px;color:' + (c.type === 'dm' ? 'var(--accent2)' : 'var(--ink)') + ';min-width:84px">' + escapeHtml(c.name) + '</span>' +
+      '<span style="font-family:var(--font-mono);font-size:12px;color:' + (c.type === 'dm' ? 'var(--accent2)' : 'var(--ink)') + ';min-width:84px">' + escapeHtml(c.name) + '</span>' +
       '<span style="flex:1;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(preview) + '</span>' +
       (last ? '<span style="font-size:10px;color:var(--muted)">' + new Date(last.ts).toLocaleTimeString() + '</span>' : '') +
     '</div>';
@@ -578,7 +584,7 @@ function renderChatView() {
   view.style.display = 'block';
   const b = CONVO_BADGES[c.type] || CONVO_BADGES.dm;
   head.innerHTML = '<span class="badge" style="font-size:10px;border-color:' + b.color + ';color:' + b.color + '">' + b.label + '</span>' +
-    '<span style="font-family:var(--mono);font-size:13px;font-weight:600">' + escapeHtml(c.name) + '</span>' +
+    '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + escapeHtml(c.name) + '</span>' +
     (c.type === 'open' ? '<span class="cnt">anyone can read this</span>' : '') +
     (c.type === 'sealed' ? '<span class="cnt">anyone with the key can read this</span>' : '') +
     (c.type === 'dm' ? '<span class="cnt" id="dm-seal-hint"></span>' : '');
@@ -718,7 +724,7 @@ function renderFeed() {
   el.innerHTML = feedItems.slice(0, 60).map((item) => {
     const author = item.from ? item.from.slice(0, 8) : 'anonymous';
     const isMine = item.from === hexOf(hub.node.addr());
-    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--edge);border-radius:2px;font-size:12.5px">' +
+    return '<div style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--ink);font-size:12.5px">' +
       '<span class="badge open" style="font-size:9px;flex-shrink:0;margin-top:1px;border-color:' + (isMine ? 'var(--accent2)' : 'var(--ok)') + ';color:' + (isMine ? 'var(--accent2)' : 'var(--ok)') + '">' + (isMine ? 'you' : author) + '</span>' +
       '<span style="flex:1;color:var(--ink);word-break:break-word">' + mdWithAttachments(item.text) + '</span>' +
       '<span class="cnt" style="flex-shrink:0">' + new Date(item.ts).toLocaleTimeString() + '</span>' +
@@ -1415,9 +1421,9 @@ function renderLocalFiles() {
   }
   el.innerHTML = files.map(f => {
     const hex = Array.from(f.magnet).map(b => b.toString(16).padStart(2, '0')).join('');
-    return '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--edge);border-radius:2px;font-size:12px">' +
+    return '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--ink);font-size:12px">' +
       '<span style="flex:1">' + f.name + '</span>' +
-      '<span class="cnt" style="font-size:10px;font-family:var(--mono)">' + hex.substring(0, 16) + '&hellip;</span>' +
+      '<span class="cnt" style="font-size:10px;font-family:var(--font-mono)">' + hex.substring(0, 16) + '&hellip;</span>' +
     '</div>';
   }).join('');
 }
