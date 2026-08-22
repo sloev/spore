@@ -3,36 +3,13 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- Antenna + Seed: a sturdy radio antenna rising from a seed/soil form.
-         The only SPORE brand icon. No mushroom. See docs/VISUALDESIGN.md §6. -->
-    <!-- Seed/soil base (a grounded half-ellipse) -->
+    <!-- SPORE's brand is the wordmark only — no icon, no mascot. This is a plain
+         HARDBRUT accent swatch (yellow field, black border, zero radius), not a
+         picture of anything: Android still requires an icon file to exist. -->
     <path
-        android:fillColor="#4b5320"
-        android:pathData="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z" />
-    <!-- Soil line under the seed -->
+        android:fillColor="#000000"
+        android:pathData="M2,2h20v20h-20z" />
     <path
-        android:fillColor="#2a2f1c"
-        android:pathData="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z" />
-    <!-- Antenna mast -->
-    <path
-        android:fillColor="#39ff14"
-        android:pathData="M11.3,17h1.4v-9h-1.4Z" />
-    <!-- Antenna tip (broadcast dot) -->
-    <path
-        android:fillColor="#39ff14"
-        android:pathData="M12,3m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
-    <!-- Two broadcast waves either side of the tip -->
-    <path
-        android:fillColor="#39ff14"
-        android:pathData="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z" />
-    <path
-        android:fillColor="#39ff14"
-        android:pathData="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z" />
-    <!-- Seed sprout (two small leaves at the base of the mast) -->
-    <path
-        android:fillColor="#57C785"
-        android:pathData="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z" />
-    <path
-        android:fillColor="#57C785"
-        android:pathData="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z" />
+        android:fillColor="#ffd23f"
+        android:pathData="M4,4h16v16h-16z" />
 </vector>

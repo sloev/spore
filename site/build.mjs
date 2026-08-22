@@ -21,9 +21,12 @@ fs.mkdirSync(out, { recursive: true });
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
 //
-// Navigation: 5 primary items — Try it · How it works · Get a node · Spec ·
-// Mission.
-// Secondary guides are rendered + linkable but kept off the top nav.
+// Navigation: 4 primary items — Try it · How it works · Get a node · Developer
+// — plus "Web node" (the live demo, appended below). Every dev-oriented
+// document with real technical depth (spec, bridges, design, mission/charter,
+// roadmap, security, ...) is reachable from one place, docs/DEVELOPER.md, not
+// scattered across the top nav. Secondary guides are still rendered + linkable
+// so nothing 404s, just kept off the primary nav.
 
 // The front page is `site/home.md`, not the README. They have different jobs: a
 // README opens on "what is this and how do I build it" for someone who already
@@ -33,10 +36,12 @@ fs.mkdirSync(out, { recursive: true });
 // table. The README stays as it is on GitHub.
 const pages = [
   ['site/home.md', 'index.html', 'Try it'],
-  ['docs/MISSION.md', 'mission.html', 'How it works'],
+  ['docs/HOW_IT_WORKS.md', 'how-it-works.html', 'How it works'],
   ['docs/APPS.md', 'apps.html', 'Get a node'],
-  ['docs/SPEC.md', 'spec.html', 'Spec'],
+  ['docs/DEVELOPER.md', 'developer.html', 'Developer'],
   // Secondary guides: rendered + linkable, kept off the top nav
+  ['docs/MISSION.md', 'mission.html', null],
+  ['docs/SPEC.md', 'spec.html', null],
   ['docs/DESIGN.md', 'design.html', null],
   ['docs/BRIDGES.md', 'bridges.html', null],
   ['docs/REBUILD.md', 'rebuild.html', null],
@@ -93,6 +98,8 @@ const titles = new Map([
   ['contributing.html', 'SPORE — contributing'],
   ['dev-guide.html', 'SPORE — developer guide'],
   ['mission.html', 'SPORE — mission'],
+  ['how-it-works.html', 'SPORE — how it works'],
+  ['developer.html', 'SPORE — developer'],
 ]);
 
 const descriptions = new Map([
@@ -108,15 +115,19 @@ const descriptions = new Map([
       'fragmentation, sealing and congestion rules — enough to reimplement it.',
   ],
   ['apps.html', 'Download SPORE: the browser node, the desktop daemon, the Android app, and the language bindings.'],
+  ['how-it-works.html', 'Addressing, store-and-forward delivery, pluggable bridges, and privacy by default — the mechanism, briefly.'],
+  ['developer.html', 'The wire format, every bridge, the reimplementation guide, and everything else with real technical depth.'],
   ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
   ['security.html', 'The SPORE findings register: what was found, how it was reproduced, what was changed, and what is still open.'],
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
 ]);
 
+// "Web node" (the live demo) sits between the picker and the technical hub —
+// spliced in rather than appended, so Developer stays the last, catch-all item.
 const navLinks = pages
   .filter(([, , label]) => label)
-  .map(([, dst, label]) => ({ dst, label }))
-  .concat([{ dst: 'demo/', label: 'Web node' }]);
+  .map(([, dst, label]) => ({ dst, label }));
+navLinks.splice(navLinks.length - 1, 0, { dst: 'demo/', label: 'Web node' });
 
 function rewriteLinks(html, self) {
   // Rewrite href="...something.md" (with optional ../ and #anchor) to the built
@@ -258,7 +269,6 @@ const siteAdapterCss = `
 /* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
 main.doc.container { max-width: 860px; }
 main.doc { font-size: 0.95rem; }
-.brand-mark { display: inline-block; vertical-align: -5px; margin-right: 0.4rem; }
 main.doc .code-copy {
   position: absolute; top: 8px; right: 8px;
   font: 11px var(--font-mono); line-height: 1; padding: 4px 9px;
@@ -343,7 +353,6 @@ function page(title, bodyHtml, self) {
 <meta property="og:description" content="${attr(desc)}" />
 <meta property="og:url" content="${attr(url)}" />
 <meta name="twitter:card" content="summary" />
-<link rel="icon" href="antenna-seed.svg" type="image/svg+xml" />
 <style>
 /* HARDBRUT (imported at build time from supernihil/hardbrut). */
 ${hardbrutCss}
@@ -360,7 +369,7 @@ ${siteAdapterCss}
 </head>
 <body class="page-${cls}">
 <nav class="navbar">
-  <a class="navbar-brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/></svg>SPORE</a>
+  <a class="navbar-brand" href="index.html">SPORE</a>
   <button class="navbar-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">☰</button>
   ${nav(self)}
 </nav>
@@ -448,10 +457,6 @@ for (const [src, dst, label] of pages) {
   fs.writeFileSync(path.join(out, dst), page(title, anchored, dst));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
-
-// Ship the Antenna + Seed favicon (the only brand icon).
-fs.writeFileSync(path.join(out, 'antenna-seed.svg'), fs.readFileSync(path.join(root, 'site/antenna-seed.svg')));
-console.log('wrote _site/antenna-seed.svg');
 
 // Ship docs images. README (index.html, at the site root) references them as
 // `docs/<img>`, while docs pages (also at the root) reference them bare, so copy

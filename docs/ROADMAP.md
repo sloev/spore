@@ -36,7 +36,10 @@ spec here; the code is the truth.
   when independent.
 - Distinguish **Verified** (code/CHANGELOG) vs **Reasoned** vs **Needs device run**. Do
   not claim hardware verification that was not run, or invent protocol features.
-- **No mushrooms.** The only brand icon is Antenna + Seed.
+- **No icon, no mascot.** SPORE's brand is the wordmark — plain "SPORE" text — on
+  every surface. Nothing stands in for it, not even a monogram; Android's
+  `ic_spore.xml` is a plain HARDBRUT accent swatch because the platform
+  requires an icon file to exist, not because it represents anything.
 
 ---
 
@@ -160,7 +163,7 @@ work below is the code half that changes what is on screen.
 - [ ] The site has persistent, clear navigation.
 - [ ] The web node has a persistent identity + status header.
 - [ ] Reduced motion is fully static; the standalone still makes zero external requests.
-- [ ] Baud appears only on empty states and completions.
+- [x] ~~Baud appears only on empty states and completions.~~ Superseded: Baud is removed entirely — brand is the SPORE wordmark only, no mascot (see the hard rules).
 - [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
 
 **Definition of done:** every surface passes visual review and the mushroom icon is
@@ -339,7 +342,7 @@ than a third hand-rolled copy of the same offset-rect math.
 | Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ✅ shipped (#146) | Delete the SPORE-authored token/CSS fork; keep Antenna+Seed + Baud as assets, now styled by HARDBRUT classes. `ref: 'main'` — HARDBRUT latest is always the source of truth; `node web/hardbrut-sync.mjs` re-pulls the committed vendored copy on demand (build itself never fetches live, so CI stays deterministic and the standalone stays zero-request) |
 | Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ✅ shipped (#146) | `build-standalone.mjs`'s inline `<style>` is HARDBRUT + a minimal app-shell adapter (tab bar, log, WYSIWYG toolbar — concepts HARDBRUT has no equivalent for); the SPI/WYSIWYG/(W12) logic is unchanged, presentation only |
 | Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ✅ shipped (#147 + this pass) | `site/style.css` deleted outright (not kept as an `@import` shell); `site/build.mjs` inlines vendored `hardbrut.css` + a thin adapter (doc reading width, code-copy button, print). Markup rebuilt on `.navbar`/`.hero`/`.grid`/`.card`/`.btn`/`.cluster`; a working `.navbar-toggle` + `.open` toggle script makes the nav responsive on mobile. All hand-drawn `<svg>` story-card illustrations (home, Apps, Continuity) removed — cards are plain HARDBRUT `.card`s, text only. Antenna+Seed brand mark and the Baud mascot are not illustrations and stay |
-| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | Android gets its own vendored HARDBRUT source, not a CSS reparse: `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` is `supernihil/hardbrut`'s official Compose port, pulled by `android/hardbrut-sync.py` from the live `https://supernihil.github.io/hardbrut/Hardbrut.kt` (always latest, same as the web's `ref: 'main'`). `Chrome.kt`'s generated `Palette`/`Metrics` alias its `HardbrutTokens` object directly for the light palette and every border/shadow/spacing metric — not a copied colour. That file has no dark-mode variant, so `design/generate.py` still parses the vendored `hardbrut.css`'s `[data-theme="dark"]` block for just the four dark hexes — the one gap between the two vendored sources. Caught a real drift in the process: the old hand-typed `OnYellow` (`#121210`) didn't match HARDBRUT's actual `--accent-ink` (`#000`). `crate()`/`CrateButton`/`Chip`/`ListRow` now draw their hard shadow via the vendored `hardShadow()` modifier instead of hand-rolled `drawRect` calls; `Chrome.kt` keeps the press-feedback and touch-target logic the drop-in file doesn't have, and its other product-specific primitives (`Chip`, `ListRow`, `ToughbookField`, `CrateSwitch`, `SegmentedLed`, `ConfirmDialog`) — no XML rewrite. The vendored file as published doesn't compile against AndroidX Compose (`TextTransform` doesn't exist in this Compose BOM; `HardbrutTextField` uses `BasicTextField`/`onFocusChanged` without importing either) — `android/hardbrut-sync.py`'s `COMPILE_FIXES` patches both narrowly on the way in and fails loudly if either stops applying cleanly; drop them once fixed upstream |
+| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | Android gets its own vendored HARDBRUT source, not a CSS reparse: `android/app/src/main/kotlin/org/spore/node/vendor/Hardbrut.kt` is `supernihil/hardbrut`'s official Compose port, pulled by `android/hardbrut-sync.py` from the live `https://supernihil.github.io/hardbrut/Hardbrut.kt` (always latest, same as the web's `ref: 'main'`). `Chrome.kt`'s generated `Palette`/`Metrics` alias its `HardbrutTokens` object directly for the light palette and every border/shadow/spacing metric — not a copied colour. That file has no dark-mode variant, so `design/generate.py` still parses the vendored `hardbrut.css`'s `[data-theme="dark"]` block for just the four dark hexes — the one gap between the two vendored sources. Caught a real drift in the process: the old hand-typed `OnYellow` (`#121210`) didn't match HARDBRUT's actual `--accent-ink` (`#000`). `crate()`/`CrateButton`/`Chip`/`ListRow` now draw their hard shadow via the vendored `hardShadow()` modifier instead of hand-rolled `drawRect` calls; `Chrome.kt` keeps the press-feedback and touch-target logic the drop-in file doesn't have, and its other product-specific primitives (`Chip`, `ListRow`, `ToughbookField`, `CrateSwitch`, `SegmentedLed`, `ConfirmDialog`) — no XML rewrite. Three real upstream compile bugs (`TextTransform` didn't exist in this Compose BOM; `HardbrutButton`/`HardbrutTextField` used `ProvideTextStyle`/`BasicTextField`/`onFocusChanged` without importing them) were patched narrowly in `android/hardbrut-sync.py`'s `COMPILE_FIXES`, reported upstream as [supernihil/hardbrut#4](https://github.com/supernihil/hardbrut/issues/4), and fixed there within the same day — `COMPILE_FIXES` is empty again, the mechanism stays for next time. Upstream also shipped `HardbrutListRow`/`HardbrutSwitch`/`HardbrutChip` in the same pass, answering [#5](https://github.com/supernihil/hardbrut/issues/5)/[#6](https://github.com/supernihil/hardbrut/issues/6) |
 | Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ✅ shipped | `gen_site_css`, `gen_standalone_css`, `gen_visualdesign_md`, the WCAG contrast-checking machinery, and the `site`/`standalone` `tokens.json` surface entries are all gone — there's no SPORE-authored contrast claim left to protect. `tokens.json` keeps only the Android-only control-size table (control/chip/row heights, touch floor), which has no HARDBRUT source to regenerate from. The "design tokens in sync" CI job now has two steps: `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` verify both vendored copies match their pinned refs (the one job allowed to touch the network), then `design/generate.py` verifies Android's `Palette` matches them |
 
 **Definition of done:** `site/build.mjs` and the standalone's CSS are the vendored
@@ -347,10 +350,12 @@ than a third hand-rolled copy of the same offset-rect math.
 `supernihil/hardbrut` and rebuilding SPORE changes all three surfaces — the two
 web surfaces on the next `hardbrut-sync.mjs` + rebuild, Android on the next
 `hardbrut-sync.py` + `design/generate.py`; the standalone still makes zero
-external requests; Antenna + Seed and Baud persist; Android's `Chrome.kt`
-aliases the vendored `Hardbrut.kt`'s tokens and shadow primitive rather than
-maintaining its own copy, keeping only the product-specific primitives (touch
-targets, press feedback, `Chip`/`ListRow`/etc.) that file doesn't provide.
+external requests; Android's `Chrome.kt` aliases the vendored `Hardbrut.kt`'s
+tokens and shadow primitive rather than maintaining its own copy, keeping only
+the product-specific primitives (touch targets, press feedback,
+`Chip`/`ListRow`/etc.) that file doesn't provide. (Antenna + Seed and Baud
+were later retired entirely — see the hard rules: the brand is the wordmark,
+nothing stands in for it.)
 
 ---
 

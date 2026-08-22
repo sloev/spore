@@ -125,7 +125,6 @@ object NodeController {
     val peerAvatarPath = MutableStateFlow<Map<String, String>>(emptyMap())
     val peerProfileName = MutableStateFlow<Map<String, String>>(emptyMap())
     val receiving = MutableStateFlow("") // "idhex:have/count" lines, "" = idle
-    val relayTick = MutableStateFlow(0L) // bumps when anything arrives (mascot wiggle)
 
     /**
      * SPORE Direct, one line, or "" when it is off — and off is the default.
@@ -392,7 +391,6 @@ object NodeController {
                     if (!SporeNative.nativeDirectOnDelivered(ptr, wire)) {
                         route(wire)
                     }
-                    relayTick.value = System.currentTimeMillis()
                 }
                 val frag = SporeNative.nativeFragStatus(ptr)
                 if (frag != lastFrag) {

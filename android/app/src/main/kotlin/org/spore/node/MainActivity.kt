@@ -59,7 +59,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.delay
 
 import kotlinx.coroutines.launch
 
@@ -103,22 +102,6 @@ internal data object Connect : Screen
 /** Wall-clock HH:mm for a message stamp. */
 internal fun timeOf(ts: Long): String =
     java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
-
-/** 📡 with a brief sparkle whenever the node relays/receives (kawaii heartbeat).
- *  Baud is the mascot (a pastel chibi), but in emoji form the antenna stands in
- *  for the brand — Antenna + Seed is the only brand icon, never a mushroom. */
-@Composable
-private fun mascot(): String {
-    val tick by NodeController.relayTick.collectAsState()
-    var sparkle by remember { mutableStateOf(false) }
-    // The sparkle is an animation, so it does not happen at all under reduced
-    // motion — §0 constraint 2 asks for completely static, not subtler.
-    val still = reducedMotion()
-    LaunchedEffect(tick) {
-        if (tick != 0L && !still) { sparkle = true; delay(1500); sparkle = false }
-    }
-    return if (sparkle) "📡✨" else "📡"
-}
 
 @Composable
 fun App() {
@@ -197,7 +180,6 @@ private fun Screen.title(): String = when (this) {
  */
 @Composable
 private fun TopBar(screen: Screen, go: (Screen) -> Unit) {
-    val m = mascot()
     val peers by NodeController.peers.collectAsState()
     val stored by NodeController.storeCount.collectAsState()
 
@@ -212,7 +194,7 @@ private fun TopBar(screen: Screen, go: (Screen) -> Unit) {
             IconTap("←", "Back", color = Palette.Ink) { go(if (screen is Compose) Feed else Chats) }
         }
         Column(Modifier.weight(1f)) {
-            DisplayHeading("$m ${screen.title()}")
+            DisplayHeading(screen.title())
             // In a thread, say whether we can actually seal to this peer — it is
             // the one status that changes what a message means. Elsewhere, what
             // this node is carrying for everyone else.

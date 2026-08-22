@@ -103,7 +103,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
                             HGap(10.dp)
                             Column(Modifier.weight(1f)) {
                                 Text(shown, color = Palette.Ink, fontWeight = FontWeight.Bold)
-                                Caption("📡 $ago")
+                                Caption(ago)
                             }
                             if (p.hasKey) StickerBadge("🔒 sealed", ink = Palette.Ink)
                         }
@@ -112,7 +112,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
             } else {
                 item {
                     Caption(
-                        "no spores nearby yet 📡\nadd a bridge, and anyone in range appears here",
+                        "no spores nearby yet\nadd a bridge, and anyone in range appears here",
                         Modifier.fillMaxWidth().padding(24.dp),
                     )
                 }
@@ -125,7 +125,7 @@ internal fun ChatsList(addr: String, open: (String) -> Unit) {
             if (threads.size <= 1) {
                 item {
                     Caption(
-                        "no conversations yet 📡\nopen one by address below, or wait for someone nearby",
+                        "no conversations yet\nopen one by address below, or wait for someone nearby",
                         Modifier.fillMaxWidth().padding(vertical = 12.dp),
                     )
                 }
