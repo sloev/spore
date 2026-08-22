@@ -97,17 +97,6 @@ ${hardbrutCss}
 .peer-count, .address, .status-line { font-family: var(--font-mono); font-size: 0.8rem; color: var(--muted); }
 .petname { font-weight: 800; }
 
-/* Tab bar — HARDBRUT has navbar; this is the 5-panel app switch. */
-.tab-bar button.tab {
-  background: transparent; color: var(--muted); border: none; box-shadow: none;
-  border-bottom: var(--border-w) solid transparent; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.06em; padding: 10px;
-}
-.tab-bar button.tab:hover { transform: none; box-shadow: none; background: transparent; }
-.tab-bar button.tab.active {
-  color: var(--ink); border-bottom-color: var(--ink); background: transparent; box-shadow: none;
-}
-
 /* The terminal log. */
 .log { font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg);
   border: var(--border); padding: var(--space-sm); height: 240px; overflow-y: auto; white-space: pre-wrap; }
@@ -175,13 +164,13 @@ mark { background: var(--accent); color: var(--accent-ink); }
   </div>
 </header>
 <main>
-  <!-- Tab bar -->
-  <nav class="tab-bar" style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid var(--edge);padding-bottom:0">
-    <button class="tab" data-panel="chats" style="flex:1;padding:10px;background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Chats</button>
-    <button class="tab" data-panel="feed" style="flex:1;padding:10px;background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Feed</button>
-    <button class="tab" data-panel="files" style="flex:1;padding:10px;background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Files</button>
-    <button class="tab" data-panel="bridges" style="flex:1;padding:10px;background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Bridges</button>
-    <button class="tab" data-panel="seed" style="flex:1;padding:10px;background:transparent;color:var(--muted);border:none;border-bottom:2px solid transparent;cursor:pointer;font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.06em">Seed</button>
+  <!-- Tab bar — HARDBRUT's .tab-list/.tab, aria-selected drives the fill (#9) -->
+  <nav class="tab-list" role="tablist">
+    <button class="tab" role="tab" data-panel="chats" aria-selected="true">Chats</button>
+    <button class="tab" role="tab" data-panel="feed" aria-selected="false">Feed</button>
+    <button class="tab" role="tab" data-panel="files" aria-selected="false">Files</button>
+    <button class="tab" role="tab" data-panel="bridges" aria-selected="false">Bridges</button>
+    <button class="tab" role="tab" data-panel="seed" aria-selected="false">Seed</button>
   </nav>
 
   <!-- Chats panel: one unified conversation list (W9) -->
@@ -1432,13 +1421,7 @@ function switchTab(name) {
   if (target) target.style.display = '';
   const tabs = document.querySelectorAll('.tab');
   for (const t of tabs) {
-    if (t.dataset.panel === name) {
-      t.style.color = 'var(--accent)';
-      t.style.borderBottomColor = 'var(--accent)';
-    } else {
-      t.style.color = 'var(--muted)';
-      t.style.borderBottomColor = 'transparent';
-    }
+    t.setAttribute('aria-selected', t.dataset.panel === name ? 'true' : 'false');
   }
 }
 document.addEventListener('DOMContentLoaded', () => {

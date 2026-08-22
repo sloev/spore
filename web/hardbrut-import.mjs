@@ -6,9 +6,11 @@
 // built artefact, so the standalone web node still makes ZERO external requests
 // at runtime.
 //
-// The Google-Fonts `@import` that HARDBRUT ships is stripped so the standalone
-// stays zero-request; `--font` degrades to the system stack (Inter is the first
-// choice in the stack, and the system UI face fills in when Inter is absent).
+// Pulls the `.nofont` variant HARDBRUT publishes alongside the default build:
+// byte-identical except it has no embedded Inter — SPORE never uses it (the
+// system font stack is what actually renders), so shipping it was ~32 KB of
+// standalone weight for nothing. `stripFontImport` below stays as a backstop
+// in case a future HARDBRUT version reintroduces a live `@import` here too.
 
 import fs from 'node:fs';
 import https from 'node:https';
@@ -21,14 +23,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const HARDBRUT = {
   remote: 'https://raw.githubusercontent.com/supernihil/hardbrut',
   ref: 'main',
-  file: 'hardbrut.css',
+  file: 'hardbrut.nofont.css',
   // Committed vendored copy — CI and reproducible builds read this when no
   // local checkout exists, so the build never depends on a live network fetch.
+  // Kept named hardbrut.css (not hardbrut.nofont.css) since design/generate.py
+  // and this file are the only readers and both know it's the nofont build.
   vendored: path.join(here, 'vendor/hardbrut/hardbrut.css'),
   // Local checkouts, in priority order. The user's known checkout is first so
   // editing it and rebuilding reflects the change with zero extra steps.
   localPaths: [
-    '/home/nihil/Developer/css/hardbrut/hardbrut.css',
+    '/home/nihil/Developer/css/hardbrut/hardbrut.nofont.css',
   ],
 };
 
