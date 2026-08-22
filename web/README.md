@@ -165,6 +165,8 @@ bridges reconnect on load, device bridges wait for a click. It's the smallest
 "a whole node in one file" seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
 
 This same file *is* the **web node** (the site's `/demo/` page): the Pages workflow
-builds it and serves it at both `/spore-standalone.html` and `/demo/`. There is no
-separate demo page to keep in sync — the thing you download and the thing you run in
-the browser are one file.
+builds it once and serves it at `/demo/` — one URL, not the same ~720 KB payload
+shipped twice under two paths. `docs/APPS.md`'s "Download" button points at that
+same URL with an HTML `download` attribute, so opening it runs the node and
+downloading it saves the identical file. There is no separate demo page to keep
+in sync — the thing you download and the thing you run in the browser are one file.
