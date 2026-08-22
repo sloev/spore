@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HARDBRUT v0.9 — Neubrutalist CSS. Zero imports. Fonts embedded inline.
+   HARDBRUT v0.10 — Neubrutalist CSS. Zero imports. Fonts embedded inline.
    ========================================================================== */
 
 /* ---- EMBEDDED FONT (Inter 900, latin only — for headings) ---- */
@@ -180,11 +180,19 @@ input[type="checkbox"],input[type="radio"]{appearance:none;display:inline-block;
 input[type="radio"]{border-radius:50%}
 input[type="checkbox"]:checked::after{content:"✓";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14px}
 input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;background:var(--ink);border-radius:50%}
+input[type="checkbox"].switch{width:48px;height:26px;vertical-align:-8px}
+input[type="checkbox"].switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;background:var(--ink);transition:transform 0.15s ease}
+input[type="checkbox"].switch:checked{background:var(--accent)}
+input[type="checkbox"].switch:checked::after{background:var(--accent-ink);transform:translateX(22px)}
 
 /* ---- BADGE / CALLOUT / MESSAGE ---- */
 .badge{display:inline-block;padding:0.2rem 0.65rem;font-family:var(--font-mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.05em;border:2px solid var(--ink);box-shadow:var(--shadow-sm);background:var(--accent);color:var(--accent-ink);vertical-align:middle}
 .callout{border:var(--border);box-shadow:var(--shadow-sm);padding:var(--space);font-weight:700;background:var(--accent);color:var(--accent-ink);margin-bottom:var(--space-sm)}
 .message{border:var(--border);box-shadow:var(--shadow-sm);padding:var(--space-sm) var(--space);margin-bottom:var(--space-sm);font-weight:700;background:var(--accent);color:var(--accent-ink)}
+.chip{display:inline-flex;align-items:center;gap:0.35rem;padding:0.3rem 0.75rem;font-family:var(--font-mono);font-size:0.78rem;text-transform:uppercase;letter-spacing:0.04em;border:2px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;box-shadow:var(--shadow-sm);transition:transform 0.1s ease,box-shadow 0.1s ease}
+.chip:hover{transform:translate(-1px,-1px);box-shadow:var(--shadow)}
+.chip:active{transform:translate(1px,1px);box-shadow:none}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
 
 /* ---- HERO / FOOTER ---- */
 .hero{padding:var(--space-lg) var(--space);text-align:center;background:var(--paper);border-bottom:4px solid var(--ink)}
