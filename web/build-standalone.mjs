@@ -165,13 +165,8 @@ mark { background: var(--accent); color: var(--accent-ink); }
 </header>
 <header class="page-header">
   <h1><span class="s">SPORE</span> — a whole node in one file</h1>
-  <p class="tag">This page carries the router (compiled to WebAssembly) and every
-     transport inline. It needs no server and no network to start; open it from a
-     USB stick or an offline copy and one full node comes alive below. Then add
-     bridges to reach other copies — a WebSocket relay, a direct WebRTC link, a
-     Nostr relay, a USB or Bluetooth radio (incl. Meshtastic and Reticulum), sound
-     through the speakers, or a WebTorrent swarm. Its identity and bridges are
-     remembered in this browser, so it comes back the same node next time.</p>
+  <p class="tag">One file, one node — no server, no network needed to start. Add a
+     bridge below to reach other copies.</p>
   <div class="bar">
     <span class="pill" id="status">loading…</span>
     <span class="pill addr" id="addr">addr —</span>
@@ -338,8 +333,16 @@ function hexToBytes(h) {
   for (let i = 0; i < u.length; i++) u[i] = parseInt(h.substr(i * 2, 2), 16);
   return u;
 }
+// Was $('log'), pointing at an id the W9 unified-chat refactor renamed to
+// chat-msgs without updating this lookup — every call (16+ sites: DM rx/tx,
+// feed posts, file transfers, group joins) was throwing on the null result,
+// aborting whatever init/handler called it. chat-msgs is the open
+// conversation's transcript, so a cross-cutting notice (e.g. fetching a
+// magnet) lands there rather than in a dedicated activity log, which no
+// longer exists as a separate panel — imperfect scoping, but visible and
+// non-crashing beats throwing.
 function logLine(cls, text) {
-  const el = $('log');
+  const el = $('chat-msgs');
   const line = document.createElement('div');
   line.className = cls;
   line.textContent = stamp() + '  ' + text;
@@ -411,9 +414,7 @@ async function boot() {
     const addrHex = hexOf(hub.node.addr());
     $('persistent-addr').textContent = addrHex.substring(0, 8) + '\u2026';
     $('petname').textContent = restored ? 'Node' : 'Anonymous';
-    $('detailed-peers').textContent = '0 peers';
     const storeSize = hub.node.storeSize ? hub.node.storeSize() : 0;
-    $('stored-count').textContent = storeSize + ' stored';
     $('compact-status').textContent = '0 peers \u00b7 ' + storeSize + ' stored';
 
     hub.onDeliver = (env) => {

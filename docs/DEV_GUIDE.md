@@ -83,6 +83,67 @@ Two docs carry a narrow slice of state and MUST NOT be duplicated elsewhere:
 `android/TESTING.md` (device evidence — 🧪 means verified in code, not on
 hardware).
 
+## Install & verify a release
+
+The four surfaces in `docs/APPS.md`, with the commands that don't fit on a
+picker page.
+
+**Android APK.** Permanent rolling link, rebuilt on every merge:
+`<major>.<minor>.<stamp>+<sha>`.
+
+```sh
+curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk
+curl -LO https://github.com/sloev/spore/releases/download/rolling/spore-android.apk.sha256
+sha256sum -c spore-android.apk.sha256
+```
+
+Allow installs from the browser/files app — builds are debug-signed until a
+release keystore exists, so Android will warn about an unknown developer.
+`nightly-YYYY.MM.DD` keeps the last five dated builds for rollback; `/releases/
+latest/download/spore-android.apk` is the last tagged build with assets.
+
+**Single-file web node.** Save it, mail it, put it on a stick — CI asserts
+**zero** external requests, so it opens over `file://` with no internet. Its
+own "Download a copy" button re-serializes the page so one seed makes the
+next; identity and bridges live in `localStorage`. Every
+[release](https://github.com/sloev/spore/releases/tag/rolling) carries the
+same file as a permanent asset, so a copy doesn't depend on this site staying
+up.
+
+```sh
+cargo build --release --lib --target wasm32-unknown-unknown
+node web/build-standalone.mjs                            # -> web/spore-standalone.html
+```
+
+**Desktop daemon.**
+
+```sh
+cargo build --release        # -> target/release/spore
+cargo run                    # in-memory mesh demo
+cargo run -- node.yaml       # bridges from a config file
+```
+
+No network to reach crates.io? Every
+[release](https://github.com/sloev/spore/releases/latest/download/spore-offline-bundle.tar.gz)
+also carries this source tree with every dependency vendored in — it unpacks
+flat, so give it a folder:
+
+```sh
+mkdir spore-offline && cd spore-offline
+curl -LO https://github.com/sloev/spore/releases/latest/download/spore-offline-bundle.tar.gz
+tar xzf spore-offline-bundle.tar.gz
+cargo build --release --offline
+```
+
+**Seed Sheet.** Printable A4, fountain-coded QR on one side, wire format by
+hand on the other — a stained or partial print can still recover the payload
+(SPORE's own erasure coding, turned on itself). See
+[Continuity](continuity.html) for why this exists.
+
+```sh
+cd site && npm install && node seed/build-seedsheet.mjs   # -> web/spore-seedsheet.html
+```
+
 ## Building and testing
 
 `docs/CONTRIBUTING.md` has the full CI command list. This is which commands apply to

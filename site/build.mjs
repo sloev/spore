@@ -21,9 +21,12 @@ fs.mkdirSync(out, { recursive: true });
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
 //
-// Navigation: 5 primary items — Try it · How it works · Get a node · Spec ·
-// Mission.
-// Secondary guides are rendered + linkable but kept off the top nav.
+// Navigation: 4 primary items — Try it · How it works · Get a node · Developer
+// — plus "Web node" (the live demo, appended below). Every dev-oriented
+// document with real technical depth (spec, bridges, design, mission/charter,
+// roadmap, security, ...) is reachable from one place, docs/DEVELOPER.md, not
+// scattered across the top nav. Secondary guides are still rendered + linkable
+// so nothing 404s, just kept off the primary nav.
 
 // The front page is `site/home.md`, not the README. They have different jobs: a
 // README opens on "what is this and how do I build it" for someone who already
@@ -33,10 +36,12 @@ fs.mkdirSync(out, { recursive: true });
 // table. The README stays as it is on GitHub.
 const pages = [
   ['site/home.md', 'index.html', 'Try it'],
-  ['docs/MISSION.md', 'mission.html', 'How it works'],
+  ['docs/HOW_IT_WORKS.md', 'how-it-works.html', 'How it works'],
   ['docs/APPS.md', 'apps.html', 'Get a node'],
-  ['docs/SPEC.md', 'spec.html', 'Spec'],
+  ['docs/DEVELOPER.md', 'developer.html', 'Developer'],
   // Secondary guides: rendered + linkable, kept off the top nav
+  ['docs/MISSION.md', 'mission.html', null],
+  ['docs/SPEC.md', 'spec.html', null],
   ['docs/DESIGN.md', 'design.html', null],
   ['docs/BRIDGES.md', 'bridges.html', null],
   ['docs/REBUILD.md', 'rebuild.html', null],
@@ -93,6 +98,8 @@ const titles = new Map([
   ['contributing.html', 'SPORE — contributing'],
   ['dev-guide.html', 'SPORE — developer guide'],
   ['mission.html', 'SPORE — mission'],
+  ['how-it-works.html', 'SPORE — how it works'],
+  ['developer.html', 'SPORE — developer'],
 ]);
 
 const descriptions = new Map([
@@ -108,15 +115,19 @@ const descriptions = new Map([
       'fragmentation, sealing and congestion rules — enough to reimplement it.',
   ],
   ['apps.html', 'Download SPORE: the browser node, the desktop daemon, the Android app, and the language bindings.'],
+  ['how-it-works.html', 'Addressing, store-and-forward delivery, pluggable bridges, and privacy by default — the mechanism, briefly.'],
+  ['developer.html', 'The wire format, every bridge, the reimplementation guide, and everything else with real technical depth.'],
   ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
   ['security.html', 'The SPORE findings register: what was found, how it was reproduced, what was changed, and what is still open.'],
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
 ]);
 
+// "Web node" (the live demo) sits between the picker and the technical hub —
+// spliced in rather than appended, so Developer stays the last, catch-all item.
 const navLinks = pages
   .filter(([, , label]) => label)
-  .map(([, dst, label]) => ({ dst, label }))
-  .concat([{ dst: 'demo/', label: 'Web node' }]);
+  .map(([, dst, label]) => ({ dst, label }));
+navLinks.splice(navLinks.length - 1, 0, { dst: 'demo/', label: 'Web node' });
 
 function rewriteLinks(html, self) {
   // Rewrite href="...something.md" (with optional ../ and #anchor) to the built

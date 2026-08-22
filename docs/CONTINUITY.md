@@ -5,8 +5,8 @@
 </p>
 
 <p align="center"><em>Poster summary —
-<a href="spore-continuity.png">full size</a>. The story cards and sections below
-are the living text; the poster can lag.</em></p>
+<a href="spore-continuity.png">full size</a>. The sections below are the
+living text; the poster can lag.</em></p>
 
 A **spore** is a small capsule that can regrow the whole organism from one
 survivor. This page is about the *software* doing the same: one HTML file, one
@@ -31,94 +31,69 @@ A surviving copy — a phone, a saved HTML file, a printed Seed Sheet, a clone, 
 release tarball — carries everything needed to keep working, verify it is
 genuine, and regrow the rest.
 
-<div class="grid">
+## Three properties
 
-<div class="col-3"><div class="card"><div class="card-body">
-<strong>Three properties</strong>
-<p class="text-muted">Readable · Reconstructable · Self-propagating</p>
-<details>
-<summary>Why “every copy is a seed” is a constraint</summary>
-<p>Most software assumes a registry, CDN, or app store. SPORE’s job is moving
-messages when that infrastructure is degraded — so getting SPORE must not depend
-on it. Understanding, verifying, and rebuilding travel <em>with</em> the node:
+**Readable · Reconstructable · Self-propagating.** Most software assumes a
+registry, CDN, or app store. SPORE's job is moving messages when that
+infrastructure is degraded — so getting SPORE must not depend on it.
+Understanding, verifying, and rebuilding travel *with* the node:
 dependency-light core, a spec independent of Rust, paper-friendly formats, and
-the network able to carry its own installer.</p>
-</details>
-</div></div></div>
+the network able to carry its own installer.
 
-<div class="col-3"><div class="card"><div class="card-body">
-<strong>What’s a seed today</strong>
-<p class="text-muted">From one browser file to paper QR to a vendored offline build.</p>
-<details>
-<summary>Artifact table</summary>
-<table>
-  <thead><tr><th>Seed</th><th>Assumes</th><th>Gets you</th></tr></thead>
-  <tbody>
-    <tr><td><strong>Single-file HTML</strong></td><td>a browser</td><td>full node offline, zero network</td></tr>
-    <tr><td><strong>Seed Sheet</strong></td><td>camera + patience</td><td>any ~K of N QR → reimplementation guide</td></tr>
-    <tr><td><strong>Offline bundle</strong></td><td>Rust toolchain</td><td>daemon + bridges, <code>cargo build --offline</code> immediately — every release carries the source with dependencies pre-vendored, or run <code>make-offline-bundle.sh</code> on a clone yourself</td></tr>
-    <tr><td><strong>SPEC + by-hand examples</strong></td><td>pen, paper</td><td>reimplement in any language</td></tr>
-    <tr><td><strong>Pure-Python T0</strong></td><td>Python 3</td><td>receive + verify public mail, no packages</td></tr>
-    <tr><td><strong>Armored envelope</strong></td><td>typing</td><td>inject one message from paper or voice</td></tr>
-  </tbody>
-</table>
-<p>Links and build commands: <a href="apps.html">Apps &amp; daemons</a>.</p>
-</details>
-</div></div></div>
+## What's a seed today
 
-<div class="col-3"><div class="card"><div class="card-body">
-<strong>Cold-start playbooks</strong>
-<p class="text-muted">Only a browser · only radios · only paper · only one laptop offline.</p>
-<details>
-<summary>Only a browser</summary>
-<p>Open <code>spore-standalone.html</code>. Add a bridge from the page (WebSocket, WebRTC,
-Nostr, WebTorrent) or the <strong>audio modem</strong> so two laptops pair with no network.
-Get the file from <a href="apps.html">Apps</a>.</p>
-</details>
-<details>
-<summary>Only radios</summary>
-<p>Daemon + matching bridge (<a href="bridges.html">BRIDGES</a>). Router and fragmentation
-are medium-independent; the radio is a thin send/recv shim.</p>
-</details>
-<details>
-<summary>Only paper (and voice)</summary>
-<p>Armor form <code>~S1.&lt;base32&gt;.&lt;checksum&gt;~</code> survives SMS, handwriting, or a
-read-aloud. Seed Sheet fountain QR recovers bulk guides from a partial print.</p>
-</details>
-<details>
-<summary>Only one laptop, no internet</summary>
-<p>Simplest: grab <code>spore-offline-bundle.tar.gz</code> from any
-<a href="https://github.com/sloev/spore/releases">release</a> before you go offline — every
-one carries this source tree with dependencies already vendored in, so
-<code>cargo build --offline</code> works the moment you unpack it. No release artifact handy?
-Clone + vendor it yourself while still online:</p>
-<pre><code>./scripts/make-offline-bundle.sh
-./scripts/make-offline-bundle.sh --tar</code></pre>
-<p>MSRV is enforced by CI (see Cargo.toml / security findings for the floor).
-<code>Cargo.lock</code> pins versions; <code>vendor/</code> carries the sources. HTML node, printed
-spec, and Seed Sheet need no vendor step.</p>
-</details>
-</div></div></div>
+| Seed | Assumes | Gets you |
+|---|---|---|
+| **Single-file HTML** | a browser | full node offline, zero network |
+| **Seed Sheet** | camera + patience | any ~K of N QR → reimplementation guide |
+| **Offline bundle** | Rust toolchain | daemon + bridges, `cargo build --offline` immediately — every release carries the source with dependencies pre-vendored, or run `make-offline-bundle.sh` on a clone yourself |
+| **SPEC + by-hand examples** | pen, paper | reimplement in any language |
+| **Pure-Python T0** | Python 3 | receive + verify public mail, no packages |
+| **Armored envelope** | typing | inject one message from paper or voice |
 
-<div class="col-3"><div class="card"><div class="card-body">
-<strong>Trust without infrastructure</strong>
-<p class="text-muted">Hash is identity. Signatures bind path learning. Seed ≠ full inbox backup.</p>
-<details>
-<summary>Anchors</summary>
-<ul>
-  <li><strong>Content addressing</strong> — envelope ID is the hash of its bytes; node address is the hash of its key.</li>
-  <li><strong>Signed everything</strong> — path learning from signed frames; releases as signed manifests.</li>
-  <li><strong>Seed restores identity, not the prekey ring</strong> — carrying the ring keeps old sealed mail readable and lengthens the theft window. Continuity of identity and forward secrecy of content pull opposite ways; you choose.</li>
-  <li><strong>Reproducible builds</strong> — compare hashes offline; the single-file node prints the wasm SHA-256 in its footer.</li>
-</ul>
-</details>
-</div></div></div>
+Links and build commands: [Apps & daemons](apps.html) and the
+[Dev guide](dev-guide.html)'s "Install & verify a release."
 
-</div>
+## Cold-start playbooks
+
+**Only a browser.** Open `spore-standalone.html`. Add a bridge from the page
+(WebSocket, WebRTC, Nostr, WebTorrent) or the **audio modem** so two laptops
+pair with no network. Get the file from [Apps](apps.html).
+
+**Only radios.** Daemon + matching bridge ([Bridges](bridges.html)). Router
+and fragmentation are medium-independent; the radio is a thin send/recv shim.
+
+**Only paper (and voice).** Armor form `~S1.<base32>.<checksum>~` survives
+SMS, handwriting, or a read-aloud. Seed Sheet fountain QR recovers bulk guides
+from a partial print.
+
+**Only one laptop, no internet.** Simplest: grab `spore-offline-bundle.tar.gz`
+from any [release](https://github.com/sloev/spore/releases) before you go
+offline — every one carries this source tree with dependencies already
+vendored in, so `cargo build --offline` works the moment you unpack it. No
+release artifact handy? Clone + vendor it yourself while still online:
+
+```sh
+./scripts/make-offline-bundle.sh
+./scripts/make-offline-bundle.sh --tar
+```
+
+MSRV is enforced by CI (see `Cargo.toml` / security findings for the floor).
+`Cargo.lock` pins versions; `vendor/` carries the sources. HTML node, printed
+spec, and Seed Sheet need no vendor step.
+
+## Trust without infrastructure
+
+**Hash is identity. Signatures bind path learning. Seed ≠ full inbox backup.**
+
+- **Content addressing** — envelope ID is the hash of its bytes; node address is the hash of its key.
+- **Signed everything** — path learning from signed frames; releases as signed manifests.
+- **Seed restores identity, not the prekey ring** — carrying the ring keeps old sealed mail readable and lengthens the theft window. Continuity of identity and forward secrecy of content pull opposite ways; you choose.
+- **Reproducible builds** — compare hashes offline; the single-file node prints the wasm SHA-256 in its footer.
 
 ## Roadmap
 
-What exists and what’s next:
+What exists and what's next:
 
 - [x] **Single-file browser node** — zero network, CI-checked
 - [x] **Config-driven daemon + bridge matrix**
@@ -133,6 +108,6 @@ What exists and what’s next:
 
 ## Help re-seed
 
-Keep a copy somewhere the others aren’t: offline disk, phone HTML, printed sheet,
+Keep a copy somewhere the others aren't: offline disk, phone HTML, printed sheet,
 another host. Continuity is redundancy that outlives its sources — and it only
-works if the copies are already scattered before they’re needed.
+works if the copies are already scattered before they're needed.
