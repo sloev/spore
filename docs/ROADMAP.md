@@ -6,14 +6,14 @@ This is the single forward-looking plan, organised as **milestones** rather than
 a flat PR map. Each milestone is a coherent body of work with a clear definition
 of done; PRs are the merge units inside a milestone, not the plan itself.
 
-"What shipped" lives in exactly one place — [`CHANGELOG.md`](CHANGELOG.md)
+"What shipped" lives in exactly one place — [Changelog](CHANGELOG.md)
 `## Unreleased` and the **Status** column in each milestone — so no second
 progress table can drift. Shipped work keeps its CHANGELOG entry and loses its
 spec here; the code is the truth.
 
-**Read order for agents:** [`MISSION.md`](MISSION.md) → this file →
-[`CHANGELOG.md`](CHANGELOG.md) → SPEC/CONTINUITY only as needed. See
-[`DEV_GUIDE.md`](DEV_GUIDE.md) for the full repo map.
+**Read order for agents:** [Mission](MISSION.md) → this file →
+[Changelog](CHANGELOG.md) → SPEC/CONTINUITY only as needed. See
+[Dev guide](DEV_GUIDE.md) for the full repo map.
 
 ---
 

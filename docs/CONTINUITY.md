@@ -21,10 +21,10 @@ for the *protocol* surviving even this codebase.
 | Piece | Answers | Lives at |
 |---|---|---|
 | **Continuity** | If I lose this device, this app, this website — does *my* node come back? | This page |
-| **Rebuild** | If this codebase disappeared, could someone who has never seen it write a compatible node? | [`REBUILD.md`](REBUILD.md) |
+| **Rebuild** | If this codebase disappeared, could someone who has never seen it write a compatible node? | [Rebuild guide](REBUILD.md) |
 | **Reference decoders** | Can I check a real envelope against something I need not trust — no crypto library, no dependency? | [`reference/`](https://github.com/sloev/spore/tree/master/reference) |
-| **Release artifacts** | Can I get a working node *and* the means to rebuild it from one download, with no live infrastructure? | Every [release](https://github.com/sloev/spore/releases) carries `spore-standalone.html` and `spore-offline-bundle.tar.gz` beside the APK — [`APPS.md`](APPS.md) |
-| **The frozen contract** | Will a node built from any of the above still speak to one built today? | `tests/api_freeze.rs` + `reference/vectors.json`, held by [`CONTRIBUTING.md`](CONTRIBUTING.md)'s freeze rules |
+| **Release artifacts** | Can I get a working node *and* the means to rebuild it from one download, with no live infrastructure? | Every [release](https://github.com/sloev/spore/releases) carries `spore-standalone.html` and `spore-offline-bundle.tar.gz` beside the APK — [Apps](APPS.md) |
+| **The frozen contract** | Will a node built from any of the above still speak to one built today? | `tests/api_freeze.rs` + `reference/vectors.json`, held by [Contributing](CONTRIBUTING.md)'s freeze rules |
 | **Public domain** | Is there a license, company or maintainer this depends on outliving? | [`LICENSE`](../LICENSE) — no |
 
 A surviving copy — a phone, a saved HTML file, a printed Seed Sheet, a clone, a
@@ -45,7 +45,7 @@ the network able to carry its own installer.
 | Seed | Assumes | Gets you |
 |---|---|---|
 | **Single-file HTML** | a browser | full node offline, zero network |
-| **Seed Sheet** | camera + patience | any ~K of N QR → reimplementation guide |
+| **Seed Sheet** | camera + patience | any ~23 of 39 QR → reimplementation guide |
 | **Offline bundle** | Rust toolchain | daemon + bridges, `cargo build --offline` immediately — every release carries the source with dependencies pre-vendored, or run `make-offline-bundle.sh` on a clone yourself |
 | **SPEC + by-hand examples** | pen, paper | reimplement in any language |
 | **Pure-Python T0** | Python 3 | receive + verify public mail, no packages |

@@ -22,7 +22,7 @@ So the application layer has exactly two ingredients:
 1. **payload conventions** — bytes the destination knows how to interpret;
 2. **endpoint state** — tables and buffers kept by sender and receiver.
 
-The wire format itself is [`SPEC.md`](SPEC.md); it is frozen, and nothing here
+The wire format itself is [Spec](SPEC.md); it is frozen, and nothing here
 changes it.
 
 This document has two parts. **Part 1** is the application layer — what you build
@@ -651,7 +651,7 @@ three tables that an attacker would like to choose the contents of:
 All three once accepted the `SIGNED` **flag** as proof, and a flag is one bit
 chosen by whoever wrote the frame — so all three were forgeable with a copied
 public key and 64 zero bytes (see S-002, S-004 in
-[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md)). The rule is therefore narrower
+[Security findings](SECURITY_FINDINGS.md)). The rule is therefore narrower
 than "relays verify" and wider than "relays never verify":
 
 > **Verify before binding trust state; do not verify to forward.**
@@ -674,7 +674,7 @@ machine, carrying nothing about where it landed. Anything that hosts it is a
 **runtime**: a language binding, a daemon, a browser worker, a microcontroller
 firmware. Runtimes vary enormously; what they have to provide does not. A runtime
 supplies **four nutrients**, and the core supplies everything else. The same four
-are normative in [`SPEC.md`](SPEC.md)'s runtime contract.
+are normative in [Spec](SPEC.md)'s runtime contract.
 
 *The image, once, because it is the whole idea: the core is a spore and a runtime
 is the soil it lands in. Past this paragraph the docs use the plain words —* core,
@@ -711,7 +711,7 @@ Two words are reserved and mean something else in these docs:
 |---|---|---|
 | **Randomness** | keys, nonces | The wasm build's *single* import is `env.spore_fill_random`; native uses `OsRng`. Already a contract, not a call. |
 | **Time** | expiry, dedup windows, ratchet TTL | `now: u32` is a parameter on `send` / `on_rx` / `open_dm`. The protocol layers never read a clock — the host decides what time it is. |
-| **Storage** | spilling the envelope store past a memory budget | The `SpillBackend` trait; `FsSpill` is the filesystem implementation. A runtime with other storage supplies its own. [`SPEC.md`](SPEC.md) names this **custody**, after the duty rather than the mechanism. |
+| **Storage** | spilling the envelope store past a memory budget | The `SpillBackend` trait; `FsSpill` is the filesystem implementation. A runtime with other storage supplies its own. [Spec](SPEC.md) names this **custody**, after the duty rather than the mechanism. |
 | **Scheduling** | expiry sweep, prekey rotation, resend | `Node::tick`, called on a timer. Without it a node only maintains itself when traffic happens to arrive. |
 
 All four are contracts rather than assumptions, which is why the same core
@@ -779,7 +779,7 @@ In this implementation those five collapse to **three driver forms** — `dgram`
 you listen before talking, and a text channel is a byte stream with an armor codec.
 
 Which media are implemented, at what status, with wire formats, security notes and
-the underlying specs, is the bridge reference: [`BRIDGES.md`](BRIDGES.md). It is
+the underlying specs, is the bridge reference: [Bridges](BRIDGES.md). It is
 generated against the code — CI fails if a runnable bridge is undocumented or a
 documented one stops existing — so it is the one place worth trusting on this.
 
@@ -817,7 +817,7 @@ the rest is designed and slots into the same tag/endpoint model.
 | §8 receipts — ACKREQ + signed receipt + backoff resend | ✅ implemented |
 | §9 anonymity — mix-mode onion + batch timing | ✅ implemented (Poisson/decoys = runner policy) |
 | §5.4 congestion — backoff, Trickle, token bucket, busy-byte | ✅ implemented |
-| Bridges — see [`BRIDGES.md`](BRIDGES.md) for the per-medium status index | ✅ implemented (radio runners need hardware) |
+| Bridges — see [Bridges](BRIDGES.md) for the per-medium status index | ✅ implemented (radio runners need hardware) |
 
 Every layer is additive and endpoint-only. The transport underneath never learns
 they exist — which is exactly why a 200-byte LoRa link, a QR code, or a human

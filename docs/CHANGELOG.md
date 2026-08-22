@@ -714,7 +714,7 @@ Two conventions specific to this project:
   pump. Config: `iroh` (listen), `iroh: <id>` (dial via relay), or `iroh: <id>@<addr>`
   (dial direct, relay/discovery off). Tested by a two-endpoint localhost QUIC
   round-trip in a dedicated `iroh` CI job. Trust notes (relay phone-home, `EndpointId`
-  ≠ SPORE address) are in [`BRIDGES.md`](BRIDGES.md). **Wire unchanged** — an
+  ≠ SPORE address) are in [Bridges](BRIDGES.md). **Wire unchanged** — an
   underlay, not a protocol change; golden vectors byte-identical.
 - **MSRV floor raised 1.75 → 1.85.** Admitting iroh pulls `zeroize` ≥1.9 (and its
   edition-2024 `zeroize_derive`) into the *core* build via chacha20poly1305/crypto_box,
@@ -1064,8 +1064,8 @@ things, so rather than let anyone infer it wrongly:
 Freezing the wire at v1 while the software is at 0.1 is not a contradiction. The
 protocol is what peers and reimplementations depend on, and it does not move. The
 software is early and says so: no radio bridge has been verified against real
-hardware — every 🧪 in [`BRIDGES.md`](BRIDGES.md) — and
-[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) carried open items, including
+hardware — every 🧪 in [Bridges](BRIDGES.md) — and
+[Security findings](SECURITY_FINDINGS.md) carried open items, including
 that the one-shot seal had no forward secrecy (S-022, closed in 0.2.0). A 1.0 badge
 would have said otherwise.
 

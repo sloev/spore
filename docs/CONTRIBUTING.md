@@ -1,8 +1,8 @@
 # Contributing
 
-New to the repo? [`MISSION.md`](MISSION.md) is what SPORE is actually for and
+New to the repo? [Mission](MISSION.md) is what SPORE is actually for and
 the decision test every change is weighed against — read that first, before
-any feature idea. [`DEV_GUIDE.md`](DEV_GUIDE.md) is the map of where
+any feature idea. [Dev guide](DEV_GUIDE.md) is the map of where
 everything lives and which doc answers which question. This doc is the rules
 once you know where you're going: freeze, CI gates, branches, releases.
 
