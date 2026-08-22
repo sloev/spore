@@ -36,7 +36,10 @@ spec here; the code is the truth.
   when independent.
 - Distinguish **Verified** (code/CHANGELOG) vs **Reasoned** vs **Needs device run**. Do
   not claim hardware verification that was not run, or invent protocol features.
-- **No mushrooms.** The only brand icon is Antenna + Seed.
+- **No icon, no mascot.** SPORE's brand is the wordmark — plain "SPORE" text — on
+  every surface. Nothing stands in for it, not even a monogram; Android's
+  `ic_spore.xml` is a plain HARDBRUT accent swatch because the platform
+  requires an icon file to exist, not because it represents anything.
 
 ---
 
@@ -160,7 +163,7 @@ work below is the code half that changes what is on screen.
 - [ ] The site has persistent, clear navigation.
 - [ ] The web node has a persistent identity + status header.
 - [ ] Reduced motion is fully static; the standalone still makes zero external requests.
-- [ ] Baud appears only on empty states and completions.
+- [x] ~~Baud appears only on empty states and completions.~~ Superseded: Baud is removed entirely — brand is the SPORE wordmark only, no mascot (see the hard rules).
 - [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
 
 **Definition of done:** every surface passes visual review and the mushroom icon is
@@ -347,10 +350,12 @@ than a third hand-rolled copy of the same offset-rect math.
 `supernihil/hardbrut` and rebuilding SPORE changes all three surfaces — the two
 web surfaces on the next `hardbrut-sync.mjs` + rebuild, Android on the next
 `hardbrut-sync.py` + `design/generate.py`; the standalone still makes zero
-external requests; Antenna + Seed and Baud persist; Android's `Chrome.kt`
-aliases the vendored `Hardbrut.kt`'s tokens and shadow primitive rather than
-maintaining its own copy, keeping only the product-specific primitives (touch
-targets, press feedback, `Chip`/`ListRow`/etc.) that file doesn't provide.
+external requests; Android's `Chrome.kt` aliases the vendored `Hardbrut.kt`'s
+tokens and shadow primitive rather than maintaining its own copy, keeping only
+the product-specific primitives (touch targets, press feedback,
+`Chip`/`ListRow`/etc.) that file doesn't provide. (Antenna + Seed and Baud
+were later retired entirely — see the hard rules: the brand is the wordmark,
+nothing stands in for it.)
 
 ---
 

@@ -63,7 +63,6 @@ const html = `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>SPORE — a whole node in one file</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Cpath%20fill='%23ffd23f'%20d='M4,17a8,3%200%201,0%2016,0a8,3%200%201,0%20-16,0Z'/%3E%3Cpath%20fill='%23ffd23f'%20d='M4,17a8,3%200%201,0%2016,0L20,18a8,3%200%201,1%20-16,0Z'/%3E%3Cpath%20fill='%23000000'%20d='M11.3,17h1.4v-9h-1.4Z'/%3E%3Cpath%20fill='%23000000'%20d='M12,3a2,2%200%201,0%200,0.01Z'/%3E%3Cpath%20fill='%23000000'%20d='M6.5,6.5a1,1%200%200,1%201.4,1.4a4,4%200%200,0%200,5.6a1,1%200%200,1%20-1.4,1.4a6,6%200%200,1%200,-8.4Z'/%3E%3Cpath%20fill='%23000000'%20d='M17.5,6.5a1,1%200%200,0%20-1.4,1.4a4,4%200%200,1%200,5.6a1,1%200%200,0%201.4,1.4a6,6%200%200,0%200,-8.4Z'/%3E%3Cpath%20fill='%23000000'%20d='M9.5,13c-1.5,0%20-2.5,1%20-2.5,2.5c1.5,0%202.5,-1%202.5,-2.5Z'/%3E%3Cpath%20fill='%23000000'%20d='M14.5,13c1.5,0%202.5,1%202.5,2.5c-1.5,0%20-2.5,-1%20-2.5,-2.5Z'/%3E%3C/svg%3E" type="image/svg+xml" />
 <style>
 /* HARDBRUT (imported at build time) — see above. */
 ${hardbrutCss}
@@ -147,7 +146,6 @@ mark { background: var(--accent); color: var(--accent-ink); }
 <body>
 <header class="persistent-header">
   <div class="header-brand">
-    <svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/><path fill="#000000" d="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z"/><path fill="#000000" d="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z"/></svg>
     <span class="brand-name">SPORE</span>
     <span class="peer-count" id="peer-count">0 peers</span>
   </div>
@@ -166,7 +164,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
   </div>
 </header>
 <header class="page-header">
-  <h1><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/><path fill="#000000" d="M9.5,13c-1.5,0 -2.5,1 -2.5,2.5c1.5,0 2.5,-1 2.5,-2.5Z"/><path fill="#000000" d="M14.5,13c1.5,0 2.5,1 2.5,2.5c-1.5,0 -2.5,-1 -2.5,-2.5Z"/></svg><span class="s">SPORE</span> — a whole node in one file</h1>
+  <h1><span class="s">SPORE</span> — a whole node in one file</h1>
   <p class="tag">This page carries the router (compiled to WebAssembly) and every
      transport inline. It needs no server and no network to start; open it from a
      USB stick or an offline copy and one full node comes alive below. Then add
@@ -507,20 +505,9 @@ async function boot() {
 // ---- conversations (W9) ----------------------------------------------------
 // (ensureConvo, saveConvos, feedTopicOf are defined above, near boot.)
 
-// Baud — the empty-state mascot, restyled to HARDBRUT: flat black ink + yellow,
-// hard outline, no pastel (the old pink chibi is retired with the palette).
-// Rendered as a data: URI so the standalone stays zero-external-request.
-function baudEmpty(message, action1, action2) {
-  const baudSvg = '<svg viewBox="0 0 48 48" width="36" height="36" style="display:block;margin:0 auto 10px">' +
-    '<circle cx="24" cy="26" r="15" fill="#ffd23f" stroke="#000" stroke-width="3"/>' +
-    '<line x1="24" y1="9" x2="18" y2="17" stroke="#000" stroke-width="3" stroke-linecap="round"/>' +
-    '<line x1="24" y1="9" x2="30" y2="17" stroke="#000" stroke-width="3" stroke-linecap="round"/>' +
-    '<rect x="15" y="21" width="6" height="8" fill="#000"/>' +
-    '<rect x="27" y="21" width="6" height="4" fill="#000"/>' +
-    '<path d="M17 31 Q24 36 31 31" stroke="#000" stroke-width="3" fill="none" stroke-linecap="round"/>' +
-    '</svg>';
-  return '<div class="baud-empty" style="text-align:center;padding:20px 0;color:var(--muted)">' +
-    baudSvg +
+// Plain text empty state — no mascot; SPORE's only brand mark is the wordmark.
+function emptyState(message, action1, action2) {
+  return '<div class="empty-state" style="text-align:center;padding:20px 0;color:var(--muted)">' +
     '<p style="margin:4px 0 12px;font-size:13px">' + message + '</p>' +
     '<div style="display:flex;gap:12px;justify-content:center">' +
     (action1 ? '<button class="x" style="text-transform:uppercase">' + action1 + '</button>' : '') +
@@ -528,17 +515,17 @@ function baudEmpty(message, action1, action2) {
     '</div></div>';
 }
 
-// Track bridge count and show the Baud empty state when none are active.
+// Track bridge count and show the empty state when none are active.
 function updateBridgesEmptyState() {
   const container = $('bridges');
-  const existing = container.querySelector('.baud-empty');
+  const existing = container.querySelector('.empty-state');
   const hasBridges = container.children.length > (existing ? 1 : 0);
   if (hasBridges) {
     if (existing) existing.remove();
   } else {
     if (!existing) {
       const h = document.createElement('div');
-      h.innerHTML = baudEmpty('No bridges yet. Add one above.', 'ADD BRIDGE');
+      h.innerHTML = emptyState('No bridges yet. Add one above.', 'ADD BRIDGE');
       const btn = h.querySelector('.x');
       if (btn) btn.addEventListener('click', () => $('add').focus());
       container.prepend(h);
@@ -568,7 +555,7 @@ function renderChatList() {
     return lastB - lastA;
   });
   if (!entries.length) {
-    el.innerHTML = baudEmpty('No chats yet. Start a 1:1, join an open group, or create a private group.');
+    el.innerHTML = emptyState('No chats yet. Start a 1:1, join an open group, or create a private group.');
     return;
   }
   el.innerHTML = entries.map(([key, c]) => {
@@ -1320,15 +1307,15 @@ $('save').onclick = () => {
   a.download = 'spore-standalone.html';
   a.click();
   URL.revokeObjectURL(a.href);
-  // Show Baud completion state briefly
+  // Show a brief completion state
   const seedPanel = document.getElementById('panel-seed');
   if (seedPanel) {
-    const existing = seedPanel.querySelector('.baud-complete');
+    const existing = seedPanel.querySelector('.complete-state');
     if (!existing) {
       const c = document.createElement('div');
-      c.className = 'baud-complete';
-      c.innerHTML = baudEmpty('Seed saved! This node can regrow from that file.');
-      c.querySelector('.baud-empty').style.padding = '8px 0';
+      c.className = 'complete-state';
+      c.innerHTML = emptyState('Seed saved! This node can regrow from that file.');
+      c.querySelector('.empty-state').style.padding = '8px 0';
       seedPanel.querySelector('details')?.after(c);
       setTimeout(() => c.remove(), 5000);
     }

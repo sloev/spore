@@ -258,7 +258,6 @@ const siteAdapterCss = `
 /* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
 main.doc.container { max-width: 860px; }
 main.doc { font-size: 0.95rem; }
-.brand-mark { display: inline-block; vertical-align: -5px; margin-right: 0.4rem; }
 main.doc .code-copy {
   position: absolute; top: 8px; right: 8px;
   font: 11px var(--font-mono); line-height: 1; padding: 4px 9px;
@@ -343,7 +342,6 @@ function page(title, bodyHtml, self) {
 <meta property="og:description" content="${attr(desc)}" />
 <meta property="og:url" content="${attr(url)}" />
 <meta name="twitter:card" content="summary" />
-<link rel="icon" href="antenna-seed.svg" type="image/svg+xml" />
 <style>
 /* HARDBRUT (imported at build time from supernihil/hardbrut). */
 ${hardbrutCss}
@@ -360,7 +358,7 @@ ${siteAdapterCss}
 </head>
 <body class="page-${cls}">
 <nav class="navbar">
-  <a class="navbar-brand" href="index.html"><svg class="brand-mark" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0a8,3 0 1,0 -16,0Z"/><path fill="#ffd23f" d="M4,17a8,3 0 1,0 16,0L20,18a8,3 0 1,1 -16,0Z"/><path fill="#000000" d="M11.3,17h1.4v-9h-1.4Z"/><path fill="#000000" d="M12,3a2,2 0 1,0 0,0.01Z"/><path fill="#000000" d="M6.5,6.5a1,1 0 0,1 1.4,1.4a4,4 0 0,0 0,5.6a1,1 0 0,1 -1.4,1.4a6,6 0 0,1 0,-8.4Z"/><path fill="#000000" d="M17.5,6.5a1,1 0 0,0 -1.4,1.4a4,4 0 0,1 0,5.6a1,1 0 0,0 1.4,1.4a6,6 0 0,0 0,-8.4Z"/></svg>SPORE</a>
+  <a class="navbar-brand" href="index.html">SPORE</a>
   <button class="navbar-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">☰</button>
   ${nav(self)}
 </nav>
@@ -448,10 +446,6 @@ for (const [src, dst, label] of pages) {
   fs.writeFileSync(path.join(out, dst), page(title, anchored, dst));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
-
-// Ship the Antenna + Seed favicon (the only brand icon).
-fs.writeFileSync(path.join(out, 'antenna-seed.svg'), fs.readFileSync(path.join(root, 'site/antenna-seed.svg')));
-console.log('wrote _site/antenna-seed.svg');
 
 // Ship docs images. README (index.html, at the site root) references them as
 // `docs/<img>`, while docs pages (also at the root) reference them bare, so copy
