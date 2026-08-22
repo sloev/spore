@@ -21,12 +21,15 @@ fs.mkdirSync(out, { recursive: true });
 // Pages to render: [source md, output html, nav label]. `null` label hides it
 // from the nav (still generated + linkable).
 //
-// Navigation: 4 primary items — Try it · How it works · Get a node · Developer
-// — plus "Web node" (the live demo, appended below). Every dev-oriented
-// document with real technical depth (spec, bridges, design, mission/charter,
-// roadmap, security, ...) is reachable from one place, docs/DEVELOPER.md, not
-// scattered across the top nav. Secondary guides are still rendered + linkable
-// so nothing 404s, just kept off the primary nav.
+// Navigation: How it works · Get a node · Try the web node · Developer — plus
+// the brand mark itself as the only link to "/" (a "Try it" nav item next to
+// a brand mark that already goes home was two links to the same page, one of
+// them mislabeled: clicking "Try it" landed on the homepage, not on anything
+// to try). Every dev-oriented document with real technical depth (spec,
+// bridges, design, mission/charter, roadmap, security, ...) is reachable from
+// one place, docs/DEVELOPER.md, not scattered across the top nav. Secondary
+// guides are still rendered + linkable so nothing 404s, just kept off the
+// primary nav.
 
 // The front page is `site/home.md`, not the README. They have different jobs: a
 // README opens on "what is this and how do I build it" for someone who already
@@ -35,7 +38,7 @@ fs.mkdirSync(out, { recursive: true });
 // the README as `index.html` made the first screen a badge row and a feature
 // table. The README stays as it is on GitHub.
 const pages = [
-  ['site/home.md', 'index.html', 'Try it'],
+  ['site/home.md', 'index.html', null],
   ['docs/HOW_IT_WORKS.md', 'how-it-works.html', 'How it works'],
   ['docs/APPS.md', 'apps.html', 'Get a node'],
   ['docs/DEVELOPER.md', 'developer.html', 'Developer'],
@@ -60,6 +63,13 @@ const pages = [
   ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
   ['docs/PROXY_SETUP.md', 'proxy-setup.html', null],
 ];
+
+// Every secondary guide is reachable from the Developer hub and nothing else
+// in the primary nav, so viewing one should mark "Developer" current — the
+// nav wasn't doing this at all, leaving every doc page with no active item.
+const developerHubPages = new Set(
+  pages.filter(([, dst, label]) => !label && dst !== 'index.html').map(([, dst]) => dst)
+);
 
 // Map a source .md path (as written in links) to its output page.
 const linkMap = new Map();
@@ -100,6 +110,12 @@ const titles = new Map([
   ['mission.html', 'SPORE — mission'],
   ['how-it-works.html', 'SPORE — how it works'],
   ['developer.html', 'SPORE — developer'],
+  ['spec.html', 'SPORE — wire format spec'],
+  ['design.html', 'SPORE — application design'],
+  ['bridges.html', 'SPORE — bridges'],
+  ['rebuild.html', 'SPORE — rebuild guide'],
+  ['continuity.html', 'SPORE — continuity'],
+  ['proxy-setup.html', 'SPORE — proxy setup'],
 ]);
 
 const descriptions = new Map([
@@ -120,6 +136,9 @@ const descriptions = new Map([
   ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
   ['security.html', 'The SPORE findings register: what was found, how it was reproduced, what was changed, and what is still open.'],
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
+  ['design.html', 'The application layer above the wire: layers, the core-vs-runtime model, and why each piece is shaped the way it is.'],
+  ['rebuild.html', 'Reimplementing SPORE from scratch in another language, with worked byte-for-byte examples.'],
+  ['proxy-setup.html', 'Fronting a SPORE bridge with Caddy or Nginx.'],
 ]);
 
 // "Web node" (the live demo) sits between the picker and the technical hub —
@@ -127,7 +146,7 @@ const descriptions = new Map([
 const navLinks = pages
   .filter(([, , label]) => label)
   .map(([, dst, label]) => ({ dst, label }));
-navLinks.splice(navLinks.length - 1, 0, { dst: 'demo/', label: 'Web node' });
+navLinks.splice(navLinks.length - 1, 0, { dst: 'demo/', label: 'Try the web node' });
 
 function rewriteLinks(html, self) {
   // Rewrite href="...something.md" (with optional ../ and #anchor) to the built
@@ -255,7 +274,9 @@ function shareBar() {
 function nav(self) {
   const items = navLinks
     .map(({ dst, label }) => {
-      const active = dst === self ? ' aria-current="page"' : '';
+      const isCurrent =
+        dst === self || (dst === 'developer.html' && developerHubPages.has(self));
+      const active = isCurrent ? ' aria-current="page"' : '';
       return `<li><a href="${dst}"${active}>${label}</a></li>`;
     })
     .join('');
@@ -267,6 +288,14 @@ function nav(self) {
 // component is redefined, and nothing here duplicates a HARDBRUT class.
 const siteAdapterCss = `
 /* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
+/* HARDBRUT's .sr-only hides unconditionally; a skip link needs to reappear
+   on focus or a keyboard user can't see the thing they just tabbed to. */
+a.sr-only:focus {
+  position: fixed; top: var(--space-sm); left: var(--space-sm);
+  width: auto; height: auto; clip: auto; overflow: visible; white-space: normal;
+  z-index: 1000; padding: 0.5rem 1rem; background: var(--accent); color: var(--accent-ink);
+  border: var(--border); box-shadow: var(--shadow);
+}
 main.doc.container { max-width: 860px; }
 main.doc { font-size: 0.95rem; }
 main.doc .code-copy {
@@ -352,7 +381,12 @@ function page(title, bodyHtml, self) {
 <meta property="og:title" content="${attr(title)}" />
 <meta property="og:description" content="${attr(desc)}" />
 <meta property="og:url" content="${attr(url)}" />
-<meta name="twitter:card" content="summary" />
+<meta property="og:image" content="${SHARE.url}og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="${SHARE.url}og-image.png" />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="alternate icon" href="favicon.ico" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <style>
 /* HARDBRUT (imported at build time from supernihil/hardbrut). */
 ${hardbrutCss}
@@ -368,18 +402,26 @@ ${siteAdapterCss}
 </script>
 </head>
 <body class="page-${cls}">
+<a class="sr-only" href="#main-content">Skip to content</a>
 <nav class="navbar">
   <a class="navbar-brand" href="index.html">SPORE</a>
   <button class="navbar-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">☰</button>
   ${nav(self)}
+  <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">◐</button>
 </nav>
-<main class="doc container">
+<main class="doc container" id="main-content">
 <section class="section">
 ${bodyHtml}
 </section>
 </main>
 <footer class="site-footer">
-  <span>SPORE — store-and-forward planetary opportunistic relay envelope · public domain (Unlicense)</span>
+  <div class="cluster">
+    <a href="https://github.com/sloev/spore">GitHub</a>
+    <a href="https://github.com/sloev/spore/blob/master/LICENSE">License (Unlicense)</a>
+    <a href="security-policy.html">Report a vulnerability</a>
+    <a href="https://github.com/supernihil/hardbrut">Built with HARDBRUT</a>
+  </div>
+  <span class="text-muted">SPORE — store-and-forward planetary opportunistic relay envelope · public domain</span>
 </footer>
 <script>
 (function () {
@@ -425,6 +467,20 @@ ${bodyHtml}
   });
 })();
 </script>
+<script>
+(function () {
+  // Dark mode has no opt-out otherwise: the boot script in <head> only ever
+  // reads the system preference or a stored choice, nothing writes one.
+  var btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  var h = document.documentElement;
+  btn.addEventListener('click', function () {
+    var next = h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    h.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+  });
+})();
+</script>
 </body>
 </html>`;
 }
@@ -457,6 +513,34 @@ for (const [src, dst, label] of pages) {
   fs.writeFileSync(path.join(out, dst), page(title, anchored, dst));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
+
+// Ship the favicon/icon/social-preview assets — plain HARDBRUT swatches and a
+// wordmark card, not a mascot; see site/favicon.svg's own comment.
+for (const asset of ['favicon.svg', 'favicon.ico', 'apple-touch-icon.png', 'og-image.png']) {
+  fs.writeFileSync(path.join(out, asset), fs.readFileSync(path.join(root, 'site', asset)));
+}
+console.log('wrote favicon.svg, favicon.ico, apple-touch-icon.png, og-image.png');
+
+// robots.txt + sitemap.xml — generated from the same `pages` list that drives
+// everything else, so a page can't be in the site but missing from the map.
+fs.writeFileSync(path.join(out, 'robots.txt'), `Sitemap: ${SHARE.url}sitemap.xml\n`);
+const sitemapUrls = pages.map(([, dst]) => SHARE.url + (dst === 'index.html' ? '' : dst));
+sitemapUrls.push(SHARE.url + 'demo/');
+const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+  `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+  sitemapUrls.map((u) => `  <url><loc>${attr(u)}</loc></url>`).join('\n') +
+  `\n</urlset>\n`;
+fs.writeFileSync(path.join(out, 'sitemap.xml'), sitemap);
+console.log('wrote robots.txt, sitemap.xml');
+
+// Custom 404 — HARDBRUT chrome, not the host's default error page.
+fs.writeFileSync(path.join(out, '404.html'), page(
+  'SPORE — page not found',
+  `<div class="hero"><h1>404</h1><p>That page doesn't exist. Try the ` +
+    `<a href="index.html">homepage</a> or the <a href="developer.html">Developer</a> hub.</p></div>`,
+  '404.html',
+));
+console.log('wrote 404.html');
 
 // Ship docs images. README (index.html, at the site root) references them as
 // `docs/<img>`, while docs pages (also at the root) reference them bare, so copy
@@ -501,7 +585,10 @@ function checkLinks() {
         }
       }
       // An anchor into a page the workflow adds later cannot be checked here.
-      if (!anchor || PROVIDED_LATER.has(on)) continue;
+      // main-content is the skip-link target page() adds to every page's
+      // <main> itself, after anchorHeadings() has already scanned the body —
+      // it's not a heading, but it's always there.
+      if (!anchor || anchor === 'main-content' || PROVIDED_LATER.has(on)) continue;
       const ids = anchors.get(on);
       if (!ids) continue; // an asset, not a rendered page
       if (!ids.has(anchor)) problems.push(`${dst}: -> ${href} (no heading "#${anchor}" on ${on})`);

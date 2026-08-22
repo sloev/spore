@@ -8,7 +8,7 @@ without a company's server in the middle.
 - **Works when the network is bad.** Flaky Wi-Fi, local-only, or offline — it catches up later.
 - **One set of rules.** Internet, cable, folder, or sound: same delivery.
 
-<p><a class="btn" href="demo/">Try it in your browser</a>
+<p><a class="btn" href="demo/">Try the web node</a>
 <a class="btn btn-cancel" href="apps.html">Get the app</a></p>
 
 <p class="text-muted">Nothing to install to try it — the browser node is one page,
