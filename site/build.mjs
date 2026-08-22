@@ -288,14 +288,6 @@ function nav(self) {
 // component is redefined, and nothing here duplicates a HARDBRUT class.
 const siteAdapterCss = `
 /* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
-/* HARDBRUT's .sr-only hides unconditionally; a skip link needs to reappear
-   on focus or a keyboard user can't see the thing they just tabbed to. */
-a.sr-only:focus {
-  position: fixed; top: var(--space-sm); left: var(--space-sm);
-  width: auto; height: auto; clip: auto; overflow: visible; white-space: normal;
-  z-index: 1000; padding: 0.5rem 1rem; background: var(--accent); color: var(--accent-ink);
-  border: var(--border); box-shadow: var(--shadow);
-}
 main.doc.container { max-width: 860px; }
 main.doc { font-size: 0.95rem; }
 main.doc .code-copy {
@@ -402,7 +394,7 @@ ${siteAdapterCss}
 </script>
 </head>
 <body class="page-${cls}">
-<a class="sr-only" href="#main-content">Skip to content</a>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <nav class="navbar">
   <a class="navbar-brand" href="index.html">SPORE</a>
   <button class="navbar-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Menu">☰</button>
