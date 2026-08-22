@@ -359,6 +359,64 @@ nothing stands in for it.)
 
 ---
 
+## Milestone 8 — Embedded ESP32 runtime (raw-802.11 relay)
+
+**Goal:** the first real implementation of the `Embedded (ESP32)` runtime
+`docs/DESIGN.md` already names ("little memory, no filesystem, one or two
+bridges") — a standalone, headless ESP32-S3 that relays real envelopes over
+raw 802.11 frames, persists its store to flash, and bridges to a phone or
+laptop over USB or BLE when one is nearby. Filed as
+[#149](https://github.com/sloev/spore/issues/149).
+
+This is less new architecture than it might look. The bridge-shape taxonomy
+already lists LoRa/Meshtastic as "message pipe" examples (`docs/DESIGN.md`
+§"Bridges & bindings") — raw 802.11 is another one, not a new shape. The
+storage nutrient (`SpillBackend` trait, M2, #87) already shipped *specifically*
+to unblock browser/ESP spill — this milestone writes a `littlefs`-backed
+implementation of an existing contract, not a new one. The USB bridge reuses
+the existing KISS byte-stream framing (`bridge::kiss_stream`), same as the
+serial/Meshtastic bridges. The new work is genuinely just the radio driver
+(promiscuous RX filter + `esp_wifi_80211_tx` injection) and the BLE fallback.
+
+**Toolchain (locked): esp-idf-sys, not bare-metal `esp-hal`.** ESP-IDF's
+std-like environment (newlib) means the core likely compiles close to as-is.
+A bare-metal `no_std` port would very likely reopen "Compile-time `max_core`
+gating," declined elsewhere in this document with the explicit exception
+"revisit only if a real MCU target proves it necessary" — this milestone *is*
+that target, but starting from esp-idf-sys avoids forcing the reopening on
+day one. Bare-metal `esp-hal` is an explicit non-goal for M8; a future
+milestone can attempt it if esp-idf-sys proves too heavy for the target board.
+
+**Regulatory posture (locked): documented, not enforced.** Raw 802.11
+frame injection/monitor mode outside normal association, and running
+encrypted traffic over any band whose rules restrict it (amateur radio's
+no-encryption rule, most notably), are the operator's compliance problem, not
+SPORE's to police. The bridge's `BRIDGES.md` entry states plainly what it
+does and names the regulatory considerations that follow from that — same as
+disclosing a mix mode's limits — but SPORE does not gate, strip, or weaken
+encryption to comply with a band's rules on anyone's behalf. Silent
+non-compliance would be dishonest; refusing to build the feature over a rule
+the operator may not even be subject to is not this project's call to make.
+
+**Tasks** (each a PR):
+
+| Task | Status | Notes |
+|---|---|---|
+| esp-idf-sys toolchain scaffold: `src/lib.rs` core builds and links for ESP32-S3 | ⬜ todo | Proves the core compiles under ESP-IDF before any radio work; no protocol changes expected |
+| Raw 802.11 bridge: promiscuous RX filter (SPORE v1 header match, instant-discard on miss) + `esp_wifi_80211_tx` injection | ⬜ todo | Message-pipe shape, `dgram` driver form — same family as LoRa/Meshtastic. 🧪 until a real device-pair run |
+| Flash store: `littlefs`-backed `SpillBackend` | ⬜ todo | Implementation of the existing M2 contract (#87), not a new one |
+| USB-CDC bridge to phone/laptop | ⬜ todo | Reuses `bridge::kiss_stream` framing — no new byte-stream shape |
+| BLE GATT fallback bridge (low-bandwidth: text/coordinates only) | ⬜ todo | New bridge; shape TBD by the GATT characteristic design |
+| `BRIDGES.md` entry (driver form, security profile, regulatory note) + `HARDWARE.md` row once a device-pair run exists | ⬜ todo | Same convention as every other 🧪 radio bridge |
+
+**Definition of done:** an ESP32-S3 running this firmware relays real SPORE
+envelopes over raw 802.11 to at least one other node, bridges to a phone or
+laptop over USB (KISS) with BLE as the low-bandwidth fallback, and its store
+survives a power cycle via flash — with `HARDWARE.md` recording a real
+device-pair run, not just green CI. 🧪 until then.
+
+---
+
 ## Explicitly out of scope / non-goals (locked)
 
 | Item | Decision |
@@ -370,7 +428,7 @@ nothing stands in for it.)
 | **Multi-file attach, in-app video, post-send edit** | v1 non-goals; tracked in M2 carried-forward. |
 | **Wire / C ABI changes** | Frozen; `allow-frozen-change` for a 2.0 only. |
 | **Routing Direct records through store-and-forward relays** | Direct is non-routed by definition. |
-| **Compile-time `max_core` gating (C0–C8 cargo features)** | Declined — ratchet session map is inline on `Node`; revisit only if a real MCU target proves it necessary. |
+| **Compile-time `max_core` gating (C0–C8 cargo features)** | Declined — ratchet session map is inline on `Node`. M8 is the real MCU target that could prove it necessary, but starts on esp-idf-sys specifically to avoid forcing the question; stays declined unless esp-idf-sys proves too heavy for the board. |
 
 ---
 
@@ -405,12 +463,16 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 5. **M5 — Polish & hardening** (only after the above)
 6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
 7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
+8. **M8 — Embedded ESP32 runtime** (raw-802.11 relay; first real MCU target) — after the still-open carried-forward items in M2/M4/M5, not ahead of them, unless deliberately reprioritized
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
-milestone: every row is `⬜ concept`, nothing in the compass depends on it, and no
-row earns a 🧪 until something exists a person could hold or run. It was written up
-as inspiration in the now-retired `docs/VISUALDESIGN.md` §6b, not in this plan as a
+milestone, and is a different thing from M8: Track H is aesthetic/cultural —
+objects and vibes, nothing a protocol change depends on — while M8 is a real
+runtime implementation the design already committed to. Track H: every row is
+`⬜ concept`, nothing in the compass depends on it, and no row earns a 🧪 until
+something exists a person could hold or run. It was written up as inspiration in
+the now-retired `docs/VISUALDESIGN.md` §6b, not in this plan as a
 promise; no replacement doc is planned — HARDBRUT upstream has no opinion on
 hardware/community concepts, so there is nothing for it to be normative about.
 
