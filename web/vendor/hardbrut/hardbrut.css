@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HARDBRUT v0.10 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
+   HARDBRUT v0.11 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
    ========================================================================== */
 
 
@@ -32,10 +32,10 @@
 }
 [data-accent="yellow"]{--accent:#ffd23f;--accent-ink:#000}
 [data-accent="red"]{--accent:#ff4444;--accent-ink:#000}
-[data-accent="blue"]{--accent:#4488ff;--accent-ink:#fff}
+[data-accent="blue"]{--accent:#4488ff;--accent-ink:#000}
 [data-accent="green"]{--accent:#44cc44;--accent-ink:#000}
 [data-accent="pink"]{--accent:#ff66aa;--accent-ink:#000}
-[data-accent="purple"]{--accent:#aa66ff;--accent-ink:#fff}
+[data-accent="purple"]{--accent:#aa66ff;--accent-ink:#000}
 
 /* ---- RESET ---- */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -140,8 +140,8 @@ button.cancel:disabled:hover,.btn-cancel:disabled:hover,.btn-cancel:disabled:act
 /* ---- LIST ROW (e.g. a conversation list) ---- */
 .list-row{display:flex;align-items:center;gap:var(--space-sm);padding:var(--space-sm) var(--space);border:var(--border);box-shadow:var(--shadow-sm);background:var(--paper);color:var(--ink);text-decoration:none;margin-bottom:var(--space-sm);cursor:pointer;transition:transform 0.1s ease,box-shadow 0.1s ease}
 .list-row:last-child{margin-bottom:0}
-.list-row:hover{transform:translate(-2px,-2px);box-shadow:var(--shadow)}
-.list-row:active{transform:translate(1px,1px);box-shadow:2px 2px 0 var(--ink)}
+.list-row:hover{background:var(--paper);transform:translate(-2px,-2px);box-shadow:var(--shadow)}
+.list-row:active{background:var(--paper);transform:translate(1px,1px);box-shadow:2px 2px 0 var(--ink)}
 .list-row-avatar{width:44px;height:44px;flex-shrink:0;border:2px solid var(--ink);background:var(--bg);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:900;overflow:hidden}
 .list-row-avatar img{width:100%;height:100%;object-fit:cover}
 .list-row-body{flex:1;min-width:0}
@@ -198,6 +198,19 @@ dialog::backdrop{background:rgba(0,0,0,0.5)}
 dialog>:first-child{margin-top:0}
 dialog>:last-child{margin-bottom:0}
 
+/* ---- PROGRESS (determinate) ---- */
+.progress{border:var(--border);background:var(--paper);box-shadow:var(--shadow-sm);height:22px;padding:3px}
+.progress-fill{height:100%;background-color:var(--accent);background-image:repeating-linear-gradient(90deg,var(--paper) 0,var(--paper) 3px,transparent 3px,transparent 14px);transition:width 0.2s ease}
+
+/* ---- SPINNER (indeterminate) — hard steps, no smooth rotation ---- */
+.spinner{display:inline-flex;gap:4px}
+.spinner span{width:10px;height:10px;background:var(--ink);opacity:0.25;animation:hb-spin 1s steps(1) infinite}
+.spinner span:nth-child(2){animation-delay:0.15s}
+.spinner span:nth-child(3){animation-delay:0.3s}
+.spinner span:nth-child(4){animation-delay:0.45s}
+@keyframes hb-spin{0%,100%{opacity:0.25}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.spinner span{animation:none;opacity:0.6}}
+
 /* ---- HERO / FOOTER ---- */
 .hero{padding:var(--space-lg) var(--space);text-align:center;background:var(--paper);border-bottom:4px solid var(--ink)}
 .hero h1{margin:0 0 var(--space-sm)}
@@ -245,6 +258,7 @@ dialog>:last-child{margin-bottom:0}
   :root:not([data-theme="light"]){color-scheme:dark}
   :root:not([data-theme="light"]) body{color:var(--ink);background:var(--bg)}
   :root:not([data-theme="light"]) a:hover{color:var(--accent-ink)}
+  :root:not([data-theme="light"]) .list-row:hover,:root:not([data-theme="light"]) .list-row:active{color:var(--ink)}
   :root:not([data-theme="light"]) ::selection{color:var(--accent-ink)}
   :root:not([data-theme="light"]) code,:root:not([data-theme="light"]) kbd,:root:not([data-theme="light"]) samp{background:var(--paper);border-color:var(--ink)}
   :root:not([data-theme="light"]) pre{background:var(--paper)}
@@ -252,7 +266,7 @@ dialog>:last-child{margin-bottom:0}
   :root:not([data-theme="light"]) input,:root:not([data-theme="light"]) textarea,:root:not([data-theme="light"]) select{background:var(--paper);color:var(--ink)}
   :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
   :root:not([data-theme="light"]) .navbar-links a[aria-current]{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) button:not(.cancel):not(.theme-toggle):not(.navbar-toggle),:root:not([data-theme="light"]) .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
+  :root:not([data-theme="light"]) button:not(.cancel):not(.theme-toggle):not(.navbar-toggle):not(.chip):not(.tab),:root:not([data-theme="light"]) .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
   :root:not([data-theme="light"]) button.cancel,:root:not([data-theme="light"]) .btn-cancel{color:var(--ink)}
   :root:not([data-theme="light"]) .theme-toggle{color:var(--ink);background:var(--paper)}
   :root:not([data-theme="light"]) .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
@@ -263,6 +277,7 @@ dialog>:last-child{margin-bottom:0}
 }
 [data-theme="dark"] body{color:var(--ink);background:var(--bg)}
 [data-theme="dark"] a:hover{color:var(--accent-ink)}
+[data-theme="dark"] .list-row:hover,[data-theme="dark"] .list-row:active{color:var(--ink)}
 [data-theme="dark"] ::selection{color:var(--accent-ink)}
 [data-theme="dark"] code,[data-theme="dark"] kbd,[data-theme="dark"] samp{background:var(--paper);border-color:var(--ink)}
 [data-theme="dark"] pre{background:var(--paper)}
@@ -270,7 +285,7 @@ dialog>:last-child{margin-bottom:0}
 [data-theme="dark"] input,[data-theme="dark"] textarea,[data-theme="dark"] select{background:var(--paper);color:var(--ink)}
 [data-theme="dark"] .navbar-links a{color:var(--ink)}
 [data-theme="dark"] .navbar-links a[aria-current]{color:var(--accent-ink)}
-[data-theme="dark"] button:not(.cancel):not(.theme-toggle):not(.navbar-toggle),[data-theme="dark"] .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
+[data-theme="dark"] button:not(.cancel):not(.theme-toggle):not(.navbar-toggle):not(.chip):not(.tab),[data-theme="dark"] .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
 [data-theme="dark"] button.cancel,[data-theme="dark"] .btn-cancel{color:var(--ink)}
 [data-theme="dark"] .theme-toggle{color:var(--ink);background:var(--paper)}
 [data-theme="dark"] .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}

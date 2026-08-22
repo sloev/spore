@@ -595,7 +595,7 @@ function renderChatView() {
   msgsEl.scrollTop = msgsEl.scrollHeight;
   // Wire any magnet links / embeds in the history to fetch on click.
   for (const a of msgsEl.querySelectorAll('.magnet-link')) {
-    a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
+    a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet, a); };
   }
   hydrateEmbeds(msgsEl);
 
@@ -725,19 +725,28 @@ function renderFeed() {
     '</div>';
   }).join('');
   for (const a of el.querySelectorAll('.magnet-link')) {
-    a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
+    a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet, a); };
   }
   hydrateEmbeds(el);
 }
 
-function fetchMagnetHex(hex) {
+// hub.node.fileBytes() is complete-or-null, not have/count \u2014 there is no
+// chunk-level progress signal in the wasm API to show a determinate bar
+// against (that would need new exports, not just a new HARDBRUT primitive).
+// A spinner is the honest fit for "waiting, duration unknown": swapped into
+// triggerEl (the link/chip the person clicked) for the duration of the poll.
+const SPINNER_HTML = '<span class="spinner"><span></span><span></span><span></span><span></span></span>';
+function fetchMagnetHex(hex, triggerEl) {
   if (!/^[0-9a-fA-F]{32}$/.test(hex)) { logLine('bad', 'bad magnet'); return; }
   const magnet = hexToBytes(hex);
   logLine('sys', 'fetching magnet ' + hex.slice(0, 8) + '\u2026');
+  const restore = triggerEl ? triggerEl.innerHTML : null;
+  if (triggerEl) triggerEl.innerHTML = SPINNER_HTML;
+  const done = () => { clearInterval(poll); if (triggerEl) triggerEl.innerHTML = restore; };
   const poll = setInterval(() => {
     const bytes = hub.node.fileBytes(magnet);
     if (bytes) {
-      clearInterval(poll);
+      done();
       const name = hub.node.fileName(magnet) || 'unnamed.bin';
       const blob = new Blob([bytes]);
       const a = document.createElement('a');
@@ -747,7 +756,7 @@ function fetchMagnetHex(hex) {
       renderLocalFiles();
     }
   }, 1000);
-  setTimeout(() => clearInterval(poll), 30000);
+  setTimeout(done, 30000);
 }
 
 // ---- embeds (W12): inline image thumbnails + file chips ---------------------
@@ -778,7 +787,7 @@ function hydrateEmbeds(scope) {
     setTimeout(() => clearInterval(poll), 30000);
   }
   for (const chip of scope.querySelectorAll('.file-chip')) {
-    chip.onclick = (e) => { e.preventDefault(); fetchMagnetHex(chip.dataset.magnet); };
+    chip.onclick = (e) => { e.preventDefault(); fetchMagnetHex(chip.dataset.magnet, chip); };
   }
 }
 
@@ -852,7 +861,7 @@ function wireFormatting(toolbarId, inputId, previewId) {
       preview.style.display = 'block';
       preview.innerHTML = mdWithAttachments(t);
       for (const a of preview.querySelectorAll('.magnet-link')) {
-        a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet); };
+        a.onclick = (e) => { e.preventDefault(); fetchMagnetHex(a.dataset.magnet, a); };
       }
       hydrateEmbeds(preview);
     }
