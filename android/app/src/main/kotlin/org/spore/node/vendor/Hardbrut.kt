@@ -13,6 +13,11 @@
 package org.spore.node.vendor
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.StartOffset
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -57,10 +62,10 @@ object HardbrutTokens {
     // Accent presets
     val AccentYellow  = Color(0xFFFFD23F) to Color(0xFF000000)
     val AccentRed     = Color(0xFFFF4444) to Color(0xFFFFFFFF)
-    val AccentBlue    = Color(0xFF4488FF) to Color(0xFFFFFFFF)
+    val AccentBlue    = Color(0xFF4488FF) to Color(0xFF000000)
     val AccentGreen   = Color(0xFF44CC44) to Color(0xFF000000)
     val AccentPink    = Color(0xFFFF66AA) to Color(0xFF000000)
-    val AccentPurple  = Color(0xFFAA66FF) to Color(0xFFFFFFFF)
+    val AccentPurple  = Color(0xFFAA66FF) to Color(0xFF000000)
 }
 
 // =====================================================================
@@ -456,6 +461,75 @@ fun HardbrutDialog(
                 .background(HardbrutTokens.Paper)
                 .padding(HardbrutTokens.Space)
         ) { content() }
+    }
+}
+
+// =====================================================================
+// PROGRESS BAR (determinate) — discrete filled/unfilled segments, same
+// shape as the CSS version's repeating-gradient look.
+// =====================================================================
+@Composable
+fun HardbrutProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    segments: Int = 12,
+    accent: Color = HardbrutTokens.AccentYellow.first
+) {
+    val filled = (progress.coerceIn(0f, 1f) * segments).toInt()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(22.dp)
+            .border(HardbrutTokens.Border, HardbrutTokens.Ink)
+            .background(HardbrutTokens.Paper)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        repeat(segments) { i ->
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(if (i < filled) accent else HardbrutTokens.Paper)
+            )
+        }
+    }
+}
+
+// =====================================================================
+// SPINNER (indeterminate) — hard opacity steps, no smooth rotation, same
+// motion language as the CSS version. Compose's animation APIs already
+// respect the system animator duration scale (Settings > Developer
+// options > Animator duration scale = 0 collapses this to a static
+// frame automatically) — no manual reduced-motion check needed here,
+// same reasoning as the rest of this file leaving state to the caller
+// rather than reimplementing platform behavior.
+// =====================================================================
+@Composable
+fun HardbrutSpinner(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "HardbrutSpinner")
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(4) { i ->
+            val alpha by transition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 0.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = keyframes {
+                        durationMillis = 800
+                        0.25f at 0
+                        1f at 200
+                        0.25f at 400
+                    },
+                    initialStartOffset = StartOffset(i * 150)
+                ),
+                label = "segment$i"
+            )
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(HardbrutTokens.Ink.copy(alpha = alpha))
+            )
+        }
     }
 }
 
