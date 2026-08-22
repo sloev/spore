@@ -1,4 +1,4 @@
-# Apps & daemons — get a node
+# Get a node — apps & daemons
 
 Four ways to run the same node. Pick by what the machine in front of you has.
 
@@ -7,7 +7,7 @@ Four ways to run the same node. Pick by what the machine in front of you has.
 | **Communicator** | Android | Full node in a background service, not a thin client |
 | **Web node** | Any browser | One HTML file, zero network requests until you add a bridge |
 | **Daemon** | Linux, macOS, Windows | Many bridges in one process |
-| **Seed Sheet** | Paper | Rebuilds the guide from any ~K of N fountain QR codes |
+| **Seed Sheet** | Paper | Rebuilds the guide from any ~23 of 39 fountain QR codes |
 
 <div class="grid">
 
@@ -25,8 +25,8 @@ Four ways to run the same node. Pick by what the machine in front of you has.
 <p class="text-muted">One HTML file — wasm + UI + transports. Zero network until you add a bridge.</p>
 </div>
 <div class="card-footer cluster">
-<a class="btn" href="spore-standalone.html">Open standalone</a>
-<a class="btn btn-cancel" href="demo/">Live demo</a>
+<a class="btn" href="demo/">Try the web node</a>
+<a class="btn btn-cancel" href="demo/" download="spore-standalone.html">Download</a>
 </div></div></div>
 
 <div class="col-3"><div class="card"><div class="card-body">
@@ -40,7 +40,7 @@ Four ways to run the same node. Pick by what the machine in front of you has.
 
 <div class="col-3"><div class="card"><div class="card-body">
 <strong>🖨 Seed Sheet</strong>
-<p class="text-muted">Printable A4 — any ~K of N fountain QR codes rebuild the guide.</p>
+<p class="text-muted">Printable A4 — any ~23 of 39 fountain QR codes rebuild the guide.</p>
 </div>
 <div class="card-footer cluster">
 <a class="btn" href="spore-seedsheet.html">Open Seed Sheet</a>

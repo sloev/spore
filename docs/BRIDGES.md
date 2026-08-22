@@ -24,7 +24,7 @@ The emoji in each protocol's title tells you how far it is:
 | Icon | Meaning |
 |---|---|
 | ✅ | **Implemented & tested** — a Rust bridge or JS transport with automated tests in this repo. |
-| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [`HARDWARE.md`](HARDWARE.md). |
+| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [Hardware verification](HARDWARE.md). |
 | 🟡 | **Partial** — a codec, framer, or IP-underlay path is present, but the end-to-end runner is not finished. |
 | ⚪ | **Planned** — a thin shim to write; the shared routing is already done. |
 
@@ -1729,7 +1729,7 @@ and the **iroh QUIC** path already merged in the core (`src/direct/iroh.rs`,
 `bridge-iroh`) on the native side: the browser's QUIC becomes one more Direct
 medium rather than a special case that pulls in an ICE/DTLS/SCTP stack. Native
 WebRTC is therefore declined outright; a native WebTransport/QUIC adapter is the
-planned answer to the browserânative conformance gap (see [`ROADMAP.md`](ROADMAP.md)
+planned answer to the browserânative conformance gap (see [Roadmap](ROADMAP.md)
 M2). Until that adapter exists, the SPEC page-2 "native nodes run ice-lite" line
 reads as more than the tree does, and says so.
 
@@ -2578,5 +2578,5 @@ sequenceDiagram
     Proxy->>Browser: WebTransport datagrams
 ```
 
-See [PROXY_SETUP.md](../docs/PROXY_SETUP.md) for sample configurations.
+See [Proxy setup](../docs/PROXY_SETUP.md) for sample configurations.
 </details>

@@ -98,7 +98,7 @@ Chat UI is **one client**, not the product definition.
   never a control with nothing behind it. A thin runtime is a profile, not a
   degraded build.
 - Freeze: wire, C ABI, vectors — change only with explicit process (see
-  [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+  [Contributing](CONTRIBUTING.md)).
 
 ---
 
@@ -159,6 +159,6 @@ If the answer is fuzzy, **stop** and tighten the design.
 decision test get cut or rewritten.
 
 **Read order for agents:** `MISSION.md` → handoff (if any) →
-[`ROADMAP.md`](ROADMAP.md) + [`CHANGELOG.md`](CHANGELOG.md) →
+[Roadmap](ROADMAP.md) + [Changelog](CHANGELOG.md) →
 SPEC/CONTINUITY only as needed. See also
-[`DEV_GUIDE.md`](DEV_GUIDE.md) for the full repo map.
+[Dev guide](DEV_GUIDE.md) for the full repo map.
