@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HARDBRUT v0.12 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
+   HARDBRUT v0.13 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
    ========================================================================== */
 
 
@@ -256,42 +256,21 @@ dialog>:last-child{margin-bottom:0}
 }
 [data-theme="dark"]{--ink:#f0f0e8;--paper:#1a1a18;--bg:#121210;--muted:#a0a090;color-scheme:dark}
 [data-theme="light"]{--ink:#000;--paper:#fff;--bg:#fdfaf2;--muted:#666;color-scheme:light}
+/* Everything themed above (body, inputs, code/pre/blockquote, table rows,
+   navbar links, buttons, badges, theme-toggle, checkbox/radio...) already
+   auto-themes correctly through --ink/--paper/--bg/--accent/--accent-ink —
+   those are the tokens that just got redefined above, and every one of
+   those rules already reads them directly with no dark-mode copy needed.
+   Do NOT re-assert color/background for those elements here: every attempt
+   at that so far has been either dead-redundant or an active bug (e.g. an
+   exclusion-list rule that forced accent-ink text onto any new button-like
+   class that forgot to add itself to the list — .chip/.tab, then
+   .btn.btn-cancel, in turn). The only two rules that genuinely can't be
+   expressed as a plain token-driven base rule are these: */
 @media(prefers-color-scheme:dark){
   :root:not([data-theme="light"]){color-scheme:dark}
-  :root:not([data-theme="light"]) body{color:var(--ink);background:var(--bg)}
   :root:not([data-theme="light"]) a:hover{color:var(--accent-ink)}
   :root:not([data-theme="light"]) .list-row:hover,:root:not([data-theme="light"]) .list-row:active{color:var(--ink)}
-  :root:not([data-theme="light"]) ::selection{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) code,:root:not([data-theme="light"]) kbd,:root:not([data-theme="light"]) samp{background:var(--paper);border-color:var(--ink)}
-  :root:not([data-theme="light"]) pre{background:var(--paper)}
-  :root:not([data-theme="light"]) blockquote{background:var(--paper)}
-  :root:not([data-theme="light"]) input,:root:not([data-theme="light"]) textarea,:root:not([data-theme="light"]) select{background:var(--paper);color:var(--ink)}
-  :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
-  :root:not([data-theme="light"]) .navbar-links a[aria-current]{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) button:not(.cancel):not(.theme-toggle):not(.navbar-toggle):not(.chip):not(.tab),:root:not([data-theme="light"]) .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
-  :root:not([data-theme="light"]) button.cancel,:root:not([data-theme="light"]) .btn-cancel{color:var(--ink)}
-  :root:not([data-theme="light"]) .theme-toggle{color:var(--ink);background:var(--paper)}
-  :root:not([data-theme="light"]) .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
-  :root:not([data-theme="light"]) .badge,:root:not([data-theme="light"]) .callout,:root:not([data-theme="light"]) .message{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) tr:nth-child(even) td{background:var(--paper)}
-  :root:not([data-theme="light"]) tr:nth-child(odd) td{background:var(--bg)}
-  :root:not([data-theme="light"]) input[type="checkbox"],:root:not([data-theme="light"]) input[type="radio"]{background:var(--paper)}
 }
-[data-theme="dark"] body{color:var(--ink);background:var(--bg)}
 [data-theme="dark"] a:hover{color:var(--accent-ink)}
 [data-theme="dark"] .list-row:hover,[data-theme="dark"] .list-row:active{color:var(--ink)}
-[data-theme="dark"] ::selection{color:var(--accent-ink)}
-[data-theme="dark"] code,[data-theme="dark"] kbd,[data-theme="dark"] samp{background:var(--paper);border-color:var(--ink)}
-[data-theme="dark"] pre{background:var(--paper)}
-[data-theme="dark"] blockquote{background:var(--paper)}
-[data-theme="dark"] input,[data-theme="dark"] textarea,[data-theme="dark"] select{background:var(--paper);color:var(--ink)}
-[data-theme="dark"] .navbar-links a{color:var(--ink)}
-[data-theme="dark"] .navbar-links a[aria-current]{color:var(--accent-ink)}
-[data-theme="dark"] button:not(.cancel):not(.theme-toggle):not(.navbar-toggle):not(.chip):not(.tab),[data-theme="dark"] .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
-[data-theme="dark"] button.cancel,[data-theme="dark"] .btn-cancel{color:var(--ink)}
-[data-theme="dark"] .theme-toggle{color:var(--ink);background:var(--paper)}
-[data-theme="dark"] .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
-[data-theme="dark"] .badge,[data-theme="dark"] .callout,[data-theme="dark"] .message{color:var(--accent-ink)}
-[data-theme="dark"] tr:nth-child(even) td{background:var(--paper)}
-[data-theme="dark"] tr:nth-child(odd) td{background:var(--bg)}
-[data-theme="dark"] input[type="checkbox"],[data-theme="dark"] input[type="radio"]{background:var(--paper)}
