@@ -1,0 +1,30 @@
+[package]
+name = "spore-esp32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Own workspace root, exactly like `android/jni`: the parent `spore` package must
+# not adopt this crate. It only builds under Espressif's Xtensa Rust fork, so
+# letting the main workspace see it would break `cargo test --all-targets` on
+# every ordinary host.
+[workspace]
+
+[dependencies]
+spore = { path = ".." }
+esp-idf-svc = "0.51"
+log = "0.4"
+
+[build-dependencies]
+embuild = "0.33"
+
+# ESP32-S3 has a few hundred KB of RAM and a few MB of flash, so size is the
+# binding constraint rather than speed — and E1's checkpoint is a measurement of
+# exactly that. `opt-level = "s"` on both profiles keeps the debug build small
+# enough to flash while still being debuggable.
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "s"

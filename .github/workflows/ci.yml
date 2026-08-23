@@ -117,3 +117,52 @@ jobs:
       - name: Docs site builds and every internal link resolves
         working-directory: site
         run: node build.mjs
+
+  # The embedded target (Roadmap M8/E1): prove the unmodified core still
+  # cross-compiles and links for ESP32-S3, and report what it costs. ESP32-S3 is
+  # Xtensa, which upstream Rust does not target, so this runs in Espressif's
+  # image rather than installing a toolchain — see esp32/README.md.
+  esp32:
+    runs-on: ubuntu-latest
+    container: espressif/idf-rust:esp32s3_latest
+    env:
+      # Deliberately replaces the workflow-level RUSTFLAGS rather than adding to
+      # it. Cargo lets an env RUSTFLAGS override `rustflags` in .cargo/config.toml
+      # wholesale, so inheriting `-D warnings` here would silently drop
+      # `--cfg espidf_time64` and build against a 32-bit time_t on an IDF that
+      # uses 64. It also drops `-D warnings` on purpose: this target emits an
+      # unavoidable "dropping unsupported crate type `cdylib`" for the core's
+      # lib/cdylib pair, which is correct behaviour, not a defect to fail on.
+      RUSTFLAGS: --cfg espidf_time64
+    steps:
+      - uses: actions/checkout@v4
+      # ESP-IDF itself is built from source on a cold cache (~10 min); .embuild is
+      # where esp-idf-sys unpacks and builds it.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            esp32/.embuild
+            esp32/target
+          key: esp32-${{ hashFiles('esp32/Cargo.lock', 'esp32/.cargo/config.toml') }}
+          restore-keys: esp32-
+      - name: Cross-compile the firmware for ESP32-S3
+        working-directory: esp32
+        run: cargo build --release
+      - name: Report flash and RAM footprint
+        working-directory: esp32
+        run: |
+          BIN=target/xtensa-esp32s3-espidf/release/spore-esp32
+          readelf -h "$BIN" | grep -q Xtensa || { echo "not an Xtensa binary"; exit 1; }
+          # Exact section-name match, not a substring one: .flash.rodata_noload
+          # and .iram0.text_end would both match a looser pattern. The image's awk
+          # is mawk, so no strtonum() — hex is converted in the shell instead.
+          sz() {
+            readelf -W -S "$BIN" | sed 's/^ *\[[ 0-9]*\] *//' \
+              | awk -v n="$1" '$1 == n { print $5; exit }'
+          }
+          # Flash holds .flash.text + .flash.rodata + the initialisers for
+          # .dram0.data; internal SRAM holds .iram0.text + .dram0.data + .bss.
+          flash=$(( 16#$(sz .flash.text) + 16#$(sz .flash.rodata) + 16#$(sz .dram0.data) ))
+          ram=$(( 16#$(sz .iram0.text) + 16#$(sz .dram0.data) + 16#$(sz .dram0.bss) ))
+          printf 'flash (app):  %9d bytes\n' "$flash"
+          printf 'internal RAM: %9d bytes\n' "$ram"

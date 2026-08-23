@@ -428,11 +428,11 @@ scoped.
 
 | Task | Status | Notes |
 |---|---|---|
-| esp-idf-sys toolchain scaffold: core builds and links for ESP32-S3, with a CI cross-compile job (E1) | ⬜ todo | Same shape as the existing `wasm` CI job — install the target, build the lib, assert a property of the artifact. Build+link only; no protocol changes expected |
-| Randomness nutrient: confirm `OsRng` resolves to ESP-IDF's hardware TRNG; add a target-cfg'd `getrandom` shim if it does not (E1) | ⬜ todo | Precedent: the `cfg(target_arch = "wasm32")` getrandom block in `Cargo.toml`, which exists for exactly this reason. Turns the toolchain decision's "likely compiles close to as-is" from reasoned into verified |
-| Time nutrient: a `now: u32` source, shipping [Spec](SPEC.md) §Time's no-trusted-clock behaviour first (E1) | ⬜ todo | A cold-booted board with no RTC battery *is* the "no trusted clock" node the spec already covers: relay regardless, age by dwell, drop after 7 local days. NTP-over-Wi-Fi is a stretch goal, not a blocker |
-| Scheduling nutrient: a FreeRTOS periodic task calling `Node::tick` (E1) | ⬜ todo | Absent from the previous version of this table. Without it the runtime silently regresses to maintaining itself only when traffic happens to arrive ([Design](DESIGN.md), nutrient table) — worst on exactly this kind of solo, often-offline node |
-| Solo bring-up smoke test: boot, fresh identity, one self-signed envelope logged over UART, a tick observed firing (E1) | ⬜ todo | 🧪 until run on real silicon. Yields the first real RAM/flash headroom numbers |
+| esp-idf-sys toolchain scaffold: core builds and links for ESP32-S3, with a CI cross-compile job (E1) | ✅ shipped | `esp32/`, its own workspace root like `android/jni`. The core cross-compiles **unmodified** — no ESP `cfg` branches, no feature gates, a plain path dependency. CI builds it in Espressif's Docker image (Xtensa is not an upstream Rust target) and reports the footprint |
+| Randomness nutrient: confirm `OsRng` resolves to ESP-IDF's hardware TRNG (E1) | ✅ shipped — **no shim needed** | The `cfg(target_arch = "wasm32")` getrandom block in `Cargo.toml` had no ESP counterpart to write: getrandom 0.2 supports `target_os = "espidf"` natively and routes to `esp_fill_random`. Verified by compiling; that it returns real entropy is a device-run claim |
+| Time nutrient: a `now: u32` source, shipping [Spec](SPEC.md) §Time's no-trusted-clock behaviour first (E1) | 🧪 written, not run | A cold-booted board with no RTC battery *is* the "no trusted clock" node the spec already covers: relay regardless, age by dwell, drop after 7 local days. NTP-over-Wi-Fi is a stretch goal, not a blocker |
+| Scheduling nutrient: a FreeRTOS periodic task calling `Node::tick` (E1) | 🧪 written, not run | Absent from the previous version of this table. Without it the runtime silently regresses to maintaining itself only when traffic happens to arrive ([Design](DESIGN.md), nutrient table) — worst on exactly this kind of solo, often-offline node |
+| Solo bring-up smoke test: boot, fresh identity, one self-signed envelope logged over UART, a tick observed firing (E1) | ⬜ todo — **needs a board** | Written and it links, but nothing here has been flashed. This is the row that turns every 🧪 above into ✅, and no other E1 row can do it |
 | Promiscuous RX filter: SPORE v1 header match, instant-discard on miss (E2) | ⬜ todo | Testable off-device against synthetic frames — issue #149's "mock envelope" phase |
 | `esp_wifi_80211_tx` injection wired as `DatagramTransport::send`, RX as `::recv`, driven through `run_datagram` (E2) | ⬜ todo | Message-pipe shape, `dgram` driver form — same family as LoRa/Meshtastic, so no new medium-independent logic |
 | Solo TX-shape test: an external monitor-mode sniffer confirms the injected frame's shape (E2) | ⬜ todo | Proves the injection path without needing a second SPORE node |
@@ -451,14 +451,25 @@ scoped.
 | Full combined run: two boards, flash store live, an envelope relayed over raw 802.11, one board bridged to a phone over USB, BLE exercised as the fallback (E6) | ⬜ todo | One [Hardware verification](HARDWARE.md) row per path, matching the existing one-row-per-path convention |
 | Flash-cycle re-confirmation in the combined rig: power-cycle one board mid-session, confirm it resumes relaying with its spilled store intact (E6) | ⬜ todo | Distinct from E3's isolated test — proves persistence holds while the radio and USB paths are also live |
 
-**Toolchain checkpoint (E1, do not skip).** When the E1 smoke test lands, record the
-measured binary size and free heap/flash headroom in that PR. This is the cheapest
-moment to reopen "esp-idf-sys, not bare-metal `esp-hal`" — before the 802.11 driver,
-`littlefs`, and a BLE stack pile on top of it. If the numbers hold, the locked
-decision stands unchanged for E2 onward and compile-time `max_core` gating stays
-declined as recorded under non-goals. If they do not, that non-goal's own stated
-exception — revisit only if a real MCU target proves it necessary — is what has been
-triggered, and it gets reopened here rather than discovered late.
+**Toolchain checkpoint (E1) — measured, and the decision stands.** The scaffold plus
+one signed envelope costs, on a release build:
+
+| | Bytes | Share of an ESP32-S3 |
+|---|---|---|
+| Flash (app image) | 542,619 | ~13% of a 4 MB part |
+| Internal SRAM (static) | 67,235 | ~13% of 512 KB |
+
+Comfortable, and measured before the 802.11 driver, `littlefs` and a BLE stack pile
+on top — which was the point of checking here rather than later. **esp-idf-sys stays
+the locked toolchain**, bare-metal `esp-hal` stays a non-goal, and compile-time
+`max_core` gating stays declined: its stated exception ("revisit only if a real MCU
+target proves it necessary") is exactly what these numbers fail to trigger. The CI
+job prints both figures on every run, so the headroom is tracked as E2–E5 land rather
+than measured once and assumed.
+
+Two caveats on what this does *not* prove. These are static sections, not live heap —
+runtime headroom is a device-run number the smoke test still owes. And the flash
+figure excludes the partition table, bootloader and any `littlefs` partition E3 adds.
 
 **Definition of done:** an ESP32-S3 running this firmware relays real SPORE
 envelopes over raw 802.11 to at least one other node, bridges to a phone or
