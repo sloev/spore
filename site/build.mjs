@@ -185,14 +185,14 @@ function rewriteLinks(html, self) {
 // through the OS share sheet (navigator.share) and fall back to the clipboard.
 // Saying so is better than shipping links that quietly do nothing.
 // ---------------------------------------------------------------------------
+// One sentence, reused everywhere it's said in public (title, OG, share sheet,
+// mail body) — SP-15/SP-16 was four different pitches competing in one
+// viewport. titles/descriptions above are the source of truth; SHARE quotes
+// them instead of inventing its own wording.
 const SHARE = {
   url: 'https://sloev.github.io/spore/',
-  title: 'SPORE — messages that still deliver, with no servers',
-  text:
-    'SPORE: a signed postcard that travels over the internet, a folder, a USB ' +
-    'stick, a QR code, or a person reading it aloud — with radio and Bluetooth ' +
-    'paths for operators who verify them against their own hardware. ' +
-    'Same delivery rules on all of them. Public domain.',
+  title: titles.get('index.html'),
+  text: descriptions.get('index.html'),
 };
 
 function shareBar() {
@@ -221,8 +221,8 @@ function shareBar() {
   return `<section class="share card" aria-label="Share SPORE">
   <div class="card-body">
   <h2>Pass it on</h2>
-  <p class="text-muted">Continuity is just redundancy that outlives its sources — and it only works
-  if the copies are already scattered before they're needed.</p>
+  <p class="text-muted">Know someone who'd want a way to send files that keeps working when the
+  network doesn't? Share this page.</p>
   <div class="cluster">${buttons}</div>
   </div>
 </section>
