@@ -1,7 +1,7 @@
 # Developer guide — a map of the repo
 
-Where things live. [`MISSION.md`](MISSION.md) is the *why* and the decision
-test; [`CONTRIBUTING.md`](CONTRIBUTING.md) is the *rules* (freeze, CI,
+Where things live. [Mission](MISSION.md) is the *why* and the decision
+test; [Contributing](CONTRIBUTING.md) is the *rules* (freeze, CI,
 branches, releases). Read those once; this one is a lookup table.
 
 ## Start here, by goal

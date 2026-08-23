@@ -56,7 +56,9 @@ const html = `<!doctype html>
   th { background: #f0f0f0; }
   code, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 8.5pt; }
   .rules li { margin: 3px 0; }
-  .meta { font-size: 9pt; background: #f6f6f6; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; }
+  .meta { font-size: 9pt; background: #f6f6f6; border: 1px solid #ccc; border-radius: 0; padding: 8px 10px; }
+  .backlink { font: 10pt system-ui, sans-serif; margin: 10px 20px 0; }
+  @media print { .backlink { display: none; } }
   .meta .hash { word-break: break-all; }
   .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 8px; }
   @media (max-width: 700px) { .grid { grid-template-columns: repeat(4, 1fr); } }
@@ -68,6 +70,8 @@ const html = `<!doctype html>
 </style>
 </head>
 <body>
+
+<p class="backlink"><a href="apps.html">&larr; Back to Get a node</a></p>
 
 <section class="sheet side1">
   <h1><span class="s">SPORE</span> — Seed Sheet</h1>

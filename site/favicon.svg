@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- SPORE's brand is the wordmark only — no icon, no mascot. This is a plain
+       HARDBRUT accent swatch (yellow field, black border, zero radius), not a
+       picture of anything, matching android/.../drawable/ic_spore.xml. -->
+  <rect width="32" height="32" fill="#000"/>
+  <rect x="4" y="4" width="24" height="24" fill="#ffd23f"/>
+</svg>

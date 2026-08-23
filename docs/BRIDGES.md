@@ -24,7 +24,7 @@ The emoji in each protocol's title tells you how far it is:
 | Icon | Meaning |
 |---|---|
 | ✅ | **Implemented & tested** — a Rust bridge or JS transport with automated tests in this repo. |
-| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [`HARDWARE.md`](HARDWARE.md). |
+| 🧪 | **Implemented, not hardware-verified** — the code exists and passes what can be tested off-device (codec roundtrips, syntax), but the real link (radio, serial, BLE, live peer) has not been exercised in CI. Treat as a template to confirm against your hardware/firmware; the repeatable procedure per path is in [Hardware verification](HARDWARE.md). |
 | 🟡 | **Partial** — a codec, framer, or IP-underlay path is present, but the end-to-end runner is not finished. |
 | ⚪ | **Planned** — a thin shim to write; the shared routing is already done. |
 
@@ -413,10 +413,10 @@ Systems that already store and pass on messages — the pattern SPORE *is*.
 
 ---
 
-# Direct links & radios
+## Direct links & radios
 
 <a id="udp"></a>
-## UDP / IPv4 broadcast ✅
+### UDP / IPv4 broadcast
 
 **Summary.** UDP is the connectionless datagram service of the Internet protocol
 suite: a source/dest port pair, a length, a checksum, and a payload, with no
@@ -471,7 +471,7 @@ signature check), not by UDP. On open Wi-Fi, treat the segment as public.
 </details>
 
 <a id="ethernet"></a>
-## Ethernet 802.3 ⚪
+### Ethernet 802.3
 
 **Summary.** The dominant wired L2. A bridge would send raw frames under a private
 EtherType so SPORE rides the segment below IP — useful where there is no IP
@@ -507,7 +507,7 @@ EtherType registry (IEEE RA).
 </details>
 
 <a id="wifi"></a>
-## Wi-Fi 802.11 ⚪
+### Wi-Fi 802.11
 
 **Summary.** Wi-Fi in raw/monitor mode can send action or data frames without
 association, letting nearby devices exchange SPORE frames with no access point — a
@@ -537,7 +537,7 @@ open. SPORE's signature is the trust anchor either way.
 </details>
 
 <a id="wifi-direct"></a>
-## Wi-Fi Direct 🟡
+### Wi-Fi Direct
 
 **Summary.** Wi-Fi Direct (P2P) forms a group with one device as a soft-AP,
 giving the group an IP subnet with no infrastructure. Because it is just IP, the
@@ -564,7 +564,7 @@ code is needed beyond selecting the interface.
 </details>
 
 <a id="esp-now"></a>
-## ESP-NOW ⚪
+### ESP-NOW
 
 **Summary.** Espressif's connectionless 2.4 GHz protocol: short, low-latency frames
 between ESP32/ESP8266 devices with no association or IP stack — ideal for cheap,
@@ -593,7 +593,7 @@ Runs on the ESP32 core build (`esp-idf`), not the desktop daemon.
 </details>
 
 <a id="ble-gatt"></a>
-## BLE GATT ⚪
+### BLE GATT
 
 **Summary.** Bluetooth Low Energy exposes a serial-like pipe through a GATT
 service with a write characteristic (host→device) and a notify characteristic
@@ -631,7 +631,7 @@ signature holds regardless of pairing mode.
 </details>
 
 <a id="ble-mesh"></a>
-## BLE Mesh ⚪
+### BLE Mesh
 
 **Summary.** A managed-flooding mesh layered on BLE advertising, addressing nodes
 by 16-bit unicast/group addresses — designed for many-hop building-scale networks.
@@ -657,7 +657,7 @@ independent.
 </details>
 
 <a id="nfc"></a>
-## NFC (ISO/IEC 14443) 🧪
+### NFC (ISO/IEC 14443)
 
 **Summary.** Tap-to-transfer at a few centimetres. An envelope becomes an NDEF
 record, moved by touching two phones or a phone to a tag — a deliberate, physical
@@ -710,7 +710,7 @@ property in a way no radio bridge can claim.
 </details>
 
 <a id="lifi"></a>
-## LiFi (IEEE 802.15.7) ⚪
+### LiFi (IEEE 802.15.7)
 
 **Summary.** Visible-light communication — data modulated onto an LED, received by
 a photodiode or camera. Air-gapped and directional; useful where RF is jammed,
@@ -736,7 +736,7 @@ driver and a camera/photodiode.
 </details>
 
 <a id="irda"></a>
-## IrDA ⚪
+### IrDA
 
 **Summary.** Infrared point-to-point (IrCOMM emulates a serial port). Legacy, but
 still present on some industrial and embedded gear; a short-range, line-of-sight
@@ -761,7 +761,7 @@ IrLAP/IrLMP/IrCOMM.
 </details>
 
 <a id="zigbee"></a>
-## Zigbee ⚪
+### Zigbee
 
 **Summary.** An 802.15.4 low-power mesh common in home automation; small frames,
 many hops. A bridge rides application-layer (APS) messages with APS fragmentation.
@@ -786,7 +786,7 @@ fountain fragmenter also helps). `U = u64`; broadcast = `0xFFFF` network address
 </details>
 
 <a id="z-wave"></a>
-## Z-Wave ⚪
+### Z-Wave
 
 **Summary.** A sub-GHz home-automation mesh with a small, fixed frame and a serial
 controller. Low bandwidth but excellent building penetration.
@@ -811,7 +811,7 @@ ITU-T G.9959 (PHY/MAC).
 </details>
 
 <a id="lorawan"></a>
-## LoRaWAN ⚪
+### LoRaWAN
 
 **Summary.** Long-range, low-power WAN: devices reach gateways that forward to a
 network server. Great range and battery life, but duty-cycle-limited and mediated
@@ -837,7 +837,7 @@ region's duty cycle; keep envelopes tiny and rare.
 </details>
 
 <a id="lora-p2p"></a>
-## LoRa P2P ⚪
+### LoRa P2P
 
 **Summary.** Raw LoRa radio with no network server — chirp-spread-spectrum frames
 between SX127x/SX126x modems in range. This is the medium Reticulum's RNode and
@@ -869,7 +869,7 @@ LoRa PHY is proprietary to Semtech.
 </details>
 
 <a id="ax25"></a>
-## Ham AX.25 / KISS 🧪
+### Ham AX.25 / KISS
 
 **Summary.** AX.25 is the amateur-radio packet protocol; KISS is the minimal framing
 between a host and a Terminal Node Controller (TNC). Together they move data over HF/
@@ -919,7 +919,7 @@ SPORE's flood directly. Keep paclen ≤256; fountain-fragment above it.
 </details>
 
 <a id="aprs"></a>
-## APRS ⚪
+### APRS
 
 **Summary.** The Automatic Packet Reporting System layers position, telemetry, and
 short **messages** on AX.25 (and the APRS-IS internet backbone). Its addressed
@@ -946,7 +946,7 @@ payload. Rides the [AX.25](#ax25) KISS path on RF, or a TCP socket to APRS-IS.
 </details>
 
 <a id="dmr"></a>
-## DMR ⚪
+### DMR
 
 **Summary.** Digital Mobile Radio (ETSI TS 102 361) is a common commercial/ham
 digital voice standard with a data plane. IP-over-DMR or short data services can
@@ -975,7 +975,7 @@ the radio layer.
 </details>
 
 <a id="gotenna"></a>
-## goTenna ⚪
+### goTenna
 
 **Summary.** A consumer LoRa-based mesh radio paired to a phone over BLE. Popular
 for off-grid group messaging; a bridge would relay envelopes through its SDK.
@@ -1000,7 +1000,7 @@ documentation; the radio protocol itself is closed).
 </details>
 
 <a id="audio"></a>
-## Audio modem ✅
+### Audio modem
 
 **Summary.** Data-over-sound: the envelope is modulated to an audio tone stream and
 played through a speaker, then demodulated from a microphone. Two laptops on a
@@ -1059,7 +1059,7 @@ prior art in data-over-sound.
 </details>
 
 <a id="icmp"></a>
-## ICMP echo (ping) 🧪
+### ICMP echo (ping)
 
 **Summary.** Every IP host answers ping and almost every firewall passes it, so
 the echo payload is a carrier that reaches where a new port cannot: a captive
@@ -1119,7 +1119,7 @@ communicating; §9 mix mode is the tool for the latter.
 </details>
 
 <a id="janus"></a>
-## JANUS (underwater sonar) ⚪
+### JANUS (underwater sonar)
 
 **Summary.** JANUS is the NATO standard for underwater acoustic communication —
 the only practical way to move bits through water, where RF does not propagate.
@@ -1145,7 +1145,7 @@ ANEP-87.
 </details>
 
 <a id="qr"></a>
-## QR stream 🟡
+### QR stream
 
 **Summary.** Envelopes rendered as QR codes and read back by a camera — an
 optical, air-gapped, one-way channel that crosses a screen-to-camera or
@@ -1178,7 +1178,7 @@ SPORE `armor` module for the text layer.
 </details>
 
 <a id="iridium"></a>
-## Iridium SBD ⚪
+### Iridium SBD
 
 **Summary.** Short Burst Data over the Iridium satellite constellation — global
 coverage, including the poles and mid-ocean, in small messages via a gateway. The
@@ -1206,10 +1206,10 @@ Costly per message; use sparingly.
 
 ---
 
-# Meshtastic
+## Meshtastic
 
 <a id="meshtastic"></a>
-## Meshtastic — one codec, four pipes ✅ 🧪
+### Meshtastic — one codec, four pipes
 
 **Summary.** Meshtastic is an open LoRa mesh firmware for cheap ESP32/nRF boards,
 widely used for off-grid group text over kilometres. SPORE rides it by wrapping an
@@ -1273,10 +1273,10 @@ serial [stream API](https://meshtastic.org/docs/development/device/client-api/).
 
 ---
 
-# Reticulum
+## Reticulum
 
 <a id="reticulum"></a>
-## Reticulum (RNS) — RNode host mode ⚪ 🧪
+### Reticulum (RNS) — RNode host mode
 
 **Summary.** Reticulum (RNS) is a cryptography-first networking stack that runs over
 almost any medium and addresses peers by a 16-byte destination hash, with its own
@@ -1352,7 +1352,7 @@ envelope is self-authenticating.
 
 ---
 
-# Internet overlays
+## Internet overlays
 
 These deliver packets over (or instead of) IP. **The key insight: most carry IP, so
 the [UDP bridge](#udp) rides them unchanged** — you only point it at the right
@@ -1360,7 +1360,7 @@ address on the overlay's interface. Only the non-IP or browser-native ones need
 their own shim.
 
 <a id="batman"></a>
-## BATMAN-adv 🧪
+### BATMAN-adv
 
 **Summary.** B.A.T.M.A.N.-adv is a Linux kernel L2 mesh: nodes join a virtual switch
 (`bat0`) that spans many radio hops as if it were one Ethernet segment. SPORE floods
@@ -1386,7 +1386,7 @@ the `bat0` interface. `U` is the batman node MAC as seen by UDP.
 </details>
 
 <a id="yggdrasil"></a>
-## Yggdrasil / cjdns 🧪
+### Yggdrasil / cjdns
 
 **Summary.** End-to-end encrypted IPv6 overlays where your address is derived from
 your public key, self-organising into a global mesh. Because they present a normal
@@ -1413,7 +1413,7 @@ overlay layer, but SPORE still authenticates with its own signature. Keep to the
 </details>
 
 <a id="thread"></a>
-## Thread 🧪
+### Thread
 
 **Summary.** Thread is a low-power 802.15.4 mesh presenting IPv6 (6LoWPAN) — common
 in smart-home devices. Envelopes ride UDP over the Thread network.
@@ -1438,7 +1438,7 @@ border router bridges to wider IP if present. 802.15.4's tiny frames mean heavy
 </details>
 
 <a id="tor"></a>
-## Tor (onion service) 🧪
+### Tor (onion service)
 
 **Summary.** Tor onion services give a location-hidden, end-to-end encrypted
 rendezvous reachable by a `.onion` address with no public IP. A bridge would run a
@@ -1469,7 +1469,7 @@ still required for authenticity.
 </details>
 
 <a id="i2p"></a>
-## I2P 🧪
+### I2P
 
 **Summary.** The Invisible Internet Project: a garlic-routed anonymity overlay with
 its own datagram service (via SAM). A natural fit for SPORE's datagram model over an
@@ -1495,7 +1495,7 @@ Fountain-fragment above ~1200 bytes.
 </details>
 
 <a id="iroh"></a>
-## iroh (QUIC) 🧪
+### iroh (QUIC)
 
 **Summary.** [iroh](https://github.com/n0-computer/iroh) gives QUIC connections
 between endpoints identified by a public key, with hole punching and **relay
@@ -1552,7 +1552,7 @@ outbound queue drains when it returns.
 </details>
 
 <a id="veilid"></a>
-## Veilid ⚪
+### Veilid
 
 **Summary.** A newer private-routed P2P framework (from the Cult of the Dead Cow)
 with a DHT and encrypted app-to-app messaging, designed for privacy without servers.
@@ -1576,7 +1576,7 @@ node id is `U`. Veilid encrypts and anonymises the path; SPORE authenticates.
 </details>
 
 <a id="libp2p"></a>
-## libp2p (gossipsub) ⚪
+### libp2p (gossipsub)
 
 **Summary.** The modular P2P stack behind IPFS and Ethereum. Its **gossipsub**
 pub/sub protocol is a ready-made flood/mesh overlay: publish to a topic, every
@@ -1605,7 +1605,7 @@ fits.
 </details>
 
 <a id="websocket"></a>
-## WebSocket ✅
+### WebSocket
 
 **Summary.** WebSocket upgrades an HTTP connection to a bidirectional binary frame
 channel — the lingua franca for browser-to-server real-time links, and reachable
@@ -1643,7 +1643,7 @@ not forge.
 </details>
 
 <a id="webtransport"></a>
-## WebTransport ⚪
+### WebTransport
 
 **Summary.** A newer browser API over HTTP/3 (QUIC) offering both reliable streams
 and **unreliable datagrams** — the closest browser match to SPORE's datagram model,
@@ -1674,7 +1674,7 @@ RFC 9297, *Proxying UDP in HTTP*, which is a different mechanism.)
 </details>
 
 <a id="webrtc"></a>
-## WebRTC DataChannel 🧪
+### WebRTC DataChannel
 
 **Summary.** WebRTC gives browsers a direct, encrypted peer-to-peer data channel
 after an out-of-band signaling handshake — no server in the path once connected.
@@ -1729,7 +1729,7 @@ and the **iroh QUIC** path already merged in the core (`src/direct/iroh.rs`,
 `bridge-iroh`) on the native side: the browser's QUIC becomes one more Direct
 medium rather than a special case that pulls in an ICE/DTLS/SCTP stack. Native
 WebRTC is therefore declined outright; a native WebTransport/QUIC adapter is the
-planned answer to the browser↔native conformance gap (see [`ROADMAP.md`](ROADMAP.md)
+planned answer to the browser↔native conformance gap (see [Roadmap](ROADMAP.md)
 M2). Until that adapter exists, the SPEC page-2 "native nodes run ice-lite" line
 reads as more than the tree does, and says so.
 
@@ -1748,7 +1748,7 @@ offer into a headless WebView.
 </details>
 
 <a id="webtorrent"></a>
-## WebTorrent swarm 🧪
+### WebTorrent swarm
 
 **Summary.** WebTorrent is BitTorrent for the browser: peers find each other through
 WebSocket trackers and connect over WebRTC. SPORE reuses exactly that discovery to
@@ -1786,7 +1786,7 @@ SPORE's signature authenticates.
 </details>
 
 <a id="web-serial"></a>
-## Web Serial / USB 🧪
+### Web Serial / USB
 
 **Summary.** The Web Serial API lets a browser tab open a USB/serial port with the
 user's permission — so a page can drive a physical TNC, RNode, or ESP32 with no
@@ -1818,7 +1818,7 @@ auto-reconnect silently.
 </details>
 
 <a id="web-bluetooth"></a>
-## Web Bluetooth 🧪
+### Web Bluetooth
 
 **Summary.** Web Bluetooth lets a tab talk to a BLE device over GATT. SPORE targets
 the Nordic UART Service — the de-facto serial-over-BLE profile on hobby radios — and
@@ -1849,7 +1849,7 @@ disconnect forgets the neighbour.
 
 ---
 
-# Store-and-forward & app carriers
+## Store-and-forward & app carriers
 
 Systems that already store a message and pass it on — the pattern SPORE *is*. An
 envelope becomes a file, an event, a chat message, or a bundle; the container
@@ -1857,7 +1857,7 @@ replicates it, and the other side unwraps it. These compose especially cleanly
 because SPORE's content-addressing dedups whatever the carrier duplicates.
 
 <a id="folder"></a>
-## Folder / USB / Syncthing ✅
+### Folder / USB / Syncthing
 
 **Summary.** The simplest carrier: write each envelope as a `*.spore` file in a
 directory, and let anything that replicates directories — Syncthing, a shared drive,
@@ -1892,7 +1892,7 @@ as one replicator.
 </details>
 
 <a id="http-bag"></a>
-## HTTP bag ✅
+### HTTP bag
 
 **Summary.** A "bag" is an HTTP endpoint that holds a pile of envelopes; nodes pull
 what they don't have. Any web host, object store, or static file server becomes a
@@ -1927,7 +1927,7 @@ SPORE-native (`bridge::bag`).
 </details>
 
 <a id="copyparty"></a>
-## Copyparty 🧪
+### Copyparty
 
 **Summary.** Copyparty is a portable file server with HTTP/WebDAV upload, a browser
 UI, and no database. Pointed at a share, it becomes a self-hosted [HTTP bag](#http-bag)
@@ -1951,7 +1951,7 @@ endpoints (or WebDAV). Envelopes are files in the share.
 </details>
 
 <a id="text-armor"></a>
-## Text armor (SMS / paper / voice) ✅
+### Text armor (SMS / paper / voice)
 
 **Summary.** When the only channel is text a human can copy — an SMS, a printed
 page, a read-aloud string — an envelope is rendered as checksummed base32 that
@@ -1985,7 +1985,7 @@ guards transcription errors, the signature guards authenticity.
 </details>
 
 <a id="nostr"></a>
-## Nostr ✅ 🧪
+### Nostr
 
 **Summary.** Nostr is a minimal relay-based protocol: clients publish signed JSON
 events to relays, and subscribers pull them by filter. Any relay becomes a SPORE
@@ -2023,7 +2023,7 @@ envelope inside is signed by the SPORE identity. A public relay is a public chan
 </details>
 
 <a id="ssb"></a>
-## SSB (Secure Scuttlebutt) 🟡
+### SSB (Secure Scuttlebutt)
 
 **Summary.** SSB is an offline-first social protocol built on per-identity **append-
 only logs** that gossip peer-to-peer (and via pubs/rooms). It is delay-tolerant and
@@ -2057,7 +2057,7 @@ SPORE envelope carries its own signature independently.
 </details>
 
 <a id="matrix"></a>
-## Matrix ⚪
+### Matrix
 
 **Summary.** Matrix is a federated real-time messaging protocol; a room is a
 replicated event log across homeservers. Envelopes ride as custom room events,
@@ -2083,7 +2083,7 @@ id. The homeserver stores and federates.
 </details>
 
 <a id="xmpp"></a>
-## XMPP / Jabber ⚪
+### XMPP / Jabber
 
 **Summary.** The long-standing federated messaging standard. Envelopes ride message
 stanzas (or PubSub nodes) between accounts across any XMPP servers.
@@ -2109,7 +2109,7 @@ XMPP server stores-and-forwards to offline contacts (MAM/offline storage).
 </details>
 
 <a id="deltachat"></a>
-## DeltaChat (email) ⚪
+### DeltaChat (email)
 
 **Summary.** DeltaChat turns ordinary e-mail (IMAP/SMTP) into a chat network with
 Autocrypt end-to-end encryption. Riding it means envelopes travel as e-mail — the
@@ -2136,7 +2136,7 @@ address. Mail servers provide global store-and-forward and offline delivery.
 </details>
 
 <a id="session"></a>
-## Session (Oxen) ⚪
+### Session (Oxen)
 
 **Summary.** Session is an anonymous messenger routing through the Oxen service-node
 network with onion routing and offline storage — no phone number, no central server.
@@ -2161,7 +2161,7 @@ anonymises; SPORE authenticates.
 </details>
 
 <a id="briar"></a>
-## Briar ⚪
+### Briar
 
 **Summary.** Briar is a censorship-resistant messenger that syncs directly between
 contacts over Tor, Wi-Fi, or Bluetooth — no servers at all. Its friend-to-friend
@@ -2187,7 +2187,7 @@ link (Tor/Wi-Fi/BLE) is available. `U` is the contact.
 </details>
 
 <a id="tox"></a>
-## Tox ⚪
+### Tox
 
 **Summary.** Tox is a serverless, encrypted P2P messenger over a DHT. Friends
 connect directly; a bridge would carry envelopes over Tox lossless packets.
@@ -2211,7 +2211,7 @@ friends; `U` is the ToxID. The DHT handles discovery and NAT traversal.
 </details>
 
 <a id="bpv7"></a>
-## DTN / Bundle Protocol v7 ⚪
+### DTN / Bundle Protocol v7
 
 **Summary.** The Delay/Disruption-Tolerant Networking Bundle Protocol is the IETF
 standard for networks with long delays and no end-to-end path — designed for deep
@@ -2245,7 +2245,7 @@ matrix — two store-carry-forward systems stacked.
 </details>
 
 <a id="nncp"></a>
-## NNCP 🧪
+### NNCP
 
 **Summary.** NNCP (Node-to-Node Copy) is a modern suite for secure, offline
 store-and-forward: encrypted packets moved by any transport (files, USB, email,
@@ -2283,7 +2283,7 @@ tampered packet is dropped rather than trusted.
 </details>
 
 <a id="uucp"></a>
-## UUCP 🧪
+### UUCP
 
 **Summary.** The original Unix-to-Unix Copy — the store-and-forward system that ran
 early e-mail and Usenet over dial-up. Still runnable, and a fittingly robust,
@@ -2316,7 +2316,7 @@ whether UUCP moved the files over a modem or a fibre, which is the point.
 </details>
 
 <a id="rhizome"></a>
-## Serval Rhizome ⚪
+### Serval Rhizome
 
 **Summary.** Rhizome is the store-and-forward layer of the Serval Project's mesh
 (for phones without infrastructure): bundles propagate opportunistically as devices
@@ -2341,7 +2341,7 @@ with SPORE's own.
 </details>
 
 <a id="hypercore"></a>
-## Hypercore / Hyperswarm ⚪
+### Hypercore / Hyperswarm
 
 **Summary.** Hypercore is a secure append-only log with peer-to-peer replication over
 Hyperswarm's DHT (the "Dat"/Holepunch stack). A SPORE feed maps neatly onto a
@@ -2367,7 +2367,7 @@ integrity is built-in; SPORE adds sender authenticity.
 </details>
 
 <a id="willow"></a>
-## Earthstar / Willow ⚪
+### Earthstar / Willow
 
 **Summary.** Willow (and its predecessor Earthstar) is an offline-first sync protocol
 with fine-grained capabilities and eventual consistency — data lives in "shares"
@@ -2394,11 +2394,11 @@ based set reconciliation is efficient for large stores.
 
 ---
 
-# Appendices
+## Appendices
 
 <a id="appendices"></a>
 
-## A. MTU reference
+### A. MTU reference
 
 The bridge clamps the node's `mtu` to this; SPORE's fountain fragmenter splits
 larger objects automatically. Values are the practical per-frame budget.
@@ -2428,7 +2428,7 @@ larger objects automatically. Values are the practical per-frame budget.
 | 64 K | WebSocket, HTTP bag, Tor |
 | — (whole file) | Folder, and most store carriers |
 
-## B. Address-type (`U`) reference
+### B. Address-type (`U`) reference
 
 `U` is what `Neighbors<U>` snoops and resolves. Null `()` media skip resolution
 entirely (broadcast; the envelope `dest` filters).
@@ -2450,7 +2450,7 @@ entirely (broadcast; the envelope `dest` filters).
 | connection | WebSocket, WebTransport, Web Serial, HTTP bag, TCP, Tor |
 | — | Folder, Text armor (no addressing) |
 
-## C. Driver form comparison
+### C. Driver form comparison
 
 | | `dgram` | `stream` | `store` |
 |---|---|---|---|
@@ -2462,7 +2462,7 @@ entirely (broadcast; the envelope `dest` filters).
 | **Reference** | `bridge::udp`, `bridge::meshtastic` | `bridge::tcp`, `kiss_stream` | `bridge::store`, `bridge::bag`, `bridge::ssb` |
 | **Best for** | radios, LAN, mesh | connections, tunnels, serial | delay-tolerant, offline, app carriers |
 
-## D. Protocol specification index
+### D. Protocol specification index
 
 Authoritative references, grouped. (Where a protocol has no public wire spec, the
 canonical implementation is linked in its section instead.)
@@ -2510,7 +2510,7 @@ canonical implementation is linked in its section instead.)
 | Hypercore | [Holepunch docs](https://docs.pears.com/building-blocks/hypercore) |
 | Willow / Earthstar | [Willow](https://willowprotocol.org/) · [Earthstar](https://earthstar-project.org/) |
 
-## E. Bridge implementation checklist
+### E. Bridge implementation checklist
 
 <details>
 <summary>Step-by-step guide for building a new bridge</summary>
@@ -2545,7 +2545,7 @@ document cites must exist. A bridge and its description cannot drift apart witho
 failing the build.*
 
 
-### WebTransport
+#### WebTransport
 
 <details>
 <summary>WebTransport bridge - Browser API for HTTP/3 communication</summary>
@@ -2554,12 +2554,12 @@ failing the build.*
 
 WebTransport is a browser API for sending and receiving data over HTTP/3. SPORE uses it to connect browsers to native nodes via a proxy that terminates TLS and forwards UDP.
 
-#### Bridge mapping
+##### Bridge mapping
 - **Form**: Datagram (`dgram`)
 - **Underlay address (`U`)**: `Url` (the WebTransport URL)
 - **MTU**: 1400 bytes (same as UDP)
 
-#### Implementation
+##### Implementation
 The browser-side implementation is in `web/transports/webtransport.mjs`. It:
 1. Opens a WebTransport session to the proxy URL
 2. Uses the datagram API for bidirectional communication
@@ -2575,5 +2575,5 @@ Browser  --WebTransport (HTTPS)-->  Proxy  --plaintext UDP-->  SPORE Daemon
 Browser  <--WebTransport datagrams--  Proxy  <--UDP responses--  SPORE Daemon
 ```
 
-See [PROXY_SETUP.md](../docs/PROXY_SETUP.md) for sample configurations.
+See [Proxy setup](../docs/PROXY_SETUP.md) for sample configurations.
 </details>

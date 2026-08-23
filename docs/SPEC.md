@@ -1,9 +1,9 @@
 # SPORE v1 — Store-and-forward Planetary Opportunistic Relay Envelope
 Front: the protocol. Back: how it rides everything. Two sides of one sheet — the
-normative whole. Worked bytes for every rule here: [REBUILD.md](REBUILD.md).
-Per-medium parameters: [BRIDGES.md](BRIDGES.md).
+normative whole. Worked bytes for every rule here: [Rebuild guide](REBUILD.md).
+Per-medium parameters: [Bridges](BRIDGES.md).
 
-<p align="center"><a href="spore-v1.png"><img src="spore-v1.png" alt="SPORE v1 one-page visual reference" width="820" /></a></p>
+<p align="center"><a href="spore-v1.png"><img src="spore-v1-thumb.jpg" alt="SPORE v1 one-page visual reference" width="820" height="547" /></a></p>
 
 ## 0. The whole protocol in one breath
 A SPORE message is a **signed postcard**: to, from, expiry, payload, signature. Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't seen, hands copies to anyone it meets who wants them, and drops duplicates and expired mail. That alone is a working planetary network. Of the four hard features — forward secrecy, fountain fragmentation, congestion control, anonymity — only congestion control touches the router; the rest live inside payloads.
@@ -13,7 +13,7 @@ A SPORE message is a **signed postcard**: to, from, expiry, payload, signature. 
 **Threat model, stated once:** every link is hostile — logged, spoofed, jammed, MITM'd. Links are trusted with *nothing*; authenticity and secrecy live only in the envelope. Attackers can drop or delay; redundancy and flood-fallback heal both.
 
 ## The runtime contract — what the host must supply
-The protocol is pure; it holds no OS. A conformant node needs four things from whatever runs it, and gets them wrong silently if it does not ask. Transport is not a fifth: the protocol names interfaces but never opens one, so bytes in and out are the boundary this contract is stated across, not an item on it (Page 2; [DESIGN.md](DESIGN.md) Part 2).
+The protocol is pure; it holds no OS. A conformant node needs four things from whatever runs it, and gets them wrong silently if it does not ask. Transport is not a fifth: the protocol names interfaces but never opens one, so bytes in and out are the boundary this contract is stated across, not an item on it (Page 2; [Design](DESIGN.md) Part 2).
 
 - **Randomness.** A CSPRNG for the signing seed, prekey secrets, ratchet keys, mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and MUST NOT be derivable from the identity seed** (§7.2).
 - **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7 local days (§5.7). Time is supplied per call, never read by the protocol itself.
@@ -121,7 +121,7 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 
 # Page 2 — Bindings: SPORE on everything
 
-**Every medium on Earth has one of five shapes.** Bind by shape; the router never changes. This page is normative for the *shapes*; the per-medium parameter tables (≈70 media: frequencies, port numbers, UUIDs, MTUs, firmware caveats) are the manual, [BRIDGES.md](BRIDGES.md).
+**Every medium on Earth has one of five shapes.** Bind by shape; the router never changes. This page is normative for the *shapes*; the per-medium parameter tables (≈70 media: frequencies, port numbers, UUIDs, MTUs, firmware caveats) are the manual, [Bridges](BRIDGES.md).
 
 1. **Message pipe** → one envelope/fragment per message.
 2. **Byte stream** → KISS: frames delimited `0xC0`, escape `0xC0`→`0xDB 0xDC`, `0xDB`→`0xDB 0xDD`, command byte `0x00`.
@@ -135,4 +135,4 @@ hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · p
 
 **Two address spaces.** *Who* = the SPORE address or topic — end-to-end, cryptographic, identical on every medium. *How* = the underlay's own naming (a node number, a destination hash, an `IP:port`, or nothing at all) — local to one link. A bridge owns exactly one interface and translates between them; the router never learns underlay addresses, the way an OS's ARP table maps IP→MAC. Bindings are learned by **snooping signed frames** — a signed envelope proves its own sender, so no handshake is needed — and a stale binding costs nothing, because flood-fallback (§5.6) routes around it.
 
-**Zero-rendezvous peering (browsers & phones).** A WebRTC session reduces to ufrag(4) + pwd(22) + DTLS fingerprint(32) + mDNS host candidate(16) ≈ **90 B**; both sides rebuild full SDP from a hardcoded template. Beep that descriptor over ultrasound or show it as a QR, answer, and the browser's own mDNS completes a direct DataChannel — no server, no typed IP, ≈15 s. Native nodes run **ice-lite with static ufrag/pwd/fingerprint**, so their descriptor is a constant you can print on the box — specified, not built: WebRTC here is browser-only ([`web/transports/webrtc.mjs`](../web/transports/webrtc.mjs)), so the native half of this is a [ROADMAP.md](ROADMAP.md) item. **App distribution:** a native node's HTTP bridge exposes the bag API — `POST /spore/push`, `GET /spore/inv`, `POST /spore/want`, MIME `application/x-spore` — on port 7373, to localhost and to the LAN at its IP. Serving the PWA itself from `/` is the intended end state (the app store is every node) but is **not implemented**: `bridge::bag` routes the three bag paths and 404s everything else.
+**Zero-rendezvous peering (browsers & phones).** A WebRTC session reduces to ufrag(4) + pwd(22) + DTLS fingerprint(32) + mDNS host candidate(16) ≈ **90 B**; both sides rebuild full SDP from a hardcoded template. Beep that descriptor over ultrasound or show it as a QR, answer, and the browser's own mDNS completes a direct DataChannel — no server, no typed IP, ≈15 s. Native nodes run **ice-lite with static ufrag/pwd/fingerprint**, so their descriptor is a constant you can print on the box — specified, not built: WebRTC here is browser-only ([`web/transports/webrtc.mjs`](../web/transports/webrtc.mjs)), so the native half of this is a [Roadmap](ROADMAP.md) item. **App distribution:** a native node's HTTP bridge exposes the bag API — `POST /spore/push`, `GET /spore/inv`, `POST /spore/want`, MIME `application/x-spore` — on port 7373, to localhost and to the LAN at its IP. Serving the PWA itself from `/` is the intended end state (the app store is every node) but is **not implemented**: `bridge::bag` routes the three bag paths and 404s everything else.

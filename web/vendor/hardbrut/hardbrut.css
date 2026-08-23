@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HARDBRUT v0.11 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
+   HARDBRUT v0.13 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
    ========================================================================== */
 
 
@@ -43,14 +43,14 @@ html{scroll-behavior:smooth;font-size:16px;-webkit-text-size-adjust:100%}
 body{font:1.0625rem/1.65 var(--font);color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
 
 /* ---- MARKDOWN ELEMENTS ---- */
-h1,h2,h3,h4,h5,h6{font-family:var(--font-display);text-transform:uppercase;letter-spacing:-0.02em;line-height:1.1;margin:var(--space-lg) 0 var(--space-sm);font-weight:900}
+h1,h2,h3,h4,h5,h6,.text-h1,.text-h2,.text-h3,.text-h4,.text-h5,.text-h6{font-family:var(--font-display);text-transform:uppercase;letter-spacing:-0.02em;line-height:1.1;margin:var(--space-lg) 0 var(--space-sm);font-weight:900}
 h1:first-child,h2:first-child,h3:first-child,h4:first-child,h5:first-child,h6:first-child{margin-top:0}
-h1{font-size:clamp(2rem,5vw,3.5rem)}
-h2{font-size:clamp(1.5rem,3.5vw,2.5rem)}
-h3{font-size:clamp(1.2rem,2.5vw,1.75rem)}
-h4{font-size:1.15rem;letter-spacing:0}
-h5{font-size:0.95rem;letter-spacing:0.03em}
-h6{font-size:0.8rem;letter-spacing:0.06em}
+h1,.text-h1{font-size:clamp(2rem,5vw,3.5rem)}
+h2,.text-h2{font-size:clamp(1.5rem,3.5vw,2.5rem)}
+h3,.text-h3{font-size:clamp(1.2rem,2.5vw,1.75rem)}
+h4,.text-h4{font-size:1.15rem;letter-spacing:0}
+h5,.text-h5{font-size:0.95rem;letter-spacing:0.03em}
+h6,.text-h6{font-size:0.8rem;letter-spacing:0.06em}
 p{margin-bottom:var(--space-sm);max-width:65ch}
 a{color:var(--ink);text-underline-offset:3px;text-decoration-thickness:2px}
 a:hover{background:var(--accent)}
@@ -242,6 +242,8 @@ dialog>:last-child{margin-bottom:0}
 .stack{display:flex;flex-direction:column;gap:var(--space-sm)}
 .cluster{display:flex;flex-wrap:wrap;gap:var(--space-sm);align-items:center}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.skip-link{position:absolute;top:-100px;left:0;z-index:1000;padding:0.75rem 1.5rem;background:var(--accent);color:var(--accent-ink);font-family:var(--font-display);font-weight:900;text-transform:uppercase;border:var(--border);box-shadow:var(--shadow)}
+.skip-link:focus{top:0}
 
 /* ---- REDUCED MOTION ---- */
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
@@ -254,42 +256,21 @@ dialog>:last-child{margin-bottom:0}
 }
 [data-theme="dark"]{--ink:#f0f0e8;--paper:#1a1a18;--bg:#121210;--muted:#a0a090;color-scheme:dark}
 [data-theme="light"]{--ink:#000;--paper:#fff;--bg:#fdfaf2;--muted:#666;color-scheme:light}
+/* Everything themed above (body, inputs, code/pre/blockquote, table rows,
+   navbar links, buttons, badges, theme-toggle, checkbox/radio...) already
+   auto-themes correctly through --ink/--paper/--bg/--accent/--accent-ink —
+   those are the tokens that just got redefined above, and every one of
+   those rules already reads them directly with no dark-mode copy needed.
+   Do NOT re-assert color/background for those elements here: every attempt
+   at that so far has been either dead-redundant or an active bug (e.g. an
+   exclusion-list rule that forced accent-ink text onto any new button-like
+   class that forgot to add itself to the list — .chip/.tab, then
+   .btn.btn-cancel, in turn). The only two rules that genuinely can't be
+   expressed as a plain token-driven base rule are these: */
 @media(prefers-color-scheme:dark){
   :root:not([data-theme="light"]){color-scheme:dark}
-  :root:not([data-theme="light"]) body{color:var(--ink);background:var(--bg)}
   :root:not([data-theme="light"]) a:hover{color:var(--accent-ink)}
   :root:not([data-theme="light"]) .list-row:hover,:root:not([data-theme="light"]) .list-row:active{color:var(--ink)}
-  :root:not([data-theme="light"]) ::selection{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) code,:root:not([data-theme="light"]) kbd,:root:not([data-theme="light"]) samp{background:var(--paper);border-color:var(--ink)}
-  :root:not([data-theme="light"]) pre{background:var(--paper)}
-  :root:not([data-theme="light"]) blockquote{background:var(--paper)}
-  :root:not([data-theme="light"]) input,:root:not([data-theme="light"]) textarea,:root:not([data-theme="light"]) select{background:var(--paper);color:var(--ink)}
-  :root:not([data-theme="light"]) .navbar-links a{color:var(--ink)}
-  :root:not([data-theme="light"]) .navbar-links a[aria-current]{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) button:not(.cancel):not(.theme-toggle):not(.navbar-toggle):not(.chip):not(.tab),:root:not([data-theme="light"]) .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
-  :root:not([data-theme="light"]) button.cancel,:root:not([data-theme="light"]) .btn-cancel{color:var(--ink)}
-  :root:not([data-theme="light"]) .theme-toggle{color:var(--ink);background:var(--paper)}
-  :root:not([data-theme="light"]) .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
-  :root:not([data-theme="light"]) .badge,:root:not([data-theme="light"]) .callout,:root:not([data-theme="light"]) .message{color:var(--accent-ink)}
-  :root:not([data-theme="light"]) tr:nth-child(even) td{background:var(--paper)}
-  :root:not([data-theme="light"]) tr:nth-child(odd) td{background:var(--bg)}
-  :root:not([data-theme="light"]) input[type="checkbox"],:root:not([data-theme="light"]) input[type="radio"]{background:var(--paper)}
 }
-[data-theme="dark"] body{color:var(--ink);background:var(--bg)}
 [data-theme="dark"] a:hover{color:var(--accent-ink)}
 [data-theme="dark"] .list-row:hover,[data-theme="dark"] .list-row:active{color:var(--ink)}
-[data-theme="dark"] ::selection{color:var(--accent-ink)}
-[data-theme="dark"] code,[data-theme="dark"] kbd,[data-theme="dark"] samp{background:var(--paper);border-color:var(--ink)}
-[data-theme="dark"] pre{background:var(--paper)}
-[data-theme="dark"] blockquote{background:var(--paper)}
-[data-theme="dark"] input,[data-theme="dark"] textarea,[data-theme="dark"] select{background:var(--paper);color:var(--ink)}
-[data-theme="dark"] .navbar-links a{color:var(--ink)}
-[data-theme="dark"] .navbar-links a[aria-current]{color:var(--accent-ink)}
-[data-theme="dark"] button:not(.cancel):not(.theme-toggle):not(.navbar-toggle):not(.chip):not(.tab),[data-theme="dark"] .btn:not(.btn-cancel):not(.theme-toggle){color:var(--accent-ink)}
-[data-theme="dark"] button.cancel,[data-theme="dark"] .btn-cancel{color:var(--ink)}
-[data-theme="dark"] .theme-toggle{color:var(--ink);background:var(--paper)}
-[data-theme="dark"] .theme-toggle:hover{color:var(--accent-ink);background:var(--accent)}
-[data-theme="dark"] .badge,[data-theme="dark"] .callout,[data-theme="dark"] .message{color:var(--accent-ink)}
-[data-theme="dark"] tr:nth-child(even) td{background:var(--paper)}
-[data-theme="dark"] tr:nth-child(odd) td{background:var(--bg)}
-[data-theme="dark"] input[type="checkbox"],[data-theme="dark"] input[type="radio"]{background:var(--paper)}
