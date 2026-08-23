@@ -37,6 +37,27 @@ The first build also downloads and compiles ESP-IDF itself, which takes a long
 time; later builds reuse it. `HOME` is redirected because the image's own `esp`
 user home is not writable when the container runs as your uid.
 
+## Footprint
+
+`size-report.sh` prints what M8's E1 checkpoint turns on. CI runs it on every
+build so growth is visible while it is still cheap to act on:
+
+```sh
+docker run --rm -v "$PWD":/work -w /work/esp32 \
+  espressif/idf-rust:esp32s3_latest sh size-report.sh
+```
+
+It reports flash (`.flash.text` + `.flash.rodata` + the initialisers for
+`.dram0.data`) and static internal SRAM (`.iram0.text` + `.dram0.data` +
+`.dram0.bss`). Both are **static sections, not live heap** — runtime headroom
+is a device-run number the bring-up binary still owes — and the flash figure
+excludes the bootloader, partition table, and any `littlefs` partition E3 adds.
+
+Do not read the last digits as exact. The flash total shifts by ~100 bytes
+depending on where the build ran, because panic messages embed absolute source
+paths and `CARGO_HOME` sitting one directory deeper changes their length. It is
+a number to compare across runs, not to quote to the byte.
+
 ## Flashing (needs the board)
 
 `espflash` is in the image, but USB passthrough makes this easier from the host:

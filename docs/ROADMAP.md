@@ -456,7 +456,7 @@ one signed envelope costs, on a release build:
 
 | | Bytes | Share of an ESP32-S3 |
 |---|---|---|
-| Flash (app image) | 542,619 | ~13% of a 4 MB part |
+| Flash (app image) | ~542,500 | ~13% of a 4 MB part |
 | Internal SRAM (static) | 67,235 | ~13% of 512 KB |
 
 Comfortable, and measured before the 802.11 driver, `littlefs` and a BLE stack pile
@@ -467,9 +467,12 @@ target proves it necessary") is exactly what these numbers fail to trigger. The 
 job prints both figures on every run, so the headroom is tracked as E2–E5 land rather
 than measured once and assumed.
 
-Two caveats on what this does *not* prove. These are static sections, not live heap —
-runtime headroom is a device-run number the smoke test still owes. And the flash
-figure excludes the partition table, bootloader and any `littlefs` partition E3 adds.
+Three caveats on what this does *not* say. These are static sections, not live heap —
+runtime headroom is a device-run number the smoke test still owes. The flash figure
+excludes the bootloader, partition table, and any `littlefs` partition E3 adds. And
+the flash total is approximate on purpose: it moves by ~100 bytes between build
+environments because panic messages bake in absolute source paths, so `CARGO_HOME`
+being one directory deeper changes it. Compare runs, not the last digits.
 
 **Definition of done:** an ESP32-S3 running this firmware relays real SPORE
 envelopes over raw 802.11 to at least one other node, bridges to a phone or
