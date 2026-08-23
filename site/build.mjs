@@ -187,23 +187,16 @@ const SHARE = {
 function shareBar() {
   const u = encodeURIComponent(SHARE.url);
   const t = encodeURIComponent(SHARE.title);
-  const txt = encodeURIComponent(SHARE.text);
-  const both = encodeURIComponent(`${SHARE.title} — ${SHARE.url}`);
 
-  // [label, href, title]. `null` href = handled by the script below.
+  // One generic share action (the OS share sheet, where available) plus Copy
+  // and a handful of named communities — not a wall of every network that has
+  // ever shipped a share-intent URL.
   const links = [
+    ['Share', null, 'Share via your device'],
+    ['Copy link', null, 'Copy the link to the clipboard'],
     ['Hacker News', `https://news.ycombinator.com/submitlink?u=${u}&t=${t}`, 'Submit to Hacker News'],
-    ['Lobsters', `https://lobste.rs/stories/new?url=${u}&title=${t}`, 'Submit to Lobsters'],
     ['Reddit', `https://www.reddit.com/submit?url=${u}&title=${t}`, 'Submit to Reddit'],
     ['Mastodon', null, 'Toot it from your own instance'],
-    ['Bluesky', `https://bsky.app/intent/compose?text=${both}`, 'Post to Bluesky'],
-    ['Telegram', `https://t.me/share/url?url=${u}&text=${txt}`, 'Send on Telegram'],
-    ['Signal', null, 'Signal has no web share link — uses your share sheet, or copies'],
-    ['Matrix', null, 'Matrix has no web share link — uses your share sheet, or copies'],
-    ['Delta Chat', `mailto:?subject=${t}&body=${txt}%0A%0A${u}`, 'Delta Chat (or any mail app)'],
-    ['WhatsApp', `https://wa.me/?text=${both}`, 'Send on WhatsApp'],
-    ['Facebook', `https://www.facebook.com/sharer/sharer.php?u=${u}`, 'Share on Facebook'],
-    ['Copy link', null, 'Copy the link to the clipboard'],
   ];
 
   const buttons = links
@@ -297,6 +290,17 @@ main.doc .code-copy {
   cursor: pointer; box-shadow: var(--shadow-sm);
 }
 main.doc pre { position: relative; }
+main.doc nav.toc {
+  border: var(--border); box-shadow: var(--shadow-sm);
+  padding: var(--space-sm) var(--space); margin-bottom: var(--space);
+}
+main.doc nav.toc strong {
+  display: block; margin-bottom: 0.4rem; font-family: var(--font-display);
+  text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.04em;
+}
+main.doc nav.toc ul { margin: 0; padding-left: 1.1rem; columns: 2; column-gap: 1.5rem; }
+main.doc nav.toc li { break-inside: avoid; }
+@media (max-width: 640px) { main.doc nav.toc ul { columns: 1; } }
 @page { size: A4; margin: 11mm 10mm; }
 @media print {
   .navbar, .site-footer, nav, .share, main.doc .code-copy { display: none !important; }
@@ -335,7 +339,8 @@ function slugify(text) {
 ///
 /// The set also carries ids the markdown placed itself — BRIDGES.md marks each of
 /// its fifty bridges with an explicit `<a id="…"></a>` rather than relying on the
-/// heading text, since a bridge's heading includes its status emoji.
+/// heading text, since several protocols (Meshtastic, Reticulum) share one deep-dive
+/// section across multiple index rows that each need their own stable anchor.
 function anchorHeadings(html) {
   const seen = new Map();
   const ids = new Set();
@@ -354,7 +359,23 @@ function anchorHeadings(html) {
   return [out, ids];
 }
 
-function page(title, bodyHtml, self) {
+// Pages long enough that a reader needs a map before they scan them — the bridge
+// reference alone is ~70 tables under one H1.
+const TOC_PAGES = new Set(['spec.html', 'bridges.html', 'changelog.html', 'security.html', 'roadmap.html']);
+
+// Contents list built from the page's own top-level (H2) headings — no separate
+// outline to keep in sync, since it is generated from whatever anchorHeadings
+// already assigned.
+function buildToc(html) {
+  const items = [...html.matchAll(/<h2 id="([^"]+)">([\s\S]*?)<\/h2>/g)]
+    .map(([, id, inner]) => `<li><a href="#${id}">${inner.replace(/<[^>]+>/g, '')}</a></li>`)
+    .join('');
+  if (!items) return html;
+  const toc = `<nav class="toc" aria-label="On this page"><strong>On this page</strong><ul>${items}</ul></nav>`;
+  return html.replace(/(<h1 id="[^"]+">[\s\S]*?<\/h1>)/, `$1${toc}`);
+}
+
+function page(title, bodyHtml, self, extraHtml = '') {
   // A per-page body class, so a page can carry its own rules — the spec needs
   // print styling that would be wrong everywhere else.
   const cls = self.replace(/\.html$/, '');
@@ -405,6 +426,7 @@ ${siteAdapterCss}
 <section class="section">
 ${bodyHtml}
 </section>
+${extraHtml}
 </main>
 <footer class="site-footer">
   <div class="cluster">
@@ -495,14 +517,13 @@ for (const [src, dst, label] of pages) {
   // someone who has not met it yet.
   const title = titles.get(dst) || (label ? `SPORE — ${label}` : 'SPORE');
   let html = rewriteLinks(marked.parse(md), dst);
-  if (dst === 'index.html') {
-    // At the foot of the page. Asking someone to pass it on before they know what
-    // it is gets nothing; after the honest section it is a reasonable request.
-    html += shareBar();
-  }
-  const [anchored, ids] = anchorHeadings(html);
+  let [anchored, ids] = anchorHeadings(html);
   anchors.set(dst, ids);
-  fs.writeFileSync(path.join(out, dst), page(title, anchored, dst));
+  if (TOC_PAGES.has(dst)) anchored = buildToc(anchored);
+  // Rendered as its own sibling section, not appended into bodyHtml — nesting it
+  // inside page()'s own <section> put one <section> inside another.
+  const extra = dst === 'index.html' ? shareBar() : '';
+  fs.writeFileSync(path.join(out, dst), page(title, anchored, dst, extra));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
 

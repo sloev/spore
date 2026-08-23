@@ -1,13 +1,5 @@
 # SPORE application layer — design
 
-<p align="center">
-  <a href="spore-design.png"><img src="spore-design.png" alt="SPORE application layer on one page" width="820" /></a>
-</p>
-
-<p align="center"><em>Poster summary —
-<a href="spore-design.png">full size</a>. The sections below are the living text;
-the poster can lag.</em></p>
-
 **The one rule this document is built on: nothing here touches relays.** Every
 feature below is a payload convention plus endpoint state — never a change to what
 a relay must understand.
@@ -16,6 +8,14 @@ That is what keeps a 200-byte LoRa packet, a QR code, or a human reading armor
 aloud a first-class peer: a relay parses the fixed header, dedups, stores and
 forwards, and nothing else. A feature requiring relay support would have to be
 rolled out to every medium in lockstep.
+
+<p align="center">
+  <a href="spore-design.png"><img src="spore-design-thumb.jpg" alt="SPORE application layer on one page" width="820" height="547" /></a>
+</p>
+
+<p align="center"><em>Poster summary, for a quick visual overview —
+<a href="spore-design.png">full size</a>. The text on this page is the living
+source; the poster can lag it.</em></p>
 
 So the application layer has exactly two ingredients:
 

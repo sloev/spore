@@ -1,13 +1,5 @@
 # Continuity — SPORE as a seed
 
-<p align="center">
-  <a href="spore-continuity.png"><img src="spore-continuity.png" alt="SPORE continuity on one page" width="820" /></a>
-</p>
-
-<p align="center"><em>Poster summary —
-<a href="spore-continuity.png">full size</a>. The sections below are the
-living text; the poster can lag.</em></p>
-
 A **spore** is a small capsule that can regrow the whole organism from one
 survivor. This page is about the *software* doing the same: one HTML file, one
 printout, or one offline bundle is enough to understand, verify, and run a node —
@@ -15,6 +7,14 @@ without depending on the same infrastructure the mesh is meant to outlast.
 
 This page is about a *node* surviving. [Rebuild](rebuild.html) is its companion
 for the *protocol* surviving even this codebase.
+
+<p align="center">
+  <a href="spore-continuity.png"><img src="spore-continuity-thumb.jpg" alt="SPORE continuity on one page" width="820" height="1230" /></a>
+</p>
+
+<p align="center"><em>Poster summary, for a quick visual overview —
+<a href="spore-continuity.png">full size</a>. The text on this page is the
+living source; the poster can lag it.</em></p>
 
 ## The pieces of "outlives us"
 
