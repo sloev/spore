@@ -2570,12 +2570,9 @@ The native side requires a proxy that:
 - Forwards WebTransport datagrams to UDP port 7439
 - Runs on port 443 (browser requirement)
 
-```mermaid
-sequenceDiagram
-    Browser->>Proxy: WebTransport (HTTPS)
-    Proxy->>SPORE Daemon: Plaintext UDP
-    SPORE Daemon->>Proxy: UDP responses
-    Proxy->>Browser: WebTransport datagrams
+```
+Browser  --WebTransport (HTTPS)-->  Proxy  --plaintext UDP-->  SPORE Daemon
+Browser  <--WebTransport datagrams--  Proxy  <--UDP responses--  SPORE Daemon
 ```
 
 See [Proxy setup](../docs/PROXY_SETUP.md) for sample configurations.
