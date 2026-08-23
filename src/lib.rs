@@ -617,6 +617,72 @@ mod tests {
     }
 
     #[test]
+    fn probe_agrees_with_decode_on_real_envelopes() {
+        // The invariant M8's promiscuous 802.11 filter leans on: whatever the
+        // flags, probing a well-formed envelope reports exactly the length
+        // decode would consume — so a receiver can size and discard frames
+        // without paying for a decode it may throw away.
+        let sk = keypair();
+        let unsigned = Envelope::new(ty::DATA, topic_of("t"), 1_700_000_000, b"hello".to_vec());
+        let mut signed = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"hello".to_vec());
+        signed.sign(&sk);
+        let mut empty = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, Vec::new());
+        empty.sign(&sk);
+        // SRC8: the one branch that changes the src width, so the walk has to
+        // add 8 rather than 32. Swapping src after signing leaves the signature
+        // unverifiable, which is precisely the point — probe is structural, and
+        // a `Some` here must not be read as "authentic".
+        let mut src8 = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"hi".to_vec());
+        src8.sign(&sk);
+        src8.src = Src::Short([9u8; 8]);
+        src8.flags |= fl::SRC8;
+
+        for e in [unsigned, signed, empty, src8] {
+            let wire = e.wire();
+            let (_, n) = Envelope::decode(&wire).unwrap();
+            assert_eq!(Envelope::probe(&wire), Some(n), "flags {:#04x}", e.flags);
+            assert_eq!(n, wire.len());
+        }
+    }
+
+    #[test]
+    fn probe_discards_what_decode_would_reject() {
+        let sk = keypair();
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"payload".to_vec());
+        e.sign(&sk);
+        let wire = e.wire();
+
+        // Too short to hold even the fixed header.
+        assert_eq!(Envelope::probe(&wire[..15]), None);
+        assert_eq!(Envelope::probe(&[0u8; 0]), None);
+        // Wrong version byte — the cheapest and most common rejection.
+        let mut bad_ver = wire.clone();
+        bad_ver[0] = 0xff;
+        assert_eq!(Envelope::probe(&bad_ver), None);
+        // Truncated: the declared payload/signature runs past the buffer.
+        for cut in [wire.len() - 1, wire.len() - 64, 20] {
+            assert_eq!(Envelope::probe(&wire[..cut]), None, "cut at {cut}");
+            assert!(Envelope::decode(&wire[..cut]).is_err(), "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn probe_rejects_foreign_air_traffic() {
+        // What monitor mode actually delivers: other people's frames. None of
+        // this is a SPORE envelope and all of it must be discarded without a
+        // panic — the filter sees far more of this than it does real traffic.
+        // An 802.11 management frame starts 0x80, so the version check alone
+        // rejects it: the cheap path this exists for.
+        let mut beacon = [0xffu8; 32];
+        beacon[0] = 0x80;
+        assert_eq!(Envelope::probe(&beacon), None);
+        assert_eq!(Envelope::probe(&[0u8; 64]), None);
+        // A frame whose first byte happens to be 0x01 still has to survive the
+        // structural walk, not just the version check.
+        assert_eq!(Envelope::probe(&[0x01u8; 20]), None);
+    }
+
+    #[test]
     fn id_is_stable_under_hop_decrement() {
         let sk = keypair();
         let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, b"x".to_vec());

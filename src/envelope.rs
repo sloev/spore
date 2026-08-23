@@ -155,6 +155,52 @@ impl Envelope {
         vk.verify(&self.body(true), &Signature::from_bytes(&sig)).is_ok()
     }
 
+    /// How long the envelope at the head of `buf` is, without decoding it.
+    ///
+    /// `None` means "not a v1 envelope, discard" — the answer a promiscuous
+    /// receiver wants for the overwhelming majority of what it is handed. A
+    /// medium that only ever delivers our own traffic can ignore this and call
+    /// [`Envelope::decode`] directly; one that hands us *every* frame on the air
+    /// (M8's raw 802.11 relay, monitor mode generally) cannot afford `decode`'s
+    /// payload `Vec` for each of them, and this reads only the header bytes and
+    /// allocates nothing.
+    ///
+    /// Structural only, and deliberately so: a `Some` answer means "worth
+    /// decoding", never "authentic". Nothing here looks at the signature, so a
+    /// forged header passes — [`Envelope::verify`] is still the only thing that
+    /// decides whether an envelope is real.
+    ///
+    /// Agrees with `decode` exactly, and is fuzzed against it
+    /// (`fuzz/fuzz_targets/envelope_decode.rs`): `probe` returns `Some(n)` for
+    /// precisely the buffers `decode` accepts, with the same `n`.
+    pub fn probe(buf: &[u8]) -> Option<usize> {
+        if buf.len() < 16 || buf[0] != VER {
+            return None;
+        }
+        let flags = buf[2];
+        let signed = flags & fl::SIGNED != 0;
+        // Same walk as `decode`, minus the copies: fixed header, optional src,
+        // length-prefixed payload, optional signature.
+        let mut off = 16usize;
+        if signed {
+            off += if flags & fl::SRC8 != 0 { 8 } else { 32 };
+        }
+        if off + 2 > buf.len() {
+            return None;
+        }
+        let plen = u16::from_be_bytes([buf[off], buf[off + 1]]) as usize;
+        // `off` is at most 48 here and `plen` at most u16::MAX, so the running
+        // total cannot overflow a usize on any target this builds for.
+        off += 2 + plen;
+        if signed {
+            off += 64;
+        }
+        if off > buf.len() {
+            return None;
+        }
+        Some(off)
+    }
+
     pub fn decode(buf: &[u8]) -> Result<(Envelope, usize), Err> {
         if buf.len() < 16 {
             return std::result::Result::Err(Err::Short);
