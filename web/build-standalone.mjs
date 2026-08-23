@@ -102,12 +102,19 @@ ${hardbrutCss}
   font-family: var(--font-display); font-weight: 900; font-size: 0.8rem; flex-shrink: 0;
 }
 
-/* The terminal log. */
-.log { font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg);
-  border: var(--border); padding: var(--space-sm); height: 240px; overflow-y: auto; white-space: pre-wrap; }
-.log .rx, .log .tx { color: var(--ink); }
-.log .relay, .log .sys, .log .bad { color: var(--muted); }
-.log .bad { font-weight: 800; }
+/* The conversation transcript. HARDBRUT's .chat is a bare flex column; the
+   scroll box around it is SPORE's, since that's a layout choice HARDBRUT
+   doesn't make for you. Cross-cutting notices (bridge/file/group events —
+   see logLine()) share this box with real messages, so they get a plain
+   centered line rather than a .chat-msg bubble of their own. */
+#chat-msgs.chat { height: 240px; overflow-y: auto; border: var(--border);
+  padding: var(--space-sm); background: var(--bg); }
+.chat-notice { align-self: center; font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+.chat-notice-bad { color: var(--warn); font-weight: 800; }
+
+/* Selected conversation in the chat list — .list-row has no built-in
+   persistent-selection state, only :hover/:active. */
+.list-row[aria-current="true"] { background: var(--accent); color: var(--accent-ink); }
 
 /* Cards double as the panel shell; HARDBRUT provides .card. */
 .card.panel { padding: var(--space); }
@@ -199,11 +206,11 @@ mark { background: var(--accent); color: var(--accent-ink); }
         <button id="new-sealed-btn" class="ghost">Create private</button>
       </div>
     </div>
-    <div id="chat-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"></div>
+    <div id="chat-list" style="margin-bottom:10px"></div>
     <!-- Active conversation thread + composer -->
     <div id="chat-view" style="display:none;border:1px solid var(--ink);padding:10px">
       <div id="chat-view-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px"></div>
-      <div id="chat-msgs" class="log" style="height:240px"></div>
+      <div id="chat-msgs" class="chat"></div>
       <div class="fmt-bar" id="chat-fmt">
         <button type="button" class="fmt" data-fmt="bold" title="bold">B</button>
         <button type="button" class="fmt" data-fmt="italic" title="italic">I</button>
@@ -338,7 +345,7 @@ function hexToBytes(h) {
 function logLine(cls, text) {
   const el = $('chat-msgs');
   const line = document.createElement('div');
-  line.className = cls;
+  line.className = 'chat-notice' + (cls === 'bad' ? ' chat-notice-bad' : '');
   line.textContent = stamp() + '  ' + text;
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
@@ -572,14 +579,16 @@ function renderChatList() {
     const last = c.msgs.length ? c.msgs[c.msgs.length - 1] : null;
     const preview = last ? ((last.fromMe ? 'You: ' : '') + (last.text.length > 40 ? last.text.slice(0, 40) + '\u2026' : last.text)) : '';
     const isActive = key === activeChat;
-    return '<div class="chat-row" data-key="' + escapeHtml(key) + '" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid ' + (isActive ? 'var(--accent2)' : 'var(--ink)') + ';cursor:pointer;background:' + (isActive ? 'var(--paper)' : 'transparent') + '">' +
-      '<span class="badge" style="font-size:9px;border-color:' + b.color + ';color:' + b.color + '">' + b.label + '</span>' +
-      '<span style="font-family:var(--font-mono);font-size:12px;color:' + (c.type === 'dm' ? 'var(--accent2)' : 'var(--ink)') + ';min-width:84px">' + escapeHtml(c.name) + '</span>' +
-      '<span style="flex:1;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(preview) + '</span>' +
-      (last ? '<span style="font-size:10px;color:var(--muted)">' + new Date(last.ts).toLocaleTimeString() + '</span>' : '') +
+    return '<div class="list-row" data-key="' + escapeHtml(key) + '"' + (isActive ? ' aria-current="true"' : '') + '>' +
+      '<div class="list-row-avatar" style="color:' + b.color + ';border-color:' + b.color + '">' + b.label.slice(0, 1) + '</div>' +
+      '<div class="list-row-body">' +
+        '<span class="list-row-title">' + escapeHtml(c.name) + '</span>' +
+        '<span class="list-row-subtitle">' + escapeHtml(preview) + '</span>' +
+      '</div>' +
+      (last ? '<span class="list-row-meta">' + new Date(last.ts).toLocaleTimeString() + '</span>' : '') +
     '</div>';
   }).join('');
-  for (const row of el.querySelectorAll('.chat-row')) {
+  for (const row of el.querySelectorAll('.list-row')) {
     row.onclick = () => { activeChat = row.dataset.key; renderChatList(); renderChatView(); };
   }
 }
@@ -606,9 +615,13 @@ function renderChatView() {
     msgsEl.innerHTML = '<span class="cnt" style="display:block;text-align:center;padding:20px 0">No messages yet.</span>';
   } else {
     msgsEl.innerHTML = c.msgs.map((m) => {
-      const cls = m.fromMe ? 'tx' : 'rx';
-      const who = m.fromMe ? '' : '<' + escapeHtml(m.from || '?') + '> ';
-      return '<div class="' + cls + '">' + stamp() + '  ' + who + mdWithAttachments(m.text) + '</div>';
+      const selfCls = m.fromMe ? ' chat-msg-self' : '';
+      const initial = (m.fromMe ? 'Me' : (m.from || '?')).slice(0, 1).toUpperCase();
+      const who = m.fromMe ? '' : escapeHtml(m.from || '?') + ': ';
+      return '<div class="chat-msg' + selfCls + '">' +
+        '<div class="chat-avatar">' + escapeHtml(initial) + '</div>' +
+        '<div class="chat-bubble">' + who + mdWithAttachments(m.text) +
+        '<span class="chat-time">' + new Date(m.ts).toLocaleTimeString() + '</span></div></div>';
     }).join('');
   }
   msgsEl.scrollTop = msgsEl.scrollHeight;
