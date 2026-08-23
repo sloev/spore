@@ -398,16 +398,59 @@ encryption to comply with a band's rules on anyone's behalf. Silent
 non-compliance would be dishonest; refusing to build the feature over a rule
 the operator may not even be subject to is not this project's call to make.
 
-**Tasks** (each a PR):
+**Tasks** (each a PR). Work is tagged **E1–E6** and ordered on three principles:
+
+- **Biggest risk first.** E1 answers *does the core compile, link, and actually run
+  on this board, in this much RAM, under esp-idf-sys?* Nothing else in M8 is worth
+  building until that answers yes.
+- **Nutrient work stays distinct from bridge work.** E1 and E3 supply the four
+  nutrients this runtime owes the *existing* core contract (randomness, time,
+  scheduling, storage — [Design](DESIGN.md)); E2, E4 and E5 add new
+  transport-shaped code to the *open* bridge list. Conflating the two is how a
+  runtime ends up inventing protocol.
+- **Solo before paired.** Each phase names what one board alone can prove, so the
+  work is not blocked on owning two of everything. Only the rows that say so need a
+  second device.
+
+Issue [#149](https://github.com/sloev/spore/issues/149)'s own phase order (env setup
+→ radio harnessing with a mock envelope → wire to `Node::on_rx` → USB-CDC) maps onto
+E1 + E2 + E4. The flash store (E3) and the BLE fallback (E5) go beyond what the issue
+scoped.
 
 | Task | Status | Notes |
 |---|---|---|
-| esp-idf-sys toolchain scaffold: `src/lib.rs` core builds and links for ESP32-S3 | ⬜ todo | Proves the core compiles under ESP-IDF before any radio work; no protocol changes expected |
-| Raw 802.11 bridge: promiscuous RX filter (SPORE v1 header match, instant-discard on miss) + `esp_wifi_80211_tx` injection | ⬜ todo | Message-pipe shape, `dgram` driver form — same family as LoRa/Meshtastic. 🧪 until a real device-pair run |
-| Flash store: `littlefs`-backed `SpillBackend` | ⬜ todo | Implementation of the existing M2 contract (#87), not a new one |
-| USB-CDC bridge to phone/laptop | ⬜ todo | Reuses `bridge::kiss_stream` framing — no new byte-stream shape |
-| BLE GATT fallback bridge (low-bandwidth: text/coordinates only) | ⬜ todo | New bridge; shape TBD by the GATT characteristic design |
-| `BRIDGES.md` entry (driver form, security profile, regulatory note) + `HARDWARE.md` row once a device-pair run exists | ⬜ todo | Same convention as every other 🧪 radio bridge |
+| esp-idf-sys toolchain scaffold: core builds and links for ESP32-S3, with a CI cross-compile job (E1) | ⬜ todo | Same shape as the existing `wasm` CI job — install the target, build the lib, assert a property of the artifact. Build+link only; no protocol changes expected |
+| Randomness nutrient: confirm `OsRng` resolves to ESP-IDF's hardware TRNG; add a target-cfg'd `getrandom` shim if it does not (E1) | ⬜ todo | Precedent: the `cfg(target_arch = "wasm32")` getrandom block in `Cargo.toml`, which exists for exactly this reason. Turns the toolchain decision's "likely compiles close to as-is" from reasoned into verified |
+| Time nutrient: a `now: u32` source, shipping [Spec](SPEC.md) §Time's no-trusted-clock behaviour first (E1) | ⬜ todo | A cold-booted board with no RTC battery *is* the "no trusted clock" node the spec already covers: relay regardless, age by dwell, drop after 7 local days. NTP-over-Wi-Fi is a stretch goal, not a blocker |
+| Scheduling nutrient: a FreeRTOS periodic task calling `Node::tick` (E1) | ⬜ todo | Absent from the previous version of this table. Without it the runtime silently regresses to maintaining itself only when traffic happens to arrive ([Design](DESIGN.md), nutrient table) — worst on exactly this kind of solo, often-offline node |
+| Solo bring-up smoke test: boot, fresh identity, one self-signed envelope logged over UART, a tick observed firing (E1) | ⬜ todo | 🧪 until run on real silicon. Yields the first real RAM/flash headroom numbers |
+| Promiscuous RX filter: SPORE v1 header match, instant-discard on miss (E2) | ⬜ todo | Testable off-device against synthetic frames — issue #149's "mock envelope" phase |
+| `esp_wifi_80211_tx` injection wired as `DatagramTransport::send`, RX as `::recv`, driven through `run_datagram` (E2) | ⬜ todo | Message-pipe shape, `dgram` driver form — same family as LoRa/Meshtastic, so no new medium-independent logic |
+| Solo TX-shape test: an external monitor-mode sniffer confirms the injected frame's shape (E2) | ⬜ todo | Proves the injection path without needing a second SPORE node |
+| Device-pair relay: two boards exchange a real envelope over the air (E2) | ⬜ todo | 🧪 until this run happens |
+| `littlefs` binding + flash partition setup (partition table, mount/format-on-first-boot) (E3) | ⬜ todo | A second unfamiliar C dependency; deliberately sequenced after the radio driver so the two risks are retired one at a time, not together |
+| `littlefs`-backed `SpillBackend`: `put` / `get` / `remove` / `ids` (E3) | ⬜ todo | Implementation of the existing M2 contract (#87), not a new one. Same semantics as the filesystem backend: a `put` that does not land leaves the entry memory-only, and `get` answers `None` identically for absent, unreadable, or oversized |
+| Adopt the last run's spill at boot (E3) | ⬜ todo | Existing generic mechanic on the store — no new logic, just calling it with the flash backend |
+| Power-cycle test: spill past the memory budget, cut power, confirm the adopted set matches (E3) | ⬜ todo | 🧪 until logged in [Hardware verification](HARDWARE.md). A genuinely new row — real flash and real power loss, not merely "not CI-testable" |
+| USB-CDC transport wired to the KISS framing (E4) | ⬜ todo | Reuses `bridge::kiss_stream`, same shape as the serial bridge — no new byte-stream shape |
+| Solo loopback: laptop-side KISS echo, board sends and receives its own frames (E4) | ⬜ todo | Proves the framing with no phone in the loop |
+| Phone tether: the Android app or web node over USB, real message exchange (E4) | ⬜ todo | 🧪 until run. [Hardware verification](HARDWARE.md) row 4 ("Web Serial → board") is the existing pattern |
+| GATT characteristic design note: service UUID, RX/TX split, MTU negotiation (E5) | ⬜ todo | The least-precedented shape here — the existing BLE bridges (Meshtastic, RNode/NUS) wrap *another* protocol's framing rather than defining a SPORE-native GATT layout. Not scoped by #149 at all, so design before code |
+| Implement the chosen driver form, restricted to text/coordinate payloads (E5) | ⬜ todo | Most likely `dgram` with a small fixed MTU; explicitly not general envelope relay |
+| Solo test: a generic BLE central exercises write/notify against the board (E5) | ⬜ todo | Confirms the characteristic layout without a phone SPORE client |
+| Phone tether: Android or Web Bluetooth exchanges a real low-bandwidth message (E5) | ⬜ todo | 🧪 until run. [Hardware verification](HARDWARE.md) row 18 (BLE NUS) is the existing pattern |
+| [Bridges](BRIDGES.md) entries for raw 802.11, USB-CDC and BLE GATT (E6) | ⬜ todo | Land with each bridge's own PR where possible — describing what a bridge does needs no device run. Driver form, security profile, and the regulatory note per the locked posture above |
+| Full combined run: two boards, flash store live, an envelope relayed over raw 802.11, one board bridged to a phone over USB, BLE exercised as the fallback (E6) | ⬜ todo | One [Hardware verification](HARDWARE.md) row per path, matching the existing one-row-per-path convention |
+| Flash-cycle re-confirmation in the combined rig: power-cycle one board mid-session, confirm it resumes relaying with its spilled store intact (E6) | ⬜ todo | Distinct from E3's isolated test — proves persistence holds while the radio and USB paths are also live |
+
+**Toolchain checkpoint (E1, do not skip).** When the E1 smoke test lands, record the
+measured binary size and free heap/flash headroom in that PR. This is the cheapest
+moment to reopen "esp-idf-sys, not bare-metal `esp-hal`" — before the 802.11 driver,
+`littlefs`, and a BLE stack pile on top of it. If the numbers hold, the locked
+decision stands unchanged for E2 onward and compile-time `max_core` gating stays
+declined as recorded under non-goals. If they do not, that non-goal's own stated
+exception — revisit only if a real MCU target proves it necessary — is what has been
+triggered, and it gets reopened here rather than discovered late.
 
 **Definition of done:** an ESP32-S3 running this firmware relays real SPORE
 envelopes over raw 802.11 to at least one other node, bridges to a phone or
