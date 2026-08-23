@@ -64,10 +64,9 @@ jobs:
       - name: Build the single-file node (seed) — it is also the live demo
         run: |
           node web/build-standalone.mjs
-          cp web/spore-standalone.html _site/spore-standalone.html
-          # The live demo IS the standalone: one self-contained file, no server,
-          # no external requests. Serve the same file at /demo/ so links there
-          # keep working.
+          # One file, one URL: /demo/ is the live page. "Download" links to
+          # the same URL with a `download` attribute (site/build.mjs), so the
+          # same ~720 KB payload is never shipped twice under two paths.
           mkdir -p _site/demo
           cp web/spore-standalone.html _site/demo/index.html
 

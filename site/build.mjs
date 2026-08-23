@@ -129,19 +129,30 @@ const navLinks = pages
   .map(([, dst, label]) => ({ dst, label }));
 navLinks.splice(navLinks.length - 1, 0, { dst: 'demo/', label: 'Web node' });
 
+const GITHUB_BLOB = 'https://github.com/sloev/spore/blob/master/';
+
 function rewriteLinks(html, self) {
   // Rewrite href="...something.md" (with optional ../ and #anchor) to the built
-  // page; leave external and non-md links alone.
+  // page; leave external and anchor links alone. A repo-relative link to
+  // anything that isn't a rendered page (source, scripts, LICENSE) has no
+  // file to resolve to on Pages at all — those go to the GitHub blob view
+  // instead of 404ing.
   return html.replace(/href="([^"]+)"/g, (m, href) => {
     if (/^https?:|^#|^mailto:/.test(href)) return m;
     const [pathPart, anchor] = href.split('#');
-    if (!pathPart.toLowerCase().endsWith('.md')) return m;
     const norm = pathPart.replace(/^\.\//, '').replace(/^\.\.\//, '');
-    const dst =
-      linkMap.get(norm) ||
-      linkMap.get(path.basename(norm).toLowerCase()) ||
-      norm.replace(/\.md$/i, '.html');
-    return `href="${dst}${anchor ? '#' + anchor : ''}"`;
+    if (pathPart.toLowerCase().endsWith('.md')) {
+      const dst =
+        linkMap.get(norm) ||
+        linkMap.get(path.basename(norm).toLowerCase()) ||
+        norm.replace(/\.md$/i, '.html');
+      return `href="${dst}${anchor ? '#' + anchor : ''}"`;
+    }
+    // Not a doc page. Only repo-relative paths (../ or ./) need rewriting —
+    // a bare filename is a same-directory asset the build already copies in
+    // (docs images, antenna-seed.svg), and must resolve locally, not on GitHub.
+    if (!/^\.\.?\//.test(pathPart)) return m;
+    return `href="${GITHUB_BLOB}${norm}${anchor ? '#' + anchor : ''}"`;
   });
 }
 
@@ -482,7 +493,7 @@ for (const img of docsImgs) {
 
 // Added after this script runs, by the Pages workflow (the standalone node and
 // the Seed Sheet), so they are not on disk when the check runs.
-const PROVIDED_LATER = new Set(['demo/', 'spore-standalone.html', 'spore-seedsheet.html']);
+const PROVIDED_LATER = new Set(['demo/', 'spore-seedsheet.html']);
 
 function checkLinks() {
   const problems = [];
