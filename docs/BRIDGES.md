@@ -520,7 +520,7 @@ true ad-hoc broadcast medium.
 | MTU | 2304 (802.11 MSDU) |
 | State | stateful (monitor/IBSS setup) |
 | Status | ⚪ planned |
-| Code | monitor-mode inject/capture per OS/driver |
+| Code | monitor-mode inject/capture per OS/driver; on ESP32-S3, `esp_wifi_80211_tx` + a promiscuous RX callback ([Roadmap](ROADMAP.md) M8/E2) |
 
 <details><summary>Deep dive</summary>
 
@@ -530,8 +530,25 @@ frame body. In practice most deployments run **IP over Wi-Fi and reuse the [UDP
 bridge](#udp)** — raw injection is only worth it for AP-less operation and needs a
 card/driver that supports monitor mode + injection.
 
+**SPORE bridge mapping.** `U = [u8;6]` (the source MAC), `dgram` form, one envelope
+per frame body. The receive side is the part that differs from every other bridge:
+monitor mode delivers *every* frame in the air, not just ours, so the callback must
+reject foreign traffic before doing any work on it. `Envelope::probe` exists for
+exactly this — it walks the v1 header and returns the envelope's length, or `None`
+to discard, without allocating. Only what survives it is worth handing to
+`Envelope::decode` and then `hub.on_rx`. A `probe` hit is a structural match and
+nothing more; the signature check still decides whether a frame is real.
+
 **Security.** WPA2/WPA3 secure the link when associated; raw/ad-hoc frames are
 open. SPORE's signature is the trust anchor either way.
+
+**Regulatory.** Injecting frames outside normal association is regulated
+differently across jurisdictions, and some bands carry rules this bridge does not
+try to satisfy on your behalf — amateur bands prohibiting encrypted content being
+the most common. SPORE documents what the bridge does and does not weaken or strip
+encryption to comply with a band's rules for you; whether a given deployment is
+permitted is the operator's call, and theirs to answer. This is the same disclosure
+posture as a mix mode's stated limits, not an endorsement or a warning against use.
 
 **References.** [IEEE 802.11](https://standards.ieee.org/ieee/802.11/7028/).
 </details>
