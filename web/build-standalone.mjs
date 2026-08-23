@@ -499,7 +499,20 @@ async function boot() {
 }
 
 // ---- conversations (W9) ----------------------------------------------------
-// (ensureConvo, saveConvos, feedTopicOf are defined above, near boot.)
+function saveConvos() {
+  LS.set(K_CONVOS, JSON.stringify(convos));
+}
+
+function ensureConvo(type, key, name, extra) {
+  if (!convos[key]) convos[key] = Object.assign({ type, name, msgs: [] }, extra);
+}
+
+// Personal-feed topic naming (W10): feed:: + addr, distinct from the bare
+// group-chat topic names so the two namespaces can never collide (see
+// docs/ROADMAP.md's "personal feed" note).
+function feedTopicOf(addr) {
+  return 'feed::' + addr;
+}
 
 // Plain text empty state — no mascot; SPORE's only brand mark is the wordmark.
 function emptyState(message, action1, action2) {
