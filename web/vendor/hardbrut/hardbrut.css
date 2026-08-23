@@ -1,5 +1,5 @@
 /* ==========================================================================
-   HARDBRUT v0.13 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
+   HARDBRUT v0.14 — Neubrutalist CSS. Zero imports. No embedded font — system font stack only.
    ========================================================================== */
 
 
@@ -211,11 +211,10 @@ dialog>:last-child{margin-bottom:0}
 @keyframes hb-spin{0%,100%{opacity:0.25}50%{opacity:1}}
 @media(prefers-reduced-motion:reduce){.spinner span{animation:none;opacity:0.6}}
 
-/* ---- HERO / FOOTER ---- */
+/* ---- HERO ---- */
 .hero{padding:var(--space-lg) var(--space);text-align:center;background:var(--paper);border-bottom:4px solid var(--ink)}
 .hero h1{margin:0 0 var(--space-sm)}
 .hero p{max-width:560px;margin:0 auto var(--space);font-size:1.1rem;color:var(--muted)}
-.site-footer{padding:var(--space-lg) var(--space);border-top:4px solid var(--ink);text-align:center;font-size:0.82rem;color:var(--muted);background:var(--paper)}
 
 /* ---- ACCENT SWATCHES ---- */
 .accent-swatches{display:flex;gap:0.5rem;flex-wrap:wrap}
