@@ -294,6 +294,12 @@ const siteAdapterCss = `
 /* SPORE adapter — docs site only. Uses HARDBRUT tokens, never redefines them. */
 main.doc.container { max-width: 860px; }
 main.doc { font-size: 0.95rem; }
+/* HARDBRUT v0.14 dropped .site-footer — a page footer is a site's own layout
+   choice, not something a component library should own. Kept the same look. */
+.site-footer {
+  padding: var(--space-lg) var(--space); border-top: 4px solid var(--ink);
+  text-align: center; font-size: 0.82rem; color: var(--muted); background: var(--paper);
+}
 main.doc .code-copy {
   position: absolute; top: 8px; right: 8px;
   font: 11px var(--font-mono); line-height: 1; padding: 4px 9px;
