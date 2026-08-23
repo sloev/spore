@@ -405,12 +405,21 @@ the operator may not even be subject to is not this project's call to make.
   building until that answers yes.
 - **Nutrient work stays distinct from bridge work.** E1 and E3 supply the four
   nutrients this runtime owes the *existing* core contract (randomness, time,
-  scheduling, storage — [Design](DESIGN.md)); E2, E4 and E5 add new
-  transport-shaped code to the *open* bridge list. Conflating the two is how a
-  runtime ends up inventing protocol.
+  scheduling, storage — [Design](DESIGN.md)); E2, E4 and E5 put the board on the
+  *open* bridge list. Conflating the two is how a runtime ends up inventing
+  protocol.
 - **Solo before paired.** Each phase names what one board alone can prove, so the
   work is not blocked on owning two of everything. Only the rows that say so need a
   second device.
+
+**None of the three bridges is new.** Raw 802.11, BLE GATT and USB/serial-over-KISS
+are all already specified in [Bridges](BRIDGES.md) — BLE down to the Nordic UART
+UUIDs, USB as byte-for-byte KISS, and 802.11 with the ESP32 path and regulatory note
+added alongside `Envelope::probe`. Two of them already have a working *browser* half
+(`web/transports/webbluetooth.mjs`, `webserial.mjs`), so E4 and E5 are making the
+board the peer for clients that already exist and already speak the framing. That is
+why no row below is a design task: the shapes are decided, and what is missing is
+the firmware side of each.
 
 Issue [#149](https://github.com/sloev/spore/issues/149)'s own phase order (env setup
 → radio harnessing with a mock envelope → wire to `Node::on_rx` → USB-CDC) maps onto
@@ -435,11 +444,10 @@ scoped.
 | USB-CDC transport wired to the KISS framing (E4) | ⬜ todo | Reuses `bridge::kiss_stream`, same shape as the serial bridge — no new byte-stream shape |
 | Solo loopback: laptop-side KISS echo, board sends and receives its own frames (E4) | ⬜ todo | Proves the framing with no phone in the loop |
 | Phone tether: the Android app or web node over USB, real message exchange (E4) | ⬜ todo | 🧪 until run. [Hardware verification](HARDWARE.md) row 4 ("Web Serial → board") is the existing pattern |
-| GATT characteristic design note: service UUID, RX/TX split, MTU negotiation (E5) | ⬜ todo | The least-precedented shape here — the existing BLE bridges (Meshtastic, RNode/NUS) wrap *another* protocol's framing rather than defining a SPORE-native GATT layout. Not scoped by #149 at all, so design before code |
-| Implement the chosen driver form, restricted to text/coordinate payloads (E5) | ⬜ todo | Most likely `dgram` with a small fixed MTU; explicitly not general envelope relay |
+| Expose the existing NUS profile from the board: KISS over Nordic UART, `stream` form (E5) | ⬜ todo | No design step needed — [Bridges](BRIDGES.md) already specifies this bridge down to the UUIDs (`6e400001-…`, RX `…0002`, TX `…0003`), KISS framing via `bridge::kiss_stream`, and the ~247-byte ATT MTU. The browser half already speaks it (`web/transports/webbluetooth.mjs`), so the board is the peripheral for a client that exists |
 | Solo test: a generic BLE central exercises write/notify against the board (E5) | ⬜ todo | Confirms the characteristic layout without a phone SPORE client |
 | Phone tether: Android or Web Bluetooth exchanges a real low-bandwidth message (E5) | ⬜ todo | 🧪 until run. [Hardware verification](HARDWARE.md) row 18 (BLE NUS) is the existing pattern |
-| [Bridges](BRIDGES.md) entries for raw 802.11, USB-CDC and BLE GATT (E6) | ⬜ todo | Land with each bridge's own PR where possible — describing what a bridge does needs no device run. Driver form, security profile, and the regulatory note per the locked posture above |
+| [Bridges](BRIDGES.md): move each of the three from ⚪ planned to 🧪 as its board-side half lands (E6) | ⬜ todo | The entries themselves already exist and are accurate — 802.11 gained the ESP path, the `probe` filter's role and the regulatory note in #172. What is left is a status change per bridge, landing with that bridge's own PR, not new prose |
 | Full combined run: two boards, flash store live, an envelope relayed over raw 802.11, one board bridged to a phone over USB, BLE exercised as the fallback (E6) | ⬜ todo | One [Hardware verification](HARDWARE.md) row per path, matching the existing one-row-per-path convention |
 | Flash-cycle re-confirmation in the combined rig: power-cycle one board mid-session, confirm it resumes relaying with its spilled store intact (E6) | ⬜ todo | Distinct from E3's isolated test — proves persistence holds while the radio and USB paths are also live |
 
