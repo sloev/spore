@@ -1,0 +1,6 @@
+# ESP32-S3 is Xtensa, which upstream Rust does not target — it needs Espressif's
+# `esp` toolchain fork. The Docker image (see esp32/README.md) ships it; this file
+# makes sure a local checkout with espup installed selects it too, rather than
+# silently trying to build with stable and failing on an unknown target.
+[toolchain]
+channel = "esp"

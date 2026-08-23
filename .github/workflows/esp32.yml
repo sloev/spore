@@ -1,0 +1,77 @@
+name: ESP32
+
+# The embedded target (Roadmap M8/E1): prove the unmodified core still
+# cross-compiles and links for ESP32-S3, and report what it costs.
+#
+# Its own workflow rather than a job in ci.yml for two reasons: ci.yml is a
+# frozen file (see pr-guard.yml), and this needs a toolchain no runner has —
+# ESP32-S3 is Xtensa, which upstream Rust does not target, so the build runs in
+# Espressif's image. See esp32/README.md.
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  IMAGE: espressif/idf-rust:esp32s3_latest
+
+jobs:
+  build:
+    name: ESP32-S3 cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ESP-IDF itself is compiled from source on a cold cache (~10 min);
+      # .embuild is where esp-idf-sys unpacks and builds it.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            esp32/.embuild
+            esp32/target
+          key: esp32-${{ hashFiles('esp32/Cargo.lock', 'esp32/.cargo/config.toml') }}
+          restore-keys: esp32-
+
+      # Deliberately `docker run` rather than a job-level `container:`. The image
+      # runs as its own `esp` user, which does not own the runner's work
+      # directories, and actions/checkout fails with EACCES trying to write its
+      # state there. Keeping checkout and caching on the host and entering the
+      # container only to build sidesteps that entirely.
+      #
+      # RUSTFLAGS is set here rather than inherited: an env RUSTFLAGS overrides
+      # .cargo/config.toml's `rustflags` wholesale, so passing the repo-wide
+      # `-D warnings` would silently drop `--cfg espidf_time64` and build against
+      # a 32-bit time_t on an IDF that uses 64. `-D warnings` is also not wanted
+      # here: this target emits an unavoidable "dropping unsupported crate type
+      # `cdylib`" for the core's lib/cdylib pair, which is correct, not a defect.
+      - name: Cross-compile the firmware for ESP32-S3
+        run: |
+          docker run --rm -u 0:0 \
+            -v "$PWD":/work -w /work/esp32 \
+            -e RUSTUP_HOME=/home/esp/.rustup \
+            -e CARGO_HOME=/home/esp/.cargo \
+            -e RUSTFLAGS='--cfg espidf_time64' \
+            -e CARGO_TERM_COLOR=always \
+            "$IMAGE" \
+            bash -lc 'export PATH="/home/esp/.cargo/bin:$PATH"; cargo build --release'
+
+      # Reported rather than asserted: there is no budget to fail against yet,
+      # and inventing one before E2-E5 land would be a made-up threshold. The
+      # point is that the number is visible on every run, so growth is noticed
+      # while it is still cheap to act on.
+      - name: Report flash and RAM footprint
+        run: |
+          out=$(docker run --rm -v "$PWD":/work -w /work/esp32 "$IMAGE" sh size-report.sh)
+          echo "$out"
+          flash=$(echo "$out" | awk '$1 == "flash" { print $2 }')
+          ram=$(echo "$out" | awk '$1 == "ram" { print $2 }')
+          {
+            echo "### ESP32-S3 footprint"
+            echo
+            echo "| | Bytes | Share of an ESP32-S3 |"
+            echo "|---|---|---|"
+            echo "| Flash (app image) | $flash | $(( flash * 100 / (4 * 1024 * 1024) ))% of a 4 MB part |"
+            echo "| Internal SRAM (static) | $ram | $(( ram * 100 / (512 * 1024) ))% of 512 KB |"
+          } >> "$GITHUB_STEP_SUMMARY"

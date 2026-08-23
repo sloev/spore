@@ -1,5 +1,11 @@
 /target
 
+# ESP32 firmware build output. `.embuild` is where esp-idf-sys unpacks and builds
+# ESP-IDF itself, so it is a toolchain cache rather than repo content — see
+# esp32/README.md. (`/target` above is root-anchored and does not cover these.)
+/esp32/target/
+/esp32/.embuild/
+
 # Offline build inputs, produced by scripts/make-offline-bundle.sh. Machine
 # state, not repo content — see docs/CONTINUITY.md.
 /vendor/

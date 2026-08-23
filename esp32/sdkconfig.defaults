@@ -1,0 +1,5 @@
+# The Rust main task runs on ESP-IDF's main task, whose default 3.5 KB stack is
+# well under what signing an envelope needs (ed25519-dalek keeps its expanded
+# secret key on the stack). Raise it rather than move work to a spawned thread,
+# which would only relocate the same requirement.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32000

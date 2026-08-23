@@ -1,0 +1,18 @@
+[build]
+target = "xtensa-esp32s3-espidf"
+
+[target.xtensa-esp32s3-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+# `espidf_time64` matches ESP-IDF ≥5.0, where time_t is 64-bit. Getting this
+# wrong shows up as silently wrong timestamps rather than a build failure.
+rustflags = ["--cfg", "espidf_time64"]
+
+# The espidf targets have no prebuilt std, so it is built from source alongside
+# the crate. This is why the Xtensa fork is a nightly toolchain.
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+MCU = "esp32s3"
+ESP_IDF_VERSION = "v5.2.2"
