@@ -287,6 +287,35 @@ else is in the lib.
 | **`stream`** | a byte stream needing framing | a reader/writer + KISS framing | `bridge::tcp`, `bridge::kiss_stream::KissStream` |
 | **`store`** | a shared container polled for new items | poll + write `*.spore` items | `bridge::store` (files), `bridge::bag` (HTTP), `bridge::ssb` |
 
+### The error model (where FEC lives)
+
+**A bridge hands up an intact envelope or nothing — never a damaged one.** The
+core has no repair path and wants none: it dedups by content id, so a corrupted
+frame that arrived is strictly worse than one that did not, and every recovery
+mechanism above this line assumes loss rather than corruption.
+
+That makes forward error correction a **bridge detail**, decided per medium,
+because the error characteristics are a property of the medium and nothing else:
+
+- **Most media already do it below us.** 802.11 (convolutional/LDPC + FCS), LoRa
+  (coding rate 4/5–4/8 + CRC), Meshtastic and RNode all run FEC in their own PHY
+  and drop what fails. Damage arrives as a whole missing frame. A bridge on one of
+  these adds nothing — coding over a coded channel pays overhead for little gain.
+- **A bridge that owns a raw channel owns the problem.** [Audio modem](#audio) is
+  the case in the tree: SPORE supplies the modulation, the framing and the
+  integrity check, so it must at minimum *detect* corruption (it appends
+  `SHA-256(frame)[0..4]` and rejects on mismatch) and must decide for itself
+  whether *correcting* is worth it. Whether it should is
+  [#179](https://github.com/sloev/spore/issues/179).
+- **Recovery above the frame is already solved, once.** Losing whole frames is what
+  the fountain erasure code exists for ([Spec](SPEC.md) §3): any sufficient subset of
+  fragments rebuilds the object, so a bridge never needs a retransmit scheme of its
+  own. What a bridge owes is an honest boundary — deliver it whole or drop it — not
+  reliability.
+
+So the question every new bridge answers is not "does SPORE do FEC" but "does this
+medium already hand me clean frames, and if not, what am I adding to make it?"
+
 ### State model (all handled by `Neighbors<U>`)
 
 - **Stateless** (LoRa, ESP-NOW, Ethernet, most store carriers): no connection —
