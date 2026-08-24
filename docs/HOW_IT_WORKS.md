@@ -10,15 +10,22 @@ No node needs to be always-on, and no server sits in the middle.
 <h2 class="text-h5">Your device is the address</h2>
 <p class="text-muted">An address is the hash of a public key, not an account.
 There is nothing to sign up for and nothing a company can suspend.</p>
-<p><a href="spec.html">Address format →</a></p>
+<p><a href="spec.html#1-identity--addressing">Address format →</a></p>
 </div></div></div>
 
 <div class="col-6"><div class="card"><div class="card-body">
 <h2 class="text-h5">Delivery is store-and-forward</h2>
 <p class="text-muted">Devices hold envelopes they haven't delivered yet and
-pass them on when they meet another node. A message finds a route without
-anyone planning one, and it still arrives after you've been offline.</p>
-<p><a href="continuity.html">Why this survives outages →</a></p>
+pass them on when they meet another node, so a message still arrives after
+you've been offline.</p>
+<p class="text-muted">Nobody plans the route. A node drops anything it has
+already seen, keeps the rest until it expires, and passes each one on with a
+hop count one lower — so copies spread outward and die out instead of looping.
+Sending is how routes are found: the first copy to arrive teaches everyone
+along the way which direction the sender lies in, and replies come back that
+way until the path stops working, at which point it spreads out again.</p>
+<p><a href="spec.html#5-forwarding-rules-the-entire-router">The forwarding rules →</a>
+· <a href="continuity.html">Why this survives outages →</a></p>
 </div></div></div>
 
 <div class="col-6"><div class="card"><div class="card-body">
