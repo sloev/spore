@@ -42,6 +42,8 @@ const pages = [
   ['docs/HOW_IT_WORKS.md', 'how-it-works.html', 'How it works'],
   ['docs/APPS.md', 'apps.html', 'Get a node'],
   ['docs/DEVELOPER.md', 'developer.html', 'Developer'],
+  // Reached by clicking its card on "Get a node", not from the top nav.
+  ['docs/ESP32.md', 'esp32.html', null],
   // Secondary guides: rendered + linkable, kept off the top nav
   ['docs/MISSION.md', 'mission.html', null],
   ['docs/SPEC.md', 'spec.html', null],
@@ -64,11 +66,19 @@ const pages = [
   ['docs/PROXY_SETUP.md', 'proxy-setup.html', null],
 ];
 
-// Every secondary guide is reachable from the Developer hub and nothing else
-// in the primary nav, so viewing one should mark "Developer" current — the
+// Product pages that hang off "Get a node" rather than the Developer hub. They
+// are reached by clicking a card on apps.html, so that is the section the nav
+// should light up — and they must be kept out of developerHubPages below, or
+// two nav items would both claim aria-current.
+const appsSubPages = new Set(['esp32.html']);
+
+// Every other secondary guide is reachable from the Developer hub and nothing
+// else in the primary nav, so viewing one should mark "Developer" current — the
 // nav wasn't doing this at all, leaving every doc page with no active item.
 const developerHubPages = new Set(
-  pages.filter(([, dst, label]) => !label && dst !== 'index.html').map(([, dst]) => dst)
+  pages
+    .filter(([, dst, label]) => !label && dst !== 'index.html' && !appsSubPages.has(dst))
+    .map(([, dst]) => dst)
 );
 
 // Map a source .md path (as written in links) to its output page.
@@ -110,6 +120,7 @@ const titles = new Map([
   ['mission.html', 'SPORE — mission'],
   ['how-it-works.html', 'SPORE — how it works'],
   ['developer.html', 'SPORE — developer'],
+  ['esp32.html', 'SPORE — the ESP32 relay'],
   ['spec.html', 'SPORE — wire format spec'],
   ['design.html', 'SPORE — application design'],
   ['bridges.html', 'SPORE — bridges'],
@@ -131,6 +142,7 @@ const descriptions = new Map([
       'fragmentation, sealing and congestion rules — enough to reimplement it.',
   ],
   ['apps.html', 'Download SPORE: the browser node, the desktop daemon, the Android app, and the language bindings.'],
+  ['esp32.html', 'A $5 ESP32-S3 board as a standalone store-and-forward relay: what it is for, how it works, and what actually runs today. In development.'],
   ['how-it-works.html', 'Addressing, store-and-forward delivery, pluggable bridges, and privacy by default — the mechanism, briefly.'],
   ['developer.html', 'The wire format, every bridge, the reimplementation guide, and everything else with real technical depth.'],
   ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
@@ -279,7 +291,9 @@ function nav(self) {
   const items = navLinks
     .map(({ dst, label }) => {
       const isCurrent =
-        dst === self || (dst === 'developer.html' && developerHubPages.has(self));
+        dst === self ||
+        (dst === 'developer.html' && developerHubPages.has(self)) ||
+        (dst === 'apps.html' && appsSubPages.has(self));
       const active = isCurrent ? ' aria-current="page"' : '';
       return `<li><a href="${dst}"${active}>${label}</a></li>`;
     })
