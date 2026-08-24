@@ -7,6 +7,18 @@ for whoever comes past. No operating system, no Raspberry Pi, nothing to log in
 to. It is the smallest thing that can be a full SPORE node rather than a client
 of one.
 
+**Flash it and it works.** No pairing, no companion app, no configuration — a
+board with power is already relaying. Plugging something in doesn't switch it
+on; it just gives it one more way to pass messages along.
+
+**And that turns your phone into a gateway.** Connect a phone to the board over
+USB and the phone reaches the board's radio mesh, while the mesh reaches
+whatever the phone has — internet, Bluetooth, a shared folder. Messages cross
+from one to the other in both directions, for as long as the cable is in. Nothing
+on either side is running "gateway" code: the board passes messages between the
+things it's connected to, the phone does the same, and a route through both is
+just what that adds up to.
+
 **You cannot run this yet.** The toolchain and the core are done and building in
 CI; the radio, the storage and the phone link are not written. The honest state
 of each part is in the table further down, and the
@@ -58,9 +70,10 @@ than a repeater.</p>
 </div></div></div>
 
 <div class="col-4"><div class="card"><div class="card-body">
-<h2 class="text-h5">3. It hands them to you</h2>
+<h2 class="text-h5">3. It hands them over, if you ask</h2>
 <p class="text-muted">Plug in a USB cable, or connect over Bluetooth, and the
-board and your phone exchange whatever each is missing.</p>
+board and your phone swap whatever each is missing. Optional — steps 1 and 2
+carry on whether or not anyone ever does this.</p>
 </div></div></div>
 
 </div>

@@ -37,6 +37,33 @@ The first build also downloads and compiles ESP-IDF itself, which takes a long
 time; later builds reuse it. `HOME` is redirected because the image's own `esp`
 user home is not writable when the container runs as your uid.
 
+### Other variants
+
+The default target is ESP32-S3, which is what the roadmap and issue #149 name.
+Others build from the same source, but **the target, the `MCU` env var and the
+image all have to agree** — each image ships only its own chip's linker, and a
+mismatched `MCU` produces a binary that flashes and then crashes:
+
+```sh
+# LOLIN S2 Mini and other ESP32-S2 boards
+docker run --rm -v "$PWD":/work -w /work/esp32 -e MCU=esp32s2 \
+  espressif/idf-rust:esp32s2_latest \
+  bash -lc 'cargo build --release --target xtensa-esp32s2-espidf'
+```
+
+<!-- generated from boards.toml: python3 esp32/boards.py --table -->
+| Board | Target | Wi-Fi | Bluetooth | Native USB | SRAM |
+|---|---|---|---|---|---|
+| ESP32-S3 | `xtensa-esp32s3-espidf` | yes | BLE 5.0 | yes | 512 KB |
+| LOLIN S2 Mini | `xtensa-esp32s2-espidf` | yes | **none** | yes | 320 KB |
+
+The S2 has no Bluetooth radio of any kind — not a driver gap, the hardware is
+absent (ESP-IDF's own `soc_caps.h` defines neither `SOC_BT_SUPPORTED` nor
+`SOC_BLE_SUPPORTED` for it). The BLE bridge cannot run on an S2; USB is its
+tether. Its console also has to be routed over USB CDC rather than UART0, which
+`sdkconfig.defaults.esp32s2` does — without it a correctly-booting board looks
+completely dead.
+
 ## Footprint
 
 `size-report.sh` prints what M8's E1 checkpoint turns on. CI runs it on every

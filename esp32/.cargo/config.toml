@@ -1,3 +1,13 @@
+# Default target is ESP32-S3, which is what the roadmap, BRIDGES.md and issue
+# #149 all name. Other variants build from the same source by overriding both
+# the target and MCU together, e.g. for a LOLIN S2 Mini:
+#
+#   MCU=esp32s2 cargo build --release --target xtensa-esp32s2-espidf
+#
+# `[env]` below does not use `force`, so a MCU set in the environment wins.
+# Each variant needs its own `[target.*]` block: without one, Cargo falls back
+# to a default linker name (`xtensa-esp32s2-elf-gcc`) instead of `ldproxy`, and
+# the build fails at link with a missing-linker error after compiling fine.
 [build]
 target = "xtensa-esp32s3-espidf"
 
@@ -6,6 +16,14 @@ linker = "ldproxy"
 runner = "espflash flash --monitor"
 # `espidf_time64` matches ESP-IDF ≥5.0, where time_t is 64-bit. Getting this
 # wrong shows up as silently wrong timestamps rather than a build failure.
+rustflags = ["--cfg", "espidf_time64"]
+
+# ESP32-S2: single-core Xtensa LX7, Wi-Fi and native USB OTG, and **no
+# Bluetooth of any kind** — it is the one family member with no BT radio, so
+# the BLE bridge (M8/E5) cannot run here. USB-CDC (E4) is its tether.
+[target.xtensa-esp32s2-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
 rustflags = ["--cfg", "espidf_time64"]
 
 # The espidf targets have no prebuilt std, so it is built from source alongside

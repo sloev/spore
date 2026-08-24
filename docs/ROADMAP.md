@@ -368,6 +368,49 @@ raw 802.11 frames, persists its store to flash, and bridges to a phone or
 laptop over USB or BLE when one is nearby. Filed as
 [#149](https://github.com/sloev/spore/issues/149).
 
+**Flash it and it works; a tether is just another bridge (locked).** There is
+no standalone build and no tethered build, no mode switch, no pairing and no
+configuration step. A board that has been flashed and given power is already a
+working node. Binding on every task below:
+
+- **Untethered and unconfigured is the normal state.** The board boots and
+  carries traffic with nothing attached and nothing set up — the radio comes up
+  on a fixed default so that two boards out of the same box find each other with
+  no intervention. A board dropped in a field with a battery is the design
+  target, not a degraded case.
+- **A connection to another device is a *bridge*, not a mode.** USB serial, BLE
+  — these register on the hub exactly like the radio does, and the core floods
+  between all of them because that is what it already does for every other
+  bridge. Nothing in the firmware knows the word "tether". Plugging a cable in
+  adds an interface to a node that was already running; unplugging removes it and
+  changes nothing else.
+- **So gateway behaviour is emergent, not a feature.** A phone on USB OTG serial
+  gets the raw-802.11 mesh through the board, and the mesh gets the phone's
+  internet, Bluetooth and folder bridges back — because the board floods between
+  its two interfaces and the phone floods between its several. Neither end has a
+  "gateway" code path; it is two ordinary nodes each doing the one thing the core
+  has always done. **If a gateway role ever needs writing, something has gone
+  wrong** — the design has stopped being bridges-on-a-hub.
+- **Neither role is a build-time choice.** Selecting behaviour with a cargo
+  feature would mean two firmwares to test, two ways to be wrong, and "which one
+  is on this board?" as a question anyone ever has to ask.
+- **Configuration cannot require a tether.** Defaults have to be good enough to
+  relay out of the box, anything persistent lives in flash, and nothing waits on
+  a companion app — otherwise the tether is load-bearing by the back door.
+
+The ordering follows from this rather than the other way round: E2/E3 (radio,
+store) come before E4/E5 (USB, BLE) because a bridge attaches *to* a working
+node, so there has to be one to attach to.
+
+**The daemon speaks the same air interface (locked).** Raw 802.11 is not an
+embedded-only bridge. A Linux daemon with a monitor-mode-capable card runs the
+same frame format (E2d below), so a laptop is a peer of the boards rather than
+just something they tether to — which is what makes a mixed deployment of cheap
+relays and a real machine one mesh instead of two. The frame layout is written
+into [Bridges](BRIDGES.md) before either side is finished, because board-to-board
+interop happens by accident when both run our code, and board-to-laptop interop
+only happens if the framing is specified.
+
 This is less new architecture than it might look. The bridge-shape taxonomy
 already lists LoRa/Meshtastic as "message pipe" examples (`docs/DESIGN.md`
 §"Bridges & bindings") — raw 802.11 is another one, not a new shape. The
@@ -437,6 +480,8 @@ scoped.
 | `esp_wifi_80211_tx` injection wired as `DatagramTransport::send`, RX as `::recv`, driven through `run_datagram` (E2) | ⬜ todo | Message-pipe shape, `dgram` driver form — same family as LoRa/Meshtastic, so no new medium-independent logic |
 | Solo TX-shape test: an external monitor-mode sniffer confirms the injected frame's shape (E2) | ⬜ todo | Proves the injection path without needing a second SPORE node |
 | Device-pair relay: two boards exchange a real envelope over the air (E2) | ⬜ todo | 🧪 until this run happens |
+| Linux daemon raw-802.11 bridge: monitor mode + injection over `nl80211`, same frame format as the board (E2d) | ⬜ todo | The other end of the same air interface, so a laptop relays with the boards rather than only talking to them over a tether. Shares the frame layout and `Envelope::probe` filter with the ESP path — one wire format, two implementations. Needs a card whose driver supports monitor + injection (`iw list` → "monitor" and "AP/VLAN"), which is a hardware constraint, not a code one |
+| Frame-format note in [Bridges](BRIDGES.md): the exact 802.11 header, EtherType/vendor tag and payload layout both sides implement (E2d) | ⬜ todo | Interop contract. Board-to-board works if both run our code; board-to-laptop only works if the framing is written down, so this precedes the daemon bridge rather than documenting it afterwards |
 | `littlefs` binding + flash partition setup (partition table, mount/format-on-first-boot) (E3) | ⬜ todo | A second unfamiliar C dependency; deliberately sequenced after the radio driver so the two risks are retired one at a time, not together |
 | `littlefs`-backed `SpillBackend`: `put` / `get` / `remove` / `ids` (E3) | ⬜ todo | Implementation of the existing M2 contract (#87), not a new one. Same semantics as the filesystem backend: a `put` that does not land leaves the entry memory-only, and `get` answers `None` identically for absent, unreadable, or oversized |
 | Adopt the last run's spill at boot (E3) | ⬜ todo | Existing generic mechanic on the store — no new logic, just calling it with the flash backend |
