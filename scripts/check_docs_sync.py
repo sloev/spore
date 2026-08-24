@@ -22,6 +22,7 @@ Run: python3 scripts/check_docs_sync.py
 """
 import json
 import os
+import subprocess
 import sys
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -111,6 +112,25 @@ for target in re.findall(r"\]\(([^)]+)\)", bridges):
     path = target.split("#", 1)[0]
     if path and not os.path.exists(os.path.normpath(os.path.join(docs_dir, path))):
         errors.append(f"docs/BRIDGES.md: broken link to {target} (file not found)")
+
+# 4. the supported-board table in esp32/README.md is generated from
+# esp32/boards.toml, which is the single source of truth for target triples,
+# Docker images and radio capability. A board added to the manifest but not the
+# README (or edited in the README by hand) drifts silently otherwise, and the
+# thing it drifts about — which chip has Bluetooth — is exactly the sort of
+# detail someone plans a milestone around.
+boards_py = os.path.join(root, "esp32", "boards.py")
+readme_path = os.path.join(root, "esp32", "README.md")
+if os.path.exists(boards_py) and os.path.exists(readme_path):
+    generated = subprocess.run(
+        [sys.executable, boards_py, "--table"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    readme = open(readme_path, encoding="utf-8").read()
+    if generated not in readme:
+        errors.append(
+            "esp32/README.md: board table does not match esp32/boards.toml — "
+            "regenerate with: python3 esp32/boards.py --table"
+        )
 
 if errors:
     print("DOCS-SYNC FAIL — regenerate vectors and/or fix terminology:")

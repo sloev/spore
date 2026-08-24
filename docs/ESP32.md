@@ -7,10 +7,17 @@ for whoever comes past. No operating system, no Raspberry Pi, nothing to log in
 to. It is the smallest thing that can be a full SPORE node rather than a client
 of one.
 
-**It works with nothing attached.** No pairing, no companion app, no setup step
-before it does its job — a board with power is already relaying. Plugging in a
-phone or a laptop is how you get mail *out* of one you walked past, not how you
-switch it on.
+**Flash it and it works.** No pairing, no companion app, no configuration — a
+board with power is already relaying. Plugging something in doesn't switch it
+on; it just gives it one more way to pass messages along.
+
+**And that turns your phone into a gateway.** Connect a phone to the board over
+USB and the phone reaches the board's radio mesh, while the mesh reaches
+whatever the phone has — internet, Bluetooth, a shared folder. Messages cross
+from one to the other in both directions, for as long as the cable is in. Nothing
+on either side is running "gateway" code: the board passes messages between the
+things it's connected to, the phone does the same, and a route through both is
+just what that adds up to.
 
 **You cannot run this yet.** The toolchain and the core are done and building in
 CI; the radio, the storage and the phone link are not written. The honest state

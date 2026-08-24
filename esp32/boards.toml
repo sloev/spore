@@ -1,0 +1,61 @@
+# Supported ESP32 boards — the single source of truth for what SPORE builds for.
+#
+# Adding a device is one entry here plus, if its target is new, a matching
+# `[target.*]` block in .cargo/config.toml. `build.sh <board>` reads this file,
+# so nothing has to be remembered at the command line and the three things that
+# must agree — target triple, MCU, and Docker image — cannot drift apart.
+#
+# `scripts/check_docs_sync.py` fails CI if the table in esp32/README.md stops
+# matching this file, so the docs cannot go stale either.
+#
+# Every version below is pinned deliberately. `*_latest` image tags are the one
+# exception and are noted as such: Espressif rebuilds them, so a green CI run
+# does not guarantee a byte-identical toolchain next week. Pin to a dated tag if
+# that ever matters more than tracking upstream.
+
+[meta]
+# Bumped when the *shape* of this file changes, not when a board is added.
+schema = 1
+# ESP-IDF release every board builds against (esp32/.cargo/config.toml [env]).
+esp_idf_version = "v5.2.2"
+
+[boards.esp32s3]
+name = "ESP32-S3"
+aliases = ["s3", "esp32-s3", "devkitc-1"]
+target = "xtensa-esp32s3-espidf"
+mcu = "esp32s3"
+arch = "xtensa"
+image = "espressif/idf-rust:esp32s3_latest" # rolling tag, see note above
+default = true
+wifi = true
+bluetooth = "BLE 5.0"
+native_usb = true
+sram_kb = 512
+# Measured by size-report.sh on a release build; see the note in README.md about
+# why the flash figure is not byte-reproducible across build environments.
+flash_bytes = 542491
+ram_bytes = 67235
+notes = "The target the roadmap and issue #149 name. Has every radio, so it is the only board where E2-E5 can all run."
+
+[boards.esp32s2mini]
+name = "LOLIN S2 Mini"
+aliases = ["s2mini", "s2", "esp32-s2", "wemos-s2-mini"]
+target = "xtensa-esp32s2-espidf"
+mcu = "esp32s2"
+arch = "xtensa"
+image = "espressif/idf-rust:esp32s2_latest" # rolling tag, see note above
+default = false
+wifi = true
+# Not a driver gap: ESP-IDF's own soc_caps.h defines neither SOC_BT_SUPPORTED
+# nor SOC_BLE_SUPPORTED for the S2. The radio is absent, so M8/E5 can never run
+# on this board and USB is its only tether.
+bluetooth = "none"
+native_usb = true
+sram_kb = 320
+flash_bytes = 514119
+ram_bytes = 54316
+# No UART bridge chip: the chip's own USB goes straight to the connector, so the
+# default UART0 console talks to pins nothing is listening to and a healthy board
+# looks dead. sdkconfig.defaults.esp32s2 routes the console over USB CDC.
+console = "usb-cdc"
+notes = "Single-core LX7. Smaller build than the S3 — no Bluetooth stack to link in."
