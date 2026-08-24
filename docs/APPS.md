@@ -1,6 +1,7 @@
 # Get a node — apps & daemons
 
-Four ways to run the same node. Pick by what the machine in front of you has.
+Four ways to run the same node. Pick by what the machine in front of you has —
+and there is a fifth being built, for when the machine is a $5 board.
 
 <div class="grid">
 
@@ -42,6 +43,17 @@ prebuilt binary is published yet; build it from source.</p>
 <div class="card-footer cluster">
 <a class="btn" href="spore-seedsheet.html">Open Seed Sheet</a>
 <a class="btn btn-cancel" href="continuity.html">Why continuity</a>
+</div></div></div>
+
+<div class="col-6"><div class="card"><div class="card-body">
+<h2 class="text-h5">📡 ESP32 relay <span class="badge">In development</span></h2>
+<p class="text-muted">A $5 board as a standalone relay — no OS, no server, cheap
+enough to leave somewhere and not worry about.</p>
+<p class="text-muted">Not runnable yet: the core builds for the board, the radio
+and storage are still being written.</p>
+</div>
+<div class="card-footer cluster">
+<a class="btn btn-cancel" href="esp32.html">How it works</a>
 </div></div></div>
 
 </div>
