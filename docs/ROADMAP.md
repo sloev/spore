@@ -368,6 +368,24 @@ raw 802.11 frames, persists its store to flash, and bridges to a phone or
 laptop over USB or BLE when one is nearby. Filed as
 [#149](https://github.com/sloev/spore/issues/149).
 
+**Standalone first, tethered second (locked).** The board is a relay that a
+phone can *also* talk to — never a peripheral that needs one. Concretely, and
+binding on every task below:
+
+- It must boot and carry traffic with **nothing attached**: no pairing step, no
+  companion app, no provisioning over the tether before it is useful. A board
+  dropped in a field with a battery is the design target; a board on a desk next
+  to a laptop is the convenient case, not the intended one.
+- Configuration therefore cannot *require* a tether. Defaults have to be good
+  enough to relay out of the box, with anything persistent living in flash.
+- So the radio and the store (E2, E3) come before USB and BLE (E4, E5), which is
+  the order the task table already runs in. Building a tether first is tempting
+  because it is the easiest half to test — and it would quietly make the tether
+  load-bearing, which is the thing this rule exists to prevent.
+- Both halves still ship. "Tethered second" is an ordering and a dependency
+  direction, not a downgrade: the USB/BLE link is how a phone gets mail out of a
+  relay it walked past, and that is half the point of the board.
+
 This is less new architecture than it might look. The bridge-shape taxonomy
 already lists LoRa/Meshtastic as "message pipe" examples (`docs/DESIGN.md`
 §"Bridges & bindings") — raw 802.11 is another one, not a new shape. The

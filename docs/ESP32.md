@@ -7,6 +7,11 @@ for whoever comes past. No operating system, no Raspberry Pi, nothing to log in
 to. It is the smallest thing that can be a full SPORE node rather than a client
 of one.
 
+**It works with nothing attached.** No pairing, no companion app, no setup step
+before it does its job — a board with power is already relaying. Plugging in a
+phone or a laptop is how you get mail *out* of one you walked past, not how you
+switch it on.
+
 **You cannot run this yet.** The toolchain and the core are done and building in
 CI; the radio, the storage and the phone link are not written. The honest state
 of each part is in the table further down, and the
@@ -58,9 +63,10 @@ than a repeater.</p>
 </div></div></div>
 
 <div class="col-4"><div class="card"><div class="card-body">
-<h2 class="text-h5">3. It hands them to you</h2>
+<h2 class="text-h5">3. It hands them over, if you ask</h2>
 <p class="text-muted">Plug in a USB cable, or connect over Bluetooth, and the
-board and your phone exchange whatever each is missing.</p>
+board and your phone swap whatever each is missing. Optional — steps 1 and 2
+carry on whether or not anyone ever does this.</p>
 </div></div></div>
 
 </div>

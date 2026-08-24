@@ -1,0 +1,12 @@
+# ESP32-S2 overrides (esp-idf-sys picks up sdkconfig.defaults.<mcu> automatically).
+#
+# The S2 has no UART-to-USB bridge chip — the boards that use it, like the LOLIN
+# S2 Mini, wire the chip's own USB OTG peripheral straight to the connector. So
+# the default console on UART0 goes to pins nothing is listening to, and the
+# board looks dead on first flash even when it booted fine. Route the console
+# through USB CDC instead, which is the port you are already plugged into.
+CONFIG_ESP_CONSOLE_USB_CDC=y
+
+# Single core, and less SRAM than the S3 (320 KB), so the main task stack is
+# still raised for ed25519 signing but not as far as the S3's.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=24000
