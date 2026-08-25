@@ -94,6 +94,41 @@ cargo install espflash
 espflash flash --monitor target/xtensa-esp32s3-espidf/release/spore-esp32
 ```
 
+## Checking it actually works
+
+Reading a log and squinting at it is not a test. `diagnose.py` attaches over
+serial, waits for the firmware to say what it is, and turns that into a verdict:
+
+```sh
+./diagnose.py                 # checks, verdict, exit 0/1
+./diagnose.py --reset         # pulse reset first, to catch the boot-only lines
+./diagnose.py --monitor       # checks, then stay attached as a terminal
+./diagnose.py --monitor-only  # just a terminal
+```
+
+```
+  [PASS ] board is talking           41 lines read
+  [PASS ] identity                   addr=b1aea40a34b8f146
+  [PASS ] signature verifies         sig=ok
+  [PASS ] probe agrees with decode   121==121 bytes
+  [PASS ] scheduler is ticking       uptime 30s -> 60s over 2 summaries
+  [PASS ] heap is stable             226396 -> 226390 bytes (-6)
+  [PASS ] no panics or resets        clean
+```
+
+Two of those can only be answered by a running board. **Signature verifies** is
+whether ed25519 actually works on this silicon, not whether it compiled for it.
+**Heap is stable** compares free heap across summaries, so a leak shows up here
+and nowhere else — static section sizes cannot see one, and neither can a single
+reading.
+
+`.....` means *not observed in this window*, which is not a failure: the
+probe/decode line only prints at boot, so catching it needs `--reset` or luck.
+Exit status is 1 only for something actually observed to be wrong.
+
+It tolerates the port vanishing mid-run, because on a board whose console is its
+own USB port that is what a reset looks like from the host side.
+
 ## What the bring-up binary does
 
 `src/main.rs` is deliberately the smallest thing that exercises what is most
