@@ -69,15 +69,20 @@ if [ "${1:-}" = "--flash" ]; then
   # Debian and Ubuntu) refuse pip into the system Python, and quietly overriding
   # that on someone's behalf is not this script's call to make.
   VENV="$PWD/.venv"
+  # Resolved as "<python> -m esptool" rather than a bare `esptool` on PATH,
+  # because a pip --user install lives in ~/.local and disappears under sudo —
+  # and sudo is exactly what an unwritable port drives you to. Carrying the
+  # interpreter and its site directory explicitly survives that.
+  ESPTOOL_PY=""
+  ESPTOOL_SITE=""
   if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import esptool" 2>/dev/null; then
-    ESPTOOL="$VENV/bin/python -m esptool"
-  elif command -v esptool.py >/dev/null 2>&1; then
-    ESPTOOL="esptool.py"
+    ESPTOOL_PY="$VENV/bin/python"
   elif python3 -c "import esptool" 2>/dev/null; then
-    ESPTOOL="python3 -m esptool"
+    ESPTOOL_PY="$(command -v python3)"
+    ESPTOOL_SITE="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null || true)"
   elif python3 -m venv "$VENV" >/dev/null 2>&1 && "$VENV/bin/pip" install --quiet esptool >/dev/null 2>&1; then
     echo "installed esptool into esp32/.venv"
-    ESPTOOL="$VENV/bin/python -m esptool"
+    ESPTOOL_PY="$VENV/bin/python"
   else
     rm -rf "$VENV"
     cat >&2 <<'MSG'
@@ -122,13 +127,24 @@ MSG
 
   # 660 root:dialout is the usual mode, and a desktop login is often not in that
   # group. Say so before esptool fails with a bare permission error.
+  # A port at root:dialout 660 that your login is not in is the normal case, not
+  # an error. Say how to fix it for good, then get on with this flash under sudo
+  # rather than making you run the whole script as root — which would lose a
+  # pip --user esptool and put root-owned files in the build directory.
+  SUDO=""
   if [ ! -w "$PORT" ]; then
-    echo "note: $PORT is not writable by you (it is $(stat -c '%U:%G mode %a' "$PORT"))." >&2
-    echo "      Either add yourself to that group and log back in, or re-run with sudo." >&2
+    PORT_GROUP="$(stat -c '%G' "$PORT")"
+    echo "note: $PORT is $(stat -c '%U:%G mode %a' "$PORT") and you are not in '$PORT_GROUP'."
+    echo "      Fix it permanently (no logout needed thanks to newgrp):"
+    echo "        sudo usermod -aG $PORT_GROUP $USER && newgrp $PORT_GROUP"
+    echo "      Using sudo for this flash."
+    echo
+    SUDO="sudo"
+    [ -n "$ESPTOOL_SITE" ] && SUDO="sudo PYTHONPATH=$ESPTOOL_SITE"
   fi
 
   echo
-  $ESPTOOL --chip "$MCU" --port "$PORT" write_flash 0x0 "$OUT"
+  $SUDO "$ESPTOOL_PY" -m esptool --chip "$MCU" --port "$PORT" write-flash 0x0 "$OUT"
 
   echo
   echo "── Done ───────────────────────────────────────────────────"
