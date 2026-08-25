@@ -53,7 +53,8 @@ fn main() {
         hex(&env.id()),
         env.verify()
     );
-    assert!(env.verify(), "a signature this node just made must verify");
+    let boot_sig_ok = env.verify();
+    assert!(boot_sig_ok, "a signature this node just made must verify");
 
     // Round-trip it through the same front door a bridge would use, including
     // the E2 pre-filter the raw-802.11 receive path is built on.
@@ -72,8 +73,21 @@ fn main() {
     loop {
         let due = node.tick(now());
         ticks += 1;
-        if ticks % 12 == 0 {
-            log::info!("tick #{ticks}: {} due, heap {} bytes", due.len(), free_heap());
+        // Everything above this loop is printed once, at boot — and on a board
+        // whose console *is* its USB port, nothing is listening then: the host
+        // only attaches a moment later, by which time the identity and the
+        // signature check have scrolled past unread. So repeat the summary on a
+        // slow cycle. Attaching at any moment tells you which node this is and
+        // that its crypto still works, rather than only telling you it is alive.
+        if ticks % 6 == 0 {
+            log::info!(
+                "up {}s · addr={} · sig={} · heap={} · due={}",
+                now(),
+                hex(&node.addr),
+                if boot_sig_ok { "ok" } else { "FAILED" },
+                free_heap(),
+                due.len()
+            );
         }
         FreeRtos::delay_ms(5_000);
     }
