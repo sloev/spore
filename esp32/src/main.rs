@@ -53,12 +53,14 @@ fn main() {
         hex(&env.id()),
         env.verify()
     );
-    assert!(env.verify(), "a signature this node just made must verify");
+    let boot_sig_ok = env.verify();
+    assert!(boot_sig_ok, "a signature this node just made must verify");
 
     // Round-trip it through the same front door a bridge would use, including
     // the E2 pre-filter the raw-802.11 receive path is built on.
     let probed = Envelope::probe(&wire);
     let (decoded, _) = Envelope::decode(&wire).expect("our own envelope must decode");
+    let boot_probe_ok = probed == Some(wire.len()) && decoded.verify();
     log::info!("probe={:?} (wire is {} bytes), decoded ok={}", probed, wire.len(), decoded.verify());
 
     log::info!("heap used by identity + one envelope: {} bytes", heap_before.saturating_sub(free_heap()));
@@ -72,8 +74,31 @@ fn main() {
     loop {
         let due = node.tick(now());
         ticks += 1;
-        if ticks % 12 == 0 {
-            log::info!("tick #{ticks}: {} due, heap {} bytes", due.len(), free_heap());
+        // Everything above this loop is printed once, at boot — and on a board
+        // whose console *is* its USB port, nothing is listening then: the host
+        // only attaches a moment later, by which time the identity and the
+        // signature check have scrolled past unread. So repeat the summary on a
+        // slow cycle. Attaching at any moment tells you which node this is and
+        // that its crypto still works, rather than only telling you it is alive.
+        // Every third tick, not every sixth: a diagnostic has to see at least two
+        // of these to say anything about whether uptime advances or heap holds,
+        // and at 30s apart that took longer to observe than anyone waits.
+        //
+        // It carries the probe result too, so every check is answerable from
+        // this line alone. Depending on the boot output was a mistake — on a
+        // board whose console is its own USB port, boot has already happened by
+        // the time anything can listen, and resetting to catch it does not work
+        // here either: an S2 ignores the DTR/RTS toggle that resets other chips.
+        if ticks % 3 == 0 {
+            log::info!(
+                "up {}s · addr={} · sig={} · probe={} · heap={} · due={}",
+                now(),
+                hex(&node.addr),
+                if boot_sig_ok { "ok" } else { "FAILED" },
+                if boot_probe_ok { "ok" } else { "FAILED" },
+                free_heap(),
+                due.len()
+            );
         }
         FreeRtos::delay_ms(5_000);
     }

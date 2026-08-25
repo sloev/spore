@@ -36,6 +36,10 @@ sram_kb = 512
 flash_bytes = 542491
 ram_bytes = 67235
 notes = "The target the roadmap and issue #149 name. Has every radio, so it is the only board where E2-E5 can all run."
+# How to get this board into download mode. Printed by build.sh before flashing,
+# because it differs per board and getting it wrong looks like a dead board.
+reset_buttons = "EN (reset) and BOOT"
+bootloader_steps = "Hold BOOT · tap EN · release BOOT"
 
 [boards.esp32s2mini]
 name = "LOLIN S2 Mini"
@@ -59,3 +63,6 @@ ram_bytes = 54316
 # looks dead. sdkconfig.defaults.esp32s2 routes the console over USB CDC.
 console = "usb-cdc"
 notes = "Single-core LX7. Smaller build than the S3 — no Bluetooth stack to link in."
+# The two tiny buttons on a LOLIN S2 Mini are silkscreened RST and 0; 0 is BOOT.
+reset_buttons = "RST and 0"
+bootloader_steps = "Hold 0 · tap RST · release 0"
