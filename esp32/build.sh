@@ -149,9 +149,12 @@ MSG
 
   echo
   echo "── Done ───────────────────────────────────────────────────"
-  echo "   Tap RST to leave download mode and start it."
-  echo "   Watch the log:"
-  echo "     python3 -m serial.tools.miniterm --raw $PORT 115200"
+  echo "   Tap RST to leave download mode and start it, then check it:"
+  echo
+  echo "     ./esp32/diagnose.py --reset"
+  echo
+  echo "   That verifies identity, signing, ticking and heap, and prints a"
+  echo "   verdict. Add --monitor to stay attached as a terminal afterwards."
 elif [ "${1:-}" = "--image" ]; then
   # Build a flashable .bin instead of flashing directly, for when espflash in a
   # container cannot drive the board — which is the normal case on chips with
