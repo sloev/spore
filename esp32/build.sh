@@ -48,31 +48,93 @@ docker_run() {
     -e MCU="$MCU" "$@"
 }
 
+save_image() {
+  OUT="spore-$BOARD.bin"
+  docker_run "$IMAGE" \
+    bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
+              cargo build --release --target $TARGET \
+              && espflash save-image --chip $MCU --merge --skip-padding $BIN $OUT"
+}
+
 if [ "${1:-}" = "--flash" ]; then
   PORT="${SPORE_PORT:-/dev/ttyACM0}"
-  [ -e "$PORT" ] || { echo "no board at $PORT — set SPORE_PORT, or check it is in bootloader mode" >&2; exit 1; }
 
-  # The port is usually root:dialout 660 and a desktop login is often not in
-  # dialout, so hand the container the device node's *actual* group rather than
-  # assuming the name — it is `uucp` on some distributions. This is why flashing
-  # does not need sudo.
-  DEV_GID="$(stat -c '%g' "$PORT")"
+  # Flashing runs on the host, not in the container. A chip with native USB is
+  # providing the very USB device the flasher talks over, so its ROM bootloader
+  # resets that stack partway through the write; the host handles the
+  # re-enumeration, while a container's --device binding was resolved once at
+  # start and is left pointing at a node that no longer exists.
+  # Find esptool, or explain the options and stop. Deliberately does not install
+  # anything outside esp32/.venv: distributions that follow PEP 668 (current
+  # Debian and Ubuntu) refuse pip into the system Python, and quietly overriding
+  # that on someone's behalf is not this script's call to make.
+  VENV="$PWD/.venv"
+  if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import esptool" 2>/dev/null; then
+    ESPTOOL="$VENV/bin/python -m esptool"
+  elif command -v esptool.py >/dev/null 2>&1; then
+    ESPTOOL="esptool.py"
+  elif python3 -c "import esptool" 2>/dev/null; then
+    ESPTOOL="python3 -m esptool"
+  elif python3 -m venv "$VENV" >/dev/null 2>&1 && "$VENV/bin/pip" install --quiet esptool >/dev/null 2>&1; then
+    echo "installed esptool into esp32/.venv"
+    ESPTOOL="$VENV/bin/python -m esptool"
+  else
+    rm -rf "$VENV"
+    cat >&2 <<'MSG'
+esptool is needed to flash, and could not be installed automatically.
+A venv needs python3-venv, which is packaged separately on Debian/Ubuntu.
+Pick whichever you prefer:
 
-  # --no-stub on chips with native USB (S2, S3, C3): the ROM bootloader is
-  # talking to us over USB-CDC provided by the chip itself, and loading the
-  # flash stub resets that USB stack. The device re-enumerates, the host makes a
-  # new node, and the `--device` passthrough this container started with is now
-  # stale — which surfaces as "Communication error while flashing device"
-  # immediately after "Using flash stub". Flashing straight from ROM is slower
-  # and avoids the reset entirely.
-  STUB=""
-  case "$(python3 "$B" --field "$BOARD" native_usb)" in
-    true) STUB="--no-stub" ;;
-  esac
+  sudo apt install python3-venv        # then re-run this script; it does the rest
+  pipx install esptool                 # if you have pipx
+  pip3 install --user --break-system-packages esptool
 
-  docker_run -e ESPFLASH_PORT="$PORT" --device="$PORT" --group-add "$DEV_GID" "$IMAGE" \
-    bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
-              cargo build --release --target $TARGET && espflash flash $STUB --monitor $BIN"
+The last one is what the PEP 668 error is warning about. For esptool it is
+fairly harmless — nothing in the OS depends on it — but it is your call, which
+is why this script will not do it for you.
+MSG
+    exit 1
+  fi
+
+  save_image
+  SIZE=$(du -h "$OUT" | cut -f1)
+  echo
+  echo "wrote esp32/$OUT ($SIZE)"
+
+  # The board sits in download mode only while you hold it there, and a board
+  # that is merely running looks identical to one that failed to flash — so say
+  # exactly which buttons, per board, rather than leaving it to be guessed.
+  echo
+  echo "── Put the board in download mode ─────────────────────────"
+  echo "   $(python3 "$B" --field "$BOARD" name) has two buttons: $(python3 "$B" --field "$BOARD" reset_buttons)"
+  echo "   $(python3 "$B" --field "$BOARD" bootloader_steps)"
+  echo
+
+  # Waiting beats failing: the port disappears while the board resets and comes
+  # back a moment later, so a flash started too eagerly dies on a missing node.
+  printf "Waiting for %s " "$PORT"
+  for _ in $(seq 1 60); do
+    [ -e "$PORT" ] && break
+    printf "."; sleep 1
+  done
+  echo
+  [ -e "$PORT" ] || { echo "still nothing at $PORT — set SPORE_PORT if it enumerates elsewhere" >&2; exit 1; }
+
+  # 660 root:dialout is the usual mode, and a desktop login is often not in that
+  # group. Say so before esptool fails with a bare permission error.
+  if [ ! -w "$PORT" ]; then
+    echo "note: $PORT is not writable by you (it is $(stat -c '%U:%G mode %a' "$PORT"))." >&2
+    echo "      Either add yourself to that group and log back in, or re-run with sudo." >&2
+  fi
+
+  echo
+  $ESPTOOL --chip "$MCU" --port "$PORT" write_flash 0x0 "$OUT"
+
+  echo
+  echo "── Done ───────────────────────────────────────────────────"
+  echo "   Tap RST to leave download mode and start it."
+  echo "   Watch the log:"
+  echo "     python3 -m serial.tools.miniterm --raw $PORT 115200"
 elif [ "${1:-}" = "--image" ]; then
   # Build a flashable .bin instead of flashing directly, for when espflash in a
   # container cannot drive the board — which is the normal case on chips with

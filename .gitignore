@@ -35,3 +35,4 @@ android/app/src/main/assets/webtransports/
 
 # Flashable firmware images produced by esp32/build.sh --image.
 /esp32/*.bin
+/esp32/.venv/
