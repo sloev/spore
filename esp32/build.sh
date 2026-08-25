@@ -73,6 +73,26 @@ if [ "${1:-}" = "--flash" ]; then
   docker_run -e ESPFLASH_PORT="$PORT" --device="$PORT" --group-add "$DEV_GID" "$IMAGE" \
     bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
               cargo build --release --target $TARGET && espflash flash $STUB --monitor $BIN"
+elif [ "${1:-}" = "--image" ]; then
+  # Build a flashable .bin instead of flashing directly, for when espflash in a
+  # container cannot drive the board — which is the normal case on chips with
+  # native USB, since the ROM bootloader resets its own USB stack mid-flash and
+  # the container's --device binding goes stale. Flash this from the host, where
+  # a re-enumerating device is not a problem:
+  #
+  #   pip3 install --user esptool
+  #   esptool.py --chip esp32s2 --port /dev/ttyACM0 write_flash 0x0 esp32/spore-<board>.bin
+  #
+  # --merge puts bootloader, partition table and app in one file written at 0x0;
+  # --skip-padding keeps it ~600 KB instead of padding out to the full 4 MB.
+  OUT="spore-$BOARD.bin"
+  docker_run "$IMAGE" \
+    bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
+              cargo build --release --target $TARGET \
+              && espflash save-image --chip $MCU --merge --skip-padding $BIN $OUT"
+  echo
+  echo "wrote esp32/$OUT — flash it from the host with:"
+  echo "  esptool.py --chip $MCU --port ${SPORE_PORT:-/dev/ttyACM0} write_flash 0x0 esp32/$OUT"
 else
   docker_run "$IMAGE" \
     bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
