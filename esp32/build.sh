@@ -74,12 +74,10 @@ if [ "${1:-}" = "--flash" ]; then
   # and sudo is exactly what an unwritable port drives you to. Carrying the
   # interpreter and its site directory explicitly survives that.
   ESPTOOL_PY=""
-  ESPTOOL_SITE=""
   if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import esptool" 2>/dev/null; then
     ESPTOOL_PY="$VENV/bin/python"
   elif python3 -c "import esptool" 2>/dev/null; then
     ESPTOOL_PY="$(command -v python3)"
-    ESPTOOL_SITE="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null || true)"
   elif python3 -m venv "$VENV" >/dev/null 2>&1 && "$VENV/bin/pip" install --quiet esptool >/dev/null 2>&1; then
     echo "installed esptool into esp32/.venv"
     ESPTOOL_PY="$VENV/bin/python"
@@ -127,24 +125,27 @@ MSG
 
   # 660 root:dialout is the usual mode, and a desktop login is often not in that
   # group. Say so before esptool fails with a bare permission error.
-  # A port at root:dialout 660 that your login is not in is the normal case, not
-  # an error. Say how to fix it for good, then get on with this flash under sudo
-  # rather than making you run the whole script as root — which would lose a
-  # pip --user esptool and put root-owned files in the build directory.
-  SUDO=""
+  # A port at root:dialout 660 that your login is not in is the normal case on a
+  # fresh machine, not an error to work around. Say how to fix it and stop —
+  # reaching for sudo here would mean sudo forever, and would drag in the whole
+  # mess of a pip --user esptool that root cannot see.
   if [ ! -w "$PORT" ]; then
     PORT_GROUP="$(stat -c '%G' "$PORT")"
-    echo "note: $PORT is $(stat -c '%U:%G mode %a' "$PORT") and you are not in '$PORT_GROUP'."
-    echo "      Fix it permanently (no logout needed thanks to newgrp):"
-    echo "        sudo usermod -aG $PORT_GROUP $USER && newgrp $PORT_GROUP"
-    echo "      Using sudo for this flash."
-    echo
-    SUDO="sudo"
-    [ -n "$ESPTOOL_SITE" ] && SUDO="sudo PYTHONPATH=$ESPTOOL_SITE"
+    cat >&2 <<MSG
+
+$PORT is $(stat -c '%U:%G mode %a' "$PORT") and you are not in '$PORT_GROUP'.
+
+Add yourself to it — newgrp applies it to this shell, so no logout:
+
+  sudo usermod -aG $PORT_GROUP $USER && newgrp $PORT_GROUP
+
+Then re-run this, and flashing will not need root again.
+MSG
+    exit 1
   fi
 
   echo
-  $SUDO "$ESPTOOL_PY" -m esptool --chip "$MCU" --port "$PORT" write-flash 0x0 "$OUT"
+  "$ESPTOOL_PY" -m esptool --chip "$MCU" --port "$PORT" write-flash 0x0 "$OUT"
 
   echo
   echo "── Done ───────────────────────────────────────────────────"
