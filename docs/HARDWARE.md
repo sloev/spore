@@ -34,6 +34,7 @@ two different consumer routers can tell you whether the ladder actually reaches.
 | 17 | **Copyparty / WebDAV** | A copyparty share (`copyparty -v .::rw`); `spore copyparty:http://host:3923/bag/` on two machines | `<hexid>.spore` files appear in the share; each node imports the other's within one poll |
 | 18 | **BLE generic (NUS)** | Chrome desktop web node → "Web Bluetooth", an nRF/ESP32 running Nordic UART | KISS frames cross; MTU chunking reassembles |
 | 19 | **Direct across two real NATs** | Two daemons on different home connections (not the same LAN, not a VPN). Both `direct: 0.0.0.0:PORT` + `direct-stun: <server>`; one also `direct-to: <other's address>`, with a mesh path between them (a shared `tcp:` peer is enough) | each side prints a reflexive locator, then `pipe … up with … (punched)` — **`punched`, not `no punch, plain connect`**. Fallback on a reflexive candidate means the punch did not land: note the NAT type on both ends, since two symmetric NATs are the case no punch solves and are what `direct-iroh:` exists for |
+| 21 | **ESP32 bring-up** (M8/E1) | `./esp32/build.sh s2mini --flash`, then `./esp32/diagnose.py`. No second device needed | all seven checks pass: identity derived, `sig=ok` (a signature the board made verifies **on** the board), `probe=ok`, uptime advancing, heap flat, no panics |
 | 20 | **NFC tap** | Two Android phones on Chrome over **HTTPS** with the web node open, or one phone plus an NTAG213/216 tag; tap → "Web NFC" | the `application/x-spore` record is written and read back; an envelope crosses in one tap. A tag holding anything else (a URL, another app's record) is ignored rather than mis-parsed. Objects past the tag's capacity should take several taps and still reassemble |
 
 **Recording results.** Append a dated line to the table's history below when a
@@ -42,4 +43,26 @@ row is verified (device, OS/firmware, result). A row with no history is still a
 
 ## History
 
-*(none recorded yet)*
+**Row 21 — ESP32 bring-up — 2026-08-25 — PASS.** LOLIN S2 Mini
+(ESP32-S2FNR2 rev v1.0, single core 240 MHz, 4 MB flash, 2 MB PSRAM, USB-OTG,
+MAC `80:65:99:49:8f:6e`), flashed from Linux with esptool 5.3.1.
+
+```
+up 11s · addr=52e36ddf70b65d9a · sig=ok · probe=ok · heap=226368 · due=0
+up 26s · addr=52e36ddf70b65d9a · sig=ok · probe=ok · heap=226368 · due=0
+up 41s · addr=52e36ddf70b65d9a · sig=ok · probe=ok · heap=226368 · due=0
+```
+
+The claim that matters is `sig=ok`: a signature this board produced verified on
+this board, so ed25519 runs on Xtensa rather than merely compiling for it.
+`probe=ok` confirms `Envelope::probe` agrees with `decode` on real silicon.
+Free heap held at 226,368 bytes across all three readings — no drift, which is
+the only way a leak would have shown, and not something static section sizes
+can tell you.
+
+**Known and expected: the identity does not survive a reboot.** An earlier run
+on the same board reported `addr=8a82bcbd735aed52`. Nothing is wrong — the
+runtime supplies no storage nutrient yet, so the seed is generated fresh at every
+boot and nothing is written to flash. M8/E3 is what makes an address persist;
+until then a power cycle is a new node.
+
