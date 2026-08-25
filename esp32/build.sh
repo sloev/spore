@@ -51,9 +51,28 @@ docker_run() {
 if [ "${1:-}" = "--flash" ]; then
   PORT="${SPORE_PORT:-/dev/ttyACM0}"
   [ -e "$PORT" ] || { echo "no board at $PORT — set SPORE_PORT, or check it is in bootloader mode" >&2; exit 1; }
-  docker_run -e ESPFLASH_PORT="$PORT" --device="$PORT" "$IMAGE" \
+
+  # The port is usually root:dialout 660 and a desktop login is often not in
+  # dialout, so hand the container the device node's *actual* group rather than
+  # assuming the name — it is `uucp` on some distributions. This is why flashing
+  # does not need sudo.
+  DEV_GID="$(stat -c '%g' "$PORT")"
+
+  # --no-stub on chips with native USB (S2, S3, C3): the ROM bootloader is
+  # talking to us over USB-CDC provided by the chip itself, and loading the
+  # flash stub resets that USB stack. The device re-enumerates, the host makes a
+  # new node, and the `--device` passthrough this container started with is now
+  # stale — which surfaces as "Communication error while flashing device"
+  # immediately after "Using flash stub". Flashing straight from ROM is slower
+  # and avoids the reset entirely.
+  STUB=""
+  case "$(python3 "$B" --field "$BOARD" native_usb)" in
+    true) STUB="--no-stub" ;;
+  esac
+
+  docker_run -e ESPFLASH_PORT="$PORT" --device="$PORT" --group-add "$DEV_GID" "$IMAGE" \
     bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
-              cargo build --release --target $TARGET && espflash flash --monitor $BIN"
+              cargo build --release --target $TARGET && espflash flash $STUB --monitor $BIN"
 else
   docker_run "$IMAGE" \
     bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
