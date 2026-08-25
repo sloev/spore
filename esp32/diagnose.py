@@ -28,8 +28,8 @@ except ImportError:
 # The repeating line the firmware prints every sixth tick, e.g.
 #   up 35s · addr=b1aea40a34b8f146 · sig=ok · heap=226396 · due=0
 SUMMARY = re.compile(
-    r"up (?P<up>\d+)s .*?addr=(?P<addr>[0-9a-f]+) .*?sig=(?P<sig>\w+) "
-    r".*?heap=(?P<heap>\d+) .*?due=(?P<due>\d+)"
+    r"up (?P<up>\d+)s .*?addr=(?P<addr>[0-9a-f]+) .*?sig=(?P<sig>\w+)"
+    r"(?: .*?probe=(?P<probe>\w+))? .*?heap=(?P<heap>\d+) .*?due=(?P<due>\d+)"
 )
 # Boot-only lines, caught if we happen to attach in time or after a reset.
 IDENTITY = re.compile(r"identity: addr=(?P<addr>[0-9a-f]+)")
@@ -52,7 +52,7 @@ class Checks:
     def feed(self, line):
         self.lines += 1
         if m := SUMMARY.search(line):
-            self.summaries.append({k: m.group(k) for k in ("up", "addr", "sig", "heap", "due")})
+            self.summaries.append({k: m.group(k) for k in ("up", "addr", "sig", "probe", "heap", "due")})
         if m := IDENTITY.search(line):
             self.identity = m.group("addr")
         if m := SIGNED.search(line):
@@ -85,8 +85,11 @@ class Checks:
         if self.probe:
             agree = self.probe["probe"] == self.probe["wire"] and self.probe["ok"] == "true"
             out.append((agree, "probe agrees with decode", f"{self.probe['probe']}=={self.probe['wire']} bytes"))
+        elif self.summaries and self.summaries[-1].get("probe"):
+            ok = self.summaries[-1]["probe"] == "ok"
+            out.append((ok, "probe agrees with decode", "probe=ok" if ok else "PROBE DISAGREED"))
         else:
-            out.append((None, "probe agrees with decode", "boot-only line, not seen"))
+            out.append((None, "probe agrees with decode", "not reported by this firmware"))
 
         # Ticks must advance, or the scheduling nutrient is not being supplied
         # and the node only maintains itself when traffic happens to arrive.
@@ -200,7 +203,8 @@ def main():
     ap.add_argument("--monitor-only", action="store_true", help="no checks, just watch")
     ap.add_argument("--quiet", action="store_true", help="verdict only, do not echo the log")
     ap.add_argument("--reset", action="store_true",
-                    help="pulse DTR/RTS first, to catch the boot-only lines")
+                    help="pulse DTR/RTS first; ignored by native-USB parts like the S2, "
+                         "and unnecessary now that the summary carries every check")
     args = ap.parse_args()
 
     if args.monitor_only:
