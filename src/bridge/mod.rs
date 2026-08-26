@@ -36,6 +36,11 @@ pub mod foldersync;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod i2p;
 pub mod icmp;
+// Raw 802.11 framing. Portable and platform-free on purpose: the ESP32 firmware
+// (M8/E2) and the Linux monitor-mode bridge (M8/E2d) are two implementations of
+// one wire format, so the codec is shared and tested here rather than written
+// twice. Compiles everywhere, including wasm, since it is pure byte handling.
+pub mod ieee80211;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod spool;
 #[cfg(not(target_arch = "wasm32"))]
