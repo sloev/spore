@@ -10,8 +10,14 @@
 //! likely to break on an MCU: the four nutrients the core needs from whatever
 //! hosts it (randomness, time, scheduling, storage) and one real signature.
 
+mod radio;
+
+use std::sync::atomic::AtomicBool;
+
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::sys as idf;
+use spore::bridge::driver::run_datagram;
+use spore::bridge::hub::Hub;
 use spore::{ty, Envelope, Node, ZERO_DEST};
 
 fn hex(bytes: &[u8]) -> String {
@@ -37,8 +43,9 @@ fn main() {
     // that to ESP-IDF's hardware TRNG (`esp_fill_random`), so no shim is needed;
     // if that ever stopped being true this line is where it would show up.
     let heap_before = free_heap();
-    let mut node = Node::new("esp32-bringup", &["news"]);
-    log::info!("identity: addr={} (seed is not logged)", hex(&node.addr));
+    let node = Node::new("esp32-relay", &["news"]);
+    let addr = node.addr;
+    log::info!("identity: addr={} (seed is not logged)", hex(&addr));
 
     // --- One real signature --------------------------------------------------
     // The heaviest crypto the core does, and the most likely thing to blow a
@@ -65,21 +72,53 @@ fn main() {
 
     log::info!("heap used by identity + one envelope: {} bytes", heap_before.saturating_sub(free_heap()));
 
+    // --- The radio (M8/E2) ---------------------------------------------------
+    // Everything above proved the core runs here. This is the part that makes it
+    // a relay rather than a node talking to itself: raw 802.11, no access point,
+    // nothing associated, on a fixed channel so two boards out of the same box
+    // find each other with no configuration.
+    let hub = Hub::new(node);
+    let mut radio_mac = None;
+    match radio::Wifi80211::new(radio::DEFAULT_CHANNEL) {
+        Ok(t) => {
+            let mac = t.mac();
+            radio_mac = Some(mac);
+            log::info!(
+                "radio up: raw 802.11 ch{} mac={} mtu={}",
+                radio::DEFAULT_CHANNEL,
+                hexb(&mac),
+                spore::bridge::ieee80211::MAX_PAYLOAD
+            );
+            // One thread, owning the bridge loop. `run_datagram` is the same
+            // shared loop every other dgram bridge uses — nothing here is
+            // ESP-specific except the transport it was handed.
+            let (iface, rx) = hub.register();
+            let hub_for_radio = hub.clone();
+            std::thread::Builder::new()
+                .stack_size(8192)
+                .spawn(move || {
+                    static STOP: AtomicBool = AtomicBool::new(false);
+                    if let Err(e) = run_datagram(hub_for_radio, iface, rx, &STOP, t) {
+                        log::error!("radio bridge stopped: {e}");
+                    }
+                })
+                .expect("spawning the radio bridge");
+        }
+        // A board with no working radio is still a node: it holds what it has and
+        // keeps its own state. Saying so beats refusing to boot, and it keeps the
+        // "flash it and it works" promise honest on a board that cannot transmit.
+        Err(e) => log::error!("radio failed to start ({e}) — continuing without it"),
+    }
+
     // --- Scheduling nutrient -------------------------------------------------
     // Without this the node only ever maintains itself when traffic happens to
-    // arrive, which on a solo, often-offline relay means effectively never. A
-    // FreeRTOS delay loop is the whole contract: call `tick` on a timer.
+    // arrive, which on a solo, often-offline relay means effectively never.
+    // `Hub::tick` drives it and dispatches whatever falls due to every bridge.
     log::info!("entering tick loop — heap now {} bytes", free_heap());
     let mut ticks: u32 = 0;
     loop {
-        let due = node.tick(now());
+        hub.tick();
         ticks += 1;
-        // Everything above this loop is printed once, at boot — and on a board
-        // whose console *is* its USB port, nothing is listening then: the host
-        // only attaches a moment later, by which time the identity and the
-        // signature check have scrolled past unread. So repeat the summary on a
-        // slow cycle. Attaching at any moment tells you which node this is and
-        // that its crypto still works, rather than only telling you it is alive.
         // Every third tick, not every sixth: a diagnostic has to see at least two
         // of these to say anything about whether uptime advances or heap holds,
         // and at 30s apart that took longer to observe than anyone waits.
@@ -91,20 +130,29 @@ fn main() {
         // here either: an S2 ignores the DTR/RTS toggle that resets other chips.
         if ticks % 3 == 0 {
             log::info!(
-                "up {}s · addr={} · sig={} · probe={} · heap={} · due={}",
+                "up {}s · addr={} · sig={} · probe={} · heap={} · radio={} · rxdrop={}",
                 now(),
-                hex(&node.addr),
+                hex(&addr),
                 if boot_sig_ok { "ok" } else { "FAILED" },
                 if boot_probe_ok { "ok" } else { "FAILED" },
                 free_heap(),
-                due.len()
+                match &radio_mac {
+                    Some(m) => hexb(m),
+                    None => "down".into(),
+                },
+                radio::dropped()
             );
         }
         FreeRtos::delay_ms(5_000);
     }
 }
 
-/// Time nutrient. The board has no RTC battery and no network yet, so on a cold
+/// MAC addresses read better colon-separated than as a hex run.
+fn hexb(mac: &[u8; 6]) -> String {
+    mac.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":")
+}
+
+/// Time nutrient. The board has no RTC battery and no network, so on a cold
 /// boot this is seconds-since-reset, not wall clock — which SPEC §Time already
 /// covers: a node with no trusted clock must not drop on expiry, it relays
 /// regardless and ages by dwell. Wiring SNTP later replaces this and nothing
