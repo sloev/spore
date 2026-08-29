@@ -3,3 +3,9 @@
 # secret key on the stack). Raise it rather than move work to a spawned thread,
 # which would only relocate the same requirement.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32000
+
+# No CONFIG_PARTITION_TABLE_* here on purpose. esp-idf-sys builds the firmware
+# but does not own the flash layout, and pointing it at a CSV in the crate root
+# fails: the generated CMake project lives under target/ and cannot see it. The
+# esp-rs maintainers' guidance is to leave these unset and pass the table at
+# *flash* time instead, which esp32/build.sh does.

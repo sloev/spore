@@ -1,0 +1,12 @@
+# Custom partition table, needed because the default has no data partition for
+# us to mount. Offsets are implicit (the tool packs them); sizes are what
+# matters. The app is ~1 MB today (see the E1 footprint note in ROADMAP.md), so
+# 1.5 MB gives it room to grow before this table has to change again.
+#
+# Name,   Type, SubType, Offset,  Size,   Flags
+nvs,      data, nvs,     ,        0x6000,
+phy_init, data, phy,     ,        0x1000,
+factory,  app,  factory, ,        1500K,
+# The envelope store. Everything a power cycle is supposed to preserve lives
+# here, mounted at /spore by esp32/src/storage.rs.
+spore,    data, spiffs,  ,        2400K,
