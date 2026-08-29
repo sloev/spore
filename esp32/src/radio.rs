@@ -95,9 +95,7 @@ pub fn start(channel: u8) -> Result<[u8; 6], idf::EspError> {
         // Filter in hardware. We only ever send management/Action frames, so
         // every data and control frame nearby can be rejected before it becomes
         // a callback at all — which on a busy channel is most of the traffic.
-        let filter = idf::wifi_promiscuous_filter_t {
-            filter_mask: idf::WIFI_PROMIS_FILTER_MASK_MGMT,
-        };
+        let filter = idf::wifi_promiscuous_filter_t { filter_mask: idf::WIFI_PROMIS_FILTER_MASK_MGMT };
         idf::esp!(idf::esp_wifi_set_promiscuous_filter(&filter))?;
         idf::esp!(idf::esp_wifi_set_promiscuous_rx_cb(Some(on_frame)))?;
         idf::esp!(idf::esp_wifi_set_promiscuous(true))?;

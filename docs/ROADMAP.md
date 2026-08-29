@@ -482,9 +482,9 @@ scoped.
 | Device-pair relay: two boards exchange a real envelope over the air (E2) | ⬜ todo | 🧪 until this run happens |
 | Linux daemon raw-802.11 bridge: monitor mode + injection over `nl80211`, same frame format as the board (E2d) | ⬜ todo | The other end of the same air interface, so a laptop relays with the boards rather than only talking to them over a tether. Shares the frame layout and `Envelope::probe` filter with the ESP path — one wire format, two implementations. Needs a card whose driver supports monitor + injection (`iw list` → "monitor" and "AP/VLAN"), which is a hardware constraint, not a code one |
 | Frame-format note in [Bridges](BRIDGES.md): the exact 802.11 header, vendor tag and payload layout both sides implement (E2d) | ✅ shipped | Vendor-specific Action frame, category 127, on the same mechanism ESP-NOW uses — the one shape an ESP32 is known to inject without association. Fixed BSSID `02:53:50:4F:52:45` (`02` + "SPORE") and a locally-administered OUI, so two boards agree with no configuration. MTU stays 🧪: the 2304 MSDU is the standard's ceiling, not what a driver will inject |
-| `littlefs` binding + flash partition setup (partition table, mount/format-on-first-boot) (E3) | ⬜ todo | A second unfamiliar C dependency; deliberately sequenced after the radio driver so the two risks are retired one at a time, not together |
-| `littlefs`-backed `SpillBackend`: `put` / `get` / `remove` / `ids` (E3) | ⬜ todo | Implementation of the existing M2 contract (#87), not a new one. Same semantics as the filesystem backend: a `put` that does not land leaves the entry memory-only, and `get` answers `None` identically for absent, unreadable, or oversized |
-| Adopt the last run's spill at boot (E3) | ⬜ todo | Existing generic mechanic on the store — no new logic, just calling it with the flash backend |
+| Flash partition setup (custom `partitions.csv`, mount/format-on-first-boot) (E3) | 🧪 written, not run | **SPIFFS, not `littlefs`** — see the note below. `esp32/src/storage.rs`. The table is applied at *flash* time, not build time: esp-idf-sys's generated CMake project lives under `target/` and cannot see a CSV in the crate root, so `CONFIG_PARTITION_TABLE_*` silently does nothing. 1500K app / 2400K store |
+| ~~A flash-backed `SpillBackend`~~ — **not needed** (E3) | ✅ shipped, no new code | ESP-IDF exposes filesystems through VFS, so `std::fs` works once a partition is mounted and the core's existing `FsSpill` runs unmodified. E3 was written as "implement the existing contract, not a new one"; mounting a filesystem satisfies that literally |
+| Adopt the last run's spill at boot (E3) | 🧪 written, not run | `Node::set_spill_dir` builds the backend and adopts in one call, re-verifying every id against its bytes — a file SPIFFS damaged is discarded rather than trusted, because an id *is* the hash of its content |
 | Power-cycle test: spill past the memory budget, cut power, confirm the adopted set matches (E3) | ⬜ todo | 🧪 until logged in [Hardware verification](HARDWARE.md). A genuinely new row — real flash and real power loss, not merely "not CI-testable" |
 | USB-CDC transport wired to the KISS framing (E4) | ⬜ todo | Reuses `bridge::kiss_stream`, same shape as the serial bridge — no new byte-stream shape |
 | Solo loopback: laptop-side KISS echo, board sends and receives its own frames (E4) | ⬜ todo | Proves the framing with no phone in the loop |
@@ -506,6 +506,20 @@ peripheral addresses are hardcoded, so it cannot be used for E2 on either the
 documented S3 target or the S2 this is being developed on. Worth revisiting if it
 ports, or if a plain ESP32 ever becomes a supported board; until then E2 uses
 `esp_wifi_80211_tx` and accepts the blob.
+
+**On SPIFFS vs `littlefs` (E3).** `littlefs` is the better filesystem here — it is
+built around power-loss atomicity, exactly the property E3 exists to test — and it
+was tried first. The component manager pulls it in cleanly, but `esp-idf-svc` 0.51
+then fails to compile: its `io` module references `crate::fs::littlefs`
+unconditionally while the module itself stays gated. Accepting a broken build for a
+property that cannot be verified without a power-cycle rig was the wrong trade, so
+E3 ships on SPIFFS, which ESP-IDF has built in. Revisit when that is fixed upstream.
+
+What the difference costs is smaller than it sounds: spilled envelopes are
+content-addressed and re-verified on read, so a file SPIFFS corrupts reads as "not
+held" and the mesh re-fetches it — the store is a cache, not a database. The real
+exposure is a failed *mount*, which loses everything at once, and that is what
+`littlefs` would buy.
 
 **Toolchain checkpoint (E1) — measured, and the decision stands.** The scaffold plus
 one signed envelope costs, on a release build:

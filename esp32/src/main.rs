@@ -11,6 +11,7 @@
 //! hosts it (randomness, time, scheduling, storage) and one real signature.
 
 mod radio;
+mod storage;
 
 use std::sync::atomic::AtomicBool;
 
@@ -54,12 +55,7 @@ fn main() {
     let mut env = Envelope::new(ty::DATA, ZERO_DEST, now(), b"the dam holds".to_vec());
     env.sign(&node.sk);
     let wire = env.wire();
-    log::info!(
-        "signed envelope: {} bytes, id={}, verify={}",
-        wire.len(),
-        hex(&env.id()),
-        env.verify()
-    );
+    log::info!("signed envelope: {} bytes, id={}, verify={}", wire.len(), hex(&env.id()), env.verify());
     let boot_sig_ok = env.verify();
     assert!(boot_sig_ok, "a signature this node just made must verify");
 
@@ -71,6 +67,32 @@ fn main() {
     log::info!("probe={:?} (wire is {} bytes), decoded ok={}", probed, wire.len(), decoded.verify());
 
     log::info!("heap used by identity + one envelope: {} bytes", heap_before.saturating_sub(free_heap()));
+
+    // --- Storage nutrient (M8/E3) --------------------------------------------
+    // Mount flash before the node is handed to the hub, so whatever the last run
+    // spilled is adopted at boot rather than after the first message arrives.
+    // Without this the store is memory-only and a power cycle is a new node —
+    // which is exactly what the first hardware run showed, with the address
+    // changing between boots.
+    let mut node = node;
+    match storage::mount() {
+        Ok((total, used)) => {
+            log::info!("flash store mounted at {} — {used} of {total} bytes used", storage::MOUNT);
+            // set_spill_dir builds the backend and adopts in one call. Adoption
+            // re-verifies every id against its bytes, so a file SPIFFS damaged
+            // is discarded rather than trusted — an id *is* the hash of its
+            // content, which is why adopting from flash needs no other check.
+            match node.set_spill_dir(std::path::Path::new(storage::MOUNT), now()) {
+                Ok(n) => log::info!("adopted {n} envelope(s) from the last run"),
+                Err(e) => log::error!("spill dir {} unusable: {e} — memory-only", storage::MOUNT),
+            }
+        }
+        // Same reasoning as a radio that will not start: a node with no flash is
+        // still a node, it just forgets on reboot. Saying so beats refusing to
+        // boot, and it keeps "flash it and it works" honest on a board whose
+        // partition table is wrong.
+        Err(e) => log::error!("flash store unavailable ({e}) — running memory-only"),
+    }
 
     // --- The radio (M8/E2) ---------------------------------------------------
     // Everything above proved the core runs here. This is the part that makes it

@@ -53,7 +53,7 @@ save_image() {
   docker_run "$IMAGE" \
     bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
               cargo build --release --target $TARGET \
-              && espflash save-image --chip $MCU --merge --skip-padding $BIN $OUT"
+              && espflash save-image --chip $MCU --merge --skip-padding --partition-table partitions.csv $BIN $OUT"
 }
 
 if [ "${1:-}" = "--flash" ]; then
@@ -171,7 +171,7 @@ elif [ "${1:-}" = "--image" ]; then
   docker_run "$IMAGE" \
     bash -lc "export PATH=/home/esp/.cargo/bin:\$PATH; mkdir -p /tmp/esphome/.cargo
               cargo build --release --target $TARGET \
-              && espflash save-image --chip $MCU --merge --skip-padding $BIN $OUT"
+              && espflash save-image --chip $MCU --merge --skip-padding --partition-table partitions.csv $BIN $OUT"
   echo
   echo "wrote esp32/$OUT — flash it from the host with:"
   echo "  esptool.py --chip $MCU --port ${SPORE_PORT:-/dev/ttyACM0} write_flash 0x0 esp32/$OUT"
