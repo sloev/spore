@@ -496,6 +496,17 @@ scoped.
 | Full combined run: two boards, flash store live, an envelope relayed over raw 802.11, one board bridged to a phone over USB, BLE exercised as the fallback (E6) | ⬜ todo | One [Hardware verification](HARDWARE.md) row per path, matching the existing one-row-per-path convention |
 | Flash-cycle re-confirmation in the combined rig: power-cycle one board mid-session, confirm it resumes relaying with its spilled store intact (E6) | ⬜ todo | Distinct from E3's isolated test — proves persistence holds while the radio and USB paths are also live |
 
+**On [esp32-open-mac](https://github.com/esp32-open-mac/esp32-open-mac) (considered, not usable yet).**
+A reverse-engineered, blob-free 802.11 MAC — written in Rust, and philosophically a
+much better fit than a closed binary: [Continuity](CONTINUITY.md) and
+[Rebuild](REBUILD.md) are both about not depending on things you cannot inspect,
+and the Wi-Fi blob is the one component of an ESP32 node nobody can audit.
+**It only runs on the original ESP32** — not the S2 or S3 — because the Wi-Fi
+peripheral addresses are hardcoded, so it cannot be used for E2 on either the
+documented S3 target or the S2 this is being developed on. Worth revisiting if it
+ports, or if a plain ESP32 ever becomes a supported board; until then E2 uses
+`esp_wifi_80211_tx` and accepts the blob.
+
 **Toolchain checkpoint (E1) — measured, and the decision stands.** The scaffold plus
 one signed envelope costs, on a release build:
 
