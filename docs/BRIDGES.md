@@ -408,6 +408,7 @@ unchanged** — point it at the right address on the overlay's interface.
 | [iroh (QUIC) 🧪](#iroh) | stream | EndpointId | var | QUIC p2p by public key; hole-punch + relay fallback (`bridge-iroh` feature) |
 | [Veilid ⚪](#veilid) | dgram | node id | var | private-routed DHT |
 | [libp2p (gossipsub) ⚪](#libp2p) | stream | PeerId | var | pub/sub overlay; IPFS swarm |
+| [TCP (KISS) ✅](#tcp) | stream | conn | 64 K | point-to-point KISS over a socket; what Tor fronts |
 | [WebSocket ✅](#websocket) | stream | conn | 64 K | binary frames to a relay or peer |
 | [WebTransport ⚪](#webtransport) | stream | conn | var | QUIC datagrams/streams in the browser |
 | [WebRTC DataChannel 🧪](#webrtc) | stream | `String` | 16 K | direct browser P2P, serverless signaling |
@@ -1699,6 +1700,45 @@ fits.
 **References.** [libp2p specs](https://github.com/libp2p/specs);
 [gossipsub v1.1](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md);
 [rust-libp2p](https://github.com/libp2p/rust-libp2p).
+</details>
+
+<a id="tcp"></a>
+### TCP (KISS)
+
+**Summary.** A point-to-point byte stream between two nodes: give it a target to
+dial, or no target to listen for one peer. KISS-framed, so it is the same wire a
+serial link carries — a TCP socket is just a longer cable. This is what the
+Android app offers as "TCP", and what a Tor onion service sits in front of.
+
+| Field | Value |
+|---|---|
+| Driver form | `stream` |
+| `U` | connection handle |
+| MTU | 64 K (KISS frame ceiling) |
+| State | stateful (one peer, reconnecting) |
+| Status | ✅ implemented & tested |
+| Code | [`bridge::tcp`](https://github.com/sloev/spore/blob/master/src/bridge/tcp.rs) |
+
+<details><summary>Deep dive</summary>
+
+**Wire format.** KISS (`0xC0 0x00 …escaped… 0xC0`), byte-for-byte with
+`src/kiss.rs` — the same framing the [serial](#web-serial) and
+[AX.25](#ax25) paths use, so a peer on the far end does not need to know which
+of them it is talking to.
+
+**SPORE bridge mapping.** One peer per bridge, `U` the connection itself.
+Reconnects on drop, because a peer restarting, a laptop sleeping and a NAT idling
+the connection out should all be survivable without restarting the daemon. A
+listener must be non-blocking: `TcpListener::accept` has no read timeout, so a
+stop flag checked only between calls would hang forever with no peer connecting.
+
+**Security.** Plaintext on the wire, deliberately — see
+[TLS](#tls--deliberately-not-linked-in). The envelope carries its own signature
+and sealing, so the transport is not trusted with either; put it inside
+[Tor](#tor), a tunnel, or a VPN if the *metadata* needs protecting.
+
+**References.** [RFC 9293](https://www.rfc-editor.org/rfc/rfc9293) (TCP);
+KISS framing as in [AX.25](#ax25).
 </details>
 
 <a id="websocket"></a>

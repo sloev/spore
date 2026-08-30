@@ -132,6 +132,54 @@ if os.path.exists(boards_py) and os.path.exists(readme_path):
             "regenerate with: python3 esp32/boards.py --table"
         )
 
+# 5. every bridge the Android app offers is documented, and none of them is
+# still marked planned. The app puts a real, tappable control on screen for each
+# of these, so a label with no BRIDGES.md entry means the phone advertises a
+# capability nothing describes, and a label whose entry says "⚪ planned" is the
+# fake UI the hard rules forbid. Found the TCP bridge shipping in the app with no
+# entry of its own — only passing mentions elsewhere.
+#
+# The map is the point: adding a bridge to the app without adding it here fails,
+# which is the moment to ask whether it is documented at all.
+ANDROID_BRIDGES = {
+    "Audio modem": "audio",
+    "Meshtastic BLE": "meshtastic",
+    "RNode BLE": "reticulum",
+    "TCP": "tcp",
+    "UDP broadcast": "udp",
+    "Web": "websocket",  # hosts WebSocket / Nostr / WebTorrent in one WebView
+    "Wi-Fi Direct": "wifi-direct",
+}
+controller = os.path.join(root, "android/app/src/main/kotlin/org/spore/node/NodeController.kt")
+if os.path.exists(controller):
+    kt = open(controller, encoding="utf-8").read()
+    offered = set(
+        re.findall(r'(?:upsertBridgeRow\(existingId, |addBridgeState\()"([^"]+)"', kt)
+    )
+    for label in sorted(offered - set(ANDROID_BRIDGES)):
+        errors.append(
+            f"NodeController.kt offers a {label!r} bridge that ANDROID_BRIDGES "
+            "does not map — add it there and document it in docs/BRIDGES.md"
+        )
+    # Split on the anchors so each entry's own Status row is what gets read.
+    sections = re.split(r'<a id="([a-z0-9-]+)"></a>', bridges)
+    status = {}
+    for i in range(1, len(sections), 2):
+        m = re.search(r"\|\s*Status\s*\|([^|]*)\|", sections[i + 1])
+        if m:
+            status[sections[i]] = m.group(1).strip()
+    for label in sorted(offered & set(ANDROID_BRIDGES)):
+        anchor_id = ANDROID_BRIDGES[label]
+        if anchor_id not in status:
+            errors.append(
+                f"docs/BRIDGES.md: the app offers {label!r} but has no <a id=\"{anchor_id}\"> entry with a Status row"
+            )
+        elif status[anchor_id].startswith("⚪"):
+            errors.append(
+                f"docs/BRIDGES.md: the app offers {label!r} but {anchor_id} is '⚪ planned' — "
+                "a control with no backend is the fake UI the hard rules forbid"
+            )
+
 if errors:
     print("DOCS-SYNC FAIL — regenerate vectors and/or fix terminology:")
     print("  cargo run --example gen_vectors > reference/vectors.json")

@@ -254,7 +254,7 @@ done.** Nothing here is load-bearing for a credible node.
 | Private group `key_id` divergence badge | ⬜ todo | Warn on mismatch in a sealed group chat; never claim roster consensus |
 | Boot receiver (optional, default off) | ⬜ todo | |
 | Sound + particles behind a setting, default off | ⬜ todo | Gated by §0.2/§8 |
-| Android bridge list ⊆ BRIDGES.md sync check | ⬜ todo | Honesty check |
+| Android bridge list ⊆ BRIDGES.md sync check | ✅ shipped | In `check_docs_sync.py`. Fails if the app offers a bridge with no BRIDGES.md entry, or one still marked ⚪ planned — a control with no backend. Found the **TCP** bridge shipping in the app undocumented; entry added |
 | `with_node` reentrancy guard | ⬜ todo | Low; documented, not prevented |
 | Beacon duty-cycle measurement | ⬜ todo | HARDWARE.md procedure |
 | Two-real-NATs Direct punch verification | ⬜ todo | `HARDWARE.md` row 19; loopback-only today |
