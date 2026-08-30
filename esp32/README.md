@@ -52,10 +52,10 @@ docker run --rm -v "$PWD":/work -w /work/esp32 -e MCU=esp32s2 \
 ```
 
 <!-- generated from boards.toml: python3 esp32/boards.py --table -->
-| Board | Target | Wi-Fi | Bluetooth | Native USB | SRAM |
-|---|---|---|---|---|---|
-| ESP32-S3 | `xtensa-esp32s3-espidf` | yes | BLE 5.0 | yes | 512 KB |
-| LOLIN S2 Mini | `xtensa-esp32s2-espidf` | yes | **none** | yes | 320 KB |
+| Board | Target | Wi-Fi | Bluetooth | Native USB | Tether | SRAM |
+|---|---|---|---|---|---|---|
+| ESP32-S3 | `xtensa-esp32s3-espidf` | yes | BLE 5.0 | yes | usb-cdc | 512 KB |
+| LOLIN S2 Mini | `xtensa-esp32s2-espidf` | yes | **none** | yes | uart | 320 KB |
 
 The S2 has no Bluetooth radio of any kind — not a driver gap, the hardware is
 absent (ESP-IDF's own `soc_caps.h` defines neither `SOC_BT_SUPPORTED` nor

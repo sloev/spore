@@ -12,6 +12,7 @@
 
 mod radio;
 mod storage;
+mod tether;
 
 use std::sync::atomic::AtomicBool;
 
@@ -132,6 +133,41 @@ fn main() {
         Err(e) => log::error!("radio failed to start ({e}) — continuing without it"),
     }
 
+    // --- The wired tether (M8/E4) --------------------------------------------
+    // A second bridge on the same hub, not a mode. With both up, the board
+    // floods between the radio and whatever is on the wire — which is what
+    // makes a host plugged in here a gateway to the mesh without either end
+    // running gateway code.
+    let mut tether_up = false;
+    match tether::start().and_then(|()| Ok(spore::bridge::serial::open(tether::DEVICE))) {
+        Ok(Ok((r, w))) => {
+            tether_up = true;
+            log::info!(
+                "tether up: KISS on {} tx={} rx={} @{}",
+                tether::DEVICE,
+                tether::TX_PIN,
+                tether::RX_PIN,
+                tether::BAUD
+            );
+            let (iface, rx) = hub.register();
+            let hub_for_tether = hub.clone();
+            std::thread::Builder::new()
+                .stack_size(8192)
+                .spawn(move || {
+                    // Same loop the desktop serial and TNC bridges run. Nothing
+                    // about it knows this is an MCU.
+                    if let Err(e) =
+                        spore::bridge::stream_link::run_split(hub_for_tether, iface, rx, r, w, "tether")
+                    {
+                        log::error!("tether bridge stopped: {e}");
+                    }
+                })
+                .expect("spawning the tether bridge");
+        }
+        Ok(Err(e)) => log::error!("tether device {} not openable: {e}", tether::DEVICE),
+        Err(e) => log::error!("tether uart failed to start ({e}) — continuing without it"),
+    }
+
     // --- Scheduling nutrient -------------------------------------------------
     // Without this the node only ever maintains itself when traffic happens to
     // arrive, which on a solo, often-offline relay means effectively never.
@@ -152,7 +188,7 @@ fn main() {
         // here either: an S2 ignores the DTR/RTS toggle that resets other chips.
         if ticks % 3 == 0 {
             log::info!(
-                "up {}s · addr={} · sig={} · probe={} · heap={} · radio={} · rxdrop={}",
+                "up {}s · addr={} · sig={} · probe={} · heap={} · radio={} · rxdrop={} · tether={}",
                 now(),
                 hex(&addr),
                 if boot_sig_ok { "ok" } else { "FAILED" },
@@ -162,7 +198,8 @@ fn main() {
                     Some(m) => hexb(m),
                     None => "down".into(),
                 },
-                radio::dropped()
+                radio::dropped(),
+                if tether_up { "up" } else { "down" }
             );
         }
         FreeRtos::delay_ms(5_000);

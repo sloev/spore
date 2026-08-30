@@ -43,17 +43,18 @@ def fmt_bt(value):
 def table(doc):
     """The markdown table in README.md, generated so it cannot go stale."""
     rows = [
-        "| Board | Target | Wi-Fi | Bluetooth | Native USB | SRAM |",
-        "|---|---|---|---|---|---|",
+        "| Board | Target | Wi-Fi | Bluetooth | Native USB | Tether | SRAM |",
+        "|---|---|---|---|---|---|---|",
     ]
     for board in doc["boards"].values():
         rows.append(
-            "| {name} | `{target}` | {wifi} | {bt} | {usb} | {sram} KB |".format(
+            "| {name} | `{target}` | {wifi} | {bt} | {usb} | {tether} | {sram} KB |".format(
                 name=board["name"],
                 target=board["target"],
                 wifi="yes" if board["wifi"] else "no",
                 bt=fmt_bt(board["bluetooth"]),
                 usb="yes" if board["native_usb"] else "no",
+                tether=board.get("tether", "-"),
                 sram=board["sram_kb"],
             )
         )
