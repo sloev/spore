@@ -82,6 +82,48 @@ pub struct Hub {
     deliver: Mutex<Option<Sender<Vec<u8>>>>, // optional app inbox: delivered envelope wires
 }
 
+// Hubs this thread is currently inside `with_node` for, by address. A Vec
+// because it is never longer than the nesting depth across distinct hubs, which
+// is one in every real caller and two in a couple of tests. (A plain comment,
+// not a doc comment: `thread_local!` does not accept one on the static.)
+thread_local! {
+    static IN_WITH_NODE: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Marks this hub as entered for as long as it lives, and unmarks on unwind as
+/// well as on return — a panic inside `f` must not leave the thread believing it
+/// is still inside `with_node`.
+struct ReentrancyGuard(usize);
+
+impl ReentrancyGuard {
+    fn enter(hub: &Hub) -> Self {
+        let key = hub as *const Hub as usize;
+        IN_WITH_NODE.with(|active| {
+            let mut active = active.borrow_mut();
+            assert!(
+                !active.contains(&key),
+                "Hub::with_node re-entered on the same hub from the same thread. \
+                 The node lock is not reentrant, so this would have deadlocked \
+                 permanently; the closure passed to with_node must not call back \
+                 into the hub it was given."
+            );
+            active.push(key);
+        });
+        ReentrancyGuard(key)
+    }
+}
+
+impl Drop for ReentrancyGuard {
+    fn drop(&mut self) {
+        IN_WITH_NODE.with(|active| {
+            let mut active = active.borrow_mut();
+            if let Some(i) = active.iter().rposition(|k| *k == self.0) {
+                active.remove(i);
+            }
+        });
+    }
+}
+
 /// Lock a mutex, recovering from poisoning instead of propagating it.
 ///
 /// A panic while a lock is held poisons it, and `lock().unwrap()` then panics in
@@ -270,6 +312,17 @@ impl Hub {
     /// the node guard and releases it first — that ordering is deliberate and is
     /// what keeps `node` and `out` deadlock-free.
     pub fn with_node<R>(&self, f: impl FnOnce(&mut Node) -> R) -> R {
+        // `f` is arbitrary embedder code running with the node lock held, and
+        // `std::sync::Mutex` is not reentrant — so a closure that calls back into
+        // the same hub deadlocks that thread permanently. That is the worst
+        // failure shape available: no panic, no log, no progress, and a backtrace
+        // that shows a thread parked on a lock it is itself holding.
+        //
+        // Panicking instead names the bug at the moment it happens. The check is
+        // per-hub and per-thread, so ordinary contention between bridge threads
+        // is untouched and nesting `with_node` on two *different* hubs — which
+        // tests do — stays legal.
+        let _guard = ReentrancyGuard::enter(self);
         f(&mut lock(&self.node))
     }
 
@@ -437,5 +490,42 @@ mod tests {
         assert_eq!(drained(&rx), 1, "a poisoned lock still serves traffic");
         let _ = hub.addr();
         hub.with_node(|n| n.store_len());
+    }
+    #[test]
+    #[should_panic(expected = "re-entered on the same hub")]
+    fn with_node_reentry_panics_instead_of_deadlocking() {
+        // Before the guard this call did not fail — it hung, holding a lock it
+        // was itself waiting on, with no panic and no log. A test for it could
+        // not even be written: it would have blocked the suite forever.
+        let hub = Hub::new(Node::new("gateway", &[]));
+        hub.with_node(|_| {
+            hub.with_node(|n| n.addr);
+        });
+    }
+
+    #[test]
+    fn nesting_across_two_hubs_is_still_allowed() {
+        // The guard is per-hub, not per-thread, because nesting on two distinct
+        // hubs is legitimate — a gateway holding one node while consulting
+        // another deadlocks nothing.
+        let a = Hub::new(Node::new("a", &[]));
+        let b = Hub::new(Node::new("b", &[]));
+        let (x, y) = a.with_node(|na| (na.addr, b.with_node(|nb| nb.addr)));
+        assert_ne!(x, y, "two nodes, two addresses");
+    }
+
+    #[test]
+    fn a_panic_inside_with_node_does_not_wedge_the_thread() {
+        // The guard must unmark on unwind too. The node lock recovers from
+        // poisoning by design (see `lock`), so a fault under it leaves the hub
+        // usable — and the reentrancy bookkeeping has to leave it usable as well,
+        // or one panic would make every later with_node on this thread panic too.
+        let hub = Hub::new(Node::new("gateway", &[]));
+        let boom = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            hub.with_node(|_| panic!("fault under the lock"));
+        }));
+        assert!(boom.is_err(), "the panic should propagate");
+        let addr = hub.with_node(|n| n.addr);
+        assert_ne!(addr, [0u8; 8], "the hub is still usable afterwards");
     }
 }
