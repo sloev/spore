@@ -27,10 +27,30 @@ except ImportError:
 
 # The repeating line the firmware prints every sixth tick, e.g.
 #   up 35s · addr=b1aea40a34b8f146 · sig=ok · heap=226396 · due=0
-SUMMARY = re.compile(
-    r"up (?P<up>\d+)s .*?addr=(?P<addr>[0-9a-f]+) .*?sig=(?P<sig>\w+)"
-    r"(?: .*?probe=(?P<probe>\w+))? .*?heap=(?P<heap>\d+) .*?due=(?P<due>\d+)"
-)
+# The repeating line the firmware prints every third tick, e.g.
+#   up 35s · addr=b1ae… · sig=ok · probe=ok · heap=226368 · budget=56592 · …
+#
+# Parsed as key=value pairs rather than one positional regex: the line has
+# gained a field on nearly every firmware change, and each time a rigid pattern
+# silently stopped matching and every check quietly became "not observed" — a
+# failure mode that looks like a healthy board with nothing to say.
+SUMMARY_UP = re.compile(r"\bup (?P<up>\d+)s\b")
+SUMMARY_KV = re.compile(r"\b(\w+)=([^\s·]+)")
+
+
+def parse_summary(line):
+    """-> dict of the summary line's fields, or None if this is not one."""
+    m = SUMMARY_UP.search(line)
+    if not m:
+        return None
+    fields = dict(SUMMARY_KV.findall(line))
+    # addr is the one field that must be there for this to be a summary at all.
+    if "addr" not in fields:
+        return None
+    fields["up"] = m.group("up")
+    return fields
+
+
 # Boot-only lines, caught if we happen to attach in time or after a reset.
 IDENTITY = re.compile(r"identity: addr=(?P<addr>[0-9a-f]+)")
 SIGNED = re.compile(r"signed envelope: (?P<len>\d+) bytes, id=(?P<id>[0-9a-f]+), verify=(?P<ok>\w+)")
@@ -51,8 +71,8 @@ class Checks:
 
     def feed(self, line):
         self.lines += 1
-        if m := SUMMARY.search(line):
-            self.summaries.append({k: m.group(k) for k in ("up", "addr", "sig", "probe", "heap", "due")})
+        if fields := parse_summary(line):
+            self.summaries.append(fields)
         if m := IDENTITY.search(line):
             self.identity = m.group("addr")
         if m := SIGNED.search(line):
@@ -67,7 +87,7 @@ class Checks:
         out = []
         out.append((self.lines > 0, "board is talking", f"{self.lines} lines read"))
 
-        addr = self.identity or (self.summaries[-1]["addr"] if self.summaries else None)
+        addr = self.identity or (self.summaries[-1].get("addr") if self.summaries else None)
         out.append((
             bool(addr) and len(addr) == 16 and all(c in "0123456789abcdef" for c in addr),
             "identity", f"addr={addr}" if addr else "no address seen",
@@ -79,7 +99,7 @@ class Checks:
         if self.signed:
             sig = self.signed["ok"] == "true"
         elif self.summaries:
-            sig = self.summaries[-1]["sig"] == "ok"
+            sig = self.summaries[-1].get("sig") == "ok"
         out.append((sig, "signature verifies", "sig=ok" if sig else "not observed" if sig is None else "SIGNATURE FAILED"))
 
         if self.probe:
@@ -99,7 +119,7 @@ class Checks:
                         f"uptime {ups[0]}s -> {ups[-1]}s over {len(ups)} summaries"))
             # A leak shows up here and nowhere else — static section sizes
             # cannot see it, and a single reading cannot either.
-            heaps = [int(s["heap"]) for s in self.summaries]
+            heaps = [int(s["heap"]) for s in self.summaries if "heap" in s]
             # Signed as the change in free heap, so negative means memory lost.
             delta = heaps[-1] - heaps[0]
             out.append((delta > -1024, "heap is stable",
