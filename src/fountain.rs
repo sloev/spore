@@ -138,6 +138,16 @@ pub(crate) struct Row {
     data: Vec<u8>,
 }
 impl Fountain {
+    /// Chunk bytes this set is holding.
+    ///
+    /// `MAX_PARTIAL_OBJECTS` bounds how many sets exist, not how large they are:
+    /// a set holds up to `count` rows of `chunk` bytes, and both come off the
+    /// wire. Counting sets is therefore not the same as counting memory, which
+    /// is what the eviction sweep actually needs to bound.
+    pub(crate) fn held_bytes(&self) -> usize {
+        self.rows.iter().map(|r| r.data.len()).sum()
+    }
+
     pub fn new() -> Self {
         Fountain { started: 0, count: 0, chunk: 0, rows: Vec::new(), done: None }
     }
