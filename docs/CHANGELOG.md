@@ -18,6 +18,21 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **S-032** Anyone could forge a delivery receipt, so "Delivered ✓" meant nothing.
+  The §8 receipt branch accepted a receipt on payload *shape* alone — type, dest,
+  `[0x06][orig_id]` — without consulting the `verified_src` the same function had
+  already computed, and without requiring `SIGNED` at all. The mistaken assumption
+  was that naming an envelope's id proves you received it; the id is not a secret,
+  it rides in the clear inside every `INV` (§6). Any relay on the path, or any peer
+  that merely heard an `INV`, could send one packet and mark another node's message
+  delivered — signed with a stranger's key, or unsigned entirely. Both variants were
+  reproduced against the real `on_rx`. `Pending` now records the destination and a
+  receipt counts only when signed by it, so a message that did not arrive keeps
+  resending per §5.4d instead of being closed out by a bystander. Wire unchanged —
+  a receipt on the wire is byte-identical to what it was; the check is local state.
+  Found by auditing an external threat-model catalogue's "authentic ≠ fresh ≠ from
+  the right party" class against the code.
+
 - **Milestone 7 complete: HARDBRUT is the framework everywhere, not a copy — and
   SPORE stops writing its own design-language document.** `site/style.css` (786
   hand-authored lines) is deleted outright; the docs site runs entirely on the

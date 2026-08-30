@@ -416,6 +416,11 @@ pub struct Node {
 struct Pending {
     wire: Vec<u8>,
     backoff: congestion::Backoff,
+    /// Who the message was addressed to — the only identity whose receipt
+    /// counts (§8). Without this, "delivered" is a claim anyone can make:
+    /// the id it references travels in the clear inside every INV, so any
+    /// peer that ever heard of the envelope could assert its delivery.
+    dest: Addr,
 }
 
 // The `Node` router's methods live in `src/node/` — split by concern (task
@@ -1674,6 +1679,54 @@ mod tests {
         // A receives the receipt and marks the message delivered.
         a.on_rx(&receipt, 0, Some(b.addr), now);
         assert!(a.acked(&id), "A learned its ACKREQ message was delivered");
+    }
+
+    #[test]
+    fn a_receipt_only_counts_from_the_address_it_was_sent_to() {
+        let now = 1_700_000_000;
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        let mut m = Node::new("mallory", &[]);
+        meet(&mut a, &mut b, now);
+        meet(&mut a, &mut m, now);
+
+        // A -> B with ACKREQ. B never receives it.
+        let fwds = a.originate_ackreq(b.addr, b"confirm receipt".to_vec(), now);
+        let id = Envelope::decode(&fwd_bytes(&fwds[0])).unwrap().0.id();
+        assert!(!a.acked(&id));
+
+        let a_addr = a.addr;
+        let receipt_for = |id: &Id| {
+            let mut p = Vec::with_capacity(17);
+            p.push(RECEIPT_TAG);
+            p.extend_from_slice(id);
+            Envelope::new(ty::DATA, a_addr, now + 3600, p)
+        };
+
+        // Mallory relayed the envelope, so she knows its id -- but she is not
+        // its destination. A receipt she signs herself proves nothing.
+        let mut forged = receipt_for(&id);
+        forged.flags |= fl::FLOOD;
+        forged.sign(&m.sk);
+        a.on_rx(&forged.wire(), 0, Some(m.addr), now);
+        assert!(!a.acked(&id), "a receipt signed by a non-recipient is not delivery");
+
+        // An unsigned receipt has no author at all.
+        let anon = receipt_for(&id);
+        a.on_rx(&anon.wire(), 0, None, now);
+        assert!(!a.acked(&id), "an unsigned receipt is not delivery");
+
+        // The real recipient's receipt still works.
+        let brx = b.on_rx(&fwd_bytes(&fwds[0]), 0, Some(a.addr), now);
+        let real = brx
+            .forwards
+            .first()
+            .map(|f| match f {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+            })
+            .expect("B emitted a receipt");
+        a.on_rx(&real, 0, Some(b.addr), now);
+        assert!(a.acked(&id), "the destination's own receipt is still accepted");
     }
 
     #[test]
