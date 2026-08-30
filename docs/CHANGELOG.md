@@ -18,6 +18,24 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Private groups can be invited into, and "revoke" is finally stated honestly
+  (W7).** Sharing a private group meant reading 64 hex characters to someone.
+  There is now one line — `spore-group:<key hex>?n=…&k=…` — with a prefix
+  deliberately unlike `spore:`, because an address invite is public and this one
+  carries the key itself; the two must not be interchangeable when pasted. The
+  checksum covers the key *and* the name, since a mistyped key opens a room that
+  is cryptographically fine and socially empty, which reads as "nobody has posted
+  yet" rather than as an error. `encode_group`/`decode_group` live in the core and
+  are exported to wasm, so the string a browser hands a person is produced by the
+  same code that will accept it — a second implementation in JavaScript is a
+  format that drifts. In the web node the invite is behind an **Invite** button
+  rather than displayed beside the conversation, because the string is the key and
+  a screenshot is a membership grant; the field that creates a group also accepts a
+  pasted invite. [Design](DESIGN.md) now separates the three key changes that were
+  previously all called "rotation": `rekey_seal` evicts and binds forward-only,
+  `rotate` gives forward secrecy and evicts nobody, `contribute` heals after a
+  copied key. An invite cannot be recalled, and SPORE holds no roster — so no
+  "remove member" control claims the protocol enforced anything. Wire unchanged.
 - **The changelog is enforced where it is written, not where it is published.**
   Between 0.6.0 and this entry, 29 pull requests merged and not one touched this
   file — `release.yml` refuses to cut a release with no bullets, but that check

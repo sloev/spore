@@ -154,6 +154,34 @@ class Spore {
     this.ex.spore_free(pp, psk.length);
     return out.length ? out : null;
   }
+
+  /**
+   * Render a private-group invite string (W7). **The string is the key** — it
+   * carries the whole 32-byte PSK, so whoever reads it is a member.
+   */
+  groupInviteEncode(name, key) {
+    const nb = new TextEncoder().encode(name);
+    const np = this._put(nb);
+    const kp = this._put(key);
+    const out = this._unpack(this.ex.spore_group_invite_encode(np, nb.length, kp));
+    this.ex.spore_free(np, nb.length);
+    this.ex.spore_free(kp, key.length);
+    return new TextDecoder().decode(out);
+  }
+
+  /**
+   * Parse a private-group invite. Returns `{ key, name }` or null — null covers
+   * "not a group invite", "malformed" and "failed its checksum" alike, because
+   * the honest answer to all three is the same: ask for the invite again.
+   */
+  groupInviteDecode(text) {
+    const tb = new TextEncoder().encode(text);
+    const tp = this._put(tb);
+    const out = this._unpack(this.ex.spore_group_invite_decode(tp, tb.length));
+    this.ex.spore_free(tp, tb.length);
+    if (out.length < 32) return null;
+    return { key: out.slice(0, 32), name: new TextDecoder().decode(out.slice(32)) };
+  }
 }
 
 /** Envelope flag bits the DM path needs (§2). */

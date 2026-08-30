@@ -201,7 +201,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
         <button id="new-open-btn" class="ghost">Join open group</button>
       </div>
       <div class="row">
-        <input type="text" id="new-sealed-name" placeholder="private group name" style="flex:1" />
+        <input type="text" id="new-sealed-name" placeholder="private group name, or paste a spore-group: invite" style="flex:1" />
         <input type="text" id="new-sealed-key" placeholder="64-hex key (blank = generate)" style="font-family:var(--font-mono);font-size:11px;max-width:220px" />
         <button id="new-sealed-btn" class="ghost">Create private</button>
       </div>
@@ -210,6 +210,7 @@ mark { background: var(--accent); color: var(--accent-ink); }
     <!-- Active conversation thread + composer -->
     <div id="chat-view" style="display:none;border:1px solid var(--ink);padding:10px">
       <div id="chat-view-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px"></div>
+      <div id="chat-invite" style="display:none;margin-bottom:6px;padding:8px;border:1px solid var(--warn)"></div>
       <div id="chat-msgs" class="chat"></div>
       <div class="fmt-bar" id="chat-fmt">
         <button type="button" class="fmt" data-fmt="bold" title="bold">B</button>
@@ -608,8 +609,39 @@ function renderChatView() {
   head.innerHTML = '<span class="badge" style="font-size:10px;border-color:' + b.color + ';color:' + b.color + '">' + b.label + '</span>' +
     '<span style="font-family:var(--font-mono);font-size:13px;font-weight:600">' + escapeHtml(c.name) + '</span>' +
     (c.type === 'open' ? '<span class="cnt">anyone can read this</span>' : '') +
-    (c.type === 'sealed' ? '<span class="cnt">anyone with the key can read this</span>' : '') +
+    (c.type === 'sealed' ? '<span class="cnt">anyone with the key can read this</span>' +
+      '<button id="chat-invite-btn" class="ghost" style="margin-left:auto">Invite</button>' : '') +
     (c.type === 'dm' ? '<span class="cnt" id="dm-seal-hint"></span>' : '');
+
+  // Private-group invite (W7). Hidden until asked for: the string *is* the key,
+  // so it must not sit on screen where a screenshot or a shoulder collects it.
+  const inviteBox = $('chat-invite');
+  inviteBox.style.display = 'none';
+  inviteBox.innerHTML = '';
+  if (c.type === 'sealed') {
+    $('chat-invite-btn').onclick = () => {
+      if (inviteBox.style.display === 'block') { inviteBox.style.display = 'none'; return; }
+      const line = spore.groupInviteEncode(c.name.replace(/^[/]/, ''), hexToBytes(c.keyHex));
+      inviteBox.style.display = 'block';
+      inviteBox.innerHTML =
+        '<div class="cnt" style="margin-bottom:4px"><strong>This link is the key.</strong> ' +
+        'Anyone who reads it can read this group — a screenshot or a forwarded copy works ' +
+        'as well as being told. It cannot be recalled: a copy already taken keeps opening ' +
+        'everything sealed under this key. You can move the group to a fresh key later and ' +
+        'hand it only to the people you still want, but SPORE keeps no member list, so ' +
+        'knowing who those are is yours to track — nothing here can verify it.</div>' +
+        '<textarea readonly rows="2" style="width:100%;font-family:var(--font-mono);font-size:11px">' +
+        escapeHtml(line) + '</textarea>' +
+        '<button id="chat-invite-copy" class="ghost" style="margin-top:4px">Copy</button>';
+      const ta = inviteBox.querySelector('textarea');
+      ta.onclick = () => ta.select();
+      $('chat-invite-copy').onclick = () => {
+        ta.select();
+        navigator.clipboard?.writeText(line).catch(() => {});
+        logLine('sys', 'invite copied — it carries the key, so share it the way you would the key');
+      };
+    };
+  }
 
   if (!c.msgs.length) {
     msgsEl.innerHTML = '<span class="cnt" style="display:block;text-align:center;padding:20px 0">No messages yet.</span>';
@@ -941,11 +973,25 @@ function wireCompose() {
 
   // Private (sealed) group
   $('new-sealed-btn').onclick = () => {
-    const name = $('new-sealed-name').value.trim().replace(/^[/]/, '');
-    if (!name) { logLine('bad', 'enter a group name'); return; }
-    let keyHex = $('new-sealed-key').value.trim().replace(/[^0-9a-fA-F]/g, '');
-    if (!keyHex) { const k = new Uint8Array(32); crypto.getRandomValues(k); keyHex = hexOf(k); $('new-sealed-key').value = keyHex; }
-    if (keyHex.length !== 64) { logLine('bad', 'the key must be 64 hex chars (32 bytes)'); return; }
+    const raw = $('new-sealed-name').value.trim();
+    let name, keyHex;
+    // A pasted spore-group: invite carries both halves, so it wins over the
+    // two fields. Anything that merely looks like one and fails its checksum
+    // is refused rather than treated as a group name — joining a mistyped key
+    // would silently open a room with one member in it.
+    if (raw.startsWith('spore-group:')) {
+      const g = spore.groupInviteDecode(raw);
+      if (!g) { logLine('bad', 'that invite is damaged — ask for it again'); return; }
+      name = g.name.replace(/^[/]/, '');
+      keyHex = hexOf(g.key);
+      if (!name) { logLine('bad', 'that invite has no group name'); return; }
+    } else {
+      name = raw.replace(/^[/]/, '');
+      if (!name) { logLine('bad', 'enter a group name'); return; }
+      keyHex = $('new-sealed-key').value.trim().replace(/[^0-9a-fA-F]/g, '');
+      if (!keyHex) { const k = new Uint8Array(32); crypto.getRandomValues(k); keyHex = hexOf(k); $('new-sealed-key').value = keyHex; }
+      if (keyHex.length !== 64) { logLine('bad', 'the key must be 64 hex chars (32 bytes)'); return; }
+    }
     hub.node.subscribe(name);
     const key = '/' + name;
     ensureConvo('sealed', key, '/' + name, { keyHex });

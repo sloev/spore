@@ -89,6 +89,86 @@ fn checksum(addr: &Addr, name: &str, bridges: &[String]) -> String {
     format!("{:02x}{:02x}", d[0], d[1])
 }
 
+/// Prefix for a *private group* invite. Deliberately different from `spore:`,
+/// because the two are not the same kind of object and must not be mistaken for
+/// one another when pasted.
+const GROUP_PREFIX: &str = "spore-group:";
+
+/// A decoded private-group invite: the room's name and the key that opens it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupInvite {
+    pub name: String,
+    pub key: [u8; 32],
+}
+
+/// Render a private-group invite as one shareable line.
+///
+/// **This string is the key.** An address invite ([`encode`]) is public — it says
+/// where to find someone and nothing more. This one carries the pre-shared key
+/// itself, because in a group with no roster that key *is* the membership: holding
+/// it is what "being a member" means (see [Design](../docs/DESIGN.md)).
+///
+/// Two consequences the caller has to surface rather than hide:
+///
+/// * anyone who reads it joins — a screenshot, a quoted reply, a photo of a
+///   screen behind someone, all work exactly as well as being told;
+/// * it cannot be withdrawn. Rotating the key changes what *future* messages are
+///   sealed under; it does not reach back into a copy already taken, and SPORE
+///   holds no member list to remove anyone from.
+pub fn encode_group(name: &str, key: &[u8; 32]) -> String {
+    let key_hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
+    let mut s = format!("{GROUP_PREFIX}{key_hex}");
+    s.push_str(&format!("?n={}", pct_encode(name)));
+    s.push_str(&format!("&k={}", group_checksum(name, key)));
+    s
+}
+
+/// Parse a private-group invite. `None` if it is not one, is malformed, or fails
+/// its checksum — a mistyped key would otherwise yield a room nobody else is in,
+/// which looks like a working group with no members rather than an error.
+pub fn decode_group(text: &str) -> Option<GroupInvite> {
+    let t = text.trim();
+    let rest = t.strip_prefix(GROUP_PREFIX)?;
+    let (key_hex, query) = match rest.split_once('?') {
+        Some((a, q)) => (a, q),
+        None => (rest, ""),
+    };
+    if key_hex.len() != 64 {
+        return None;
+    }
+    let mut key = [0u8; 32];
+    for (i, byte) in key.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(key_hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+
+    let mut name = String::new();
+    let mut given_k: Option<String> = None;
+    for pair in query.split('&').filter(|p| !p.is_empty()) {
+        let (k, v) = pair.split_once('=')?;
+        let v = pct_decode(v)?;
+        match k {
+            "n" => name = v,
+            "k" => given_k = Some(v),
+            _ => {}
+        }
+    }
+    if given_k? != group_checksum(&name, &key) {
+        return None;
+    }
+    Some(GroupInvite { name, key })
+}
+
+/// Same shape as [`checksum`]: catches a truncated or mistyped invite before it
+/// becomes a silently empty room.
+fn group_checksum(name: &str, key: &[u8; 32]) -> String {
+    let mut h = Vec::with_capacity(32 + 1 + name.len());
+    h.extend_from_slice(key);
+    h.push(0);
+    h.extend_from_slice(name.as_bytes());
+    let d = Sha256::digest(&h);
+    format!("{:02x}{:02x}", d[0], d[1])
+}
+
 /// Render an invite as one shareable line.
 pub fn encode(addr: &Addr, name: &str, bridges: &[String]) -> String {
     let mut s = format!("{PREFIX}{}", hex8(addr));
@@ -175,6 +255,42 @@ mod tests {
         assert!(decode(&tampered).is_none(), "checksum catches a changed address");
         // Truncation, too.
         assert!(decode(&good[..good.len() - 3]).is_none(), "checksum catches truncation");
+    }
+
+    #[test]
+    fn group_invite_roundtrips_and_carries_the_key_verbatim() {
+        let key = [0xa7u8; 32];
+        let s = encode_group("Book club & 🍄", &key);
+        let got = decode_group(&s).expect("round-trips");
+        assert_eq!(got.key, key, "the key survives byte-for-byte");
+        assert_eq!(got.name, "Book club & 🍄");
+        assert!(s.starts_with("spore-group:"), "not mistakable for an address invite: {s}");
+        assert!(decode(&s).is_none(), "an address decoder must refuse a group invite");
+        assert!(decode_group(&encode(&[1; 8], "x", &[])).is_none(), "and the reverse");
+    }
+
+    #[test]
+    fn a_mistyped_group_key_is_refused_rather_than_opening_an_empty_room() {
+        let key = [0x11u8; 32];
+        let good = encode_group("rehearsal", &key);
+
+        assert!(decode_group("").is_none());
+        assert!(decode_group("spore-group:").is_none());
+        assert!(decode_group("spore-group:abcd?n=x").is_none(), "key must be 32 bytes");
+        // 64 characters, but not hex: rejected rather than parsed as zeroes.
+        let non_hex = format!("spore-group:{}?n=x&k=0000", "z".repeat(64));
+        assert!(decode_group(&non_hex).is_none(), "non-hex key");
+        // One flipped nibble in the key changes the room. Without the checksum
+        // this would silently yield a group nobody else is in, which looks like
+        // a working group that no one has posted to yet.
+        let tampered = good.replacen("spore-group:11", "spore-group:12", 1);
+        assert!(decode_group(&tampered).is_none(), "checksum catches a changed key");
+        // The name is covered too — it is what the joiner sees the room called.
+        let renamed = good.replace("n=rehearsal", "n=payroll");
+        assert!(decode_group(&renamed).is_none(), "checksum covers the name");
+        assert!(decode_group(&good[..good.len() - 2]).is_none(), "checksum catches truncation");
+        // Surrounding whitespace is what a paste from chat actually looks like.
+        assert!(decode_group(&format!("  {good}\n")).is_some(), "a pasted invite still works");
     }
 
     #[test]
