@@ -163,6 +163,38 @@ impl Node {
     /// peer re-announces, a dropped partial object is re-fetched, an evicted dedup
     /// entry costs one duplicate relay. Nothing here can make the node *wrong*,
     /// only forgetful.
+    /// Bound `frags` by both count and bytes.
+    ///
+    /// Separate from `enforce_bounds` because it has to run *after* a fragment
+    /// is inserted, not only at the start of the next ingest — otherwise the
+    /// budget is exceeded by up to one chunk for as long as no further traffic
+    /// arrives, which on a link an attacker controls is indefinitely.
+    ///
+    /// Bounded twice on purpose. A set holds up to `count` rows of `chunk`
+    /// bytes and both come off the wire, so `MAX_PARTIAL_OBJECTS` alone bounds
+    /// cardinality while permitting gigabytes on a desktop and several times the
+    /// whole heap on an MCU (audit F-3, #189). Oldest goes first either way: it
+    /// is the set least likely to still have chunks coming.
+    pub(crate) fn enforce_partial_budget(&mut self) {
+        let held: usize = self.frags.values().map(|f| f.held_bytes()).sum();
+        if self.frags.len() <= MAX_PARTIAL_OBJECTS && held <= self.partial_budget {
+            return;
+        }
+        let mut by_age: Vec<(Id, u32, usize)> =
+            self.frags.iter().map(|(k, f)| (*k, f.started, f.held_bytes())).collect();
+        by_age.sort_unstable_by_key(|(_, started, _)| *started);
+
+        let (mut n, mut bytes) = (self.frags.len(), held);
+        for (id, _, sz) in by_age {
+            if n <= MAX_PARTIAL_OBJECTS && bytes <= self.partial_budget {
+                break;
+            }
+            self.frags.remove(&id);
+            n -= 1;
+            bytes = bytes.saturating_sub(sz);
+        }
+    }
+
     pub(crate) fn enforce_bounds(&mut self, now: u32) {
         if now.saturating_sub(self.last_sweep) >= SWEEP_INTERVAL_SECS {
             self.last_sweep = now;
@@ -192,16 +224,7 @@ impl Node {
             }
         }
 
-        // Partial objects: evict the oldest, which is the one least likely to still
-        // have chunks coming.
-        if self.frags.len() > MAX_PARTIAL_OBJECTS {
-            let excess = self.frags.len() - MAX_PARTIAL_OBJECTS;
-            let mut by_age: Vec<(Id, u32)> = self.frags.iter().map(|(k, f)| (*k, f.started)).collect();
-            by_age.sort_unstable_by_key(|(_, started)| *started);
-            for (id, _) in by_age.into_iter().take(excess) {
-                self.frags.remove(&id);
-            }
-        }
+        self.enforce_partial_budget();
 
         self.paths.trim(MAX_PEERS);
         trim_map(&mut self.peer_prekeys, MAX_PEERS);
@@ -387,6 +410,8 @@ impl Node {
                     rx.forwards.append(&mut inner.forwards);
                 }
             }
+            // After the insert, not only on the next ingest — see the method.
+            self.enforce_partial_budget();
         }
 
         // Store + relay only within the source's quota — this is the mesh-load

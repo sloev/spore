@@ -70,6 +70,7 @@ impl Node {
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
+            partial_budget: DEFAULT_PARTIAL_BUDGET,
             mtu: DEFAULT_MTU,
             manifests: HashMap::new(),
             pending: HashMap::new(),
@@ -168,6 +169,16 @@ impl Node {
     /// spill directory this has no effect — there is nowhere for bytes to go.
     pub fn set_mem_budget(&mut self, bytes: usize) {
         self.store.set_mem_budget(bytes);
+    }
+
+    /// Cap the chunk bytes held across all incomplete fountain sets.
+    ///
+    /// The companion to [`Node::set_mem_budget`], and needed for the same
+    /// reason: partial sets are held *outside* the store, so the store's budget
+    /// does not cover them. A runtime with a few hundred KB of heap must lower
+    /// both or neither (audit F-3, #189).
+    pub fn set_partial_budget(&mut self, bytes: usize) {
+        self.partial_budget = bytes.max(1024);
     }
 
     /// Bytes the store is holding, in memory and on disk together.

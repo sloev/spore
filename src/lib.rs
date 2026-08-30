@@ -165,6 +165,15 @@ pub const MAX_SEEN: usize = 1 << 16;
 /// Incomplete fountain sets held at once. Each holds real chunk bytes, so this is
 /// the tightest of these bounds.
 pub const MAX_PARTIAL_OBJECTS: usize = 256;
+/// Chunk bytes held across *all* incomplete fountain sets.
+///
+/// [`MAX_PARTIAL_OBJECTS`] bounds how many sets exist; this bounds how much
+/// they weigh, which is the bound that actually protects memory. A set holds up
+/// to `count` rows of `chunk` bytes and both come off the wire, so the count
+/// alone permitted gigabytes on a desktop and many times the available heap on
+/// an MCU (audit F-3, #189). Lower it with [`Node::set_partial_budget`] on a
+/// runtime with less room.
+pub const DEFAULT_PARTIAL_BUDGET: usize = 4 * 1024 * 1024;
 /// How long an incomplete fountain set is kept before it is collected. Fragments
 /// of a live object keep arriving; a set that has heard nothing for this long is
 /// either abandoned or was never real.
@@ -383,6 +392,8 @@ pub struct Node {
     max_store_bytes: usize,
     seq: u64,
     frags: HashMap<Id, Fountain>,
+    /// Byte ceiling for `frags`; see [`DEFAULT_PARTIAL_BUDGET`].
+    partial_budget: usize,
     pub mtu: usize,
     manifests: HashMap<Id, file::Manifest>,
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
@@ -614,6 +625,47 @@ mod tests {
         assert_eq!(n, wire.len());
         assert_eq!(d.payload, b"hello");
         assert!(d.verify());
+    }
+
+    #[test]
+    fn partial_fragment_memory_is_bounded_by_bytes_not_just_sets() {
+        // Audit F-3 (#189). MAX_PARTIAL_OBJECTS bounds how many incomplete
+        // fountain sets exist, not how large they are — and both `count` and
+        // `chunk` come off the wire. Before the byte budget, 256 sets could hold
+        // gigabytes on a desktop and many times the whole heap on an MCU.
+        //
+        // Unsigned and addressed to the public destination, so this is what an
+        // unauthenticated peer in range can do: no key, no forgery, no quota
+        // (see F-2, which is why `within_quota` does not stop it).
+        let mut n = Node::new("victim", &[]);
+        let now = 1_700_000_000u32;
+        n.set_partial_budget(64 * 1024);
+
+        const CHUNK: usize = 4 * 1024;
+        for set in 0..MAX_PARTIAL_OBJECTS {
+            let mut payload = Vec::with_capacity(18 + CHUNK);
+            let mut oid = [0u8; 16];
+            oid[..8].copy_from_slice(&(set as u64).to_be_bytes());
+            payload.extend_from_slice(&oid);
+            payload.push(0); // idx
+            payload.push(255); // count — the set can never complete
+            payload.extend_from_slice(&vec![0xAB; CHUNK]);
+
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
+            e.flags |= fl::FRAGMENT;
+            assert!(matches!(e.src, Src::None), "unsigned: no source quota applies");
+            let _ = n.on_rx(&e.wire(), 0, None, now);
+        }
+
+        let held: usize = n.frags.values().map(|f| f.held_bytes()).sum();
+        assert!(
+            held <= 64 * 1024,
+            "partial sets hold {held} bytes, over the 64 KiB budget — the count \
+             cap alone does not bound memory"
+        );
+        // Still bounded the old way too, and still functional rather than empty.
+        assert!(n.frags.len() <= MAX_PARTIAL_OBJECTS);
+        assert!(!n.frags.is_empty(), "eviction must not clear the table wholesale");
     }
 
     #[test]

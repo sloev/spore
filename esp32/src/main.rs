@@ -105,9 +105,19 @@ fn main() {
     // A quarter of what is free right now: the Wi-Fi stack, the tether buffers
     // and the bridge threads all come out of the same heap, and the store is
     // the one consumer that can spill the excess to flash instead of failing.
+    // Both budgets, not just the store's. Incomplete fountain sets are held
+    // outside the store, so `set_mem_budget` does not cover them and their own
+    // default is another 4 MB (audit F-3, #189) — lowering one and not the other
+    // leaves the larger hole open.
     let budget = (free_heap() as usize / 4).max(16 * 1024);
     node.set_mem_budget(budget);
-    log::info!("store memory budget {} bytes ({} free at the time)", budget, free_heap());
+    node.set_partial_budget(budget / 2);
+    log::info!(
+        "budgets: store {} B, partial fragments {} B ({} free at the time)",
+        budget,
+        budget / 2,
+        free_heap()
+    );
 
     // --- The radio (M8/E2) ---------------------------------------------------
     // Everything above proved the core runs here. This is the part that makes it
