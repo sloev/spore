@@ -557,6 +557,56 @@ device-pair run, not just green CI. 🧪 until then.
 
 ---
 
+## Milestone 9 — Threat-model legibility & anti-abuse guardrails
+
+**Goal:** close the gap between what SPORE's protocol already does (stamp
+anti-spam, congestion control, mix-mode anonymity, custody re-verification —
+all real, all in `SPEC.md`) and what a competent outside reader can find out
+without reading the wire format. Triggered by an external architecture
+comparison (Meshtastic/Reticulum/SPORE) that raised real questions — Sybil
+resistance, replay, metadata leakage, delivery semantics, "who pays the
+storage cost" — nearly all of which `SPEC.md` §5/§7/§9/§10 and
+`SECURITY_FINDINGS.md` already answer. The reviewer couldn't find those
+answers from the public site, which is itself the finding: this milestone is
+documentation and UX legibility, not new protocol.
+
+| Task | Status | Notes |
+|---|---|---|
+| `docs/THREAT_MODEL.md` — six chapters (**observers · participants · identities · resources · network/transport · implementation & evolution**), each threat carrying *adversary capability → attack → asset → mitigation → **residual risk** → explicitly out of scope*, cross-referencing the SPEC §0/§9/§10 mechanism and the `SECURITY_FINDINGS.md` ID that defends it | ⬜ todo | SPEC §0 states the threat model in one paragraph ("every link is hostile"); this expands it without inventing new claims. The governing rule, worth adopting verbatim: **every security mechanism names the attacker it defeats, and every attacker gets an explicit residual-risk statement.** The six-chapter split is broad enough to cover radio-mesh, encrypted-routing and opportunistic-delivery threats without pretending they are the same model |
+| **S-032 — delivery-receipt forgery (§8)** | ✅ **shipped, this pass** | Found while auditing the catalogue's "ACK and receipt spoofing" item against the code. Receipts were accepted on payload *shape* alone — unsigned, or signed by any stranger — because the id they reference is public (it rides in every `INV`). `Pending` now records the destination and the receipt must be signed by it. Local state only; no wire/ABI change |
+| Audit pass for the catalogue items with no obvious SPEC answer: **wormhole/eclipse against "first copy wins" path learning** (§4), **identity-key revocation while disconnected**, and **crypto agility under a frozen wire** (ver `0x01`, no algorithm negotiation) | ⬜ todo | These are the three where I could not find an existing answer, unlike replication/spam/FS/transport which are all shipped. Each may well end as a documented *residual risk* rather than a code change — a frozen wire is a deliberate trade, not an oversight — but each deserves a written verdict rather than silence |
+| Honest-relay retention statement: what an *honest* carrier's storage reveals if seized (seen-set ≥ 30 d, paths 7 d, store-until-expiry, receipts) | ⬜ todo | The catalogue's sharpest store-and-forward-specific point: "honest node" ≠ "collects no metadata". SPORE's numbers are already bounded and documented per-table; what's missing is stating the *aggregate* a seized device yields |
+| Locked design guardrail: **no popularity/frequency-weighted replication** (e.g. "send more copies toward frequently-encountered devices") without a documented Sybil analysis first | ⬜ todo | Stamp (§10) is per-envelope proof-of-work, not per-identity — it does not by itself defend a future reputation/social-routing feature against one attacker minting many identities. Nothing today needs this guardrail; it exists so nobody adds social routing later without re-deriving it |
+| Public docs/site pass making the already-shipped anti-abuse and privacy mechanisms discoverable: stamp PoW, §5.4 congestion control, custody re-verify-on-read, mix-mode onion+padding+decoys, and the "any underlay with its own routing is just one interface" framing (Meshtastic/Reticulum/Tor/etc. become transports SPORE rides, not rivals) | ⬜ todo | Currently only `SPEC.md` carries this; `README.md`/`site/home.md` don't surface it, which is exactly why an outside technical reviewer concluded these were open questions rather than shipped answers |
+| Delivery-status UX language pass (Android/webnode): surface the ACKREQ receipt (§8) and store/expiry state as plain states — e.g. *waiting for contact → travelling → delivered → expired* — rather than raw TTL/hop-count internals | ⬜ todo | Direct extension of the Honesty contract's "no path ⇒ say so" already in `MISSION.md`; check current send/error-feedback UI (M2, #61/#62) before assuming this is greenfield |
+
+**Explicitly not doing here** (already solved, would duplicate shipped work):
+replication/copy-count limits (§5.4 congestion control + dedup + store
+eviction), spam/"postage" (§10 stamp + quotas), forward secrecy (§7 ratchet +
+prekey ring + healing topic-key rotation), transport abstraction (Page 2 —
+already the core design). Named "delivery policy" presets (Urgent/Efficient/
+Private/Carry/Emergency) were considered and deferred: the underlying knobs
+(stamp, hops, FLOOD, mix toggle) already exist, and packaging them as named
+UX presets is a candidate for M5 polish, not core protocol — revisit only if
+it survives the MISSION.md decision test against "bloats the mental model
+past two pages."
+
+**Definition of done:** a reader can go from `README.md` to a real answer for
+"what stops someone from flooding my device with junk" and "what can a
+carrier who relays my envelope learn" without reading `SPEC.md` cover to
+cover; `docs/THREAT_MODEL.md` exists, covers the six chapters, and every claim
+in it links to either a SPEC section or a `SECURITY_FINDINGS.md` ID — with a
+residual-risk line wherever the honest answer is "partially" or "not at all".
+
+**Why this milestone earns its place** (it is otherwise just documentation):
+auditing an external threat catalogue against the code found **S-032**, a
+receipt-forgery bug that had been shipping. The catalogue's value was not its
+recommendations — most were already implemented — but that it named a class
+("authentic ≠ fresh ≠ from the right party") precise enough to test. That is
+the argument for doing the remaining audit rows rather than only the prose.
+
+---
+
 ## Explicitly out of scope / non-goals (locked)
 
 | Item | Decision |
@@ -569,6 +619,7 @@ device-pair run, not just green CI. 🧪 until then.
 | **Wire / C ABI changes** | Frozen; `allow-frozen-change` for a 2.0 only. |
 | **Routing Direct records through store-and-forward relays** | Direct is non-routed by definition. |
 | **Compile-time `max_core` gating (C0–C8 cargo features)** | Declined — ratchet session map is inline on `Node`. M8 is the real MCU target that could prove it necessary, but starts on esp-idf-sys specifically to avoid forcing the question; stays declined unless esp-idf-sys proves too heavy for the board. |
+| **Identity spanning multiple devices (one person, several keys)** | Not decided, not started. Today identity = one Ed25519 keypair *per device* (SPEC §1/§11 — "ratchet state is per-device, give each device its own key"). A person-level identity with authorised sub-devices is architecturally significant (new envelope semantics, likely wire-affecting) and gated by the same frozen-format process as any 2.0 change. Tracked here so it isn't silently absent; not scheduled. |
 
 ---
 
@@ -604,6 +655,7 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
 7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
 8. **M8 — Embedded ESP32 runtime** (raw-802.11 relay; first real MCU target) — after the still-open carried-forward items in M2/M4/M5, not ahead of them, unless deliberately reprioritized
+9. **M9 — Threat-model legibility & anti-abuse guardrails** (docs/UX only; no protocol gap found) — low urgency, pick up opportunistically
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
