@@ -562,3 +562,47 @@ pub unsafe extern "C" fn spore_topic_open(ct: *const u8, ct_len: usize, psk: *co
         None => pack(Vec::new()),
     }
 }
+
+/// Render a private-group invite (W7) — `spore-group:<key hex>?n=…&k=…`.
+///
+/// Exported rather than formatted in JavaScript so the string the browser hands
+/// a person and the string the core will accept are produced by the same code.
+/// A second implementation in the UI is a format that drifts, and the failure
+/// mode of a drifted invite is a room with one member in it.
+///
+/// # Safety
+/// `name`/`name_len` are UTF-8; `key` points to 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_group_invite_encode(name: *const u8, name_len: usize, key: *const u8) -> i64 {
+    let key_arr: &[u8; 32] = match std::slice::from_raw_parts(key, 32).try_into() {
+        Ok(a) => a,
+        Err(_) => return pack(Vec::new()),
+    };
+    let Ok(name) = std::str::from_utf8(std::slice::from_raw_parts(name, name_len)) else {
+        return pack(Vec::new());
+    };
+    pack(crate::invite::encode_group(name, key_arr).into_bytes())
+}
+
+/// Parse a private-group invite. Returns `[key:32][name utf8]`, or empty if the
+/// text is not a group invite, is malformed, or fails its checksum — the
+/// caller cannot tell those apart on purpose, because the honest UI response to
+/// all three is the same: this invite does not work, ask for it again.
+///
+/// # Safety
+/// `ptr`/`len` describe UTF-8 text.
+#[no_mangle]
+pub unsafe extern "C" fn spore_group_invite_decode(ptr: *const u8, len: usize) -> i64 {
+    let Ok(text) = std::str::from_utf8(std::slice::from_raw_parts(ptr, len)) else {
+        return pack(Vec::new());
+    };
+    match crate::invite::decode_group(text) {
+        Some(g) => {
+            let mut out = Vec::with_capacity(32 + g.name.len());
+            out.extend_from_slice(&g.key);
+            out.extend_from_slice(g.name.as_bytes());
+            pack(out)
+        }
+        None => pack(Vec::new()),
+    }
+}

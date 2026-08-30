@@ -576,6 +576,49 @@ chat, and neither is a cryptography problem:
    between devices, and left behind on old ones.
 </details>
 
+### Invites, and what "revoke" can and cannot mean (W7)
+
+`invite::encode_group` renders a private group as one line:
+
+```text
+spore-group:<64 hex — the whole 32-byte key>?n=<name>&k=<checksum>
+```
+
+It is deliberately **not** the `spore:` prefix an address invite uses, because the
+two are not the same kind of object and must not be interchangeable when pasted.
+`k` is the same two-byte checksum an address invite carries, over the key *and*
+the name; a mistyped key would otherwise open a room that is cryptographically
+fine and socially empty, which reads as "a group nobody has posted to yet" rather
+than as an error.
+
+The property that governs the UI: **the invite string is the key.** An address
+invite is public and says only where to find someone. This one carries the secret
+that constitutes membership, because in a group with no roster, holding the key
+*is* being a member. Two consequences a client must surface rather than bury:
+
+- **Anyone who reads it joins.** A screenshot, a quoted reply, or a photo of a
+  screen works exactly as well as being told. So the string is shown on request
+  rather than displayed beside the conversation.
+- **It cannot be recalled.** A copy already taken keeps opening everything sealed
+  under that key, and nothing in the protocol reaches back to a copy.
+
+What *is* available is moving the group forward, and it is worth being exact about
+which of the three key changes above applies, because they are not interchangeable:
+
+| You want to | Use | What it actually achieves |
+|---|---|---|
+| Deny a leaked invite going forward | `rekey_seal` to the members you still want | New random key; whoever is not handed it cannot read *future* messages. Past ciphertext they already hold is unaffected. |
+| Limit the damage of a future leak | `rotate` (epoch) | Forward secrecy only. A holder of the current key computes every later key, so this does not evict anyone. |
+| Recover from a copied key | `contribute`/`absorb` | Post-compromise security — the group heals by operating. |
+
+So "revoke" is real but narrower than the word suggests, and the honest phrasing
+is *forward-only*: eviction is `rekey_seal`, it binds only going forward, and
+SPORE holds no member list, so **who** the remaining members are is the
+application's knowledge and never the protocol's claim. A client must not render
+a "remove member" control that implies the protocol enforced it — there is no
+roster to enforce against, and a partitioned mesh can leave two halves disagreeing
+about who was removed (which is what `key_id` makes visible rather than silent).
+
 ## Delivery receipts (§8)  ✅ implemented
 
 Flood-and-forget is fine for most mail, but sometimes you want to *know* it arrived.

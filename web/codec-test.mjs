@@ -97,5 +97,44 @@ const startsWith = (u8, prefix) => prefix.every((b, i) => u8[i] === b);
   check('ndef: mime type is the documented one', SPORE_MIME === 'application/x-spore');
 }
 
-console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio and NDEF wire formats verified');
+// ---------------------------------------------------------------------------
+// Private-group invite (W7) — the same kind of Rust twin as the codecs above:
+// the string a browser hands a person must be the string `src/invite.rs` will
+// accept, or the invite opens a room with one member in it. The binding is a
+// thin marshal over wasm, which is precisely where an offset bug would hide.
+// Skipped rather than failed when the wasm is not built, so this file still
+// runs on its own; CI always builds it first.
+// ---------------------------------------------------------------------------
+{
+  const wasmPath = new URL('../target/wasm32-unknown-unknown/release/spore.wasm', import.meta.url);
+  const fs = await import('node:fs');
+  if (!fs.existsSync(wasmPath)) {
+    console.log('skip group invite — wasm not built (cargo build --release --lib --target wasm32-unknown-unknown)');
+  } else {
+    const { loadSpore } = await import('./spore.mjs');
+    const spore = await loadSpore(fs.readFileSync(wasmPath));
+    const key = Uint8Array.from({ length: 32 }, (_, i) => i * 7 & 0xff);
+    const name = 'Book club & 🍄';
+    const line = spore.groupInviteEncode(name, key);
+
+    check('group invite: prefix is spore-group:', line.startsWith('spore-group:'));
+    const g = spore.groupInviteDecode(line);
+    check('group invite: round-trips the name through percent-encoding', g && g.name === name);
+    check('group invite: carries the key byte-for-byte', g && eq(g.key, key));
+    check('group invite: a flipped key nibble fails the checksum',
+      spore.groupInviteDecode(line.replace('spore-group:00', 'spore-group:01')) === null);
+    check('group invite: a renamed invite fails the checksum',
+      spore.groupInviteDecode(line.replace('n=Book', 'n=Payroll')) === null);
+    check('group invite: truncation is refused',
+      spore.groupInviteDecode(line.slice(0, -2)) === null);
+    check('group invite: an address invite is not a group invite',
+      spore.groupInviteDecode('spore:1c9a4f0e77b32d51?n=Jo&k=3f2a') === null);
+    check('group invite: junk is refused', spore.groupInviteDecode('hello') === null);
+    // What a paste out of a chat client actually looks like.
+    check('group invite: surrounding whitespace still decodes',
+      spore.groupInviteDecode(`  ${line}\n`) !== null);
+  }
+}
+
+console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio, NDEF and group-invite formats verified');
 process.exit(fails ? 1 : 0);
