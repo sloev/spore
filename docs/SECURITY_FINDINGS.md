@@ -56,6 +56,7 @@ than fixing a crash, it says so explicitly.
 | [S-029](#s-029) | Release integrity (my own fix, racy) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 | [S-030](#s-030) | Release integrity (S-025's trap, in S-025's fix) | Low | ✅ | ✅ | ✗ manual | release plumbing |
 | [S-031](#s-031) | Remote CPU exhaustion (audio) | **High** | ✅ measured | ✅ | ✅ | no |
+| [S-032](#s-032) | Delivery-receipt forgery (§8) | Medium-High | ✅ | ✅ | ✅ | yes (receipts checked against the destination) |
 
 Two entries above are deliberately not "fixed": S-024 records mismatches whose
 resolution is a design choice rather than a repair. And two have no automated test,
@@ -1354,6 +1355,67 @@ round-trip, chunked-streaming and back-to-back-frame tests all still pass unchan
 break. `two_frames_in_a_stream_both_decode`, so the cursor survives a consume and a
 drain. `scanning_does_not_redo_work_as_the_buffer_fills` asserts the cost stays flat
 as noise fills the buffer, which is the property itself rather than a proxy for it.
+
+---
+
+## S-032
+
+**Anyone can forge "Delivered ✓".** Medium-High. `src/node/ingest.rs` — the §8
+receipt branch of `ingest`.
+
+**Root cause.** The branch that consumes a delivery receipt checked only the
+*shape* of what arrived — `typ == DATA`, dest is one of mine, `ACKREQ` clear,
+payload starts `[0x06]` and is ≥ 17 bytes — and then recorded the referenced id
+as delivered. It never consulted `verified_src`, which the same function had
+already computed twelve lines earlier, and it never required the `SIGNED` flag at
+all. The `Pending` entry did not even retain the address the message was sent to,
+so there was nothing to compare a receipt against.
+
+The mistaken assumption is that knowing the original envelope's id implies having
+received it. It does not: **`ID` is not a secret**. It travels in the clear inside
+every `INV` (§6), which is unsigned, exchanged on every meeting, and lists exactly
+the ids a peer is carrying. Any node that relayed the envelope, or merely heard an
+`INV` naming it, can name it back.
+
+**Exploit.** Alice sends Bob a message with `ACKREQ`. Mallory — any relay on the
+path, or any peer that saw an `INV` — sends Alice one `DATA` envelope addressed to
+Alice with payload `[0x06][orig_id]`. Alice records the message as delivered.
+Bob never received anything. Two variants both work: a receipt Mallory *signs with
+her own key*, and a receipt with **no signature at all** (an unsigned envelope
+carries no `src` and "rides last everywhere", but the branch never looked). No key,
+no session, no position on the path beyond hearing one `INV` — one packet.
+
+The damage is a false security claim rather than disclosure, which is what keeps
+this below the spoofing entries: nothing decrypts and nothing is impersonated at
+the content layer. But "delivered" is precisely a claim [Mission](MISSION.md)'s
+honesty contract forbids getting wrong, and a store-and-forward system whose whole
+premise is *eventual* delivery is one where the receipt is the only evidence a user
+ever gets. A forged one is indistinguishable from the real thing, and it
+suppresses the §5.4d resend that would otherwise have kept trying.
+
+**Reproduced.** A test driving the real `Node::on_rx`: Mallory meets Alice, Alice
+sends Bob an `ACKREQ` message that Bob never receives, Mallory returns a forged
+receipt. `a.acked(&id)` was `true` for both the stranger-signed and the wholly
+unsigned variant.
+
+**Patch.** `Pending` gains a `dest` field recording who the message was addressed
+to, and the receipt branch requires `verified_src` — `Some` only for a signature
+that checks out — to equal that address. An unsigned receipt has no
+`verified_src` and is rejected; a stranger's signature verifies but does not match
+the destination and is rejected.
+
+**Freeze impact?** None. `Pending` is a private struct, the check is local state,
+and no envelope byte changes — a receipt on the wire is exactly what it was.
+`tests/api_freeze.rs` passes untouched.
+
+**Behaviour change.** Yes, and deliberately: a receipt that would previously have
+been accepted from anyone now counts only from the destination. A node that was
+relying on a third party to close out its `pending` entry will now keep resending
+per §5.4d until the real recipient answers — which is the correct behaviour.
+
+**Test.** `a_receipt_only_counts_from_the_address_it_was_sent_to` — asserts both
+forgeries are refused *and* that the genuine recipient's receipt is still accepted,
+so the fix cannot be satisfied by simply breaking receipts.
 
 ---
 

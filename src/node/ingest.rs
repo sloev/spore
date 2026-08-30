@@ -371,12 +371,19 @@ impl Node {
         // Receipts (§8), only for mail addressed specifically to one of our
         // addresses (never for topic/public floods).
         if e.typ == ty::DATA && self.addrs.contains(&e.dest) {
-            // A receipt for something we sent -> record the delivery.
+            // A receipt for something we sent -> record the delivery, but only
+            // from the address we actually sent it to. `verified_src` is `Some`
+            // only for a signature that checks out, so an unsigned receipt and
+            // one signed by a stranger are both rejected here: the referenced
+            // id is not a secret (it rides in the clear inside every INV, §6),
+            // so possession of it proves nothing about delivery.
             if e.flags & fl::ACKREQ == 0 && e.payload.first() == Some(&RECEIPT_TAG) && e.payload.len() >= 17 {
                 let mut oid = [0u8; 16];
                 oid.copy_from_slice(&e.payload[1..17]);
-                self.acked.insert(oid);
-                self.pending.remove(&oid);
+                if verified_src.is_some_and(|s| self.pending.get(&oid).is_some_and(|p| p.dest == s)) {
+                    self.acked.insert(oid);
+                    self.pending.remove(&oid);
+                }
             }
             // A message that asked for a receipt -> flood one back to its src.
             if e.flags & fl::ACKREQ != 0 && e.flags & fl::FRAGMENT == 0 {

@@ -171,7 +171,7 @@ impl Node {
         let id = e.id();
         self.mark_seen(&e);
         self.store_put(&e, now);
-        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
+        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now), dest });
         self.forward_intents(&e, NO_IFACE, now)
     }
 
@@ -222,7 +222,7 @@ impl Node {
         let id = e.id();
         self.mark_seen(&e);
         self.store_put(&e, now);
-        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now) });
+        self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now), dest });
         (id, self.forward_intents(&e, NO_IFACE, now), encrypted)
     }
 
