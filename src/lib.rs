@@ -653,10 +653,7 @@ mod tests {
         }
 
         // Paced: a sender cannot make us relay unboundedly on unsigned traffic.
-        assert!(
-            relayed < 400,
-            "unsigned traffic relayed {relayed}/400 — the quota is not applying"
-        );
+        assert!(relayed < 400, "unsigned traffic relayed {relayed}/400 — the quota is not applying");
         // But not silenced. Local delivery happens above the quota check, so a
         // node still *receives* public mail it is over budget to pass on;
         // dropping that would be a worse failure than relaying too much.
