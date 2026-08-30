@@ -70,7 +70,7 @@ impl Node {
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
             frags: HashMap::new(),
-            partial_budget: DEFAULT_PARTIAL_BUDGET,
+            limits: Limits::default(),
             mtu: DEFAULT_MTU,
             manifests: HashMap::new(),
             pending: HashMap::new(),
@@ -178,7 +178,34 @@ impl Node {
     /// does not cover them. A runtime with a few hundred KB of heap must lower
     /// both or neither (audit F-3, #189).
     pub fn set_partial_budget(&mut self, bytes: usize) {
-        self.partial_budget = bytes.max(1024);
+        self.limits.partial_bytes = bytes.max(1024);
+    }
+
+    /// Replace every table ceiling at once.
+    ///
+    /// The general form of [`Node::set_partial_budget`], and the answer to audit
+    /// #189's second recommendation: the caps are desktop numbers compiled into
+    /// every build, so fixing them one table at a time leaves the class open.
+    /// A constrained runtime should call this once at start-up with
+    /// [`Limits::for_budget`] sized from the memory it actually has:
+    ///
+    /// ```no_run
+    /// # use spore::{Node, Limits};
+    /// # let mut node = Node::new("mcu", &[]);
+    /// // A quarter of free heap for tables; the radio and tether need the rest.
+    /// node.set_limits(Limits::for_budget(free_heap_bytes() / 4));
+    /// # fn free_heap_bytes() -> usize { 226_368 }
+    /// ```
+    ///
+    /// Takes effect on the next bound enforcement, which is every ingest — so a
+    /// node already over the new ceilings trims down rather than staying over.
+    pub fn set_limits(&mut self, limits: Limits) {
+        self.limits = limits;
+    }
+
+    /// The ceilings in force.
+    pub fn limits(&self) -> Limits {
+        self.limits
     }
 
     /// Bytes the store is holding, in memory and on disk together.

@@ -177,7 +177,7 @@ impl Node {
     /// is the set least likely to still have chunks coming.
     pub(crate) fn enforce_partial_budget(&mut self) {
         let held: usize = self.frags.values().map(|f| f.held_bytes()).sum();
-        if self.frags.len() <= MAX_PARTIAL_OBJECTS && held <= self.partial_budget {
+        if self.frags.len() <= self.limits.partial_objects && held <= self.limits.partial_bytes {
             return;
         }
         let mut by_age: Vec<(Id, u32, usize)> =
@@ -186,7 +186,7 @@ impl Node {
 
         let (mut n, mut bytes) = (self.frags.len(), held);
         for (id, _, sz) in by_age {
-            if n <= MAX_PARTIAL_OBJECTS && bytes <= self.partial_budget {
+            if n <= self.limits.partial_objects && bytes <= self.limits.partial_bytes {
                 break;
             }
             self.frags.remove(&id);
@@ -215,8 +215,8 @@ impl Node {
         // Dedup: prefer evicting whatever is nearest to expiring, so the ids most
         // likely to still be in flight survive. Sorting is O(n log n) but only
         // happens on the ingest that crosses the cap.
-        if self.seen.len() > MAX_SEEN {
-            let excess = self.seen.len() - MAX_SEEN;
+        if self.seen.len() > self.limits.seen {
+            let excess = self.seen.len() - self.limits.seen;
             let mut by_expiry: Vec<(Id, u32)> = self.seen.iter().map(|(k, v)| (*k, *v)).collect();
             by_expiry.sort_unstable_by_key(|(_, until)| *until);
             for (id, _) in by_expiry.into_iter().take(excess) {
@@ -226,22 +226,23 @@ impl Node {
 
         self.enforce_partial_budget();
 
-        self.paths.trim(MAX_PEERS);
-        trim_map(&mut self.peer_prekeys, MAX_PEERS);
-        trim_map(&mut self.peer_busy, MAX_PEERS);
-        trim_map(&mut self.peer_names, MAX_PEERS);
-        trim_map(&mut self.sessions, MAX_PEERS);
-        trim_map(&mut self.manifests, MAX_MANIFESTS);
-        trim_set(&mut self.acked, MAX_ACKED);
+        let lim = self.limits;
+        self.paths.trim(lim.peers);
+        trim_map(&mut self.peer_prekeys, lim.peers);
+        trim_map(&mut self.peer_busy, lim.peers);
+        trim_map(&mut self.peer_names, lim.peers);
+        trim_map(&mut self.sessions, lim.peers);
+        trim_map(&mut self.manifests, lim.manifests);
+        trim_set(&mut self.acked, lim.acked);
 
         // Inboxes are queues the application drains. If it has not, drop from the
         // front: the oldest request or event is the one most likely to be stale.
-        if self.rpc_inbox.len() > MAX_INBOX {
-            let excess = self.rpc_inbox.len() - MAX_INBOX;
+        if self.rpc_inbox.len() > lim.inbox {
+            let excess = self.rpc_inbox.len() - lim.inbox;
             self.rpc_inbox.drain(..excess);
         }
-        if self.feed_inbox.len() > MAX_INBOX {
-            let excess = self.feed_inbox.len() - MAX_INBOX;
+        if self.feed_inbox.len() > lim.inbox {
+            let excess = self.feed_inbox.len() - lim.inbox;
             self.feed_inbox.drain(..excess);
         }
     }

@@ -105,17 +105,30 @@ fn main() {
     // A quarter of what is free right now: the Wi-Fi stack, the tether buffers
     // and the bridge threads all come out of the same heap, and the store is
     // the one consumer that can spill the excess to flash instead of failing.
-    // Both budgets, not just the store's. Incomplete fountain sets are held
-    // outside the store, so `set_mem_budget` does not cover them and their own
-    // default is another 4 MB (audit F-3, #189) — lowering one and not the other
-    // leaves the larger hole open.
+    // Every budget, not just the store's. The store is one consumer among
+    // several: the dedup table, the peer maps, the ratchet sessions and the
+    // incomplete fountain sets are all held outside it, all capped by constants
+    // sized for a laptop, and together they permit some 7 MB of tables — about
+    // thirty times this board's free heap. Lowering one and leaving the rest is
+    // what audit #189's second recommendation asked us to stop doing, so the
+    // whole class is scaled from one number here (F-1, F-3, and recommendation
+    // 2 of #189).
+    //
+    // A quarter of what is free right now: the Wi-Fi stack, the tether buffers
+    // and the bridge threads all come out of the same heap, and the store is
+    // the one consumer that can spill the excess to flash instead of failing.
     let budget = (free_heap() as usize / 4).max(16 * 1024);
     node.set_mem_budget(budget);
-    node.set_partial_budget(budget / 2);
+    node.set_limits(spore::Limits::for_budget(budget));
+    let lim = node.limits();
     log::info!(
-        "budgets: store {} B, partial fragments {} B ({} free at the time)",
+        "budgets: store {} B, tables ~{} B (seen {}, peers {}, frags {} sets / {} B) — {} free at the time",
         budget,
-        budget / 2,
+        lim.est_bytes(),
+        lim.seen,
+        lim.peers,
+        lim.partial_objects,
+        lim.partial_bytes,
         free_heap()
     );
 

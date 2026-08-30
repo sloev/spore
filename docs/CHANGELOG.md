@@ -18,6 +18,24 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Table ceilings come from a memory budget instead of six laptop numbers
+  (audit #189, recommendation 2).** F-1 and F-3 each fixed one table for the MCU
+  and left the class open, which is what the audit said to stop doing. Added
+  together the defaults let a node hold roughly **7 MB of tables** before
+  anything evicts — about **thirty times** an ESP32-S2's 226 KB of free heap —
+  and the largest single item was not the payload but the ratchet sessions, at
+  264 B × 4096 peers ≈ 1.1 MB. `Limits` puts all seven ceilings in one struct;
+  `Limits::for_budget(bytes)` divides a budget by documented shares (40% to
+  fountain payload, the only table holding attacker-chosen bytes; 25% to dedup,
+  which must never be starved because a node that cannot dedup refloods
+  forever; 20% to the five peer-keyed maps; 5% each to manifests, receipts and
+  inboxes) using per-entry costs measured with `size_of` rather than guessed, so
+  they follow the structs if the structs grow. Every ceiling has a floor,
+  because a table trimmed to nothing does not degrade, it breaks. The firmware
+  now sets all of them from actual free heap in the same place it already sized
+  the store. `Limits::default()` is the old constants exactly, asserted by a
+  test, so nothing that does not ask for a budget behaves differently. Wire
+  unchanged; no C ABI change.
 - **Private groups can be invited into, and "revoke" is finally stated honestly
   (W7).** Sharing a private group meant reading 64 hex characters to someone.
   There is now one line — `spore-group:<key hex>?n=…&k=…` — with a prefix
