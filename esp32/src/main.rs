@@ -95,6 +95,20 @@ fn main() {
         Err(e) => log::error!("flash store unavailable ({e}) — running memory-only"),
     }
 
+    // --- Memory budget (audit F-1) -------------------------------------------
+    // The store's default budget is 5 MB, chosen for a desktop. This board has
+    // a few hundred KB of heap, so leaving the default means the node exhausts
+    // RAM long before it decides anything is worth spilling — which would make
+    // the flash store above unreachable under exactly the pressure it exists
+    // for, and lets ordinary traffic OOM the board with no attacker involved.
+    //
+    // A quarter of what is free right now: the Wi-Fi stack, the tether buffers
+    // and the bridge threads all come out of the same heap, and the store is
+    // the one consumer that can spill the excess to flash instead of failing.
+    let budget = (free_heap() as usize / 4).max(16 * 1024);
+    node.set_mem_budget(budget);
+    log::info!("store memory budget {} bytes ({} free at the time)", budget, free_heap());
+
     // --- The radio (M8/E2) ---------------------------------------------------
     // Everything above proved the core runs here. This is the part that makes it
     // a relay rather than a node talking to itself: raw 802.11, no access point,
@@ -188,12 +202,13 @@ fn main() {
         // here either: an S2 ignores the DTR/RTS toggle that resets other chips.
         if ticks % 3 == 0 {
             log::info!(
-                "up {}s · addr={} · sig={} · probe={} · heap={} · radio={} · rxdrop={} · tether={}",
+                "up {}s · addr={} · sig={} · probe={} · heap={} · budget={} · radio={} · rxdrop={} · tether={}",
                 now(),
                 hex(&addr),
                 if boot_sig_ok { "ok" } else { "FAILED" },
                 if boot_probe_ok { "ok" } else { "FAILED" },
                 free_heap(),
+                budget,
                 match &radio_mac {
                     Some(m) => hexb(m),
                     None => "down".into(),
