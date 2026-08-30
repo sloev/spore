@@ -628,6 +628,42 @@ mod tests {
     }
 
     #[test]
+    fn unsigned_traffic_is_paced_but_still_delivered() {
+        // Audit F-2 (#189). Unsigned envelopes used to skip the source quota
+        // entirely, on the reasoning that dedup and expiry already bounded them.
+        // They do not: dedup is keyed on content id and an attacker varies
+        // content for free, while expiry bounds lifetime rather than rate.
+        //
+        // Now they share the UNATTRIBUTED bucket with signed-but-unverifiable
+        // traffic — bounded, and impossible to aim at a chosen victim's budget.
+        let mut n = Node::new("victim", &[]);
+        let now = 1_700_000_000u32;
+
+        // Well past DEFAULT_SOURCE_QUOTA, all of it unsigned and public.
+        let mut relayed = 0usize;
+        let mut delivered = 0usize;
+        for i in 0..400u32 {
+            let mut body = vec![0xAB; 4096];
+            body[..4].copy_from_slice(&i.to_be_bytes()); // a new content id each time
+            let e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, body);
+            assert!(matches!(e.src, Src::None));
+            let rx = n.on_rx(&e.wire(), 0, None, now);
+            relayed += rx.forwards.len();
+            delivered += rx.delivered.len();
+        }
+
+        // Paced: a sender cannot make us relay unboundedly on unsigned traffic.
+        assert!(
+            relayed < 400,
+            "unsigned traffic relayed {relayed}/400 — the quota is not applying"
+        );
+        // But not silenced. Local delivery happens above the quota check, so a
+        // node still *receives* public mail it is over budget to pass on;
+        // dropping that would be a worse failure than relaying too much.
+        assert!(delivered > 0, "over-quota unsigned mail must still be delivered locally");
+    }
+
+    #[test]
     fn partial_fragment_memory_is_bounded_by_bytes_not_just_sets() {
         // Audit F-3 (#189). MAX_PARTIAL_OBJECTS bounds how many incomplete
         // fountain sets exist, not how large they are — and both `count` and

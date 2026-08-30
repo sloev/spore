@@ -292,14 +292,20 @@ impl Node {
         // a denial of service against a third party, bought with junk. So only a
         // verified signature spends a named budget; everything else shares one
         // bucket, which is still bounded but cannot be aimed.
+        // An unsigned envelope is the *most* unattributable of the three, so it
+        // shares that same bucket rather than skipping the quota entirely, which
+        // is what it used to do (audit F-2, #189). The old reasoning was that
+        // "dedup/expiry already bound them", and it does not hold: dedup is keyed
+        // on content id and an attacker varies content for free — a different
+        // byte is a different id, every time — while expiry bounds lifetime, not
+        // rate or volume. Nothing SPORE sends is unsigned (every path in
+        // `node::send` signs), so this paces foreign unsigned traffic without
+        // touching anything this node originates.
         let src_addr = match &e.src {
-            Src::Full(_) | Src::Short(_) => Some(verified_src.unwrap_or(congestion::UNATTRIBUTED)),
-            Src::None => None,
+            Src::Full(_) | Src::Short(_) => verified_src.unwrap_or(congestion::UNATTRIBUTED),
+            Src::None => congestion::UNATTRIBUTED,
         };
-        let within_quota = match src_addr {
-            Some(a) => self.quotas.admit(a, e.wire().len() as u32, e.stamp(), now),
-            None => true, // unattributable frames: dedup/expiry already bound them
-        };
+        let within_quota = self.quotas.admit(src_addr, e.wire().len() as u32, e.stamp(), now);
 
         let mut rx = Rx::default();
 
