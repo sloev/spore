@@ -1,0 +1,94 @@
+name: PR guard (changelog)
+
+# Refuse pull requests that change what a node does without saying so in
+# `docs/CHANGELOG.md`'s `## Unreleased` section.
+#
+# Why this exists as a *PR* gate rather than a release gate: `release.yml`
+# already refuses to cut a release with no `- ` bullets, but that check fires
+# once, at the end, on whoever happens to press the button. Between 0.6.0 and
+# this workflow, 29 pull requests merged and none of them touched the
+# changelog — so the person cutting the next release would have had to
+# reconstruct a fortnight of history from `git log`, or write one vague bullet
+# to satisfy the gate. The latter has already happened once: the comment in
+# `release.yml` about v0.4.0 shipping its own boilerplate as release notes is
+# the scar. Catching it here means the entry is written by the person who
+# still remembers what they changed.
+#
+# This is not busywork for its own sake. The changelog is load-bearing:
+# `android.yml` extracts each version's section verbatim and publishes it as
+# the GitHub release notes, so an empty section is a release nobody can read.
+#
+# Two escape hatches, because plenty of good PRs genuinely warrant no entry
+# (a formatting fix, a roadmap edit, a CI tweak):
+#
+#   * the `no-changelog` label — the same deliberate-opt-out shape as
+#     `allow-frozen-change` in `pr-guard.yml`;
+#   * `release/v*` head branches — the release bump *retitles* `## Unreleased`
+#     to the new version and leaves a fresh empty one behind, so it always
+#     looks like a PR that emptied the section. It is the one PR that is
+#     supposed to.
+#
+# `labeled`/`unlabeled` are in the trigger list for the reason `pr-guard.yml`
+# documents at length: the check reads labels from the payload that started
+# the run, so without them, adding the label does nothing and re-running the
+# failed job replays the original label-free payload.
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  changelog-entry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require an Unreleased entry, or an explicit opt-out
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+
+          if echo ",$LABELS," | grep -q ',no-changelog,'; then
+            echo "Label 'no-changelog' present — this PR declares it needs no entry."
+            exit 0
+          fi
+
+          case "$HEAD_REF" in
+            release/v*)
+              echo "Release bump PR — it retitles '## Unreleased' by design."
+              exit 0
+              ;;
+          esac
+
+          # The merge base, not the base tip: master moves under long-lived
+          # branches, and comparing against its tip would credit this PR with
+          # entries somebody else merged (or blame it for their removals).
+          base="$(git merge-base "$BASE" "$HEAD")"
+
+          # The whole section body, not just `- ` lines: extending an existing
+          # bullet is as much "saying what changed" as adding a new one.
+          section() {
+            git show "$1:docs/CHANGELOG.md" 2>/dev/null |
+              awk '/^## Unreleased/ { f = 1; next } /^## / { f = 0 } f' || true
+          }
+
+          if [ "$(section "$base")" = "$(section "$HEAD")" ]; then
+            echo "::error::This PR does not touch the '## Unreleased' section of docs/CHANGELOG.md."
+            echo ""
+            echo "Add a '- ' bullet describing what changed. Two conventions the file asks for:"
+            echo "  * state the wire status — 'Wire unchanged' means gen_vectors still"
+            echo "    reproduces reference/vectors.json byte-for-byte;"
+            echo "  * a security fix references its finding, e.g. 'S-032', which links to"
+            echo "    docs/SECURITY_FINDINGS.md."
+            echo ""
+            echo "If this PR genuinely warrants no entry — formatting, a roadmap edit, a CI"
+            echo "tweak — add the 'no-changelog' label to say so deliberately."
+            exit 1
+          fi
+
+          echo "OK — the Unreleased section was updated."

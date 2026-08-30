@@ -18,6 +18,16 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The changelog is enforced where it is written, not where it is published.**
+  Between 0.6.0 and this entry, 29 pull requests merged and not one touched this
+  file — `release.yml` refuses to cut a release with no bullets, but that check
+  fires once, at the end, on whoever presses the button, by which point a
+  fortnight of history has to be reconstructed from `git log`. That is how v0.4.0
+  shipped with its own boilerplate as release notes. `changelog-guard.yml` moves
+  the check to PR time: a PR must touch `## Unreleased` or carry a `no-changelog`
+  label, the same deliberate-opt-out shape `pr-guard.yml` uses for
+  `allow-frozen-change`. Release-bump branches are exempt, because retitling
+  `## Unreleased` is precisely what they are for. Wire unchanged; CI only.
 - **S-032** Anyone could forge a delivery receipt, so "Delivered ✓" meant nothing.
   The §8 receipt branch accepted a receipt on payload *shape* alone — type, dest,
   `[0x06][orig_id]` — without consulting the `verified_src` the same function had
