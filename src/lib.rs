@@ -159,8 +159,12 @@ pub const DEFAULT_GOSSIP_BUDGET: u32 = 32 * 1024;
 // forgotten peer re-announces, a dropped partial object is re-fetched, an evicted
 // dedup entry costs one duplicate relay.
 
-/// Dedup entries retained (§5). Evicts nearest-to-expiry first, so the ids most
-/// likely to still be in flight are the ones kept.
+/// The **default** dedup entries retained (§5). Evicts nearest-to-expiry first,
+/// so the ids most likely to still be in flight are the ones kept.
+///
+/// Every `MAX_*` here is the desktop default for a field of [`Limits`], not a
+/// universal ceiling: a constrained runtime replaces them together with
+/// [`Node::set_limits`] rather than inheriting laptop numbers (audit #189).
 pub const MAX_SEEN: usize = 1 << 16;
 /// Incomplete fountain sets held at once. Each holds real chunk bytes, so this is
 /// the tightest of these bounds.
@@ -171,8 +175,8 @@ pub const MAX_PARTIAL_OBJECTS: usize = 256;
 /// they weigh, which is the bound that actually protects memory. A set holds up
 /// to `count` rows of `chunk` bytes and both come off the wire, so the count
 /// alone permitted gigabytes on a desktop and many times the available heap on
-/// an MCU (audit F-3, #189). Lower it with [`Node::set_partial_budget`] on a
-/// runtime with less room.
+/// an MCU (audit F-3, #189). Lower it with [`Node::set_partial_budget`], or with
+/// [`Node::set_limits`] to scale it alongside every other table at once.
 pub const DEFAULT_PARTIAL_BUDGET: usize = 4 * 1024 * 1024;
 /// How long an incomplete fountain set is kept before it is collected. Fragments
 /// of a live object keep arriving; a set that has heard nothing for this long is
@@ -191,6 +195,150 @@ pub const MAX_INBOX: usize = 1024;
 /// How often the time-based sweep runs. Hard caps apply on every ingest; this is
 /// only for expiry, which does not need to be immediate.
 const SWEEP_INTERVAL_SECS: u32 = 60;
+
+/// Every growable table's ceiling, in one place, so a runtime can size them
+/// together instead of inheriting numbers chosen for a laptop.
+///
+/// The constants above are defaults, not universals. Added together they let a
+/// node hold roughly **7 MB of tables** before any of them evicts — which is
+/// unremarkable on a desktop and about **thirty times the free heap of an
+/// ESP32-S2** (226 KB, measured in [Hardware](../docs/HARDWARE.md) row 21). The
+/// F-3 fix in audit #189 gave the fountain sets a byte budget for exactly this
+/// reason; that audit's second recommendation was to stop fixing the class one
+/// table at a time, which is what this struct is.
+///
+/// [`Limits::default()`] is the desktop set, unchanged, so nothing that does not
+/// ask for a different one behaves differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// Dedup entries (`MAX_SEEN`).
+    pub seen: usize,
+    /// Incomplete fountain sets (`MAX_PARTIAL_OBJECTS`).
+    pub partial_objects: usize,
+    /// Chunk bytes across all incomplete fountain sets (`DEFAULT_PARTIAL_BUDGET`).
+    pub partial_bytes: usize,
+    /// Peers kept in each of the peer-keyed maps (`MAX_PEERS`).
+    pub peers: usize,
+    /// File manifests (`MAX_MANIFESTS`).
+    pub manifests: usize,
+    /// Receipt ids (`MAX_ACKED`).
+    pub acked: usize,
+    /// Undrained RPC / feed inbox items (`MAX_INBOX`).
+    pub inbox: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            seen: MAX_SEEN,
+            partial_objects: MAX_PARTIAL_OBJECTS,
+            partial_bytes: DEFAULT_PARTIAL_BUDGET,
+            peers: MAX_PEERS,
+            manifests: MAX_MANIFESTS,
+            acked: MAX_ACKED,
+            inbox: MAX_INBOX,
+        }
+    }
+}
+
+impl Limits {
+    /// Bytes one entry costs, measured from the real types rather than guessed,
+    /// so these follow the structs if the structs grow.
+    ///
+    /// [`Limits::with_overhead`] covers the open-addressed table around the
+    /// entry. It is a close approximation, not an allocator-exact figure —
+    /// which is the right precision for sizing a cap, and is stated so nobody
+    /// reads more into it.
+    ///
+    /// One control byte per slot, and the table doubles at a 7/8 load factor,
+    /// so a live entry effectively occupies 8/7 of itself plus that byte.
+    fn with_overhead(entry: usize) -> usize {
+        (entry + 1) * 8 / 7
+    }
+    fn cost_seen() -> usize {
+        Self::with_overhead(core::mem::size_of::<(Id, u32)>())
+    }
+    /// A peer is charged for *all five* peer-keyed tables at once, because
+    /// `MAX_PEERS` caps each of them separately and a peer generally appears in
+    /// every one. The ratchet session dominates the sum.
+    fn cost_peer() -> usize {
+        Self::with_overhead(core::mem::size_of::<(Addr, [u8; 32])>())
+            + Self::with_overhead(core::mem::size_of::<(Addr, u8)>())
+            + Self::with_overhead(core::mem::size_of::<(Addr, String)>())
+            + Self::with_overhead(core::mem::size_of::<(Addr, ratchet::Ratchet)>())
+            + Self::with_overhead(core::mem::size_of::<(Addr, u32)>()) // paths, approximated
+    }
+    fn cost_manifest() -> usize {
+        Self::with_overhead(core::mem::size_of::<(Id, file::Manifest)>())
+    }
+    fn cost_acked() -> usize {
+        Self::with_overhead(core::mem::size_of::<Id>())
+    }
+    /// An inbox item carries a payload, so this is a nominal figure for a small
+    /// one rather than a bound on any particular message.
+    const COST_INBOX: usize = 256;
+    /// The empty per-set bookkeeping; the chunk bytes are `partial_bytes`.
+    fn cost_partial_set() -> usize {
+        Self::with_overhead(core::mem::size_of::<(Id, fountain::Fountain)>())
+    }
+
+    /// Scale every ceiling to fit `bytes` of table memory.
+    ///
+    /// The budget is divided by fixed shares rather than by scaling the desktop
+    /// numbers uniformly, because the desktop numbers are not in the right
+    /// proportion to each other for a small node — they were each chosen alone.
+    /// The shares:
+    ///
+    /// | Share | Table | Why |
+    /// |---|---|---|
+    /// | 40% | `partial_bytes` | Attacker-chosen payload; the F-3 surface, and the only one that holds arbitrary bytes |
+    /// | 25% | `seen` | Dedup must not be starved: it is what stops a flood from circulating forever |
+    /// | 20% | `peers` | Five tables at once, dominated by the ratchet session |
+    /// | 5% each | `manifests`, `acked`, `inbox` | Bookkeeping that degrades gracefully when trimmed |
+    ///
+    /// Every ceiling has a floor, because a table trimmed to nothing does not
+    /// degrade — it breaks. A node with no dedup relays its own traffic back at
+    /// the mesh forever, so `seen` is held at a minimum whatever the budget
+    /// says. Pass a budget smaller than those floors and you get the floors,
+    /// which is the honest failure: a node too small to be safe is not made safe
+    /// by pretending its tables are smaller than they are.
+    pub fn for_budget(bytes: usize) -> Self {
+        let share = |pct: usize| bytes.saturating_mul(pct) / 100;
+        let div = |b: usize, cost: usize| b / cost.max(1);
+        // The fountain share pays for both halves of what a partial set costs:
+        // the chunk bytes it holds *and* its own bookkeeping. Charging only the
+        // bytes is how a budget quietly overruns itself.
+        let partial_total = share(40).max(16 * 1024);
+        // One set per 4 KB of payload budget: enough sets to reassemble several
+        // objects at once without letting cardinality outrun the bytes those
+        // sets are allowed to hold. Never above the desktop cap — this function
+        // exists to constrain a node, not to grow one past the default.
+        let partial_objects = (partial_total / 4096).clamp(4, MAX_PARTIAL_OBJECTS);
+        let partial_bytes =
+            partial_total.saturating_sub(partial_objects * Self::cost_partial_set()).max(16 * 1024);
+        Self {
+            seen: div(share(25), Self::cost_seen()).max(256),
+            partial_objects,
+            partial_bytes,
+            peers: div(share(20), Self::cost_peer()).max(8),
+            manifests: div(share(5), Self::cost_manifest()).max(8),
+            acked: div(share(5), Self::cost_acked()).max(16),
+            inbox: div(share(5), Self::COST_INBOX).max(8),
+        }
+    }
+
+    /// Roughly what these ceilings let the tables weigh, for logging a budget
+    /// back to an operator who wants to check it against real free memory.
+    pub fn est_bytes(&self) -> usize {
+        self.seen * Self::cost_seen()
+            + self.partial_bytes
+            + self.partial_objects * Self::cost_partial_set()
+            + self.peers * Self::cost_peer()
+            + self.manifests * Self::cost_manifest()
+            + self.acked * Self::cost_acked()
+            + self.inbox * Self::COST_INBOX
+    }
+}
 
 /// An object too large to carry as one fountain set — returned by
 /// [`Node::send`].
@@ -392,8 +540,9 @@ pub struct Node {
     max_store_bytes: usize,
     seq: u64,
     frags: HashMap<Id, Fountain>,
-    /// Byte ceiling for `frags`; see [`DEFAULT_PARTIAL_BUDGET`].
-    partial_budget: usize,
+    /// Every table ceiling, including the byte budget for `frags`. See
+    /// [`Limits`]; defaults to the desktop set.
+    limits: Limits,
     pub mtu: usize,
     manifests: HashMap<Id, file::Manifest>,
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
@@ -704,6 +853,80 @@ mod tests {
         // Still bounded the old way too, and still functional rather than empty.
         assert!(n.frags.len() <= MAX_PARTIAL_OBJECTS);
         assert!(!n.frags.is_empty(), "eviction must not clear the table wholesale");
+    }
+
+    #[test]
+    fn the_default_limits_are_exactly_the_constants_they_replaced() {
+        // The refactor must be invisible to anyone who never asks for a budget:
+        // if these drift, desktop nodes silently change behaviour.
+        let d = Limits::default();
+        assert_eq!(d.seen, MAX_SEEN);
+        assert_eq!(d.partial_objects, MAX_PARTIAL_OBJECTS);
+        assert_eq!(d.partial_bytes, DEFAULT_PARTIAL_BUDGET);
+        assert_eq!(d.peers, MAX_PEERS);
+        assert_eq!(d.manifests, MAX_MANIFESTS);
+        assert_eq!(d.acked, MAX_ACKED);
+        assert_eq!(d.inbox, MAX_INBOX);
+        assert_eq!(Node::new("n", &[]).limits(), d, "a fresh node starts at the defaults");
+    }
+
+    #[test]
+    fn the_desktop_defaults_do_not_fit_an_mcu_but_a_budget_does() {
+        // Audit #189, recommendation 2. The point of the whole struct: the
+        // defaults are laptop numbers, and an ESP32-S2 has 226,368 bytes of free
+        // heap (HARDWARE.md row 21). Nothing reconciled those two facts.
+        const ESP32_S2_FREE_HEAP: usize = 226_368;
+        assert!(
+            Limits::default().est_bytes() > ESP32_S2_FREE_HEAP * 10,
+            "if the defaults ever fit an MCU, this milestone's premise changed"
+        );
+
+        // A quarter of that heap for tables, leaving the rest for radio, tether
+        // and the store.
+        let budget = ESP32_S2_FREE_HEAP / 4;
+        let l = Limits::for_budget(budget);
+        assert!(
+            l.est_bytes() <= budget,
+            "for_budget({budget}) estimated {} bytes — a budget that does not fit is not a budget",
+            l.est_bytes()
+        );
+        // Still a working node, not a starved one.
+        assert!(l.seen >= 256, "dedup must survive: a node that cannot dedup refloods forever");
+        assert!(l.peers >= 8 && l.partial_objects >= 4 && l.acked >= 16);
+    }
+
+    #[test]
+    fn a_budget_scales_monotonically_and_never_to_zero() {
+        let mut prev = Limits::for_budget(0);
+        // Even a zero budget yields the floors, not a node with no tables.
+        assert!(prev.seen >= 256 && prev.partial_bytes >= 16 * 1024 && prev.inbox >= 8);
+        for kb in [64usize, 256, 1024, 4096, 16384] {
+            let l = Limits::for_budget(kb * 1024);
+            assert!(l.seen >= prev.seen, "seen shrank as the budget grew ({kb} KiB)");
+            assert!(l.peers >= prev.peers, "peers shrank as the budget grew ({kb} KiB)");
+            assert!(l.partial_bytes >= prev.partial_bytes, "partial_bytes shrank ({kb} KiB)");
+            prev = l;
+        }
+    }
+
+    #[test]
+    fn set_limits_actually_trims_a_node_that_is_already_over() {
+        // Enforcement is on every ingest, so a node handed tighter limits after
+        // it has filled up must come down rather than sit over the new ceiling.
+        let mut n = Node::new("victim", &[]);
+        let now = 1_700_000_000u32;
+        for i in 0..2000u64 {
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, i.to_be_bytes().to_vec());
+            e.flags |= fl::FLOOD;
+            let _ = n.on_rx(&e.wire(), 0, None, now);
+        }
+        assert!(n.seen.len() > 500, "precondition: the dedup table filled up");
+
+        n.set_limits(Limits { seen: 300, ..Limits::default() });
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"one more".to_vec());
+        e.flags |= fl::FLOOD;
+        let _ = n.on_rx(&e.wire(), 0, None, now);
+        assert!(n.seen.len() <= 300, "seen held {} against a ceiling of 300", n.seen.len());
     }
 
     #[test]
