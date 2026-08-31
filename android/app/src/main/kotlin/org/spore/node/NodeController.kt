@@ -656,7 +656,7 @@ object NodeController {
      * and confusing if the sender retries and gets a *different* partial set.
      * One refusal refuses the whole batch, so a retry is a clean retry.
      */
-    fun sendTextWithAttachment(peer: String, text: String, files: List<StagedAttachment>): Boolean {
+    internal fun sendTextWithAttachment(peer: String, text: String, files: List<StagedAttachment>): Boolean {
         val cap = maxFileBytes()
         val tooBig = files.filter { it.bytes.size > cap }
         if (tooBig.isNotEmpty()) {
