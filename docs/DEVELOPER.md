@@ -38,6 +38,7 @@ site. Pick a row.
 <div class="list-rows">
 <a class="list-row" href="security-policy.html"><div class="list-row-body"><span class="list-row-title">Reporting a vulnerability</span><span class="list-row-subtitle">How to report, and what happens next.</span></div></a>
 <a class="list-row" href="security.html"><div class="list-row-body"><span class="list-row-title">Security findings</span><span class="list-row-subtitle">What was found, how it was reproduced, and what's still open.</span></div></a>
+<a class="list-row" href="threat-model.html"><div class="list-row-body"><span class="list-row-title">Threat model</span><span class="list-row-subtitle">Six chapters of adversary, what stops them, and the residual risk where nothing fully does.</span></div></a>
 <a class="list-row" href="hardware.html"><div class="list-row-body"><span class="list-row-title">Hardware verification</span><span class="list-row-subtitle">What's been run on real radios and real devices, not just CI.</span></div></a>
 <a class="list-row" href="testing.html"><div class="list-row-body"><span class="list-row-title">Android device tests</span><span class="list-row-subtitle">The device-matrix checklist for the Android app.</span></div></a>
 </div>

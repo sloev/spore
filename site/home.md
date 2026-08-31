@@ -31,6 +31,7 @@ and it keeps working after you go offline.</p>
 <div class="col-4"><div class="card"><div class="card-body">
 <h3 class="text-h5">Being straight with you</h3>
 <p class="text-muted">Private to one person stays private. Open group posts are public on purpose.</p>
+<p><a href="threat-model.html">What this promises, and doesn't →</a></p>
 </div></div></div>
 
 </div>
