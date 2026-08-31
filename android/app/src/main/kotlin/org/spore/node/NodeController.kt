@@ -22,14 +22,11 @@ data class Msg(
     val encrypted: Boolean = false, // sealed to the peer's prekey (§7)
     val id: String? = null, // envelope id, for delivery receipts (mine only)
     val delivered: Boolean = false, // a receipt came back (§8)
-    // Set when this message *is* a file. The chunk state lives in `transfers`
-    // rather than being copied in here, so one poll updates every bubble that
-    // shows it and the two can never disagree.
-    val magnet: String? = null,
-    // Mime type of the attachment, from the body marker. Decides whether the
-    // bubble renders an inline image or a file chip; null when there is no
-    // attachment.
-    val mime: String? = null,
+    // Zero or more files attached to this message (multi-file attach). The
+    // chunk state lives in `transfers` rather than being copied in here, so
+    // one poll updates every bubble that shows it and the two can never
+    // disagree. Empty for a plain-text message.
+    val attachments: List<Markdown.Attach> = emptyList(),
     val ts: Long = System.currentTimeMillis(),
 )
 
@@ -593,10 +590,9 @@ object NodeController {
         // receiver's bubble previews and Opens exactly like the sender's; the body
         // is stored whole (the bubble strips the marker for display).
         val body = payload.toString(Charsets.UTF_8)
-        val (_, att) = Markdown.parseAttach(body)
+        val (_, atts) = Markdown.parseAttach(body)
         append(
-            Msg(thread, body, mine = false, verified = ok, encrypted = sealed,
-                magnet = att?.magnet, mime = att?.mime)
+            Msg(thread, body, mine = false, verified = ok, encrypted = sealed, attachments = atts)
         )
     }
 
@@ -609,28 +605,28 @@ object NodeController {
      *  empty — so the composer can say why and keep the text instead of clearing it. */
     fun send(peer: String, text: String): Boolean {
         if (text.isEmpty()) return false
-        return sendBody(peer, text, magnet = null, mime = null)
+        return sendBody(peer, text, emptyList())
     }
 
     /**
      * Send a UTF-8 body and append the sender's own bubble. Shared by plain text
-     * and by attachment sends; `magnet`/`mime` are stamped onto the appended [Msg]
-     * so an attachment bubble previews and shows chunk status, and are null for
-     * ordinary text. A public post floods; a DM is sealed and receipted.
+     * and by attachment sends; `attachments` is stamped onto the appended [Msg]
+     * so an attachment bubble previews and shows chunk status per file, and is
+     * empty for ordinary text. A public post floods; a DM is sealed and receipted.
      */
-    private fun sendBody(peer: String, body: String, magnet: String?, mime: String?): Boolean {
+    private fun sendBody(peer: String, body: String, attachments: List<Markdown.Attach>): Boolean {
         if (ptr == 0L || body.isEmpty()) return false
         val dest = destOf(peer) ?: return false
         val bytes = body.toByteArray(Charsets.UTF_8)
         if (peer == Petnames.PUBLIC) {
             val n = SporeNative.nativeSendCounted(ptr, dest, bytes)
-            append(Msg(peer, body, mine = true, verified = true, fragments = n, magnet = magnet, mime = mime))
+            append(Msg(peer, body, mine = true, verified = true, fragments = n, attachments = attachments))
             return true
         }
         val res = SporeNative.nativeSendDirect(ptr, dest, bytes)?.split(':')
         val id = res?.getOrNull(0)
         val enc = res?.getOrNull(1) == "1"
-        append(Msg(peer, body, mine = true, verified = true, encrypted = enc, id = id, magnet = magnet, mime = mime))
+        append(Msg(peer, body, mine = true, verified = true, encrypted = enc, id = id, attachments = attachments))
         return true
     }
 
@@ -650,19 +646,41 @@ object NodeController {
      * body — the marker drives the inline preview, the "Open" action, and the
      * chunk status — so a file no longer arrives as a separate, contextless bubble.
      *
-     * `text` may be blank (attachment only). Returns false if the file is refused
-     * (empty or over the store budget) so the composer can say why and keep the
-     * staged file rather than silently dropping it.
+     * `text` may be blank (attachment(s) only). Returns false if any file is
+     * refused (empty or over the store budget) so the composer can say why and
+     * keep the staged files rather than silently dropping them.
+     *
+     * All files are size-checked *before* any is published (multi-file attach):
+     * publishing three files and then refusing the fourth would leave three
+     * manifests in the store with no message ever referencing them — wasteful,
+     * and confusing if the sender retries and gets a *different* partial set.
+     * One refusal refuses the whole batch, so a retry is a clean retry.
      */
-    fun sendTextWithAttachment(peer: String, text: String, name: String, data: ByteArray, mime: String): Boolean {
-        val magnet = publishAttachment(peer, name, data) ?: return false
-        val marker = Markdown.attachMarker(name, magnet, mime)
-        val body = if (text.isBlank()) marker else "$text\n\n$marker"
-        return sendBody(peer, body, magnet, mime)
+    fun sendTextWithAttachment(peer: String, text: String, files: List<StagedAttachment>): Boolean {
+        val cap = maxFileBytes()
+        val tooBig = files.filter { it.bytes.size > cap }
+        if (tooBig.isNotEmpty()) {
+            val names = tooBig.joinToString(", ") { it.name }
+            append(
+                Msg(peer, "⚠ $names ${if (tooBig.size == 1) "is" else "are"} over this node's " +
+                    "${cap / 1024 / 1024} MB per-file limit. Send it in parts.",
+                    mine = true, verified = true)
+            )
+            return false
+        }
+        val attachments = files.map { f ->
+            val magnet = publishAttachment(peer, f.name, f.bytes) ?: return false
+            Markdown.Attach(f.name, magnet, f.mime)
+        }
+        val markers = attachments.joinToString("\n") { Markdown.attachMarker(it.name, it.magnet, it.mime) }
+        val body = if (text.isBlank()) markers else "$text\n\n$markers"
+        return sendBody(peer, body, attachments)
     }
 
     /**
-     * Publish a file's manifest + chunks and return its magnet, or null if refused.
+     * Publish one file's manifest + chunks and return its magnet, or null if the
+     * native call failed. Size is checked by the caller for the whole batch, not
+     * here — this is the per-file publish step, reused once per attachment.
      *
      * Publish-only: appends no chat bubble (the caller's [sendBody] does that) and
      * caches a local copy so the sender can preview and Open their own attachment,
@@ -672,18 +690,6 @@ object NodeController {
      */
     private fun publishAttachment(peer: String, name: String, data: ByteArray): String? {
         if (ptr == 0L || data.isEmpty()) return null
-        // Manifests are trees now, so a file's size is bounded by the store every
-        // chunk has to sit in — not by what one envelope can list. Refuse clearly
-        // rather than publishing chunks we would immediately evict.
-        val cap = maxFileBytes()
-        if (data.size > cap) {
-            append(
-                Msg(peer, "⚠ $name is ${data.size / 1024 / 1024} MB — this node keeps room for " +
-                    "about ${cap / 1024 / 1024} MB per file. Send it in parts.",
-                    mine = true, verified = true)
-            )
-            return null
-        }
         val destHex = if (peer == Petnames.PUBLIC) "" else peer
         val res = SporeNative.nativePublishFile(ptr, name, data, destHex)?.split(':') ?: return null
         val magnet = res.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return null
@@ -748,14 +754,17 @@ object NodeController {
             // arrival. The save above still recorded its path for preview/Open; we
             // only skip announcing it a second time.
             if (posts.value.any { Markdown.imageMagnet(it.text) == magnet } ||
-                messages.value.any { it.magnet == magnet }
+                messages.value.any { m -> m.attachments.any { it.magnet == magnet } }
             ) continue
             append(
                 Msg(
                     lastFileSender,
                     if (written >= 0) "📎 received ${f.name} (${written / 1024} KB) → ${f.path}"
                     else "⚠ received ${f.name} but could not save it",
-                    mine = false, verified = true, magnet = magnet
+                    // Mime is unknown here — this file arrived with no marker (the
+                    // legacy public/unsealed path, Design's Appendix A "Scope" note),
+                    // so there is nothing to read one from. Empty, not a guess.
+                    mine = false, verified = true, attachments = listOf(Markdown.Attach(f.name, magnet, ""))
                 )
             )
         }

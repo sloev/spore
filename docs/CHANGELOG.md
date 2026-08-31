@@ -18,6 +18,28 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Multiple files per send, on both surfaces (M2 carried-forward gap).**
+  `Markdown.parseAttach` (Android) and `mdWithAttachments` (web) both moved
+  from matching the first `📎 name | spore:magnet | mime` marker line to
+  matching every one — `Msg.attachments`/`Attach` is now a list, replacing the
+  singular `magnet`/`mime` fields it carried since the single-attachment
+  convention shipped. Android stages picks via `GetMultipleContents()`.
+  The web node needed a real second design, not just a bigger join: its
+  composer is a plain `<input type="text">`, and Chrome silently strips any
+  `\n` assigned to `.value` (`"a\nb"` becomes `"ab"`, confirmed with a bare
+  repro) — so several marker lines can never live in the composer text the
+  way one marker could. It now stages picked files in memory
+  (`chatStaged`, its own chip row above the composer) and assembles the
+  multi-line body only at send time, never touching the input's value.
+  Every file in a batch is size-checked before any is published, so a
+  refusal never leaves orphaned manifests in the store for a message that
+  never referenced them. The legacy public/unsealed "received…" bubble
+  (no marker sender) now carries the real filename instead of falling back
+  to the string "attachment", since the receiver already knows it locally.
+  `docs/DESIGN.md` Appendix A's "non-goal (v1)" note is retired — describes
+  the shipped multi-marker convention instead. Wire unchanged: this is a
+  payload-convention change, not a wire-format one; relays still see opaque
+  UTF-8 either way.
 - **Milestone 9 complete: a DM's status is three honest states, not a silent
   gap.** Both surfaces previously had an incomplete story. Android showed
   "· sent" / "✓ delivered" but no "gave up" — `resend_unacked` silently drops

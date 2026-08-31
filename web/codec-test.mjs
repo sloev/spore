@@ -12,6 +12,7 @@ import { modulate, Demod } from './transports/audio.mjs';
 import { encodeMeshPacket, decodeMeshPacket } from './transports/meshtastic.mjs';
 import { encodeNdef, decodeNdef, SPORE_MIME } from './transports/webnfc.mjs';
 import { deliveryStatus } from './ui/delivery-status.mjs';
+import { mdWithAttachments } from './ui/markdown.mjs';
 
 let fails = 0;
 const eq = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
@@ -159,5 +160,30 @@ const startsWith = (u8, prefix) => prefix.every((b, i) => u8[i] === b);
   check('delivery: delivered wins even past the expiry boundary', has(deliveryStatus({ fromMe: true, id: 'x', delivered: true, ts: now - 8 * DAY }, EXPIRY_SECS, now), '✓ delivered'));
 }
 
-console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio, NDEF, group-invite and delivery-status formats verified');
+// ---------------------------------------------------------------------------
+// Multi-file attach (M2 carried-forward gap) — Appendix A's marker convention
+// extended to several marker lines per body. Android now sends these; this
+// pins that the web reference node's *existing* renderer (unmodified — the
+// global-flag regex in mdWithAttachments already handled repeated matches)
+// still turns N consecutive marker lines into N chips, not one chip and N-1
+// lines of leftover marker text.
+// ---------------------------------------------------------------------------
+{
+  const body = 'sharing these\n\n' +
+    '📎 a.txt | spore:00112233445566778899aabbccddeeff | text/plain\n' +
+    '📎 b.png | spore:ffeeddccbbaa99887766554433221100 | image/png\n' +
+    '📎 c.pdf | spore:aabbccddeeff00112233445566778899 | application/pdf';
+  const html = mdWithAttachments(body);
+  const chipCount = (html.match(/class="file-chip"/g) || []).length;
+  check('multi-file: three consecutive markers yield three chips', chipCount === 3);
+  check('multi-file: each magnet appears once', ['00112233445566778899aabbccddeeff', 'ffeeddccbbaa99887766554433221100', 'aabbccddeeff00112233445566778899'].every((hex) => html.includes(hex)));
+  check('multi-file: the leading text survives', html.includes('sharing these'));
+  check('multi-file: no marker syntax leaks into the rendered text', !html.includes('spore:'));
+
+  // A single marker still works exactly as before — the extension is additive.
+  const one = mdWithAttachments('one file\n\n📎 x.bin | spore:11223344556677889900aabbccddeeff | application/octet-stream');
+  check('multi-file: the single-marker case is unaffected', (one.match(/class="file-chip"/g) || []).length === 1);
+}
+
+console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio, NDEF, group-invite, delivery-status and multi-file-attach formats verified');
 process.exit(fails ? 1 : 0);

@@ -113,7 +113,17 @@ that are verified, with honest limits on the ones that aren't.
 
 **Carried-forward functional gaps (still real, not regressions):**
 
-- [ ] Multiple files per send (v1 is one attachment per message)
+- [x] Multiple files per send — shipped on both surfaces. `Markdown.parseAttach`
+  (Android) and `mdWithAttachments` (web) both moved from `.find` (one match) to
+  `.findAll`/global-replace (every match); `Msg.attachments`/`Attach` list
+  replaces the singular `magnet`/`mime` fields. Android stages via
+  `GetMultipleContents()` into a `List<StagedAttachment>`; the web node needed
+  its own staged-chip model too, not just a bigger join — its composer is a
+  plain `<input type="text">`, and Chrome silently strips any `\n` assigned to
+  `.value`, so N marker lines can never be built by inserting text into the
+  box the way one marker could. Every publish is size-checked before any file
+  in the batch is published, so a refusal never leaves orphaned manifests
+  behind. See Appendix A in DESIGN.md for the wire-level convention.
 - [ ] ExoPlayer audio/video inline preview + playback
 - [ ] Edit / remove an attachment after send
 - [ ] Merge the bubble for public/unsealed files (needs `nativeEnvId` at `route()` time)

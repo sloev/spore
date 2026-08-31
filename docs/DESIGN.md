@@ -880,25 +880,41 @@ contextless bubble with no preview and no way to open it.
 
 **The marker (application convention).** An attachment travels as two envelopes: the
 file's manifest+chunks (the existing publish path, sealed to the peer when known), and a
-normal DATA body whose **last line** is the canonical marker:
+normal DATA body whose **trailing lines** carry one canonical marker per attachment —
+one file per line, in send order:
 
 ```
 📎 <filename> | spore:<hex-magnet> | <mime>
+📎 <filename> | spore:<hex-magnet> | <mime>
 ```
 
-- Matched by `Markdown.parseAttach`, regex **`(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$`**.
+- Matched by `Markdown.parseAttach`, regex **`(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$`**
+  applied with `findAll`/global replace, not just the first match — multi-file attach
+  (v1 shipped single-marker only; this is the same regex, just no longer stopping at one).
 - Application-level only: relays and non-SPORE clients see opaque UTF-8, and a client
-  that doesn't parse it just shows the marker text — a reasonable fallback.
+  that doesn't parse it just shows the marker text — a reasonable fallback. A client that
+  still only takes the *first* match (an old build) recovers attachment #1 and leaves the
+  other lines as visible text — the same degrade, not a crash or a dropped message.
 - Distinct from the feed's image form `![name](spore:<magnet>)`, which has nowhere to
-  carry a mime type; chat needs the mime to choose image-preview vs file-chip.
+  carry a mime type and stays single-file — chat needs the mime to choose
+  image-preview vs file-chip, and multi-file attach is a chat-only concept.
+- **The single-line `<input type="text">` trap (web only).** The web composer's
+  `chat-input`/`feed-msg` are plain text inputs, and Chrome silently strips any `\n`
+  assigned to `.value` (`"a\nb"` → `"ab"`). Several marker lines can therefore never be
+  built by inserting text into the composer the way one marker could — they are held as
+  a separate staged-file list (`chatStaged`, rendered as its own chip row, mirroring
+  Android's staging model below) and joined into a real multi-line string only at send
+  time, entirely in memory, never touching the input's value.
 
-**One bubble, both sides.** The sender's `sendTextWithAttachment` publishes the file then
-sends the marker body via the shared `sendBody`, stamping `magnet`+`mime` onto its own
-`Msg` (local bytes are cached immediately — our own file never comes back through the
-mesh). The receiver's `route()` parses the marker and stamps `magnet`+`mime` onto the
-received `Msg`; the manifest envelope's "incoming file…" bubble is suppressed for sealed
-files, and `pumpFiles`' "received…" bubble is suppressed when a message already
-references the magnet — so the attachment is **one** bubble, not three.
+**One bubble, both sides.** The sender's `sendTextWithAttachment` publishes every staged
+file (all size-checked *before* any is published — one refusal refuses the whole batch,
+so a retry is clean rather than resuming a partial publish) then sends the marker body via
+the shared `sendBody`, stamping the full `List<Attach>` onto its own `Msg` (local bytes are
+cached immediately — our own files never come back through the mesh). The receiver's
+`route()` parses every marker and stamps the same list onto the received `Msg`; the
+manifest envelope's "incoming file…" bubble is suppressed for sealed files, and
+`pumpFiles`' "received…" bubble is suppressed when a message already references the
+magnet — so each attachment is part of **one** bubble, not a separate one per file.
 
 **Preview & Open.** Images decode with `inSampleSize` (cap 1080 px) on `Dispatchers.IO`
 via `produceState` — a phone photo decoded whole for a 220 dp row costs ~100 MB of heap.
@@ -909,6 +925,11 @@ and never the private store directly (`res/xml/file_paths.xml` lists exactly
 
 **Scope.** Only sealed DM attachments get the single merged bubble, because only they are
 guaranteed a marker sender; a **public/unsealed** file with no marker still shows the
-legacy "incoming/received" status bubbles. Non-goals (v1): multiple files per send,
-ExoPlayer audio/video playback, editing after send. Opening an *arbitrary received file*
-(vs a cached attachment) is still open — see the ROADMAP.
+legacy "incoming/received" status bubbles (now carrying a real filename via `Attach`
+rather than falling back to the string "attachment", since a receiver constructing that
+legacy bubble already knows the local filename it just saved). Multiple files per send
+shipped on both surfaces — see the M2 carried-forward row in ROADMAP for the exact split
+(Android: staged-chip list, `GetMultipleContents`; web: staged-chip list, since the
+single-line composer can't hold multi-line marker text). Still non-goals: ExoPlayer
+audio/video playback, editing after send. Opening an *arbitrary received file* (vs a
+cached attachment) is still open — see the ROADMAP.
