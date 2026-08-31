@@ -31,6 +31,23 @@ pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
 pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
 pub const PATH_FRESH_SECS: u32 = 3 * 3600;
 
+/// The default lifetime a locally-originated `DATA` envelope is given
+/// (§11's "expiry 7 d"), used everywhere `Node` mints one: `send`,
+/// `send_direct`, `originate_ackreq`, RPC requests, feed and topic posts.
+///
+/// Named rather than left as a repeated `7 * 86400` literal because a UI
+/// needs the same number a client never otherwise sees: an unacknowledged
+/// send has no "gave up" signal from the core (§5.4d's resend backoff
+/// exhausts in minutes, long before the envelope itself expires, and
+/// `resend_unacked` drops the `Pending` entry silently either way) — so the
+/// only honest way to tell "still travelling" from "expired, never
+/// delivered" client-side is to compare this constant against a message's
+/// own send time. `spore_default_message_expiry_secs` (wasm) and
+/// `nativeDefaultMessageExpirySecs` (JNI) both read this value rather than
+/// duplicating it, so the UI's notion of "expired" can never drift from
+/// what the envelope's own `expiry` field actually says.
+pub const DEFAULT_MESSAGE_EXPIRY_SECS: u32 = 7 * 24 * 3600;
+
 /// How long a learned path is kept at all (§4: "Fresh < 3 h; purge 7 d").
 ///
 /// Between [`PATH_FRESH_SECS`] and this, a path no longer routes but still counts

@@ -145,6 +145,15 @@ class Spore {
     return out;
   }
 
+  /** Seconds a locally-originated DM/post lives before it expires unread.
+   * Needs no node — it is a build constant, not per-instance state. A UI
+   * compares this against a message's own send time to tell "still
+   * travelling" from "expired, never delivered": the core has no separate
+   * "gave up" event for an unacknowledged send. */
+  defaultMessageExpirySecs() {
+    return this.ex.spore_default_message_expiry_secs();
+  }
+
   /** Open a topic-sealed payload with the 32-byte key. null on failure. */
   topicOpen(ct, psk) {
     const cp = this._put(ct);
@@ -278,13 +287,25 @@ class SporeNode {
    * session, else a one-shot seal to their prekey, else **cleartext**, because a
    * node that has never heard their ANNOUNCE has no key to seal to. Ask
    * `canSealTo(dest)` first and say so — never draw a padlock unconditionally. */
+  /** Returns `{ forwards, id }` — `id` is this message's 16-byte envelope id,
+   * for polling `acked(id)` later. A DM always requests a receipt (§8), so
+   * every send has one; there is nothing to omit it for. */
   sendDirect(dest, payload) {
     const dp = this.s._put(dest);
     const pp = this.s._put(payload);
     const packed = this.s.ex.spore_node_send_direct(this.ptr, dp, pp, payload.length, now());
     this.s.ex.spore_free(dp, dest.length);
     this.s.ex.spore_free(pp, payload.length);
-    return this.s._parse(this.s._unpack(packed));
+    const { forwards, delivered } = this.s._parse(this.s._unpack(packed));
+    return { forwards, id: delivered[0] };
+  }
+
+  /** Has a delivery receipt for `id` (from `sendDirect`) come back? (§8) */
+  acked(id) {
+    const ip = this.s._put(id);
+    const ok = this.s.ex.spore_node_acked(this.ptr, ip);
+    this.s.ex.spore_free(ip, id.length);
+    return ok === 1;
   }
 
   /** Would a DM to `dest` right now actually be sealed? Ask before promising it. */

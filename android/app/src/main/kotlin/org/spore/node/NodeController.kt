@@ -97,6 +97,19 @@ object NodeController {
     private var houseJob: Job? = null
     private lateinit var appCtx: Context
 
+    // A build constant, so read once rather than crossing the JNI boundary on
+    // every bubble's recomposition. `by lazy` also means it's never touched
+    // before the native library is loaded.
+    private val defaultMessageExpiryMs: Long by lazy { SporeNative.nativeDefaultMessageExpirySecs() * 1000 }
+
+    /** True once a message's own lifetime has passed with no receipt, ever —
+     * distinct from "still trying," which the core has no event for at all.
+     * §5.4d's resend backoff exhausts in minutes and silently drops its
+     * `Pending` entry either way, long before the envelope itself expires, so
+     * this is the only honest way to tell "gave up" from "still travelling." */
+    fun messageExpired(m: Msg): Boolean =
+        m.mine && m.id != null && !m.delivered && System.currentTimeMillis() > m.ts + defaultMessageExpiryMs
+
     val messages = MutableStateFlow<List<Msg>>(emptyList())
     val posts = MutableStateFlow<List<Post>>(emptyList())
     val topics = MutableStateFlow<List<String>>(emptyList()) // followed topic names

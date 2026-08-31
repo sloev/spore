@@ -557,7 +557,7 @@ device-pair run, not just green CI. 🧪 until then.
 
 ---
 
-## Milestone 9 — Threat-model legibility & anti-abuse guardrails
+## Milestone 9 — Threat-model legibility & anti-abuse guardrails ✅
 
 **Goal:** close the gap between what SPORE's protocol already does (stamp
 anti-spam, congestion control, mix-mode anonymity, custody re-verification —
@@ -578,7 +578,7 @@ documentation and UX legibility, not new protocol.
 | Honest-relay retention statement: what an *honest* carrier's storage reveals if seized (seen-set ≥ 30 d, paths 7 d, store-until-expiry, receipts) | ✅ shipped | A table in `THREAT_MODEL.md` with real numbers per table (`seen`/`store`/`paths`/`peer_*`/`sessions`/`pending`+`acked`). The honest conclusion: content stays exactly as protected as §7 makes it regardless of who seizes the device, but `paths` in particular is a real, if partial, social graph — built from ordinary operation, no malice required |
 | Locked design guardrail: **no popularity/frequency-weighted replication** (e.g. "send more copies toward frequently-encountered devices") without a documented Sybil analysis first | ✅ shipped | Written into `THREAT_MODEL.md` chapter 3 as a blockquoted guardrail, the canonical location for it. Nothing in the codebase needs this today — stamp and quotas are both identity-agnostic — it exists so a future reputation/social-routing feature doesn't skip the analysis |
 | Public docs/site pass making the already-shipped anti-abuse and privacy mechanisms discoverable: stamp PoW, §5.4 congestion control, custody re-verify-on-read, mix-mode onion+padding+decoys, and the "any underlay with its own routing is just one interface" framing (Meshtastic/Reticulum/Tor/etc. become transports SPORE rides, not rivals) | ✅ shipped | Two new cards on `how-it-works.html` ("Junk mail costs the sender something," "Radio networks become one interface"), each linking into `threat-model.html`/`spec.html` at the exact section rather than the page top; `home.md`'s "Being straight with you" card now links to the threat model instead of ending on an unsupported claim. Anchors verified against the real build (`site/build.mjs` fails the build on any broken internal link) |
-| Delivery-status UX language pass (Android/webnode): surface the ACKREQ receipt (§8) and store/expiry state as plain states — e.g. *waiting for contact → travelling → delivered → expired* — rather than raw TTL/hop-count internals | ⬜ todo | Investigated: Android already has a two-state "· sent" / "✓ delivered" label (`ChatScreens.kt`) but no "gave up" state — `resend_unacked` silently drops a `pending` entry once its backoff exhausts (~15 min), which looks identical to "still trying" from the UI. The web node has **no delivery tracking at all**: `sendDirect`'s wasm export discards the message id and there is no `acked` export. Scoped as a separate PR — it is a real code/UX change, not a docs pass, and this milestone's own hard rule is one concern per PR |
+| Delivery-status UX language pass (Android/webnode): surface the ACKREQ receipt (§8) and store/expiry state as plain states — e.g. *waiting for contact → travelling → delivered → expired* — rather than raw TTL/hop-count internals | ✅ shipped | Three states on both surfaces now: **delivered** (a receipt came back), **expired — undelivered** (the envelope's own lifetime passed with no receipt, ever), **still travelling** for everything between — collapsed on purpose, because the core has no "still resending" vs "relying on passive custody" event to distinguish and a status line should not invent precision the protocol doesn't have. New `DEFAULT_MESSAGE_EXPIRY_SECS` names the repeated `7 * 86400` literal (seven call sites) and is read by both UIs (`spore_default_message_expiry_secs` wasm, `nativeDefaultMessageExpirySecs` JNI) rather than duplicated, so "expired" can never drift from what the envelope's own `expiry` field says. Web gained delivery tracking it never had — `sendDirect` discarded the id and there was no `acked` export at all; `spore_node_acked` and the id (via `blob`'s existing second slot) close that gap, polled every 10 s. `deliveryStatus` is a real, independently-tested module (`web/ui/delivery-status.mjs`, inlined into the standalone same as `markdown.mjs`), not an inline function only reachable through the browser |
 
 **Explicitly not doing here** (already solved, would duplicate shipped work):
 replication/copy-count limits (§5.4 congestion control + dedup + store
@@ -655,7 +655,7 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
 7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
 8. **M8 — Embedded ESP32 runtime** (raw-802.11 relay; first real MCU target) — after the still-open carried-forward items in M2/M4/M5, not ahead of them, unless deliberately reprioritized
-9. **M9 — Threat-model legibility & anti-abuse guardrails** (docs/UX only; no protocol gap found) — low urgency, pick up opportunistically
+9. **M9 — Threat-model legibility & anti-abuse guardrails** ✅ complete
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a

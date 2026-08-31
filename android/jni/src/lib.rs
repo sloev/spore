@@ -858,6 +858,24 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAcked(
     }
 }
 
+/// The default lifetime (seconds) `Node` gives a locally-originated `DATA`
+/// envelope — [`spore::DEFAULT_MESSAGE_EXPIRY_SECS`]. No `ptr`: it is a build
+/// constant, not per-instance state, the same shape as
+/// `nativeSuggestedBulkBudget`.
+///
+/// The core has no "gave up" event for an unacknowledged send — §5.4d's
+/// resend backoff exhausts in minutes and silently drops its `Pending` entry
+/// either way, long before the envelope itself expires. Comparing this value
+/// against a message's own send time is the only honest way for the UI to
+/// tell "still travelling" from "expired, never delivered."
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeDefaultMessageExpirySecs(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jlong {
+    spore::DEFAULT_MESSAGE_EXPIRY_SECS as jlong
+}
+
 /// Resend ACKREQ messages whose backoff elapsed without a receipt (§5.6).
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeResendUnacked(

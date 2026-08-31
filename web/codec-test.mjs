@@ -11,6 +11,7 @@ import { kissFrame, KissDeframer } from './transports/kiss.mjs';
 import { modulate, Demod } from './transports/audio.mjs';
 import { encodeMeshPacket, decodeMeshPacket } from './transports/meshtastic.mjs';
 import { encodeNdef, decodeNdef, SPORE_MIME } from './transports/webnfc.mjs';
+import { deliveryStatus } from './ui/delivery-status.mjs';
 
 let fails = 0;
 const eq = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
@@ -136,5 +137,27 @@ const startsWith = (u8, prefix) => prefix.every((b, i) => u8[i] === b);
   }
 }
 
-console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio, NDEF and group-invite formats verified');
+// ---------------------------------------------------------------------------
+// Delivery status (M9) — the three states a DM's status line can honestly
+// show. `nowMs` is injected so the expiry boundary is tested deterministically
+// rather than racing the wall clock.
+// ---------------------------------------------------------------------------
+{
+  const DAY = 86400 * 1000;
+  const EXPIRY_SECS = 7 * 86400;
+  const now = 1_700_000_000_000;
+  const has = (s, t) => s.includes(t);
+
+  check('delivery: not mine renders nothing', deliveryStatus({ fromMe: false, id: 'x', ts: now }, EXPIRY_SECS, now) === '');
+  check('delivery: no id (group/legacy) renders nothing', deliveryStatus({ fromMe: true, id: null, ts: now }, EXPIRY_SECS, now) === '');
+  check('delivery: delivered shows the checkmark', has(deliveryStatus({ fromMe: true, id: 'x', delivered: true, ts: now }, EXPIRY_SECS, now), '✓ delivered'));
+  check('delivery: just sent is still travelling', has(deliveryStatus({ fromMe: true, id: 'x', ts: now }, EXPIRY_SECS, now), 'still travelling'));
+  check('delivery: 6 days old, within the 7-day window, still travelling', has(deliveryStatus({ fromMe: true, id: 'x', ts: now - 6 * DAY }, EXPIRY_SECS, now), 'still travelling'));
+  check('delivery: 8 days old, past the window, expired', has(deliveryStatus({ fromMe: true, id: 'x', ts: now - 8 * DAY }, EXPIRY_SECS, now), 'expired'));
+  check('delivery: 1 second before the boundary, still travelling', has(deliveryStatus({ fromMe: true, id: 'x', ts: now - EXPIRY_SECS * 1000 + 1000 }, EXPIRY_SECS, now), 'still travelling'));
+  check('delivery: 1 second after the boundary, expired', has(deliveryStatus({ fromMe: true, id: 'x', ts: now - EXPIRY_SECS * 1000 - 1000 }, EXPIRY_SECS, now), 'expired'));
+  check('delivery: delivered wins even past the expiry boundary', has(deliveryStatus({ fromMe: true, id: 'x', delivered: true, ts: now - 8 * DAY }, EXPIRY_SECS, now), '✓ delivered'));
+}
+
+console.log(fails ? `\nCODEC TESTS FAILED (${fails})` : '\nCODEC OK — kiss, meshtastic, audio, NDEF, group-invite and delivery-status formats verified');
 process.exit(fails ? 1 : 0);

@@ -386,8 +386,18 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
                         }
                         if (mine && m.id != null) {
                             HGap(6.dp)
-                            if (m.delivered) StickerBadge("✓ delivered", ink = Palette.Ink)
-                            else Caption("· sent")
+                            // Three states, not two: "delivered" (a receipt came back),
+                            // "expired" (its own lifetime passed with no receipt, ever),
+                            // or "still travelling" for everything in between — which
+                            // covers both active resending and passive custody, because
+                            // nothing outside the core can tell those two apart, and
+                            // claiming to would be a status line inventing precision the
+                            // protocol doesn't have. See NodeController.messageExpired.
+                            when {
+                                m.delivered -> StickerBadge("✓ delivered", ink = Palette.Ink)
+                                NodeController.messageExpired(m) -> StickerBadge("expired — undelivered", ink = Palette.Yellow)
+                                else -> Caption("· still travelling")
+                            }
                         }
                     }
                 }
