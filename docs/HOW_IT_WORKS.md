@@ -45,6 +45,25 @@ what lets a stranger's device carry it forward.</p>
 </div></div></div>
 
 <div class="col-6"><div class="card"><div class="card-body">
+<h2 class="text-h5">Junk mail costs the sender something</h2>
+<p class="text-muted">Priority is proof-of-work, not a claim — anyone can mint a
+high-priority envelope, but not for free. Congestion control caps how much of a
+link any relayed traffic can use, and a node re-checks a stored copy against its
+own content hash before trusting it, so tampering after the fact just makes the
+copy disappear rather than serve corrupted.</p>
+<p><a href="threat-model.html#4-resources--storage-cpu-battery-bandwidth-spam">What stops flooding →</a></p>
+</div></div></div>
+
+<div class="col-6"><div class="card"><div class="card-body">
+<h2 class="text-h5">Radio networks become one interface</h2>
+<p class="text-muted">Meshtastic, Reticulum, Tor, WireGuard, plain IP — each
+already moves bytes across many physical hops. SPORE hands one of them a frame
+and treats the whole crossing as a single hop. They aren't rivals to replace;
+they're transports it can ride.</p>
+<p><a href="spec.html#page-2--bindings-spore-on-everything">Every medium is one of five shapes →</a></p>
+</div></div></div>
+
+<div class="col-6"><div class="card"><div class="card-body">
 <h2 class="text-h5">Direct, when a path exists</h2>
 <p class="text-muted">For a live chat or file transfer, two nodes can open a
 low-latency pipe straight to each other. When no path exists, the message

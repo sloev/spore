@@ -327,6 +327,7 @@ before trusting it: [BRIDGES.md § Meshtastic](docs/BRIDGES.md#meshtastic).
 | `docs/REBUILD.md` | reimplement SPORE in any language: the wire format with real worked examples |
 | `reference/`    | dependency-free Tier-0 decoders (pure-Python parse + verify) + cross-language test vectors |
 | `docs/BRIDGES.md` | bridge reference — status index + a deep dive per protocol (wire format, SPORE mapping, security, specs) |
+| `docs/THREAT_MODEL.md` | who's assumed hostile, what stops them, and the residual risk stated plainly where nothing fully does |
 | `docs/CONTINUITY.md` | SPORE as a seed: single-file node, cold-start playbooks, offline trust |
 | `docs/CONTRIBUTING.md` | the 1.0 freeze, branch/PR rules, and how docs are kept in sync with code |
 | `docs/DEV_GUIDE.md` | start here to change something — the full repo map, per-area build/test commands, and repo conventions |

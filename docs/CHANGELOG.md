@@ -18,6 +18,26 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **`docs/THREAT_MODEL.md`, and five other M9 items closed alongside it.** Six
+  chapters — observers, participants, identities, resources, network/transport,
+  implementation & evolution — each threat carrying adversary capability →
+  attack → asset → mitigation → **residual risk** → explicitly out of scope,
+  every claim linked to a SPEC section or a SECURITY_FINDINGS ID. Closes the
+  three items the previous pass left as an open audit: wormhole/eclipse against
+  path learning turns out to be bounded and non-transitive (`absorb_announce`
+  never adopts a peer's claims about third-party paths, and the reference build
+  always advertises `np=0`); identity-key revocation is a real, stated gap with
+  no protocol answer today; crypto agility under the frozen wire is a
+  deliberate hard-fork trade, not an oversight. Adds a locked Sybil guardrail
+  (no popularity-weighted replication without an analysis first) and a table of
+  exactly what an honestly-behaving relay's own storage reveals if seized —
+  `paths` in particular is a real, if partial, social graph, built from
+  ordinary operation with no malice required. The document is registered on the
+  site (`threat-model.html`, off the Developer hub) rather than left
+  repo-only, with two new `how-it-works.html` cards and a `home.md` link
+  pointing into it at the exact section — the whole motivation was that these
+  answers existed only in `SPEC.md`, undiscoverable from the page an outside
+  reviewer actually read. Wire unchanged; documentation only.
 - **Formatting in Android chats, and bubbles that actually render it (W12).**
   The feed composer had bold / italic / code / link; the chat composer had only
   the attach button, so the same message written in a chat came out plain. The

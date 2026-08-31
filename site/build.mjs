@@ -55,6 +55,7 @@ const pages = [
   ['docs/ROADMAP.md', 'roadmap.html', null],
   ['docs/SECURITY.md', 'security-policy.html', null],
   ['docs/SECURITY_FINDINGS.md', 'security.html', null],
+  ['docs/THREAT_MODEL.md', 'threat-model.html', null],
   ['docs/CHANGELOG.md', 'changelog.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
