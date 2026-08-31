@@ -18,6 +18,18 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Formatting in Android chats, and bubbles that actually render it (W12).**
+  The feed composer had bold / italic / code / link; the chat composer had only
+  the attach button, so the same message written in a chat came out plain. The
+  toolbar is now on both, driven by the `Markdown.wrap`/`Markdown.link` helpers
+  the feed already used. The half that matters for honesty: chat bubbles
+  previously drew their text with a plain `Text(...)`, so a toolbar alone would
+  have written `**bold**` into a message that displayed the asterisks — a
+  control whose backend is missing, which the hard rules forbid. Bubbles now
+  render through `Markdown.render`, the same inline subset the feed uses. The
+  composer's state moved from `String` to `TextFieldValue`, because a
+  formatting button needs to know where the caret is. The web node already had
+  all of this. Wire unchanged; no protocol change.
 - **The web node no longer scrolls sideways on a phone.** Measured at a 390px
   viewport: `scrollWidth` 599 against a 390 client width, all 209px of it the
   footer's wasm SHA-256. One unbreakable 64-hex token widened the *whole

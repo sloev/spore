@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -180,7 +181,7 @@ internal fun ChatDetail(peer: String) {
     val ctx = LocalContext.current
     val messages by NodeController.messages.collectAsState()
     val names by Petnames.map.collectAsState()
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(TextFieldValue("")) }
     var editingName by remember(peer) { mutableStateOf(names[peer] ?: "") }
     val thread = remember(messages, peer) { messages.filter { it.peer == peer } }
     val confirm = rememberConfirm()
@@ -217,14 +218,14 @@ internal fun ChatDetail(peer: String) {
     val performSend = {
         val s = staged
         if (s != null) {
-            if (NodeController.sendTextWithAttachment(peer, text, s.name, s.bytes, s.mime)) {
+            if (NodeController.sendTextWithAttachment(peer, text.text, s.name, s.bytes, s.mime)) {
                 staged = null
-                text = ""
+                text = TextFieldValue("")
             } else {
                 confirm("Attachment too large for this node's store — send it smaller")
             }
-        } else if (NodeController.send(peer, text)) {
-            text = ""
+        } else if (NodeController.send(peer, text.text)) {
+            text = TextFieldValue("")
         } else {
             confirm("Node not started yet — not sent")
         }
@@ -309,6 +310,15 @@ internal fun ChatDetail(peer: String) {
                 }
             }
         }
+        // Formatting, the same four marks the feed composer offers (W12). The
+        // bubble renders them, so this is not a control that writes syntax the
+        // reader would see as literal asterisks.
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CrateButton("B", { text = Markdown.wrap(text, "**") }, contentDescription = "Bold")
+            CrateButton("i", { text = Markdown.wrap(text, "_") }, contentDescription = "Italic")
+            CrateButton("</>", { text = Markdown.wrap(text, "`") }, contentDescription = "Code")
+            CrateButton("🔗", { text = Markdown.link(text) }, contentDescription = "Insert link")
+        }
         Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             CrateButton("📎", { pickFile.launch("*/*") }, contentDescription = "Attach file")
             ToughbookField(
@@ -319,7 +329,7 @@ internal fun ChatDetail(peer: String) {
                 "Send",
                 { if (peer == Petnames.PUBLIC) confirmPublic = true else performSend() },
                 // Send is live with either text or an attachment.
-                enabled = text.isNotBlank() || staged != null,
+                enabled = text.text.isNotBlank() || staged != null,
                 face = Palette.Yellow,
                 // Pink face, void ink: 5.58:1. The reverse (pink on olive) is the
                 // one pairing §1 bans outright.
@@ -362,7 +372,7 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
             Crate(edge = if (mine) Palette.Yellow else Palette.Ink) {
                 Column {
                     if (!mine) Caption("${if (m.encrypted) "🔒 " else ""}${Petnames.label(m.peer)}")
-                    if (shownText.isNotEmpty()) Text(shownText, color = Palette.Ink)
+                    if (shownText.isNotEmpty()) Text(Markdown.render(shownText, Palette.Ink))
                     if (m.magnet != null) {
                         if (shownText.isNotEmpty()) VGap(6.dp)
                         Attachment(m.magnet, m.mime, m.text)
