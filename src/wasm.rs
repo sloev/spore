@@ -423,8 +423,13 @@ pub unsafe extern "C" fn spore_node_send_direct(
     let mut d = [0u8; 8];
     d.copy_from_slice(std::slice::from_raw_parts(dest, 8));
     let pl = std::slice::from_raw_parts(payload, plen);
-    let (_id, forwards, _encrypted) = node.send_direct(d, pl, now);
-    pack(blob(forward_wires(forwards), Vec::new()))
+    let (id, forwards, _encrypted) = node.send_direct(d, pl, now);
+    // The id rides in the `blob`'s second list — one element, 16 bytes — so a
+    // UI can later ask `spore_node_acked` about *this* send. Reusing `blob`'s
+    // existing two-list shape rather than inventing a new packing: the second
+    // list is otherwise unused here (there is nothing "delivered" from a local
+    // send), and every JS caller already knows how to unpack it.
+    pack(blob(forward_wires(forwards), vec![id.to_vec()]))
 }
 
 /// Was the last [`spore_node_send_direct`] actually sealed? `1` yes, `0` no.
@@ -445,6 +450,38 @@ pub unsafe extern "C" fn spore_node_send_direct_sealed(n: *mut Node, dest: *cons
     // Asks the same two questions `send_direct` asks, without sending: is there a
     // ratchet session that can send, or a known prekey to seal to?
     node.can_seal_to(&d) as u8
+}
+
+/// Has a delivery receipt for this envelope id (§8) come back? `1` yes, `0` no.
+///
+/// The Android JNI binding has had this since the two-state "sent"/"delivered"
+/// label shipped; the browser never did, so `sendDirect` had nowhere to send an
+/// id and a DM's delivery state was simply unobservable from JS.
+///
+/// # Safety
+/// `n` valid; `id` points to 16 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_acked(n: *mut Node, id: *const u8) -> u8 {
+    let node = &*n;
+    let mut i = [0u8; 16];
+    i.copy_from_slice(std::slice::from_raw_parts(id, 16));
+    node.acked(&i) as u8
+}
+
+/// The default lifetime (seconds) `Node` gives a locally-originated `DATA`
+/// envelope — [`crate::DEFAULT_MESSAGE_EXPIRY_SECS`]. Needs no `Node`: it is a
+/// build-time constant, not per-instance state.
+///
+/// A UI reads this once rather than hardcoding "7 days" a second time, because
+/// the core has no "gave up" event for an unacknowledged send — §5.4d's resend
+/// backoff exhausts in minutes, long before the envelope itself expires, and
+/// silently drops its `Pending` entry either way. The only honest way to tell
+/// "still travelling" from "expired, never delivered" outside the core is to
+/// compare this constant against the message's own send time, which the UI
+/// already has.
+#[no_mangle]
+pub extern "C" fn spore_default_message_expiry_secs() -> u32 {
+    DEFAULT_MESSAGE_EXPIRY_SECS
 }
 
 /// Open a delivered DM from `sender`. Returns the plaintext packed into an i64,

@@ -44,6 +44,7 @@ const hardbrutCss = requireHardbrutCss();
 const modules = [
   inlineModule(read('spore.mjs')),
   inlineModule(read('ui/markdown.mjs')),
+  inlineModule(read('ui/delivery-status.mjs')),
   inlineModule(read('transports/kiss.mjs')),
   inlineModule(read('transports/loopback.mjs')),
   inlineModule(read('transports/websocket.mjs')),
@@ -434,6 +435,23 @@ async function boot() {
     const saveRing = () => { try { LS.set(K_RING, hexOf(hub.node.prekeyRing())); } catch (e) {} };
     saveRing();
     setInterval(saveRing, 60000);
+
+    // Flip any of our DMs whose delivery receipt has arrived (§8). Mirrors
+    // Android's refreshDelivery(); the web node never had this at all before —
+    // sendDirect() discarded the id, so a sent DM's fate was unobservable.
+    setInterval(() => {
+      let changed = false;
+      for (const c of Object.values(convos)) {
+        if (c.type !== 'dm') continue;
+        for (const m of c.msgs) {
+          if (m.fromMe && m.id && !m.delivered && hub.node.acked(hexToBytes(m.id))) {
+            m.delivered = true;
+            changed = true;
+          }
+        }
+      }
+      if (changed) { saveConvos(); if (convos[activeChat]) renderChatView(); }
+    }, 10000);
     $('addr').textContent = 'addr ' + hexOf(hub.node.addr());
 
     // Update persistent header with node identity
@@ -677,7 +695,8 @@ function renderChatView() {
       return '<div class="chat-msg' + selfCls + '">' +
         '<div class="chat-avatar">' + escapeHtml(initial) + '</div>' +
         '<div class="chat-bubble">' + who + mdWithAttachments(m.text) +
-        '<span class="chat-time">' + new Date(m.ts).toLocaleTimeString() + '</span></div></div>';
+        '<span class="chat-time">' + new Date(m.ts).toLocaleTimeString() + '</span>' +
+        deliveryStatus(m, spore.defaultMessageExpirySecs()) + '</div></div>';
     }).join('');
   }
   msgsEl.scrollTop = msgsEl.scrollHeight;
@@ -715,9 +734,13 @@ function sendChatMessage() {
     const dest = hexToBytes(c.addr);
     const canSeal = hub.node.canSealTo(dest);
     const payload = new TextEncoder().encode(text);
-    const { forwards } = hub.node.sendDirect(dest, payload);
+    const { forwards, id } = hub.node.sendDirect(dest, payload);
     hub._dispatch(forwards, null);
-    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now() });
+    // id/delivered drive the three-state status line in renderChatView: not
+    // set at all (older saved messages, before this shipped) draws nothing;
+    // set + !delivered polls acked() and may show "expired"; delivered stops
+    // polling. A DM always requests a receipt (§8), so id is never empty here.
+    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now(), id: hexOf(id), delivered: false });
     saveConvos();
     renderChatList(); renderChatView();
     logLine('tx', 'DM to ' + c.addr.slice(0, 8) + (canSeal ? ' (sealed)' : ' (cleartext)'));

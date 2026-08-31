@@ -79,7 +79,7 @@ impl Node {
 
     /// Originate a signed public (flooded) message on topic/broadcast `dest`.
     pub fn originate(&mut self, dest: Addr, payload: Vec<u8>, now: u32) -> Vec<Forward> {
-        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
         // Topics and public floods carry FLOOD; the relay uses this flag (not
         // structure) to tell multicast from unicast (§5).
         if dest == ZERO_DEST || self.topics.contains(&dest) {
@@ -116,7 +116,7 @@ impl Node {
     /// an error to report, not a bug to abort on. For objects that large, use the
     /// file/manifest layer, which exists for exactly this.
     pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Result<Vec<Forward>, TooLarge> {
-        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, data);
+        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, data);
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
         }
@@ -158,7 +158,7 @@ impl Node {
     /// Originate a unicast message that asks the recipient for a delivery
     /// receipt (§8). Tracks it for backoff resend until a receipt arrives.
     pub fn originate_ackreq(&mut self, dest: Addr, payload: Vec<u8>, now: u32) -> Vec<Forward> {
-        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
         e.flags |= fl::ACKREQ;
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
@@ -205,7 +205,7 @@ impl Node {
         } else {
             (plaintext.to_vec(), false, false)
         };
-        let mut e = Envelope::new(ty::DATA, dest, now + 7 * 86400, payload);
+        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
         e.flags |= fl::ACKREQ;
         if encrypted {
             e.flags |= fl::ENCRYPTED;
@@ -307,7 +307,7 @@ impl Node {
         OsRng.fill_bytes(&mut idb);
         let id = u64::from_be_bytes(idb);
         let payload = rpc::encode_request(id, &req);
-        let mut e = Envelope::new(ty::DATA, service, now + 7 * 86400, payload);
+        let mut e = Envelope::new(ty::DATA, service, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
         if service == ZERO_DEST || self.topics.contains(&service) {
             e.flags |= fl::FLOOD;
         }
@@ -330,7 +330,7 @@ impl Node {
     /// Reply to a request, routed back toward the requester.
     pub fn respond(&mut self, to: Addr, req_id: u64, resp: rpc::Response, now: u32) -> Vec<Forward> {
         let payload = rpc::encode_response(req_id, &resp);
-        let mut e = Envelope::new(ty::DATA, to, now + 7 * 86400, payload);
+        let mut e = Envelope::new(ty::DATA, to, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
         e.sign(&self.sk);
         if self.paths.fresh(&to, now).is_none() {
             e.flags |= fl::FLOOD; // reverse path unknown -> flood to find it
@@ -367,7 +367,7 @@ impl Node {
         let mut payload = Vec::with_capacity(1 + event.len());
         payload.push(feed::FEED_TAG);
         payload.extend_from_slice(&event);
-        let mut e = Envelope::new(ty::DATA, topic_of(topic), now + 7 * 86400, payload);
+        let mut e = Envelope::new(ty::DATA, topic_of(topic), now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
         e.flags |= fl::FLOOD;
         e.sign(&self.sk);
         self.mark_seen(&e);

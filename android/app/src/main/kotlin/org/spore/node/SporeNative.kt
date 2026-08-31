@@ -236,6 +236,11 @@ object SporeNative {
     /** Has a delivery receipt for this envelope id (hex) arrived? */
     external fun nativeAcked(ptr: Long, idHex: String): Boolean
 
+    /** Seconds a locally-originated message lives before it expires unread.
+     * No `ptr` — a build constant, not per-instance state. See
+     * [NodeController.messageExpired] for why the UI needs this at all. */
+    external fun nativeDefaultMessageExpirySecs(): Long
+
     /** Resend ACKREQ messages whose backoff elapsed without a receipt. */
     external fun nativeResendUnacked(ptr: Long)
 

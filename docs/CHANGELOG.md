@@ -18,6 +18,28 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Milestone 9 complete: a DM's status is three honest states, not a silent
+  gap.** Both surfaces previously had an incomplete story. Android showed
+  "· sent" / "✓ delivered" but no "gave up" — `resend_unacked` silently drops
+  its `Pending` entry once the §5.4d backoff exhausts (~15 min), long before
+  the envelope's own 7-day expiry, so a message that will never arrive looked
+  identical to one still in flight. The web node had **no delivery tracking at
+  all**: `sendDirect`'s wasm export discarded the message id and there was no
+  `acked` export, so a sent DM's fate was simply unobservable from JS.
+  Both now show exactly three states — **delivered** (a receipt came back),
+  **expired — undelivered** (the envelope's own lifetime passed with no
+  receipt, ever), **still travelling** for everything between — collapsed on
+  purpose, because the core has no event distinguishing active resending from
+  passive custody, and a status line should not invent precision the protocol
+  doesn't have. New `DEFAULT_MESSAGE_EXPIRY_SECS` names the `7 * 86400` literal
+  repeated across seven send sites; both UIs read it (`spore_default_message_expiry_secs`
+  wasm, `nativeDefaultMessageExpirySecs` JNI) rather than duplicating "7 days"
+  a third time, so "expired" can never drift from what the envelope's own
+  `expiry` field actually says. The web status logic is a real, independently
+  tested module (`web/ui/delivery-status.mjs`) rather than an inline function
+  only reachable through a browser. Wire unchanged; no wire/ABI change —
+  `spore_node_acked` and the id are new wasm exports, `nativeDefaultMessageExpirySecs`
+  a new JNI export, `bindings/spore.h` untouched (wasm-only).
 - **`docs/THREAT_MODEL.md`, and five other M9 items closed alongside it.** Six
   chapters — observers, participants, identities, resources, network/transport,
   implementation & evolution — each threat carrying adversary capability →
