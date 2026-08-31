@@ -18,6 +18,23 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **The web node no longer scrolls sideways on a phone.** Measured at a 390px
+  viewport: `scrollWidth` 599 against a 390 client width, all 209px of it the
+  footer's wasm SHA-256. One unbreakable 64-hex token widened the *whole
+  document*, so every other element then laid out in a narrow column with dead
+  space to pan into — which reads as a broken app rather than as one long
+  string. The wrap properties alone did not fix it: HARDBRUT sets
+  `white-space: nowrap` on `code`, which defeats both `overflow-wrap` and
+  `word-break`, so the footer digest needed `white-space: normal` back.
+  Scoped there rather than applied to every `code`, because nowrap is right for
+  short inline code in prose. Also gave the header's two rows 6px of separation:
+  HARDBRUT's hard `5px 5px 0` shadow has no blur, and the rows sat flush, so
+  COPY's shadow was drawn into SHARE's border — invisible at desktop widths,
+  where the two buttons are ~700px apart, and obvious once both rows compress
+  and the buttons stack. Verified by driving headless Chrome over CDP with a
+  real 390x844 device viewport, because `--window-size` alone floors the CSS
+  viewport at ~485px and quietly reports a page that fits. Wire unchanged; the
+  standalone still makes zero external requests.
 - **Table ceilings come from a memory budget instead of six laptop numbers
   (audit #189, recommendation 2).** F-1 and F-3 each fixed one table for the MCU
   and left the class open, which is what the audit said to stop doing. Added

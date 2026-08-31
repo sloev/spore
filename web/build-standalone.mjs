@@ -142,6 +142,30 @@ ${hardbrutCss}
 .bridge .ttl { font-weight: 800; flex: 1; }
 
 mark { background: var(--accent); color: var(--accent-ink); }
+
+/* Long unbreakable tokens must not widen the document.
+   A node's UI is full of them — a 64-hex wasm digest, an address, a magnet, a
+   group invite — and a single one that cannot wrap makes the *whole page* wider
+   than the screen. Every other element then lays out in a narrow column with
+   dead space to pan into, which reads as a broken app rather than as one long
+   string. Measured before this rule at 390px: scrollWidth 599 against a 390
+   viewport, all of it the footer's SHA-256.
+   Uses overflow-wrap:anywhere rather than word-break:break-all so ordinary
+   prose still breaks at spaces and only the unbreakable run is split. */
+   The wrap properties alone are not enough: HARDBRUT sets white-space:nowrap
+   on code, which defeats them both, so the offender needs it back to normal.
+   Scoped to the footer digest rather than applied to every code element,
+   because nowrap is the right default for the short inline code in prose. */
+code, .mono, .pill { overflow-wrap: anywhere; }
+footer code { white-space: normal; word-break: break-all; }
+
+/* Stacked hard shadows need somewhere to land. HARDBRUT throws a solid
+   5px 5px 0 shadow with no blur, and the header's two rows sit flush, so COPY's
+   shadow is drawn into SHARE's border. It only *looks* wrong on a narrow
+   screen: at desktop widths the two buttons are ~700px apart horizontally and
+   the shadow falls on empty paper, so this is a spacing bug that only becomes
+   visible once both rows compress and the buttons align right above each other. */
+.identity-row + .status-line { margin-top: 6px; }
 </style>
 </head>
 <body>
