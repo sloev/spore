@@ -154,25 +154,37 @@ object Markdown {
      */
     data class Attach(val name: String, val magnet: String, val mime: String)
 
-    // Canonical marker, always the last line of the body:
+    // Canonical marker, one per line, trailing the body — one line per attachment:
     //   📎 <filename> | spore:<hex-magnet> | <mime>
     // Application convention only — relays see opaque UTF-8. `(?m)` so `$` matches
-    // the end of that line rather than only the end of the whole body.
+    // the end of each line rather than only the end of the whole body.
+    //
+    // Multiple markers (multi-file attach) is a forward-compatible extension of
+    // what shipped as a single-marker convention: an older client that still
+    // calls `.find()` for one match recovers attachment #1 and leaves the other
+    // marker lines as visible text — the same "opaque, falls back to showing the
+    // marker text" degrade already documented for a non-SPORE client, not a
+    // crash or a dropped message.
     private val ATTACH = Regex("""(?m)^📎 (.+) \| spore:([0-9a-fA-F]{16,}) \| (\S+)$""")
 
-    /** Build the marker line for a published attachment. */
+    /** Build one marker line for a published attachment. Join several with `\n`
+     * to attach more than one file to a body (multi-file attach). */
     fun attachMarker(name: String, magnet: String, mime: String): String =
         "📎 $name | spore:$magnet | $mime"
 
     /**
-     * Split a body into its human text and its attachment, if it carries one.
-     * The text has the marker line removed and is trimmed; a body that is only a
-     * marker yields empty text. A body with no marker yields `(body, null)`.
+     * Split a body into its human text and its attachments, if it carries any.
+     * The text has every marker line removed and is trimmed; a body that is
+     * only markers yields empty text. A body with no marker yields `(body,
+     * emptyList())`. Order matches the order the marker lines appear in the
+     * body, which is send order.
      */
-    fun parseAttach(body: String): Pair<String, Attach?> {
-        val m = ATTACH.find(body) ?: return body to null
-        val att = Attach(m.groupValues[1], m.groupValues[2], m.groupValues[3])
-        val text = body.replace(m.value, "").trim()
-        return text to att
+    fun parseAttach(body: String): Pair<String, List<Attach>> {
+        val matches = ATTACH.findAll(body).toList()
+        if (matches.isEmpty()) return body to emptyList()
+        val atts = matches.map { Attach(it.groupValues[1], it.groupValues[2], it.groupValues[3]) }
+        var text = body
+        for (m in matches) text = text.replace(m.value, "")
+        return text.trim() to atts
     }
 }

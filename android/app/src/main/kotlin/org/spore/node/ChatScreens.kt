@@ -192,21 +192,24 @@ internal fun ChatDetail(peer: String) {
     val composerFocus = remember { FocusRequester() }
     LaunchedEffect(peer) { runCatching { composerFocus.requestFocus() } }
 
-    // Staged, not sent: picking a file only fills this. Nothing goes on the wire
-    // or into the thread until Send — the file reads as attached to the message
-    // being composed, which is the whole point of the change.
-    var staged by remember(peer) { mutableStateOf<StagedAttachment?>(null) }
+    // Staged, not sent: picking files only fills this. Nothing goes on the wire
+    // or into the thread until Send — files read as attached to the message
+    // being composed, which is the whole point of the change. A list rather
+    // than one slot (multi-file attach): a single pick can return several URIs,
+    // and repeated taps of the attach button append rather than replace.
+    var staged by remember(peer) { mutableStateOf<List<StagedAttachment>>(emptyList()) }
 
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+        val picked = uris.mapNotNull { uri ->
             val name = ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
                 val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (c.moveToFirst() && i >= 0) c.getString(i) else null
             } ?: "file.bin"
             val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
             val data = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            if (data != null) staged = StagedAttachment(name, data, mime)
+            data?.let { StagedAttachment(name, it, mime) }
         }
+        if (picked.isNotEmpty()) staged = staged + picked
     }
 
     // A PUBLIC send reaches every node in range rather than just this thread, and —
@@ -216,13 +219,12 @@ internal fun ChatDetail(peer: String) {
     // from B2) lives here so both the direct tap and the confirmed broadcast reuse it.
     var confirmPublic by remember { mutableStateOf(false) }
     val performSend = {
-        val s = staged
-        if (s != null) {
-            if (NodeController.sendTextWithAttachment(peer, text.text, s.name, s.bytes, s.mime)) {
-                staged = null
+        if (staged.isNotEmpty()) {
+            if (NodeController.sendTextWithAttachment(peer, text.text, staged)) {
+                staged = emptyList()
                 text = TextFieldValue("")
             } else {
-                confirm("Attachment too large for this node's store — send it smaller")
+                confirm("An attachment is too large for this node's store — send it smaller")
             }
         } else if (NodeController.send(peer, text.text)) {
             text = TextFieldValue("")
@@ -279,7 +281,7 @@ internal fun ChatDetail(peer: String) {
                 Modifier.fillMaxSize(), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(thread) { m ->
-                    Bubble(m, m.magnet?.let { mg -> transfers.firstOrNull { it.magnet == mg } })
+                    Bubble(m, m.attachments.map { att -> transfers.firstOrNull { it.magnet == att.magnet } })
                 }
             }
             if (!atBottom && thread.isNotEmpty()) {
@@ -296,9 +298,10 @@ internal fun ChatDetail(peer: String) {
                 )
             }
         }
-        // The staged attachment, if any: a chip above the composer with a clear
-        // affordance to drop it before sending.
-        staged?.let { s ->
+        // The staged attachments, if any: one chip per file above the composer,
+        // each with its own affordance to drop it before sending (multi-file
+        // attach — a message can carry more than one).
+        staged.forEachIndexed { i, s ->
             Crate(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (s.mime.startsWith("image/")) "🖼" else "📎", Modifier.padding(end = 8.dp))
@@ -306,7 +309,11 @@ internal fun ChatDetail(peer: String) {
                         Text(s.name, color = Palette.Ink, fontWeight = FontWeight.Bold, maxLines = 1)
                         Caption("${s.bytes.size / 1024} KB · staged, not sent")
                     }
-                    CrateButton("✕", { staged = null }, contentDescription = "Remove staged attachment")
+                    CrateButton(
+                        "✕",
+                        { staged = staged.filterIndexed { j, _ -> j != i } },
+                        contentDescription = "Remove staged attachment: ${s.name}",
+                    )
                 }
             }
         }
@@ -320,7 +327,7 @@ internal fun ChatDetail(peer: String) {
             CrateButton("🔗", { text = Markdown.link(text) }, contentDescription = "Insert link")
         }
         Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            CrateButton("📎", { pickFile.launch("*/*") }, contentDescription = "Attach file")
+            CrateButton("📎", { pickFiles.launch("*/*") }, contentDescription = "Attach file")
             ToughbookField(
                 text, { text = it }, Modifier.weight(1f).focusRequester(composerFocus), placeholder = "message…",
             )
@@ -329,7 +336,7 @@ internal fun ChatDetail(peer: String) {
                 "Send",
                 { if (peer == Petnames.PUBLIC) confirmPublic = true else performSend() },
                 // Send is live with either text or an attachment.
-                enabled = text.text.isNotBlank() || staged != null,
+                enabled = text.text.isNotBlank() || staged.isNotEmpty(),
                 face = Palette.Yellow,
                 // Pink face, void ink: 5.58:1. The reverse (pink on olive) is the
                 // one pairing §1 bans outright.
@@ -359,10 +366,11 @@ internal data class StagedAttachment(val name: String, val bytes: ByteArray, val
  * is what carries it for anyone who cannot see the difference.
  */
 @Composable
-private fun Bubble(m: Msg, transfer: Transfer?) {
+private fun Bubble(m: Msg, transfers: List<Transfer?>) {
     val mine = m.mine
-    // Strip the attachment marker from the displayed text; the attachment itself
-    // renders as a preview/chip below rather than as a line of marker syntax.
+    // Strip every attachment marker line from the displayed text; each
+    // attachment renders as its own preview/chip below rather than as a line
+    // of marker syntax (multi-file attach: zero, one, or several).
     val shownText = remember(m.text) { Markdown.parseAttach(m.text).first }
     Row(
         Modifier.fillMaxWidth(),
@@ -373,11 +381,16 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
                 Column {
                     if (!mine) Caption("${if (m.encrypted) "🔒 " else ""}${Petnames.label(m.peer)}")
                     if (shownText.isNotEmpty()) Text(Markdown.render(shownText, Palette.Ink))
-                    if (m.magnet != null) {
-                        if (shownText.isNotEmpty()) VGap(6.dp)
-                        Attachment(m.magnet, m.mime, m.text)
+                    m.attachments.forEachIndexed { i, att ->
+                        if (shownText.isNotEmpty() || i > 0) VGap(6.dp)
+                        Attachment(att)
+                        AttachmentStatus(att, transfers.getOrNull(i), mine)
                     }
-                    FragmentStatus(m, transfer)
+                    // The wire-frame count of a plain long text has nothing to do
+                    // with attachments — it is what a message with no file at all
+                    // needed to fit the mesh — so it only applies when there is no
+                    // attachment progress already being shown above.
+                    if (m.attachments.isEmpty()) TextFragmentStatus(m)
                     Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Caption(timeOf(m.ts))
                         if (!m.mine && !m.verified) {
@@ -407,62 +420,68 @@ private fun Bubble(m: Msg, transfer: Transfer?) {
 }
 
 /**
- * What became of this message on the wire: fountain chunks for a file, wire frames
- * for a long text. §3's segmented LED, because the unit of work is a countable
- * number of pieces and a smooth bar would be inventing precision.
+ * What became of one attachment on the wire: fountain chunks any relay can
+ * carry. §3's segmented LED, because the unit of work is a countable number
+ * of pieces and a smooth bar would be inventing precision. One of these per
+ * attachment (multi-file attach) — each file has its own transfer.
  *
- * The two cases are labelled differently on purpose. A **file** is fountain-coded
- * into chunks any relay can carry, so `have/count` is real progress. Our *own*
- * file is complete the moment it is published — the LED fills immediately, and it
- * says "served from this node" rather than implying anyone has fetched it, because
- * whether a peer pulled a chunk is not something this node can observe. Claiming
- * delivery we cannot see is how a status line becomes a lie.
+ * Our *own* file is complete the moment it is published — the LED fills
+ * immediately, and it says "served from this node" rather than implying
+ * anyone has fetched it, because whether a peer pulled a chunk is not
+ * something this node can observe. Claiming delivery we cannot see is how a
+ * status line becomes a lie.
  */
 @Composable
-private fun FragmentStatus(m: Msg, transfer: Transfer?) {
-    when {
-        transfer != null -> {
-            VGap(4.dp)
-            Caption("micro-packing")
-            SegmentedLed(transfer.have, transfer.count, Modifier.fillMaxWidth())
-            Caption(
-                if (transfer.have < transfer.count) "${transfer.have}/${transfer.count} chunks · fetching"
-                else if (m.mine) "${transfer.count} chunks · served from this node"
-                else "${transfer.count} chunks · complete"
-            )
-        }
-        // A file whose manifest we have not polled yet, so there is no count to show.
-        m.magnet != null -> {
-            VGap(4.dp)
-            Caption("micro-packing · counting chunks")
-        }
-        m.mine && m.fragments > 1 -> {
-            VGap(4.dp)
-            Caption("micro-packing")
-            SegmentedLed(m.fragments, m.fragments, Modifier.fillMaxWidth())
-            Caption("${m.fragments} wire frames")
-        }
+private fun AttachmentStatus(att: Markdown.Attach, transfer: Transfer?, mine: Boolean) {
+    VGap(4.dp)
+    if (transfer != null) {
+        Caption("micro-packing")
+        SegmentedLed(transfer.have, transfer.count, Modifier.fillMaxWidth())
+        Caption(
+            if (transfer.have < transfer.count) "${transfer.have}/${transfer.count} chunks · fetching"
+            else if (mine) "${transfer.count} chunks · served from this node"
+            else "${transfer.count} chunks · complete"
+        )
+    } else {
+        // The manifest hasn't been polled yet, so there is no count to show.
+        Caption("micro-packing · counting chunks")
+    }
+}
+
+/**
+ * The wire-frame count of a plain long text with no attachment at all — the
+ * one case [AttachmentStatus] doesn't cover, since it has nothing to do with
+ * a file. §3's segmented LED, same as above, but for the message body itself.
+ */
+@Composable
+private fun TextFragmentStatus(m: Msg) {
+    if (m.mine && m.fragments > 1) {
+        VGap(4.dp)
+        Caption("micro-packing")
+        SegmentedLed(m.fragments, m.fragments, Modifier.fillMaxWidth())
+        Caption("${m.fragments} wire frames")
     }
 }
 
 /**
  * The attachment part of a bubble: an inline image preview when the file is an
  * image and its bytes are on disk, otherwise a tappable file chip. Tapping either
- * hands the file to another app via [openAttachment].
+ * hands the file to another app via [openAttachment]. One call per attachment
+ * (multi-file attach) — `att` carries name/magnet/mime directly, so this no
+ * longer re-parses the body to recover the name the way the single-attachment
+ * version had to.
  *
  * `path` is null until the file is complete on this device (our own send caches it
  * immediately; a received file lands when [NodeController.pumpFiles] saves it). No
  * path means the chip reads as not-here-yet and does not offer Open — the LED in
- * [FragmentStatus] carries the progress.
+ * [AttachmentStatus] carries the progress.
  */
 @Composable
-private fun Attachment(magnet: String, mime: String?, body: String) {
+private fun Attachment(att: Markdown.Attach) {
     val ctx = LocalContext.current
     val paths by NodeController.filePaths.collectAsState()
-    val path = paths[magnet]
-    val att = remember(body) { Markdown.parseAttach(body).second }
-    val name = att?.name ?: "attachment"
-    val isImage = (mime ?: att?.mime).orEmpty().startsWith("image/")
+    val path = paths[att.magnet]
+    val isImage = att.mime.startsWith("image/")
     val here = path != null
 
     if (isImage && here) {
@@ -484,12 +503,12 @@ private fun Attachment(magnet: String, mime: String?, body: String) {
         if (shown != null) {
             Image(
                 shown.asImageBitmap(),
-                contentDescription = "attached image: $name",
+                contentDescription = "attached image: ${att.name}",
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 220.dp)
                     .border(2.dp, Palette.Ink)
-                    .clickable { openAttachment(ctx, magnet, name, mime ?: att?.mime, path) },
+                    .clickable { openAttachment(ctx, att.magnet, att.name, att.mime, path) },
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             )
             return
@@ -501,13 +520,13 @@ private fun Attachment(magnet: String, mime: String?, body: String) {
         Modifier
             .fillMaxWidth()
             .border(2.dp, Palette.Ink, CrateShape)
-            .then(if (here) Modifier.clickable { openAttachment(ctx, magnet, name, mime ?: att?.mime, path) } else Modifier)
+            .then(if (here) Modifier.clickable { openAttachment(ctx, att.magnet, att.name, att.mime, path) } else Modifier)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(if (isImage) "🖼" else "📎", Modifier.padding(end = 8.dp))
         Column(Modifier.weight(1f)) {
-            Text(name, color = Palette.Ink, maxLines = 1)
+            Text(att.name, color = Palette.Ink, maxLines = 1)
             Caption(if (here) "tap to open" else "fetching…")
         }
     }

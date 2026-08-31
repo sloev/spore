@@ -245,6 +245,7 @@ footer code { white-space: normal; word-break: break-all; }
         <button type="button" class="fmt" data-fmt="attach" title="attach a file">📎</button>
         <button type="button" class="fmt" data-fmt="image" title="attach an image">🖼</button>
       </div>
+      <div id="chat-staged"></div>
       <div class="row" id="chat-compose-row">
         <input type="text" id="chat-input" placeholder="message&#x2026;" />
         <button id="chat-send">Send</button>
@@ -403,6 +404,14 @@ let saved = [];      // [{type, fields}] persisted bridges
 //   msgs    — [{text, fromMe, from, ts}]
 let convos = {};     // {key: conversation}
 let activeChat = null; // current conversation key
+// Files picked but not yet sent (multi-file attach). Published immediately —
+// the web node has always published on pick rather than deferring publish to
+// send time, unlike Android — but held here rather than in the composer text,
+// since the marker lines can only be assembled into a real multi-line string
+// at send time. Scoped to whichever chat chatStagedFor names; cleared on
+// switching chats, matching Android's staged-by-remember(peer) pattern.
+let chatStaged = [];
+let chatStagedFor = null;
 let feedItems = [];   // [{from, topicHash, text, ts}]
 let followedFeeds = []; // subscribed feed addresses (16-hex strings)
 let feedInterval = null;
@@ -645,6 +654,13 @@ function renderChatView() {
     view.style.display = 'none';
     return;
   }
+  // Staged attachments belong to whichever chat they were picked for. Switching
+  // chats drops them rather than silently carrying a file into the wrong
+  // conversation — matching Android's staged-by-remember(peer) pattern.
+  if (chatStagedFor !== activeChat) {
+    chatStaged = [];
+    chatStagedFor = activeChat;
+  }
   const c = convos[activeChat];
   view.style.display = 'block';
   const b = CONVO_BADGES[c.type] || CONVO_BADGES.dm;
@@ -721,47 +737,75 @@ function renderChatView() {
   } else {
     sealState.textContent = '';
   }
+  renderChatStaged();
+}
+
+// Chips for files picked but not yet sent (multi-file attach). Each has its
+// own remove affordance, matching Android's staged-attachment row.
+function renderChatStaged() {
+  const el = $('chat-staged');
+  if (!el) return;
+  if (!chatStaged.length) { el.innerHTML = ''; return; }
+  el.innerHTML = chatStaged.map((f, i) =>
+    '<div class="row" style="align-items:center;margin-bottom:4px">' +
+    '<span class="cnt">' + (f.mime.startsWith('image/') ? '🖼' : '📎') + ' ' +
+    escapeHtml(f.name) + ' (' + Math.round(f.bytes / 1024) + ' KB) · staged, not sent</span>' +
+    '<button type="button" class="ghost" data-i="' + i + '">✕</button></div>'
+  ).join('');
+  for (const btn of el.querySelectorAll('button[data-i]')) {
+    btn.onclick = () => { chatStaged.splice(+btn.dataset.i, 1); renderChatStaged(); };
+  }
 }
 
 function sendChatMessage() {
   if (!activeChat || !convos[activeChat]) return;
   const c = convos[activeChat];
   const text = $('chat-input').value.trim();
-  if (!text) return;
+  const staged = chatStagedFor === activeChat ? chatStaged : [];
+  if (!text && !staged.length) return;
+
+  // Markers are assembled here, in memory, never through the <input>'s value —
+  // see the 'attach' case in applyFmt for why: Chrome strips a newline from a text
+  // input's .value, so N marker lines can only exist as a real multi-line
+  // string built at send time.
+  const markers = staged.map((f) => '📎 ' + f.name + ' | spore:' + f.magnet + ' | ' + f.mime).join('\\n');
+  const body = text && markers ? text + '\\n\\n' + markers : (text || markers);
 
   if (c.type === 'dm') {
     if (!c.addr) { logLine('bad', 'no address for this chat'); return; }
     const dest = hexToBytes(c.addr);
     const canSeal = hub.node.canSealTo(dest);
-    const payload = new TextEncoder().encode(text);
+    const payload = new TextEncoder().encode(body);
     const { forwards, id } = hub.node.sendDirect(dest, payload);
     hub._dispatch(forwards, null);
     // id/delivered drive the three-state status line in renderChatView: not
     // set at all (older saved messages, before this shipped) draws nothing;
     // set + !delivered polls acked() and may show "expired"; delivered stops
     // polling. A DM always requests a receipt (§8), so id is never empty here.
-    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now(), id: hexOf(id), delivered: false });
+    c.msgs.push({ text: body, fromMe: true, from: 'me', ts: Date.now(), id: hexOf(id), delivered: false });
     saveConvos();
     renderChatList(); renderChatView();
     logLine('tx', 'DM to ' + c.addr.slice(0, 8) + (canSeal ? ' (sealed)' : ' (cleartext)'));
   } else if (c.type === 'open') {
     const topic = c.name.replace(/^[/]/, '');
-    hub.node.publish(topic, new TextEncoder().encode(text));
-    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now() });
+    hub.node.publish(topic, new TextEncoder().encode(body));
+    c.msgs.push({ text: body, fromMe: true, from: 'me', ts: Date.now() });
     saveConvos();
     renderChatList(); renderChatView();
     logLine('tx', 'posted to /' + topic);
   } else if (c.type === 'sealed') {
     const topic = c.name.replace(/^[/]/, '');
     const keyBytes = hexToBytes(c.keyHex);
-    const ct = spore.topicSeal(new TextEncoder().encode(text), keyBytes);
+    const ct = spore.topicSeal(new TextEncoder().encode(body), keyBytes);
     hub.node.publish(topic, ct);
-    c.msgs.push({ text, fromMe: true, from: 'me', ts: Date.now() });
+    c.msgs.push({ text: body, fromMe: true, from: 'me', ts: Date.now() });
     saveConvos();
     renderChatList(); renderChatView();
     logLine('tx', 'posted (sealed) to /' + topic);
   }
   $('chat-input').value = '';
+  chatStaged = [];
+  renderChatStaged();
 }
 
 // ---- feed (W10): personal microblog + subscribed feeds ---------------------
@@ -928,11 +972,39 @@ function applyFmt(input, kind) {
       wrap('[', '](https://)');
       break;
     }
-    case 'attach':
+    case 'attach': {
+      // Publish every picked file and stage it as a chip above the composer,
+      // one canonical marker per file assembled only at send time (Appendix
+      // A, multi-file attach). NOT inserted into the input's live text: this
+      // element is a plain <input type="text">, and Chrome silently strips
+      // any newline assigned to its .value ("a" + newline + "b" becomes "ab") — confirmed with
+      // a bare repro before writing this comment. Multiple marker lines can
+      // therefore never live in the composer text the way a single marker
+      // could; they have to be built as a real multi-line string in memory
+      // and only ever touch sendChatMessage's outgoing body, never the DOM
+      // input. This mirrors Android's staged-chip composer exactly, which
+      // never had this problem because ToughbookField is a real multi-line
+      // field. Chat-only: 'attach' has no equivalent button on the feed
+      // toolbar, matching Appendix A's stated scope.
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.onchange = async () => {
+        const files = Array.from(input.files || []);
+        for (const f of files) {
+          const buf = new Uint8Array(await f.arrayBuffer());
+          const magnet = hexOf(hub.node.publishFile(f.name, buf));
+          chatStaged.push({ name: f.name, magnet, mime: f.type || 'application/octet-stream', bytes: buf.length });
+          logLine('tx', 'attached file ' + f.name + ' (' + buf.length + ' bytes)');
+        }
+        renderChatStaged();
+      };
+      input.click();
+      break;
+    }
     case 'image': {
       // Stage a real file, publish it, and insert the canonical marker:
       //   image -> ![name](spore:<magnet>)
-      //   file  -> 📎 name | spore:<magnet> | mime   (Appendix A)
       const input = document.createElement('input');
       input.type = 'file';
       input.onchange = async () => {
@@ -940,13 +1012,11 @@ function applyFmt(input, kind) {
         if (!f) return;
         const buf = new Uint8Array(await f.arrayBuffer());
         const magnet = hexOf(hub.node.publishFile(f.name, buf));
-        const marker = kind === 'image'
-          ? '![' + f.name + '](spore:' + magnet + ')'
-          : '📎 ' + f.name + ' | spore:' + magnet + ' | ' + (f.type || 'application/octet-stream');
+        const marker = '![' + f.name + '](spore:' + magnet + ')';
         const at = el.selectionStart ?? el.value.length;
         el.value = el.value.slice(0, at) + ' ' + marker + ' ' + el.value.slice(at);
         el.dispatchEvent(new Event('input'));
-        logLine('tx', (kind === 'image' ? 'attached image ' : 'attached file ') + f.name + ' (' + buf.length + ' bytes)');
+        logLine('tx', 'attached image ' + f.name + ' (' + buf.length + ' bytes)');
       };
       input.click();
       break;
