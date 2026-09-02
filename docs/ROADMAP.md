@@ -685,6 +685,24 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | ⬜ not started | First consumer of the contract; see design-system note below |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 
+**Scope: the web node is not the landing site.** Two different products live in
+this repo and M10 touches exactly one of them.
+
+| | Source | Output | Audience |
+|---|---|---|---|
+| **Web node** | `web/` | `web/spore-standalone.html`, one self-contained file, zero external requests | someone *running a node* |
+| **Landing site** | `site/` | GitHub Pages | someone *reading about* SPORE |
+
+They are separate builds with separate artefacts. The only coupling is that
+`site/build.mjs` imports `requireHardbrutCss` from `../web/hardbrut-import.mjs`
+(the vendoring helper, not the node) and renders `web/README.md` as
+`webguide.html`. **M10 rebuilds the web node only.** The Pages site keeps its
+current markup and its flat `hardbrut.css`, and no task in this milestone
+changes it. If the site is ever moved onto HARDBRUT/3 that is its own milestone
+with its own definition of done — a docs site and a mesh client have almost no
+components in common, and conflating them is how the design language forked the
+first time (see M6/M7).
+
 **Design system.** M10-D consumes **HARDBRUT/3**, a three-layer rebuild
 (primitive tokens → semantic roles → patterns) of `supernihil/hardbrut`, vendored
 at `web/vendor/hardbrut3/` — 36 CSS files (63.5 KB) plus `inter-900-latin.woff2`
