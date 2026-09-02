@@ -654,6 +654,51 @@ kernel. It is simply Android-only and in the wrong directory.
 — the exact pattern a wasm storage port needs. `Store::set_spill_backend(Box<dyn
 SpillBackend>)` is existing precedent for a pluggable port.
 
+**Portability is a hard requirement, and it is already met — keep it that way.**
+The kernel must run on ESP32, Android, Windows, Linux, macOS and in the browser.
+That is not aspirational: every one of those is already built on **every PR**,
+from the same crate.
+
+| Target | CI job | How |
+|---|---|---|
+| Linux / macOS / Windows | `ci.yml` | `os: [ubuntu-latest, macos-latest, windows-latest]` |
+| Browser (wasm) | `ci.yml`, `android.yml` | `--target wasm32-unknown-unknown` |
+| Android | `android.yml` | `cargo-ndk`, `aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android` |
+| ESP32-S3 | `esp32.yml` | `xtensa-esp32s3-espidf` in Espressif's container — "prove the unmodified core still compiles" |
+
+The crate is already split into a **portable core** and a **native-only layer**,
+and that split is what makes this work. `bridge/{hub, driver, serial, ax25,
+copyparty, foldersync, i2p, spool, store, stream_link}` and `direct/` are
+`#[cfg(not(target_arch = "wasm32"))]`; everything below them is portable.
+
+**The communicator belongs in the portable half**, which means it obeys four
+rules. The first three are enforced automatically — the wasm and ESP32 jobs stop
+compiling if they are broken — and the fourth is not, which is why it is written
+down:
+
+1. **No filesystem.** Reach storage only through the M10-A port. Web is the only
+   target with no filesystem at all; ESP32 has one (`esp32/src/storage.rs` mounts
+   SPIFFS through ESP-IDF's VFS, so `FsSpill` runs there unmodified), as do
+   desktop, CLI and Android. **The port therefore needs exactly one new
+   implementation, not one per platform.**
+2. **No threads.** `wasm32-unknown-unknown` has none. The layer is driven by the
+   host — "here is a tick, do your work" — exactly as the core already is.
+3. **No new dependencies** unless they build on Espressif's Xtensa Rust fork.
+   The repo already has scar tissue here: the optional `iroh` feature moved the
+   MSRV floor from 1.75 to 1.85 because Cargo resolves optional dependencies too.
+4. **No reading the clock.** `SystemTime::now()` and `Instant::now()` *compile*
+   on `wasm32-unknown-unknown` and then panic at runtime, so no compile guard
+   catches this one. The core's existing convention is the answer: time arrives
+   as a `now: u32` parameter (`Mix::add`, `Pending::expire`, every `spore_node_*`
+   entry point). The communicator does the same. Clock reads stay in the
+   native-only layer, where they already live.
+
+**ESP32 gets the kernel, not the communicator.** It is a headless relay (M8) with
+320–512 KB of SRAM, no screen and no conversations; a contact book on it would be
+dead weight. The communicator is a Cargo feature, default on, off for ESP32 —
+excluded by design, not by limitation. Portability of the *kernel* is the win;
+the app layer goes where there is a user.
+
 **Sequencing (locked): contract first, stores after.** The `SporeClient`
 command+event interface is defined *first* and is the UI's only contract. The web
 UI is built against it immediately, backed initially by thin JS stores; those
