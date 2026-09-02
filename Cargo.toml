@@ -27,14 +27,14 @@ license = "Unlicense"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-ed25519-dalek = "=2.1.1"
+ed25519-dalek = "=3.0.0"
 crypto_box = "0.9"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-chacha20poly1305 = "0.10"
-sha2 = "0.10"
-blake2 = "0.10"
-rand = "0.8"
-base64ct = "=1.6.0"
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+chacha20poly1305 = "0.11"
+sha2 = "0.11"
+blake2 = "0.11"
+rand = "0.10"
+base64ct = "=1.8.3"
 # `zeroize` is bumped to 1.x (≥1.9) to satisfy the optional iroh bridge's
 # `iroh-base`, which pulls it into the *core* build via chacha20poly1305/crypto_box.
 # That is what moved the MSRV floor off 1.75 (see rust-version above): zeroize 1.9's
