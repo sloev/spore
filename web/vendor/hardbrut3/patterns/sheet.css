@@ -1,0 +1,28 @@
+/* Desktop overlays: dialog, popover, menu, tooltip. Below 600px a popover or
+   menu carrying the -responsive class re-anchors as a bottom sheet: same
+   markup, different geometry. */
+dialog,.dialog{width:min(32rem,calc(100vw - 2 * var(--pad)));max-height:calc(100dvh - 2 * var(--pad));padding:var(--pad);margin:auto;background:var(--paper);color:var(--ink);border:var(--border);box-shadow:var(--e3);overflow:auto}
+dialog::backdrop{background:var(--scrim)}
+dialog>:first-child,.dialog>:first-child{margin-top:0}
+.dialog-title{font-family:var(--font-display);font-weight:900;text-transform:uppercase;font-size:var(--text-h3);letter-spacing:var(--tracking-display);margin-bottom:var(--gap)}
+.dialog-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:var(--gap-tight);margin-top:var(--gap-loose)}
+@media (max-width:600px){.dialog-actions{flex-direction:column-reverse}.dialog-actions>*{width:100%}}
+.scrim{position:fixed;inset:0;z-index:var(--z-sheet);background:var(--scrim)}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:calc(var(--z-sheet) + 1);max-height:85dvh;overflow:auto;padding:var(--pad);padding-bottom:calc(var(--pad) + var(--safe-b));background:var(--paper);border-top:var(--border-heavy);box-shadow:var(--e3);animation:hb-rise var(--dur-3) var(--ease-out)}
+.sheet-grip{width:56px;height:var(--bw-heavy);margin:0 auto var(--gap);background:var(--ink)}
+@keyframes hb-rise{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.popover{position:absolute;z-index:var(--z-sheet);min-width:200px;padding:var(--pad-tight);background:var(--paper);border:var(--border);box-shadow:var(--e3)}
+.menu{min-width:200px;padding:0;margin:0;background:var(--paper);border:var(--border);box-shadow:var(--e3);list-style:none}
+.menu-item{display:flex;align-items:center;gap:var(--gap-tight);width:100%;min-height:var(--tap-min);padding:0 var(--pad-tight);background:none;color:var(--ink);border:0;border-bottom:var(--border-thin);box-shadow:none;font-family:var(--font);font-weight:700;font-size:var(--text-sm);text-transform:none;letter-spacing:0;text-align:left;justify-content:flex-start;cursor:pointer}
+.menu-item:last-child{border-bottom:0}
+.menu-item:hover{background:var(--accent);color:var(--accent-ink);transform:none;box-shadow:none}
+.menu-item:active{transform:none;box-shadow:none;background:var(--accent)}
+.menu-item-danger:hover{background:var(--danger);color:var(--danger-ink)}
+.menu-sep{height:0;border:0;border-top:var(--border);margin:0}
+@media (max-width:600px){
+  .popover-responsive,.menu-responsive{position:fixed;left:0;right:0;bottom:0;top:auto;width:auto;min-width:0;max-height:85dvh;overflow:auto;border:0;border-top:var(--border-heavy);padding-bottom:var(--safe-b);animation:hb-rise var(--dur-3) var(--ease-out)}
+}
+/* Tooltip is a pointer affordance only — never the sole carrier of meaning,
+   because touch and screen readers never see it. */
+.tooltip{position:absolute;z-index:var(--z-dialog);padding:var(--space-1) var(--space-2);background:var(--ink);color:var(--paper);border:var(--bw-thin) solid var(--ink);font-family:var(--font-mono);font-size:var(--text-xs);white-space:nowrap;pointer-events:none}
+@media (hover:none){.tooltip{display:none}}

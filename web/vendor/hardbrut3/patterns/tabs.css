@@ -1,0 +1,7 @@
+.tab-list{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--gap)}
+.tab{min-height:var(--control-h-sm);padding:0 var(--space-4);background:var(--paper);color:var(--ink);border:var(--border-thin);box-shadow:var(--e1);font-family:var(--font-display);font-weight:900;font-size:var(--text-label);text-transform:uppercase;letter-spacing:0.02em;cursor:pointer}
+.tab:hover{transform:translate(var(--lift),var(--lift));box-shadow:var(--e2)}
+.tab:active{transform:translate(1px,1px);box-shadow:var(--e0)}
+.tab[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+.tab-panel[hidden]{display:none}
+@media (max-width:600px){.tab-list{flex-wrap:nowrap;overflow-x:auto;padding-bottom:var(--space-1)}.tab{flex:0 0 auto}}

@@ -1,0 +1,18 @@
+/* Raw palette. Never reference these directly in a component — use color-roles. */
+:root{
+  --ink-900:#000;
+  --ink-100:#f0f0e8;
+  --paper-000:#fff;
+  --paper-900:#1a1a18;
+  --sand-050:#fdfaf2;
+  --coal-950:#121210;
+  --grey-500:#666;
+  --grey-300:#a0a090;
+
+  --yellow:#ffd23f;
+  --red:#ff4444;
+  --blue:#4488ff;
+  --green:#44cc44;
+  --pink:#ff66aa;
+  --purple:#aa66ff;
+}

@@ -1,0 +1,26 @@
+:root{
+  /* Snappy and mechanical. No bounce, no spring, no long fades. */
+  --dur-1:100ms; /* @kind other */   /* press / hover */
+  --dur-2:160ms; /* @kind other */   /* toggles, reveals */
+  --dur-3:220ms; /* @kind other */   /* sheets, overlays */
+  --ease:ease;                      /* @kind other */
+  --ease-out:cubic-bezier(.2,.7,.3,1); /* @kind other */
+
+  /* Shared press choreography: hover lifts toward the shadow, press slams into
+     it. Every interactive surface uses these two so the whole system agrees. */
+  --lift:-2px;   /* @kind spacing */
+  --press:3px;   /* @kind spacing */
+}
+@media (prefers-reduced-motion:reduce){
+  :root{
+    --dur-1:1ms; /* @kind other */
+    --dur-2:1ms; /* @kind other */
+    --dur-3:1ms; /* @kind other */
+    --lift:0px;  /* @kind spacing */
+    --press:0px; /* @kind spacing */
+  }
+}
+/* Touch devices have no hover; the lift would flicker after a tap. */
+@media (hover:none){
+  :root{--lift:0px}
+}

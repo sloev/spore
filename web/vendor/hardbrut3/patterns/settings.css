@@ -1,0 +1,18 @@
+/* Settings reuse row geometry but never lift: a settings row is a destination
+   or a control, not a card. */
+.settings{display:flex;flex-direction:column;gap:var(--gap-loose);width:100%;max-width:720px;margin-inline:auto;padding:var(--pad-tight)}
+.settings-group{background:var(--paper);border:var(--border);box-shadow:var(--e2)}
+.settings-group-title{padding:var(--space-2) var(--pad-tight);background:var(--ink);color:var(--paper);font-family:var(--font-display);font-weight:900;font-size:var(--text-label);text-transform:uppercase;letter-spacing:var(--tracking-label)}
+.settings-row{display:flex;align-items:center;gap:var(--gap);width:100%;min-height:var(--tap-min);padding:var(--space-3) var(--pad-tight);background:var(--paper);color:var(--ink);border:0;border-bottom:var(--border-thin);box-shadow:none;font-family:var(--font);font-weight:400;font-size:var(--text-body);text-transform:none;letter-spacing:0;text-align:left;text-decoration:none}
+.settings-row:last-child{border-bottom:0}
+.settings-row-body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.settings-row-body>b{font-weight:800}
+.settings-row-body>span{font-size:var(--text-sm);color:var(--muted)}
+.settings-row-control{flex:0 0 auto;display:flex;align-items:center;gap:var(--gap-tight)}
+button.settings-row,a.settings-row{cursor:pointer}
+button.settings-row:hover,a.settings-row:hover{background:var(--sunken);transform:none;box-shadow:none}
+button.settings-row:active,a.settings-row:active{background:var(--accent);color:var(--accent-ink);transform:none;box-shadow:none}
+.settings-row-nav::after{content:"\203A";font-family:var(--font-mono);font-size:1.3rem;line-height:1;color:var(--muted)}
+.settings-row-danger>.settings-row-body>b{font-family:var(--font-display);font-weight:900;text-transform:uppercase;letter-spacing:var(--tracking-label);font-size:var(--text-sm)}
+button.settings-row-danger:hover{background:var(--danger);color:var(--danger-ink)}
+.settings-nav{display:flex;flex-direction:column;gap:var(--space-1)}

@@ -1,0 +1,14 @@
+.text-center{text-align:center}
+.text-muted,.muted{color:var(--muted)}
+.text-sm{font-size:var(--text-sm)}
+.text-xs{font-size:var(--text-xs)}
+.text-uppercase{text-transform:uppercase;letter-spacing:var(--tracking-label)}
+.mono{font-family:var(--font-mono)}
+.full{width:100%}
+.grow{flex:1 1 auto;min-width:0}
+.nowrap{white-space:nowrap}
+.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.no-scrollbar{scrollbar-width:none}
+.no-scrollbar::-webkit-scrollbar{display:none}
+.only-desktop{display:none}
+@media (min-width:821px){.only-desktop{display:revert}.only-mobile{display:none}}

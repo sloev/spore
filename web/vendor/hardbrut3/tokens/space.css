@@ -1,0 +1,45 @@
+/* 4px grid — 1:1 with Android dp, so 12 here is 12.dp there. */
+:root{
+  --space-0:0;
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:24px;
+  --space-6:32px;
+  --space-7:40px;
+  --space-8:64px;
+
+  /* Named roles so density can shift per surface without touching components. */
+  --gap-tight:var(--space-2);
+  --gap:var(--space-3);
+  --gap-loose:var(--space-5);
+  --pad-tight:var(--space-3);
+  --pad:var(--space-4);
+  --pad-loose:var(--space-5);
+  --section:var(--space-7);
+
+  /* Gutter reserved so a hard shadow never clips or triggers overflow inside
+     a scroll container. Any scroller with shadowed children uses it. */
+  --shadow-gutter:var(--space-2);
+
+  /* Android/iOS safe areas — always applied, zero in a browser window. */
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-r:env(safe-area-inset-right,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-l:env(safe-area-inset-left,0px);
+
+  /* Legacy aliases kept so v1 component code keeps compiling. Prefer the
+     numbered scale and the named roles above in anything new. */
+  --space:var(--space-4);
+  --space-sm:var(--space-3);
+  --space-lg:var(--space-6);
+
+  /* Layout */
+  --measure-page:1200px;
+  --rail-w:88px;
+  --sidebar-w:340px;
+}
+@media (min-width:900px){
+  :root{--pad:var(--space-5);--gap:var(--space-4)}
+}

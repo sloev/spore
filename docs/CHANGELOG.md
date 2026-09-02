@@ -37,6 +37,38 @@ Two conventions specific to this project:
   file carries does change, from garbage to the public address it always
   intended.
 
+- **`SporeClient` — the M10 seam between the UI and the kernel.** New
+  `web/app/spore-client.mjs`: the sole caller of `spore.mjs`, sole owner of the
+  node pointer, and sole owner of a timer. Screens subscribe to one event stream
+  (`EnvelopeReceived`, `EnvelopeAcked`, `EnvelopeExpired`, `FeedEvent`,
+  `BridgeStateChanged`, `AnnounceSent`, `ClientFault`) instead of starting poll
+  loops of their own — the pre-M10 node had five independent ones. Faults are
+  events, not throws, so a transport hiccup cannot take down a component tree.
+  Optimistic sends are real rows carrying the true envelope id and
+  `status: 'queued'`, so a reconnect reconciles by id rather than guessing which
+  placeholder matches which envelope; an unacked DM past its own TTL becomes
+  `EnvelopeExpired`, because the core emits no "gave up" event and leaving it
+  spinning would be dishonest. `web/app/transports.mjs` carries the browser
+  registry forward from the old `BRIDGES` table; `availableTransports()`
+  feature-detects it, so gesture transports stay hidden where their API is
+  absent and the eleven daemon-only bridges are simply not in the file. WebRTC
+  is declared `manual` with no `open()` and *refuses* `addBridge()` rather than
+  offering a control whose backend is missing — it gets `attachTransport()`
+  instead, which its handshake screen will use. Storage is an injected port,
+  async-shaped so M10-A can swap in a Rust-backed one without a caller changing;
+  it reuses the existing `spore.seed`/`spore.ring` keys so an installed node
+  keeps its identity. 11 contract tests run against the real wasm kernel.
+  Wire unchanged: no core or ABI change.
+
+- **HARDBRUT/3 vendored for the web app.** `web/vendor/hardbrut3/` — 36 CSS
+  files (63.5 KB) in the upstream three-layer structure (tokens → base →
+  patterns → themes) plus `inter-900-latin.woff2`, verified byte-identical to
+  `supernihil/hardbrut`'s copy. Nothing consumes it yet; the flat
+  `web/vendor/hardbrut/hardbrut.css` still drives every current surface, so this
+  is inert until M10-D. `docs/ROADMAP.md` gains **Milestone 10**, recording the
+  three-ABI divergence (`wasm.rs` 34 exports, `ffi.rs` 20, `android/jni` 64) and
+  the seven kernel gaps behind it. Wire unchanged: assets and documentation.
+
 - **Multiple files per send, on both surfaces (M2 carried-forward gap).**
   `Markdown.parseAttach` (Android) and `mdWithAttachments` (web) both moved
   from matching the first `📎 name | spore:magnet | mime` marker line to

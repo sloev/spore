@@ -1,0 +1,20 @@
+/* Hard offset shadows, zero blur — the whole elevation system.
+   e1 sits on the page, e2 floats, e3 is the top layer (dialogs, sheets, drags). */
+:root{
+  --e0:none;                    /* @kind shadow */
+  --e1:3px 3px 0 var(--ink);    /* @kind shadow */
+  --e2:5px 5px 0 var(--ink);    /* @kind shadow */
+  --e3:7px 7px 0 var(--ink);    /* @kind shadow */
+  --e1-offset:3px;
+  --e2-offset:5px;
+  --e3-offset:7px;
+  /* Legacy aliases (v1 names) */
+  --shadow-sm:var(--e1);   /* @kind shadow */
+  --shadow:var(--e2);      /* @kind shadow */
+  --shadow-lg:var(--e3);   /* @kind shadow */
+}
+/* Phones: shave a pixel so a full-width shadowed card still fits a 360px
+   viewport without a horizontal scrollbar. */
+@media (max-width:480px){
+  :root{--e1:2px 2px 0 var(--ink);--e2:4px 4px 0 var(--ink);--e3:6px 6px 0 var(--ink);--e1-offset:2px;--e2-offset:4px;--e3-offset:6px}
+}

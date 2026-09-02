@@ -1,0 +1,28 @@
+/* One press choreography for every button: hover lifts toward the shadow,
+   press slams into it and the shadow disappears. Touch devices skip the lift. */
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);min-height:var(--control-h);padding:0 var(--control-pad-x);font-family:var(--font-display);font-weight:900;font-size:var(--text-sm);text-transform:uppercase;letter-spacing:0.02em;line-height:1.2;text-align:center;text-decoration:none;cursor:pointer;border:var(--border);background:var(--accent);color:var(--accent-ink);box-shadow:var(--e2);transition:transform var(--dur-1) var(--ease),box-shadow var(--dur-1) var(--ease),background var(--dur-1) var(--ease)}
+button:hover,.btn:hover{transform:translate(var(--lift),var(--lift));box-shadow:var(--e3)}
+button:active,.btn:active{transform:translate(var(--press),var(--press));box-shadow:var(--e0)}
+button:disabled,.btn:disabled,.btn[aria-disabled="true"]{opacity:.45;cursor:not-allowed}
+button:disabled:hover,button:disabled:active,.btn:disabled:hover,.btn:disabled:active{transform:none;box-shadow:var(--e2)}
+/* Secondary — same geometry, paper fill, lower elevation. .cancel is the v1 name. */
+.btn-secondary,button.cancel,.btn-cancel{background:var(--paper);color:var(--ink);box-shadow:var(--e1)}
+.btn-secondary:disabled:hover,button.cancel:disabled:hover,.btn-cancel:disabled:hover{box-shadow:var(--e1)}
+/* Tertiary — no fill, no shadow. Text-level actions inside dense rows. */
+.btn-tertiary{background:none;color:var(--ink);border-color:transparent;box-shadow:var(--e0)}
+.btn-tertiary:hover{background:var(--accent);color:var(--accent-ink);border-color:var(--ink);box-shadow:var(--e1);transform:none}
+.btn-tertiary:active{transform:translate(1px,1px);box-shadow:var(--e0)}
+.btn-danger{background:var(--danger);color:var(--danger-ink)}
+.btn-icon{width:var(--control-h);min-height:var(--control-h);padding:0;font-family:var(--font-mono);font-weight:400;font-size:1.15rem;letter-spacing:0}
+.btn-sm{min-height:var(--control-h-sm);padding:0 var(--control-pad-x-sm);font-size:var(--text-xs)}
+.btn-sm.btn-icon{width:var(--control-h-sm)}
+.btn-lg{min-height:var(--control-h-lg);font-size:var(--text-body)}
+/* Phones give the primary CTA the full width. */
+.btn-block{width:100%}
+@media (max-width:600px){.btn-block-mobile{width:100%}}
+.btn[data-loading="true"],button[data-loading="true"]{pointer-events:none;opacity:.7}
+/* Button group: shared edge, no doubled border, one shadow for the whole run. */
+.btn-group{display:inline-flex;box-shadow:var(--e2)}
+.btn-group>button,.btn-group>.btn{box-shadow:none;border-right-width:0}
+.btn-group>:last-child{border-right-width:var(--bw)}
+.btn-group>button:hover,.btn-group>.btn:hover,.btn-group>button:active,.btn-group>.btn:active{transform:none;box-shadow:none;background:var(--accent);color:var(--accent-ink)}

@@ -1,0 +1,11 @@
+:root{
+  /* Zero border-radius. Ever. The only exception is the radio dot, which is a
+     circle because a radio is a circle — that lives in forms.css. */
+  --radius:0;
+  --bw:3px;              /* structural border: cards, controls, bars */
+  --bw-thin:2px;         /* inner divisions: table cells, chips, avatars, tabs */
+  --bw-heavy:4px;        /* page-level edges: app bars, hero, active swatch */
+  --border:var(--bw) solid var(--ink);
+  --border-thin:var(--bw-thin) solid var(--ink);
+  --border-heavy:var(--bw-heavy) solid var(--ink);
+}

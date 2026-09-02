@@ -1,0 +1,10 @@
+/* Phone + small-tablet primary navigation. Replaces the rail below 820px.
+   Never both at once. */
+.bottom-nav{display:none;position:sticky;bottom:0;z-index:var(--z-nav);background:var(--paper);border-top:var(--border-heavy);padding-bottom:var(--safe-b)}
+@media (max-width:820px){.bottom-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}}
+.bottom-nav-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:var(--bar-h);padding:var(--space-2) var(--space-1);background:none;color:var(--ink);border:0;border-right:var(--border-thin);box-shadow:none;font-family:var(--font-display);font-weight:900;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:var(--tracking-label);cursor:pointer;position:relative}
+.bottom-nav-item:last-child{border-right:0}
+.bottom-nav-item:hover,.bottom-nav-item:active{transform:none;box-shadow:none}
+.bottom-nav-item[aria-current="page"]{background:var(--accent);color:var(--accent-ink)}
+.bottom-nav-item:active{background:var(--sunken)}
+.bottom-nav-item[aria-current="page"]:active{background:var(--accent)}
