@@ -18,6 +18,31 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Web node: shell, navigation and onboarding on HARDBRUT/3 (M10-D, partial).**
+  `web/app/` gains the first screens built against the `SporeClient` contract:
+  the app shell (nav rail, bottom nav, app bar, one-pane/two-pane rules), the
+  three-step onboarding flow, an icon set, formatting helpers and a dev harness
+  (`web/app/index.html`) that loads the modules unbundled so a reload picks up an
+  edit. **Not yet wired into `build-standalone.mjs`** — the shipped standalone is
+  untouched and still runs the pre-M10 app, so nothing half-built reaches a user.
+  Verified in headless Chrome against the real wasm kernel, not a fake: the
+  identity is genuinely generated on the button press, and the seed shown in step
+  2 matches the persisted `spore.seed` byte-for-byte, with no console exceptions
+  through the whole flow. Two departures from the prototype, both because the
+  kernel cannot honestly back it: it shows the real 64-hex seed rather than a
+  seed *phrase* (there is no mnemonic wordlist in the crate, and invented words
+  would produce a backup that restores nothing), and its "Skip demo" control is
+  dropped as design-demo scaffolding — skipping the *bridge* step is real and
+  kept. Running it also caught two defects worth naming: on a phone a
+  one-pane screen rendered an entirely blank page, because the pattern hides
+  `.app-shell-main` while the pane is "list" and there was no sidebar to fall
+  back to (hiding the only pane can never be right, so main now stays visible
+  when no sidebar exists); and the rail had picked up an "S" monogram from
+  HARDBRUT/3's own guidance, which contradicts this repo's absolute rule that the
+  brand is the wordmark and nothing stands in for it, "not even a monogram".
+  `SporeClient` gains `exportSeed()` for the one screen allowed to show it.
+  Wire unchanged: no core or ABI change.
+
 - **Fixed: the web node could never read a file back.** `spore.mjs`'s
   `fileBytes`, `fileName` and `fetchFile` passed the 16-byte magnet
   `Uint8Array` straight to exports declared `magnet: *const u8`. JS coerces an

@@ -682,7 +682,7 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ⬜ not started | Same pattern as `spore_fill_random`; `SpillBackend` is the in-tree precedent |
 | M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
-| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | ⬜ not started | First consumer of the contract; see design-system note below |
+| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 
 **Scope: the web node is not the landing site.** Two different products live in
