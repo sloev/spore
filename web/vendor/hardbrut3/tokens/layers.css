@@ -1,0 +1,10 @@
+:root{
+  --z-base:0;        /* @kind other */
+  --z-raised:10;     /* @kind other */
+  --z-sticky:100; /* @kind other */    /* app bar, navbar, day dividers */
+  --z-nav:200; /* @kind other */       /* bottom nav */
+  --z-sheet:300;     /* @kind other */
+  --z-dialog:400;    /* @kind other */
+  --z-toast:500;     /* @kind other */
+  --z-skip:600;      /* @kind other */
+}

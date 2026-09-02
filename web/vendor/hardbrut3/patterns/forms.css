@@ -1,0 +1,41 @@
+.field{display:block;margin-bottom:var(--gap)}
+.field:last-child{margin-bottom:0}
+label,.label{display:block;font-family:var(--font-display);font-weight:900;font-size:var(--text-label);text-transform:uppercase;letter-spacing:var(--tracking-label);margin-bottom:var(--space-1)}
+.field-hint{font-size:var(--text-xs);color:var(--muted);margin-top:var(--space-1)}
+.field-error{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);font-weight:800;color:var(--danger-ink);background:var(--danger);border:var(--border-thin);padding:var(--space-1) var(--space-2);margin-top:var(--space-1)}
+input[type="text"],input[type="email"],input[type="password"],input[type="search"],input[type="url"],input[type="number"],input[type="tel"],input[type="date"],textarea,select{display:block;width:100%;min-height:var(--field-h);padding:var(--space-2) var(--space-3);font-family:var(--font);font-size:var(--text-input);line-height:var(--leading-snug);color:var(--ink);background:var(--paper);border:var(--border);box-shadow:var(--e1);transition:box-shadow var(--dur-1) var(--ease)}
+input::placeholder,textarea::placeholder{color:var(--muted)}
+input:hover,textarea:hover,select:hover{box-shadow:var(--e2)}
+input:focus,textarea:focus,select:focus{outline:none;box-shadow:var(--e2)}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline:var(--bw) solid var(--ink);outline-offset:3px}
+input:disabled,textarea:disabled,select:disabled{opacity:.5;cursor:not-allowed;background:var(--sunken);box-shadow:var(--e0)}
+input:read-only:not([type="checkbox"]):not([type="radio"]),textarea:read-only{background:var(--sunken);box-shadow:var(--e0)}
+[aria-invalid="true"]{background:color-mix(in srgb,var(--danger) 22%,var(--paper))}
+textarea{min-height:96px;resize:vertical}
+select{appearance:none;padding-right:var(--space-7);background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);background-position:calc(100% - 20px) center,calc(100% - 13px) center;background-size:7px 7px,7px 7px;background-repeat:no-repeat}
+/* Search: leading glyph is a real character, not an icon font. */
+.search{position:relative;display:block}
+.search>input{padding-left:var(--space-7)}
+.search::before{content:"\2315";position:absolute;left:var(--space-3);top:50%;transform:translateY(-50%) rotate(-45deg);font-size:1.1rem;line-height:1;color:var(--muted);pointer-events:none}
+.choice{display:flex;align-items:flex-start;gap:var(--space-3);min-height:var(--tap-min);padding:var(--space-2) 0;cursor:pointer}
+.choice>span{font-family:var(--font);font-weight:400;font-size:var(--text-body);text-transform:none;letter-spacing:0;margin:0}
+input[type="checkbox"],input[type="radio"]{appearance:none;flex:0 0 auto;width:24px;height:24px;margin:0;background:var(--paper);border:var(--border);box-shadow:var(--e1);cursor:pointer;position:relative;transition:background var(--dur-1) var(--ease)}
+input[type="radio"]{border-radius:50%}
+input[type="checkbox"]:checked,input[type="radio"]:checked{background:var(--accent)}
+input[type="checkbox"]:checked::after{content:"\2713";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--accent-ink);font-weight:900;font-size:15px;line-height:1}
+input[type="radio"]:checked::after{content:"";position:absolute;inset:4px;background:var(--accent-ink);border-radius:50%}
+input[type="checkbox"]:disabled,input[type="radio"]:disabled{opacity:.5;box-shadow:var(--e0)}
+/* Switch: a checkbox wide enough to slide. Knob is ink, track fills accent on. */
+input[type="checkbox"].switch{width:52px;height:28px;border-radius:0}
+input[type="checkbox"].switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;background:var(--ink);transition:transform var(--dur-2) var(--ease-out);border-radius:0}
+input[type="checkbox"].switch:checked::after{background:var(--accent-ink);transform:translateX(24px)}
+input[type="range"]{appearance:none;width:100%;height:24px;background:none;cursor:pointer}
+input[type="range"]::-webkit-slider-runnable-track{height:12px;background:var(--sunken);border:var(--border-thin)}
+input[type="range"]::-webkit-slider-thumb{appearance:none;width:20px;height:24px;margin-top:-8px;background:var(--accent);border:var(--border-thin);box-shadow:var(--e1)}
+input[type="range"]::-moz-range-track{height:12px;background:var(--sunken);border:var(--border-thin)}
+input[type="range"]::-moz-range-thumb{width:20px;height:24px;background:var(--accent);border:var(--border-thin);border-radius:0;box-shadow:var(--e1)}
+/* Native file inputs are unstyleable across platforms — use .dropzone, or a
+   Button wrapping a visually-hidden input. */
+.dropzone{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);width:100%;min-height:140px;padding:var(--pad);text-align:center;background:var(--paper);color:var(--ink);border:var(--bw) dashed var(--ink);box-shadow:var(--e0);cursor:pointer;transition:background var(--dur-1) var(--ease)}
+.dropzone:hover,.dropzone[data-over="true"]{background:var(--accent);color:var(--accent-ink);border-style:solid;box-shadow:var(--e2);transform:none}
+.dropzone>strong{font-family:var(--font-display);font-weight:900;text-transform:uppercase;font-size:var(--text-h4)}

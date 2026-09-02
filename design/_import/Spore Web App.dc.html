@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/palette.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/color-roles.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/typography.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/space.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/shape.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/elevation.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/motion.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/controls.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/tokens/layers.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/base/reset.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/base/typeset.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/base/markdown.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/base/a11y.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/layout.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/app-shell.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/app-bar.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/nav-rail.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/bottom-nav.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/navbar.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/buttons.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/forms.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/segmented.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/tabs.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/card.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/list.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/feedback.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/sheet.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/toast.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/chat.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/files.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/feed.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/settings.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/patterns/utilities.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/themes/dark.css">
+<link rel="stylesheet" href="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/styles.css">
+<script src="_ds/hardbrut-3-design-system-21e3b1d6-a976-4d43-8304-36ae85987dcf/_ds_bundle.js"></script>
+<style>html,body{margin:0;height:100%;overflow:hidden}.nav-rail-item span:last-child{font-size:10px;letter-spacing:0.02em}.feed .post-head{display:none}.post>.post-actions{display:none}
+@media (min-width:1181px){.app-shell:not(:has(.app-shell-side)){grid-template-columns:var(--rail-w) minmax(0,1fr)}.app-shell:not(:has(.app-shell-side)) .app-shell-main{grid-column:2}}
+@media (min-width:821px) and (max-width:1180px){.app-shell:not(:has(.app-shell-side)){grid-template-columns:minmax(0,1fr)}.app-shell:not(:has(.app-shell-side)) .app-shell-main{grid-column:1}}
+.app-shell{flex:1 1 auto !important;min-height:0 !important;height:auto !important}
+.app-shell-main,.app-shell-side{min-height:0 !important}
+.composer{border-top:0 !important}
+.settings-row-control{flex-wrap:wrap !important;flex-shrink:1 !important;justify-content:flex-end !important;max-width:60% !important}
+.settings-row{align-items:flex-start !important}
+.settings-row-control{padding-top:2px !important}
+.accent-swatches{display:flex !important;flex-wrap:wrap !important;justify-content:flex-end !important}
+.app-bar{min-height:60px !important;height:60px !important;box-sizing:border-box !important;padding-top:0 !important;padding-bottom:0 !important}
+.app-bar-title{justify-content:center !important}
+@media (max-width:820px){.app-bar:not(:has(.app-bar-back))::before{content:"";display:inline-block;width:30px;flex:none}}
+.app-bar-back{min-height:30px !important;height:30px !important;width:30px !important}
+
+@media (min-width:821px) and (max-width:1180px){.bottom-nav{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}}
+.bottom-nav-item span:nth-child(2){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.bottom-nav-item span:first-child{font-size:var(--icon-lg)}</style>
+</helmet>
+
+<sc-if value="{{isOnboarding}}" hint-placeholder-val="{{false}}">
+<div style="background:var(--bg);height:100dvh;overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:var(--section) var(--pad)">
+  <div style="max-width:480px;width:100%;display:flex;flex-direction:column;gap:var(--gap);margin-top:var(--space-8)">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <span style="display:inline-block;background:var(--accent);color:var(--ink);border:var(--border);box-shadow:var(--e2);padding:var(--space-1) var(--space-3);font-family:var(--font-display);text-transform:uppercase;letter-spacing:0.06em">SPORE</span>
+      <button type="button" class="text-xs mono text-uppercase" style="background:none;border:none;cursor:pointer;color:var(--muted)" onClick="{{skipOnboarding}}">Skip demo ›</button>
+    </div>
+    <div style="display:flex;gap:var(--space-2)">
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+        <div style="height:4px;flex:1;background:{{s.color}}"></div>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{step0}}" hint-placeholder-val="{{true}}">
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:var(--gap)">
+        <span class="text-uppercase text-sm mono">Step 1 of 3</span>
+        <h1 style="margin:0">This tab is your node</h1>
+        <p class="text-muted" style="margin:0">No account, no server. A 32-byte seed generated right here becomes your identity — a 16-digit address derived from it, nothing more.</p>
+        <div style="background:var(--sunken);border:var(--border);padding:var(--pad-tight);display:flex;flex-direction:column;gap:var(--space-1)">
+          <span class="text-xs mono text-uppercase text-muted">Your address</span>
+          <span class="mono" style="font-size:var(--text-h4)">{{addrFormatted}}</span>
+        </div>
+        <x-import component-from-global-scope="DesignSystem_21e3b1.Button" onClick="{{nextStep}}" hint-size="auto,48px">Generate identity</x-import>
+      </div></div>
+    </sc-if>
+
+    <sc-if value="{{step1}}" hint-placeholder-val="{{false}}">
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:var(--gap)">
+        <span class="text-uppercase text-sm mono">Step 2 of 3</span>
+        <h1 style="margin:0">Back up your seed</h1>
+        <p class="text-muted" style="margin:0">This is the only copy. Losing it loses the identity — there is no recovery, no support desk, no reset link.</p>
+        <div class="alert alert-danger"><p class="text-sm" style="margin-bottom:0">Write it down or store it in a password manager. This cannot be shown again after you continue.</p></div>
+        <div style="background:var(--sunken);border:var(--border);padding:var(--pad-tight)">
+          <span class="mono text-sm" style="word-break:break-all;line-height:1.8">{{seedWords}}</span>
+        </div>
+        <label style="display:flex;align-items:center;gap:var(--gap-tight)">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Checkbox" checked="{{seedConfirmed}}" onChange="{{toggleSeedConfirmed}}" aria-label="I have backed up my seed" hint-size="20px,20px"></x-import>
+          <span class="text-sm">I have backed this up somewhere safe.</span>
+        </label>
+        <x-import component-from-global-scope="DesignSystem_21e3b1.Button" onClick="{{nextStep}}" disabled="{{!seedConfirmed}}" hint-size="auto,48px">Continue</x-import>
+      </div></div>
+    </sc-if>
+
+    <sc-if value="{{step2}}" hint-placeholder-val="{{false}}">
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:var(--gap)">
+        <span class="text-uppercase text-sm mono">Step 3 of 3</span>
+        <h1 style="margin:0">Add your first bridge</h1>
+        <p class="text-muted" style="margin:0">Without a bridge this node can't reach anyone. A relay is the easiest start — add more, or different kinds, any time from Settings.</p>
+        <x-import component-from-global-scope="DesignSystem_21e3b1.Field" label="Relay URL" htmlFor="ob-relay" hint="wss:// address of a public or private relay" hint-size="100%,90px">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Input" id="ob-relay" value="{{ obRelayUrl }}" onChange="{{ setObRelayUrl }}" placeholder="wss://relay.spore.example" hint-size="100%,46px"></x-import>
+        </x-import>
+        <div style="display:flex;gap:var(--gap-tight)">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" onClick="{{skipOnboarding}}" hint-size="auto,48px">Do this later</x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Button" onClick="{{finishOnboarding}}" hint-size="auto,48px">Connect &amp; finish</x-import>
+        </div>
+      </div></div>
+    </sc-if>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{isApp}}" hint-placeholder-val="{{true}}">
+<div style="display:flex;flex-direction:column;height:100dvh">
+<x-import component-from-global-scope="DesignSystem_21e3b1.AppShell" pane="{{ pane }}" rail="{{ rail }}" sidebar="{{ sidebar }}" hint-size="100%,100%" style="display:block;flex:1 1 auto;min-height:0">
+  <x-import component-from-global-scope="DesignSystem_21e3b1.AppBar" title="{{ barTitle }}" subtitle="{{ barSubtitle }}" onBack="{{ goBack }}" leading="{{ barLeading }}" actions="{{ barActions }}" hint-size="100%,64px"></x-import>
+
+  <sc-if value="{{isChat}}" hint-placeholder-val="{{true}}">
+    <div class="pane-body scroll-y">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Chat" hint-size="100%,300px">
+        <x-import component-from-global-scope="DesignSystem_21e3b1.DateSeparator" hint-size="90px,26px">Today</x-import>
+        <sc-for list="{{ chatMessages }}" as="m" hint-placeholder-count="4">
+          <sc-if value="{{ m.isSystem }}" hint-placeholder-val="{{false}}">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.SystemMessage" hint-size="100%,32px">{{ m.body }}</x-import>
+          </sc-if>
+          <sc-if value="{{ m.isMessage }}" hint-placeholder-val="{{true}}">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.ChatMessage" dc-props="{{ m }}" hint-size="70%,64px"></x-import>
+          </sc-if>
+        </sc-for>
+      </x-import>
+    </div>
+    <div style="padding:var(--space-1) var(--pad);background:var(--paper);border-top:var(--border);flex:none;overflow-x:auto;white-space:nowrap">
+      <span class="badge {{ chatKeyBadge }} mono text-xs" style="display:inline-flex;align-items:center;gap:4px"><span style="width:12px;height:12px;display:inline-flex">{{ chatKeyIcon }}</span>{{ chatKeyLabel }}</span>
+    </div>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.ChatComposer" value="{{ chatDraft }}" onChange="{{ setChatDraft }}" onSend="{{ sendChat }}" draft="{{ hasChatDraft }}" hint-size="100%,110px"></x-import>
+  </sc-if>
+
+  <sc-if value="{{isBlogs}}" hint-placeholder-val="{{false}}">
+    <sc-if value="{{composingPost}}" hint-placeholder-val="{{false}}">
+      <div class="pane-body scroll-y" style="padding:var(--pad)">
+        <div style="max-width:720px;display:flex;flex-direction:column;gap:var(--gap)">
+          <div style="display:flex;gap:var(--gap-tight);flex-wrap:wrap">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.ButtonGroup" label="Formatting" hint-size="auto,40px">
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" size="sm" kind="secondary" onClick="{{ boldMark }}" hint-size="40px,40px">B</x-import>
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" size="sm" kind="secondary" onClick="{{ italicMark }}" hint-size="40px,40px">I</x-import>
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" size="sm" kind="secondary" onClick="{{ headingMark }}" hint-size="40px,40px">H</x-import>
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" size="sm" kind="secondary" onClick="{{ linkMark }}" hint-size="40px,40px">Link</x-import>
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" size="sm" kind="secondary" onClick="{{ listMark }}" hint-size="40px,40px">List</x-import>
+            </x-import>
+          </div>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Textarea" value="{{ postDraft }}" onChange="{{ setPostDraft }}" placeholder="Write in Markdown…" hint-size="100%,260px" style="min-height:260px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.FileDropzone" onFiles="{{ addPostAttachment }}" hint="Any file, attached to this post" hint-size="100%,120px"></x-import>
+          <sc-if value="{{ hasPostAttachments }}" hint-placeholder-val="{{false}}">
+            <div style="display:flex;gap:var(--gap-tight);flex-wrap:wrap">
+              <sc-for list="{{ postAttachmentChips }}" as="a" hint-placeholder-count="1">
+                <x-import component-from-global-scope="DesignSystem_21e3b1.Chip" icon="{{ xIcon }}" onClick="{{ a.onRemove }}" hint-size="auto,32px">{{ a.name }}</x-import>
+              </sc-for>
+            </div>
+          </sc-if>
+          <div style="display:flex;gap:var(--gap-tight)">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" onClick="{{ closeComposePost }}" hint-size="auto,48px">Cancel</x-import>
+            <x-import component-from-global-scope="DesignSystem_21e3b1.Button" onClick="{{ publishPost }}" disabled="{{ !hasPostDraft }}" hint-size="auto,48px">Publish</x-import>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{!composingPost}}" hint-placeholder-val="{{true}}">
+    <div class="pane-body scroll-y">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Feed" hint-size="100%,600px">
+        <sc-for list="{{ posts }}" as="p" hint-placeholder-count="2">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Post" dc-props="{{ p }}" hint-size="100%,280px"></x-import>
+        </sc-for>
+        <sc-if value="{{ feedEmpty }}" hint-placeholder-val="{{false}}">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.EmptyState" mark="○" title="{{ feedEmptyTitle }}" hint-size="100%,180px">{{ feedEmptyBody }}</x-import>
+        </sc-if>
+      </x-import>
+    </div>
+    </sc-if>
+  </sc-if>
+
+  <sc-if value="{{isSettings}}" hint-placeholder-val="{{false}}">
+    <div class="pane-body scroll-y" style="padding:var(--pad)">
+      <div class="settings" style="max-width:720px;margin-inline:0;padding:0;display:flex;flex-direction:column;gap:var(--section)">
+
+        <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsGroup" title="Bridges" hint-size="100%,320px">
+          <div style="padding:var(--space-3) var(--pad-tight);display:flex;align-items:center;justify-content:space-between;gap:var(--gap-tight);flex-wrap:wrap;border-bottom:var(--border-thin)">
+            <p class="text-muted text-sm" style="margin:0">{{ bridgesUpSummary }}</p>
+            <x-import component-from-global-scope="DesignSystem_21e3b1.Button" size="sm" onClick="{{ openAddBridge }}" icon="{{ addIcon }}" hint-size="auto,40px">Add bridge</x-import>
+          </div>
+          <sc-for list="{{ bridgeRows }}" as="b" hint-placeholder-count="4">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" nav="{{true}}" onClick="{{ b.onOpen }}" title="{{ b.title }}" description="{{ b.subtitle }}" control="{{ b.meta }}" hint-size="100%,64px"></x-import>
+          </sc-for>
+          <sc-for list="{{ deviceRows }}" as="d" hint-placeholder-count="2">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="{{ d.title }}" description="{{ d.subtitle }}" control="{{ d.meta }}" hint-size="100%,64px"></x-import>
+          </sc-for>
+          <p class="text-xs mono text-uppercase text-muted" style="margin:0;padding:var(--space-2) var(--pad-tight)">11 bridges (UDP, TCP, folder, HTTP bag, copyparty, SSB, AX.25, Tor, I2P, ICMP, Iroh) are daemon-only and never appear here.</p>
+        </x-import>
+
+        <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsGroup" title="Appearance" hint-size="100%,150px">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Accent" description="Six values, swaps instantly" control="{{ accentSwatchesEl }}" hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Theme" description="Follows system until you choose" control="{{ themeToggleEl }}" hint-size="100%,64px"></x-import>
+        </x-import>
+
+        <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsGroup" title="Data" hint-size="100%,150px">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Kept on this device" description="Seed and bridge list survive a reload." hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Keep history on this device" description="{{ persistHistoryDesc }}" control="{{ persistHistorySwitchEl }}" hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" danger="{{true}}" onClick="{{ openWipeDialog }}" title="Wipe this tab" description="Drops the seed and stops this node. Cannot be undone." hint-size="100%,64px"></x-import>
+        </x-import>
+
+        <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsGroup" title="Diagnostics" hint-size="100%,220px">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" nav="{{true}}" onClick="{{ manualAnnounce }}" title="Manual announce" description="{{ announceStatus }}" hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Native bridges" description="11 transports available on the desktop daemon only." hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" nav="{{true}}" onClick="{{ replayOnboarding }}" title="Replay onboarding" description="Demo — restart the first-run flow." hint-size="100%,64px"></x-import>
+        </x-import>
+
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isIdentity}}" hint-placeholder-val="{{false}}">
+    <div class="pane-body scroll-y" style="padding:var(--pad)">
+      <div style="width:100%;max-width:640px;display:flex;flex-direction:column;gap:var(--section)">
+        <sc-if value="{{!editIdentityId}}" hint-placeholder-val="{{true}}">
+        <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsGroup" title="Identities on this device" hint-size="100%,240px">
+          <sc-for list="{{ identityRows }}" as="idt" hint-placeholder-count="2">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="{{ idt.title }}" description="{{ idt.description }}" control="{{ idt.control }}" hint-size="100%,64px"></x-import>
+          </sc-for>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" nav="{{true}}" onClick="{{ addIdentity }}" title="Add identity" description="A fresh seed and address — switch anytime, no logging out." hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" nav="{{true}}" onClick="{{ openImportIdentity }}" title="Import identity" description="Paste a seed phrase to bring an identity from another device." hint-size="100%,64px"></x-import>
+        </x-import>
+        </sc-if>
+
+        <sc-if value="{{editIdentityId}}" hint-placeholder-val="{{false}}">
+        <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsGroup" title="{{ editTargetPetname }}" hint-size="100%,220px">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Address" description="{{ addrFormatted }}" control="{{ copyAddrButton }}" hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Petname" description="Sent with announce — not private" control="{{ petnameInput }}" hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" title="Avatar" description="Published as a magnet, alongside your petname" control="{{ avatarControlEl }}" hint-size="100%,64px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SettingsRow" nav="{{true}}" onClick="{{ openSeedDialog }}" title="Back up seed phrase" description="Shown once. There is no recovery without it." hint-size="100%,64px"></x-import>
+        </x-import>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isContacts}}" hint-placeholder-val="{{false}}">
+    <div class="pane-body scroll-y" style="padding:var(--pad)">
+      <div style="width:100%;display:flex;flex-direction:column;gap:var(--gap)">
+        <p class="text-muted text-sm" style="margin:0">{{ contactsIntro }}</p>
+        <div style="display:flex;gap:var(--gap-tight);flex-wrap:wrap">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.SearchInput" placeholder="Search" value="{{ contactsSearch }}" onChange="{{ setContactsSearch }}" hint-size="200px,46px"></x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" icon="{{ addIcon }}" onClick="{{ openAddContact }}" hint-size="auto,46px">Add</x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Chip" pressed="{{ contactsViewIsContacts }}" onClick="{{ showContactsView }}" hint-size="auto,32px">Contacts</x-import>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Chip" pressed="{{ contactsViewIsSeen }}" onClick="{{ showSeenView }}" hint-size="auto,32px">Seen announces</x-import>
+        </div>
+        <div class="list" style="display:flex;flex-direction:column;gap:var(--space-1)">
+          <sc-for list="{{ contactRows }}" as="c" hint-placeholder-count="4">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.ListRow" as="{{ c.asTag }}" onClick="{{ c.onOpen }}" avatar="{{ c.avatar }}" title="{{ c.title }}" subtitle="{{ c.subtitle }}" meta="{{ c.meta }}" hint-size="100%,64px"></x-import>
+          </sc-for>
+        </div>
+        <sc-if value="{{ contactsEmpty }}" hint-placeholder-val="{{false}}">
+          <x-import component-from-global-scope="DesignSystem_21e3b1.EmptyState" mark="?" title="Nothing found" hint-size="100%,160px">Try a different search, or add one by address, invite or QR.</x-import>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isFiles}}" hint-placeholder-val="{{false}}">
+    <div class="pane-body scroll-y" style="padding:var(--pad)">
+      <sc-if value="{{!contactFolderAddr}}" hint-placeholder-val="{{true}}">
+      <div style="width:100%;display:flex;flex-direction:column;gap:var(--section)">
+        <div style="display:flex;flex-direction:column;gap:var(--gap)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--gap-tight);flex-wrap:wrap">
+            <h2 style="margin:0">Your public folder</h2>
+            <div style="display:flex;gap:var(--gap-tight);align-items:center;position:relative">
+              <x-import component-from-global-scope="DesignSystem_21e3b1.SearchInput" placeholder="Search names or filenames" value="{{ folderSearchQuery }}" onChange="{{ setFolderSearchQuery }}" hint-size="220px,44px"></x-import>
+              <sc-if value="{{ hasFolderSuggestions }}" hint-placeholder-val="{{false}}">
+                <div style="position:absolute;top:48px;right:0;left:0;background:var(--paper);border:var(--border);box-shadow:var(--e2);z-index:50">
+                  <sc-for list="{{ folderSuggestions }}" as="sug" hint-placeholder-count="2">
+                    <x-import component-from-global-scope="DesignSystem_21e3b1.ListRow" as="button" title="{{ sug.title }}" subtitle="{{ sug.subtitle }}" onClick="{{ sug.onOpen }}" hint-size="100%,56px"></x-import>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" icon="{{ addIcon }}" onClick="{{ openShareFile }}" hint-size="auto,44px">Share a file</x-import>
+            </div>
+          </div>
+          <p class="text-muted text-sm" style="margin:0">Anyone with the magnet can fetch these from this node while this tab is open, torrent-style. Files received in chats, groups and blogs stay with those threads — find them there.</p>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Table" columns="{{ myFilesColumns }}" rows="{{ myFilesTableRows }}" hint-size="100%,160px"></x-import>
+        </div>
+      </div>
+      </sc-if>
+      <sc-if value="{{!!contactFolderAddr}}" hint-placeholder-val="{{false}}">
+      <div style="width:100%;display:flex;flex-direction:column;gap:var(--section)">
+        <div style="display:flex;flex-direction:column;gap:var(--gap)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--gap-tight);flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:var(--gap-tight)">
+              <span aria-hidden="true" style="width:24px;height:24px">{{ contactFolderIcon }}</span>
+              <h2 style="margin:0">{{ contactFolderName }}</h2>
+            </div>
+            <div style="display:flex;gap:var(--gap-tight);align-items:center;position:relative">
+              <x-import component-from-global-scope="DesignSystem_21e3b1.SearchInput" placeholder="Search names or filenames" value="{{ folderSearchQuery }}" onChange="{{ setFolderSearchQuery }}" hint-size="220px,44px"></x-import>
+              <sc-if value="{{ hasFolderSuggestions }}" hint-placeholder-val="{{false}}">
+                <div style="position:absolute;top:48px;right:0;left:0;background:var(--paper);border:var(--border);box-shadow:var(--e2);z-index:50">
+                  <sc-for list="{{ folderSuggestions }}" as="sug" hint-placeholder-count="2">
+                    <x-import component-from-global-scope="DesignSystem_21e3b1.ListRow" as="button" title="{{ sug.title }}" subtitle="{{ sug.subtitle }}" onClick="{{ sug.onOpen }}" hint-size="100%,56px"></x-import>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" onClick="{{ closeContactFolder }}" hint-size="auto,44px">Back to your folder</x-import>
+            </div>
+          </div>
+          <p class="text-muted text-sm" style="margin:0">Public folder for {{ contactFolderAddrFmt }}</p>
+          <p class="text-muted text-sm" style="margin:0">Files {{ contactFolderName }} is seeding right now, torrent-style. Fetching saves a copy to your DM with them.</p>
+          <x-import component-from-global-scope="DesignSystem_21e3b1.Table" columns="{{ contactFilesColumns }}" rows="{{ contactFilesTableRows }}" hint-size="100%,140px"></x-import>
+          <sc-if value="{{ contactFilesEmpty }}" hint-placeholder-val="{{false}}">
+            <x-import component-from-global-scope="DesignSystem_21e3b1.EmptyState" mark="○" title="Nothing shared" hint-size="100%,140px">{{ contactFolderName }} is not seeding anything right now.</x-import>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+</x-import>
+<x-import component-from-global-scope="DesignSystem_21e3b1.BottomNav" items="{{ dests }}" value="{{ navValue }}" onChange="{{ setScreen }}" hint-size="100%,64px"></x-import>
+{{ identityQuickMenu }}
+</div>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Dialog" open="{{ !!editContactAddr }}" onClose="{{ closeEditContact }}" title="Contact" hint-size="420px,320px">
+  <div style="display:flex;flex-direction:column;gap:var(--gap)">
+    <p class="text-sm text-muted" style="margin:0">Claims to be <strong>{{ editContactName }}</strong> — unauthenticated. Give this address a private label instead, seen only by you.</p>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Field" label="Your label" htmlFor="edit-name" hint-size="100%,90px">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Input" id="edit-name" value="{{ editNameDraft }}" onChange="{{ setEditNameDraft }}" placeholder="{{ editContactName }}" hint-size="100%,46px"></x-import>
+    </x-import>
+    <label style="display:flex;align-items:center;gap:var(--gap-tight)">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Switch" checked="{{ editContactFollowing }}" onChange="{{ toggleEditContactFollowing }}" aria-label="Follow this address's blog" hint-size="44px,24px"></x-import>
+      <span class="text-sm">Following — see their wall in Blogs.</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:var(--gap-tight)">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Switch" checked="{{ editContactBlocked }}" onChange="{{ toggleEditContactBlocked }}" aria-label="Block this address" hint-size="44px,24px"></x-import>
+      <span class="text-sm">Block — hide their messages and posts.</span>
+    </label>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" block="{{true}}" onClick="{{ openContactFolder }}" hint-size="100%,44px">View public folder</x-import>
+    <div style="display:flex;gap:var(--gap-tight)">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" block="{{true}}" onClick="{{ closeEditContact }}" hint-size="100%,48px">Cancel</x-import>
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Button" block="{{true}}" disabled="{{ editContactUnchanged }}" onClick="{{ saveEditContact }}" hint-size="100%,48px">Save</x-import>
+    </div>
+  </div>
+</x-import>
+
+<sc-if value="{{!!shareToastLink}}" hint-placeholder-val="{{false}}">
+  <div style="position:fixed;left:0;right:0;bottom:var(--space-4);display:flex;justify-content:center;z-index:1000;padding:0 var(--pad)">
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Toast" onDismiss="{{ dismissShareToast }}" tone="success" hint-size="360px,52px">Link copied: <span class="mono">{{ shareToastLink }}</span></x-import>
+  </div>
+</sc-if>
+
+<sc-if value="{{!!identityToastMsg}}" hint-placeholder-val="{{false}}">
+  <div style="position:fixed;left:0;right:0;bottom:var(--space-4);display:flex;justify-content:center;z-index:1000;padding:0 var(--pad)">
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Toast" tone="info" hint-size="360px,52px">{{ identityToastMsg }}</x-import>
+  </div>
+</sc-if>
+
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ addContactOpen }}" onClose="{{ closeAddContact }}" label="Add contact" hint-size="380px,460px">
+  <div style="display:flex;flex-direction:column;gap:var(--gap);padding:var(--pad)">
+    <p class="text-sm text-muted" style="margin:0">Paste an address or an invite string, or meet up in person — scan their code, or show yours. There is no directory to browse.</p>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Field" label="Address or invite" htmlFor="add-contact-value" hint-size="100%,90px">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Input" id="add-contact-value" value="{{ addContactValue }}" onChange="{{ setAddContactValue }}" placeholder="3F2A9C1088E4001B" hint-size="100%,46px"></x-import>
+    </x-import>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Button" block="{{true}}" onClick="{{ confirmAddContact }}" disabled="{{ !addContactValue }}" hint-size="100%,48px">Add</x-import>
+    <div style="height:1px;background:var(--ink);opacity:0.15"></div>
+    <p class="text-xs mono text-uppercase text-muted" style="margin:0">Or meet up in person</p>
+    <div style="background:var(--sunken);border:2px dashed var(--ink);height:160px;display:flex;align-items:center;justify-content:center">
+      <span class="text-xs mono text-uppercase text-muted">Your QR \u00b7 {{ addrFormatted }}</span>
+    </div>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" block="{{true}}" hint-size="100%,48px">Scan a code</x-import>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ avatarSheetOpen }}" onClose="{{ closeAvatarSheet }}" label="Change avatar" hint-size="380px,240px">
+  <div style="padding:var(--pad)">
+    <x-import component-from-global-scope="DesignSystem_21e3b1.FileDropzone" onFiles="{{ setMyAvatar }}" hint="Image, published by magnet with your petname" hint-size="100%,160px"></x-import>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ shareFileOpen }}" onClose="{{ closeShareFile }}" label="Share a file" hint-size="380px,260px">
+  <div style="padding:var(--pad)">
+    <x-import component-from-global-scope="DesignSystem_21e3b1.FileDropzone" onFiles="{{ addSharedFile }}" hint="Any file, published by magnet" hint-size="100%,160px"></x-import>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ importIdentityOpen }}" onClose="{{ closeImportIdentity }}" label="Import identity" hint-size="420px,260px">
+  <div style="padding:var(--pad);display:flex;flex-direction:column;gap:var(--gap)">
+    <p class="text-sm text-muted" style="margin:0">Paste the seed phrase or address of an identity from another device.</p>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Textarea" value="{{ importIdentityValue }}" onChange="{{ setImportIdentityValue }}" placeholder="ripple canyon violet mantle..." hint-size="100%,90px"></x-import>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Button" block="{{true}}" disabled="{{ !importIdentityValue }}" onClick="{{ confirmImportIdentity }}" hint-size="100%,48px">Import</x-import>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Dialog" open="{{ !!deleteIdentityId }}" onClose="{{ closeDeleteIdentity }}" title="Delete identity" hint-size="400px,220px">
+  <div style="display:flex;flex-direction:column;gap:var(--gap)">
+    <div class="alert alert-danger"><p class="text-sm" style="margin-bottom:0">This removes {{ deleteIdentityName }} and its seed from this device. There is no recovery without a backup.</p></div>
+    <div style="display:flex;gap:var(--gap-tight)">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" block="{{true}}" onClick="{{ closeDeleteIdentity }}" hint-size="100%,48px">Cancel</x-import>
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="danger" block="{{true}}" onClick="{{ confirmDeleteIdentity }}" hint-size="100%,48px">Delete</x-import>
+    </div>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Dialog" open="{{ !!exportIdentityId }}" onClose="{{ closeExportIdentity }}" title="{{ exportIdentityTitle }}" hint-size="480px,280px">
+  <div class="alert alert-danger"><p class="text-sm" style="margin-bottom:0">Anyone with this seed controls this identity completely.</p></div>
+  <div style="background:var(--sunken);border:var(--border);padding:var(--pad-tight);margin-top:var(--gap-tight)">
+    <span class="mono text-sm" style="word-break:break-all;line-height:1.8">{{ exportIdentitySeed }}</span>
+  </div>
+  <x-import component-from-global-scope="DesignSystem_21e3b1.Button" kind="secondary" block="{{true}}" onClick="{{ closeExportIdentity }}" hint-size="100%,44px" style="margin-top:var(--gap)">Done</x-import>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Dialog" open="{{ seedDialogOpen }}" onClose="{{ closeSeedDialog }}" title="Your seed phrase" actions="{{ seedDialogActions }}" hint-size="480px,320px">
+  <div class="alert alert-danger"><p class="text-sm" style="margin-bottom:0">Anyone with this seed controls your identity completely.</p></div>
+  <div style="background:var(--sunken);border:var(--border);padding:var(--pad-tight);margin-top:var(--gap-tight)">
+    <span class="mono text-sm" style="word-break:break-all;line-height:1.8">{{ seedWords }}</span>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Dialog" open="{{ wipeDialogOpen }}" onClose="{{ closeWipeDialog }}" title="Wipe this tab?" actions="{{ wipeDialogActions }}" hint-size="420px,180px">
+  <p class="text-sm" style="margin:0">This drops your seed and prekey ring from this device and stops the node. Anyone who only knows you here loses the ability to reach you until you restore from backup.</p>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ addBridgeOpen }}" onClose="{{ closeAddBridge }}" label="Add bridge" hint-size="420px,340px">
+  <div style="display:flex;flex-direction:column;gap:var(--gap);padding:var(--pad)">
+    <x-import component-from-global-scope="DesignSystem_21e3b1.SegmentedControl" value="{{ addBridgeKind }}" onChange="{{ setAddBridgeKind }}" options="{{ addBridgeKindOptions }}" hint-size="100%,44px"></x-import>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Field" label="{{ addBridgeFieldLabel }}" htmlFor="ab-value" hint="{{ addBridgeFieldHint }}" hint-size="100%,90px">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.Input" id="ab-value" value="{{ addBridgeValue }}" onChange="{{ setAddBridgeValue }}" placeholder="{{ addBridgeFieldPlaceholder }}" hint-size="100%,46px"></x-import>
+    </x-import>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Button" block="{{true}}" onClick="{{ confirmAddBridge }}" disabled="{{ !addBridgeValue }}" hint-size="100%,48px">Add bridge</x-import>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Dialog" open="{{ bridgeDiagOpen }}" onClose="{{ closeBridgeDiag }}" title="{{ diagTitle }}" actions="{{ diagActions }}" hint-size="440px,260px">
+  <div style="display:flex;flex-direction:column;gap:var(--space-2)">
+    <p class="text-sm" style="margin:0">{{ diagDescription }}</p>
+    <div class="grid">
+      <div class="col-6"><span class="text-xs mono text-uppercase text-muted">In</span><br><span class="mono" style="font-size:var(--text-h4)">{{ diagIn }}</span></div>
+      <div class="col-6"><span class="text-xs mono text-uppercase text-muted">Out</span><br><span class="mono" style="font-size:var(--text-h4)">{{ diagOut }}</span></div>
+    </div>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ membersSheetOpen }}" onClose="{{ closeMembers }}" label="Heard from" hint-size="380px,340px">
+  <div style="padding:var(--pad);display:flex;flex-direction:column;gap:var(--gap-tight)">
+    <p class="text-sm text-muted" style="margin:0">No membership list exists in the protocol. These are senders this node has heard from on this topic.</p>
+    <sc-for list="{{ heardFrom }}" as="h" hint-placeholder-count="3">
+      <x-import component-from-global-scope="DesignSystem_21e3b1.ListRow" avatar="{{ h.avatar }}" title="{{ h.petname }}" subtitle="{{ h.addr }}" meta="{{ h.since }}" hint-size="100%,64px"></x-import>
+    </sc-for>
+  </div>
+</x-import>
+
+<x-import component-from-global-scope="DesignSystem_21e3b1.Sheet" open="{{ inviteSheetOpen }}" onClose="{{ closeInvite }}" label="Invite to group" hint-size="380px,340px">
+  <div style="padding:var(--pad);display:flex;flex-direction:column;gap:var(--gap)">
+    <p class="text-sm text-muted" style="margin:0">Anyone with this armored string can join. It carries the topic name and the 32-byte key.</p>
+    <div style="background:var(--sunken);border:var(--border);padding:var(--pad-tight)">
+      <span class="mono text-xs" style="word-break:break-all">{{ inviteArmor }}</span>
+    </div>
+    <div style="background:var(--sunken);border:2px dashed var(--ink);height:160px;display:flex;align-items:center;justify-content:center">
+      <span class="text-xs mono text-uppercase text-muted">QR slot</span>
+    </div>
+    <x-import component-from-global-scope="DesignSystem_21e3b1.Button" block="{{true}}" onClick="{{ copyInvite }}" hint-size="100%,48px">Copy invite</x-import>
+  </div>
+</x-import>
+
+</sc-if>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;yellow&quot;,&quot;red&quot;,&quot;blue&quot;,&quot;green&quot;,&quot;pink&quot;,&quot;purple&quot;],&quot;default&quot;:&quot;red&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;onboarding&quot;,&quot;contacts&quot;,&quot;chat&quot;,&quot;blogs&quot;,&quot;files&quot;,&quot;settings&quot;],&quot;default&quot;:&quot;chat&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const KEYSTATE = {
+  sealed: { icon:'check', label:'SEALED', badge:'badge-success' },
+  ratchet: { icon:'refresh', label:'RATCHET', badge:'badge-info' },
+  cleartext: { icon:'ban', label:'CLEARTEXT', badge:'badge-quiet' }
+};
+const AVATAR_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="%23c9c4bb"/></svg>');
+const IMG_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="260" height="180"><rect width="260" height="180" fill="#c9c4bb"/></svg>');
+function formatAddr(hex){ return hex.match(/.{1,4}/g).join(' · ').toUpperCase(); }
+function ev(v){ return v && v.target ? v.target.value : v; }
+function truncate(s,n){ return s && s.length > n ? s.slice(0,n-1) + '\u2026' : (s || ''); }
+function fmt(date, clock, rel){ return date + ', ' + clock + ' (' + rel + ')'; }
+function tIcon(children){ return React.createElement('svg', { xmlns:'http://www.w3.org/2000/svg', width:'1em', height:'1em', viewBox:'0 0 24 24', fill:'none', stroke:'currentColor', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round', style:{display:'block'} }, children); }
+const ICONS = {
+  plus: tIcon([React.createElement('path',{key:1,d:'M12 5v14'}), React.createElement('path',{key:2,d:'M5 12h14'})]),
+  x: tIcon([React.createElement('path',{key:1,d:'M18 6 6 18'}), React.createElement('path',{key:2,d:'M6 6l12 12'})]),
+  dots: tIcon([React.createElement('circle',{key:1,cx:5,cy:12,r:1}), React.createElement('circle',{key:2,cx:12,cy:12,r:1}), React.createElement('circle',{key:3,cx:19,cy:12,r:1})]),
+  settings: tIcon([React.createElement('circle',{key:1,cx:12,cy:12,r:3}), React.createElement('path',{key:2,d:'M12 2v4M12 18v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M2 12h4M18 12h4M4.2 19.8l2.8-2.8M17 7l2.8-2.8'})]),
+  users: tIcon([React.createElement('circle',{key:1,cx:9,cy:7,r:3}), React.createElement('path',{key:2,d:'M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2'}), React.createElement('circle',{key:3,cx:17,cy:8,r:2.2}), React.createElement('path',{key:4,d:'M16 21v-1.4a3.8 3.8 0 0 0-2.2-3.4'})]),
+  messageCircle: tIcon([React.createElement('path',{key:1,d:'M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 1 1 17 0z'})]),
+  article: tIcon([React.createElement('rect',{key:1,x:4,y:4,width:16,height:16,rx:1}), React.createElement('path',{key:2,d:'M7 9h10M7 13h10M7 17h6'})]),
+  folder: tIcon([React.createElement('path',{key:1,d:'M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z'})]),
+  share2: tIcon([React.createElement('circle',{key:1,cx:18,cy:5,r:2}), React.createElement('circle',{key:2,cx:6,cy:12,r:2}), React.createElement('circle',{key:3,cx:18,cy:19,r:2}), React.createElement('path',{key:4,d:'M8.7 10.7l6.6-3.4M8.7 13.3l6.6 3.4'})]),
+  trash: tIcon([React.createElement('path',{key:1,d:'M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3'})]),
+  user: tIcon([React.createElement('circle',{key:1,cx:12,cy:8,r:3.2}), React.createElement('path',{key:2,d:'M5 20c0-3.9 3.1-6 7-6s7 2.1 7 6'})]),
+  check: tIcon([React.createElement('path',{key:1,d:'M5 12.5l4.5 4.5L19 7'})]),
+  refresh: tIcon([React.createElement('path',{key:1,d:'M4 12a8 8 0 0 1 13.7-5.7L20 8M4 12a8 8 0 0 0 13.7 5.7L20 16M20 8v-4M20 8h-4M20 16v4M20 16h-4'})]),
+  ban: tIcon([React.createElement('circle',{key:1,cx:12,cy:12,r:8}), React.createElement('path',{key:2,d:'M6.3 6.3l11.4 11.4'})]),
+  swap: tIcon([React.createElement('path',{key:1,d:'M4 9h13l-3-3M20 15H7l3 3'})]),
+  help: tIcon([React.createElement('circle',{key:1,cx:12,cy:12,r:9}), React.createElement('path',{key:2,d:'M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-1 .5-1 1.2-1 2.2'}), React.createElement('path',{key:3,d:'M12 17v.01'})])
+};
+function nowStamp(){
+  const d = new Date();
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  const clock = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  return fmt(d.getDate() + ' ' + mon, clock, 'just now');
+}
+
+class Component extends DCLogic {
+  state = {
+    started: (this.props.startScreen || 'chat') !== 'onboarding',
+    onboardStep: 0,
+    obRelayUrl: '', seedConfirmed: false,
+    screen: ['contacts','chat','blogs','files','settings'].includes(this.props.startScreen) ? this.props.startScreen : 'chat',
+    pane: 'list',
+
+    chatOpen: 'ada',
+    chatDraft: '',
+    conversations: [
+      { id:'ada', type:'dm', name:'Ada Lovelace', key:'sealed', lastMsg:'On it. Reviewing now.', lastTime:'09:44', activity:6 },
+      { id:'guild', type:'group', name:'Design Guild', key:'sealed', heard:4, lastMsg:'Audit attached \u2014 three contrast failures.', lastTime:'09:10', activity:5 },
+      { id:'town', type:'group', name:'Town Square', key:'cleartext', heard:23, public:true, lastMsg:'Anyone near the east ridge relay today?', lastTime:'11:02', activity:4 },
+      { id:'jo', type:'dm', name:'Jo Mercer', key:'cleartext', lastMsg:'Announcing now, one sec.', lastTime:'2d', activity:3 },
+      { id:'rae', type:'dm', name:'Rae Kim', key:'ratchet', lastMsg:'Got it, thanks.', lastTime:'14:05', activity:2 },
+      { id:'ops', type:'group', name:'Mesh Radio Ops', key:'sealed', heard:9, lastMsg:'Copy. Watching the hop count.', lastTime:'06:41', activity:1 }
+    ],
+    threads: {
+      ada: [
+        { isMessage:true, author:'Ada Lovelace', time:fmt('15 Mar','09:41','today'), run:'first', body:'**Shipped.** Dark mode is in \u2014 see `spec.md`.' },
+        { isMessage:true, self:true, avatar:null, time:fmt('15 Mar','09:44','today'), state:'read', body:'On it. Reviewing now.' }
+      ],
+      rae: [
+        { isMessage:true, author:'Rae Kim', time:fmt('14 Mar','14:02','yesterday'), run:'first', body:'Sending the audit file now.', attachments:{ name:'audit.pdf', size:'2.4 MB' } },
+        { isMessage:true, self:true, avatar:null, time:fmt('14 Mar','14:05','yesterday'), state:'sent', body:'Got it, thanks.' },
+        { isMessage:true, author:'Rae Kim', time:fmt('14 Mar','14:08','yesterday'), run:'first', body:'Grabbing the field recordings for you now.', attachments:{ kind:'downloading', name:'field-recordings.zip', size:'18.4 MB', progress:62 } },
+        { isMessage:true, author:'Rae Kim', time:fmt('14 Mar','14:11','yesterday'), run:'first', body:'Zoomed in on the joint hatching.', attachments:{ kind:'image', name:'skeleton-detail.png' } },
+        { isMessage:true, self:true, avatar:null, time:fmt('14 Mar','14:14','yesterday'), state:'sent', body:'Nice \u2014 posted the ship notes here: https://spore.mesh/notes/3.1', attachments:{ kind:'link', href:'https://spore.mesh/notes/3.1', title:'Ship notes \u2014 3.1', description:'Dark mode, six accent colors, zero component rewrites.', host:'spore.mesh' } }
+      ],
+      jo: [
+        { isMessage:true, author:'Jo Mercer', time:fmt('13 Mar','18:02','2 days ago'), body:'Haven\u2019t heard your prekey yet \u2014 sending in the clear until you announce.' },
+        { isMessage:true, self:true, avatar:null, time:fmt('13 Mar','18:04','2 days ago'), state:'queued', body:'Announcing now, one sec.' }
+      ],
+      guild: [
+        { isSystem:true, body:'Ada added Rae Kim' },
+        { isMessage:true, author:'Rae Kim', time:fmt('15 Mar','09:06','today'), run:'first', body:'Question about the skeletons \u2014 hatch or shimmer?' },
+        { isMessage:true, author:'Rae Kim', time:fmt('15 Mar','09:06','today'), run:'last', body:'Shimmer feels wrong for this brand.' },
+        { isMessage:true, self:true, avatar:null, time:fmt('15 Mar','09:08','today'), state:'read', body:'Hatch. Always hatch.' },
+        { isMessage:true, author:'Jo Mercer', time:fmt('15 Mar','09:10','today'), body:'Audit attached \u2014 three contrast failures, all in muted grey.' }
+      ],
+      ops: [
+        { isSystem:true, body:'Node heard 9 senders on this topic' },
+        { isMessage:true, author:'Unit 12', time:fmt('15 Mar','06:40','today'), run:'first', body:'LoRa link up on the east relay.' },
+        { isMessage:true, self:true, avatar:null, time:fmt('15 Mar','06:41','today'), state:'sent', body:'Copy. Watching the hop count.' }
+      ],
+      town: [
+        { isSystem:true, body:'Open topic \u2014 travels in the clear, anyone can relay it' },
+        { isMessage:true, author:'Unit 04', time:fmt('15 Mar','11:02','today'), run:'first', body:'Anyone near the east ridge relay today?' }
+      ]
+    },
+    heardFromByConvo: {
+      guild: [ {petname:'Ada Lovelace', addr:'3F2A9C1088E4001B', since:'first seen 12 Mar'}, {petname:'Rae Kim', addr:'9C10E4883F2A001B', since:'first seen 12 Mar'}, {petname:'Jo Mercer', addr:'88E4001B3F2A9C10', since:'first seen 14 Mar'}, {petname:'You', addr:null, since:'this node'} ],
+      ops: [ {petname:'Unit 12', addr:'A1B2C3D4E5F60718', since:'first seen 09:41 today'}, {petname:'Unit 04', addr:'0718A1B2C3D4E5F6', since:'first seen 08:02 today'} ],
+      town: [ {petname:'Unit 04', addr:'0718A1B2C3D4E5F6', since:'first seen 11:02 today'} ]
+    },
+    membersSheetOpen: false, inviteSheetOpen: false,
+
+    feedOpen: 'me',
+    feedDraft: '',
+    channels: [
+      { id:'me', name:'You', handle:'@you', description:'Your wall.', owner:'3F2A9C1088E4001B', isMine:true },
+      { id:'announcements', name:'Design Guild', handle:'@designguild', description:'Ship notes and outages.', owner:'9C1088E4001B3F2A', isMine:false },
+      { id:'relay', name:'Weather Relay', handle:'@weatherrelay', description:'Storm reports from field nodes.', owner:'A1B2C3D4E5F60718', isMine:false }
+    ],
+    postsByChannel: {
+      me: [],
+      announcements: [
+        { id:'p1', author:'Design Guild', handle:'@designguild', time:'2h', date:'12 Mar',
+          body:'## Ship notes \u2014 3.1\n- Dark mode landed; roles reassign, no component rules repeat\n- `--accent` swaps at runtime across all six values\n\n> Open wall \u2014 travels in the clear, anyone can relay it.',
+          reactions:[{emoji:'\u{1F525}',count:12,mine:true}], replyCount:2,
+          comments:[{author:'Rae Kim',time:'1h',body:'The hatched skeletons are great.'}] },
+        { id:'p2', author:'Design Guild', handle:'@designguild', time:'5h', date:'12 Mar', body:'Reminder: the interface uses no emoji \u2014 glyphs only.', reactions:[{emoji:'\u{1F44D}',count:6}], replyCount:0 }
+      ],
+      relay: [
+        { id:'p3', author:'Weather Relay', handle:'@weatherrelay', time:'40m', date:'14 Mar', body:'Squall line moving east, visibility dropping on the ridge relay.', replyCount:1,
+          comments:[{author:'Unit 12',time:'20m',body:'Copy, rerouting through the valley node.'}] }
+      ]
+    },
+
+    bridges: [
+      { id:'ws1', kind:'websocket', label:'relay.spore.example', up:true, error:null, in:'128 KB', out:'94 KB' },
+      { id:'webrtc1', kind:'webrtc', label:'Peer \u2014 Rae\u2019s laptop', up:true, error:null, in:'12 KB', out:'8 KB' },
+      { id:'nostr1', kind:'nostr', label:'nos.relay.example', up:false, error:'connection refused', in:'0 KB', out:'0 KB' },
+      { id:'wt1', kind:'webtorrent', label:'swarm:spore-mesh-01', up:true, error:null, in:'340 KB', out:'220 KB' }
+    ],
+    devices: [
+      { id:'serial1', kind:'webserial', label:'USB serial \u2014 LoRa module', granted:false },
+      { id:'bt1', kind:'webbluetooth', label:'Bluetooth \u2014 Meshtastic', granted:false }
+    ],
+    composingPost: false, postDraft: '', postAttachments: [],
+    feedSearch: '', feedHelpOpen: false, followSheetOpen: false, followValue: '',
+    addBridgeOpen: false, addBridgeKind: 'websocket', addBridgeValue: '',
+    bridgeDiagOpen: null,
+
+    expandedPosts: {},
+    contactsSearch: '', contactsView: 'contacts',
+    contacts2: [
+      { addr:'3F2A9C1088E4001B', claimedName:'Ada Lovelace', localName:null, avatarState:'ready', blocked:false },
+      { addr:'9C10E4883F2A001B', claimedName:'Rae Kim', localName:null, avatarState:'fetching', blocked:false },
+      { addr:'88E4001B3F2A9C10', claimedName:'Jo Mercer', localName:'Jo (work)', avatarState:'none', blocked:false },
+      { addr:'A1B2C3D4E5F60718', claimedName:'Unit 04', localName:null, avatarState:'none', blocked:false }
+    ],
+    seenContacts: [
+      { addr:'E5F60718A1B2C3D4', claimedName:'Rider-7', lastSeen:'11:02 today', ts:2 },
+      { addr:'0718A1B2C3D4E5F6', claimedName:'Unit 12', lastSeen:'09:41 today', ts:1 }
+    ],
+    editContactAddr: null, editNameDraft: '', editContactBlocked: false,
+    contactFolderAddr: null,
+    folderSearchQuery: '',
+    contactFiles: {
+      '3F2A9C1088E4001B': [{ id:'cf1', name:'roadmap.pdf', size:'1.1 MB', peers:2 }, { id:'cf2', name:'logo-pack.zip', size:'4.8 MB', peers:1 }],
+      '9C10E4883F2A001B': [{ id:'cf3', name:'notes.md', size:'12 KB', peers:1 }]
+    },
+    fetchedContactFiles: {},
+    addContactOpen: false, addContactValue: '', qrMeetupOpen: false,
+
+    myFiles: [
+      { id:'f1', name:'audit.pdf', size:'2.4 MB', peers:3 },
+      { id:'f2', name:'brand-spec.pdf', size:'2.4 MB', peers:1 }
+    ],
+    shareFileOpen: false,
+
+    myAvatar: null, avatarSheetOpen: false,
+    identities: [
+      { id:'id1', petname:'You', avatar:null, addr:'3F2A9C1088E4001B' },
+      { id:'id2', petname:'Work node', avatar:null, addr:'88E4001B3F2A9C10' }
+    ],
+    activeIdentityId: 'id1', identityMenuOpen: false, editIdentityId: null,
+    importIdentityOpen: false, importIdentityValue: '',
+    deleteIdentityId: null, exportIdentityId: null,
+    replyDrafts: {},
+    petname: 'You', seedDialogOpen: false, wipeDialogOpen: false, persistHistory: true,
+    announceStatus: 'Last announced 2 minutes ago.',
+    shareToastLink: null, identityToastMsg: null
+  };
+
+  ns(){ return window.DesignSystem_21e3b1 || {}; }
+  activeIdentity(){ return this.state.identities.find(i => i.id === this.state.activeIdentityId) || this.state.identities[0]; }
+  addr(){ return this.activeIdentity().addr; }
+
+  nextStep = () => this.setState(s => ({ onboardStep: s.onboardStep + 1 }));
+  toggleSeedConfirmed = () => this.setState(s => ({ seedConfirmed: !s.seedConfirmed }));
+  setObRelayUrl = (v) => this.setState({ obRelayUrl: ev(v) });
+  skipOnboarding = () => this.setState({ started: true });
+  finishOnboarding = () => this.setState({ started: true });
+  replayOnboarding = () => this.setState({ started: false, onboardStep: 0, seedConfirmed: false });
+
+  setScreen = (screen) => {
+    if (screen === 'identity') { this.setState(s => ({ identityMenuOpen: !s.identityMenuOpen })); return; }
+    // chat/blogs render a sidebar list + main detail; other screens render only in main,
+    // which mobile hides when pane is 'list' — so those need 'detail' to actually show.
+    const pane = (screen === 'chat' || screen === 'blogs') ? 'list' : 'detail';
+    this.setState({ screen, pane, contactFolderAddr: null, identityMenuOpen: false });
+  };
+  goBack = () => this.setState(s => (['bridges','chats','groups','feed'].includes(s.screen) ? { screen: s.screen === 'bridges' ? 'settings' : 'chat' } : { pane: 'list' }));
+  canGoBack = (screen) => ['bridges','chat','blogs'].includes(screen);
+  selectChat = (id) => this.setState({ chatOpen: id, pane: 'detail' });
+  selectFeed = (id) => this.setState({ feedOpen: id, pane: 'detail' });
+
+  setChatDraft = (v) => this.setState({ chatDraft: v });
+  sendChat = () => {
+    const { chatOpen, chatDraft, threads } = this.state;
+    if (!chatDraft.trim()) return;
+    const next = Object.assign({}, threads);
+    next[chatOpen] = (next[chatOpen] || []).concat([{ isMessage:true, self:true, avatar:null, time:nowStamp(), state:'sent', body:chatDraft }]);
+    this.setState({ threads: next, chatDraft: '' });
+  };
+  openMembers = () => this.setState({ membersSheetOpen: true });
+  closeMembers = () => this.setState({ membersSheetOpen: false });
+  openInvite = () => this.setState({ inviteSheetOpen: true });
+  closeInvite = () => this.setState({ inviteSheetOpen: false });
+  copyInvite = () => { navigator.clipboard && navigator.clipboard.writeText(this.inviteArmorFor(this.state.chatOpen)); this.closeInvite(); };
+  inviteArmorFor(id){ return '-----BEGIN SPORE GROUP-----\nspore1' + id + 'k3y9f2a0c1d8e4b7a3f2a9c1088e4001b\n-----END SPORE GROUP-----'; }
+
+  setFeedSearch = (v) => this.setState({ feedSearch: v });
+  toggleFeedHelp = () => this.setState(s => ({ feedHelpOpen: !s.feedHelpOpen }));
+  closeFeedHelp = () => this.setState({ feedHelpOpen: false });
+  openFollowSheet = () => this.setState({ followSheetOpen: true, followValue: '' });
+  closeFollowSheet = () => this.setState({ followSheetOpen: false });
+  setFollowValue = (v) => this.setState({ followValue: ev(v) });
+  confirmFollow = () => {
+    const { followValue, channels } = this.state;
+    if (!followValue.trim()) return;
+    const id = 'w' + Date.now();
+    this.setState({
+      channels: channels.concat([{ id, name: followValue.length > 16 ? formatAddr(followValue.slice(-16).toUpperCase()) : followValue, handle:'@'+followValue.toLowerCase().replace(/[^a-z0-9]/g,''), description:'Followed from an address or invite.', owner: (followValue.replace(/[^0-9a-fA-F]/g,'')+'0000000000000000').slice(0,16).toUpperCase(), isMine:false }]),
+      followSheetOpen: false, feedOpen: id, pane: 'detail'
+    });
+  };
+  openComposePost = () => this.setState({ composingPost: true, feedOpen: 'me', pane: 'detail', postDraft: '', postAttachments: [] });
+  closeComposePost = () => this.setState({ composingPost: false });
+  setPostDraft = (v) => this.setState({ postDraft: ev(v) });
+  insertMark = (before, after) => this.setState(s => ({ postDraft: s.postDraft + before + (after || '') }));
+  boldMark = () => this.insertMark('**bold**');
+  italicMark = () => this.insertMark('*italic*');
+  headingMark = () => this.insertMark('\n## Heading\n');
+  linkMark = () => this.insertMark('[label](https://)');
+  listMark = () => this.insertMark('\n- item\n');
+  addPostAttachment = (files) => { const f = files && files[0]; if (f) this.setState(s => ({ postAttachments: s.postAttachments.concat([f.name]) })); };
+  removePostAttachment = (name) => this.setState(s => ({ postAttachments: s.postAttachments.filter(n => n !== name) }));
+  publishPost = () => {
+    const { postDraft, postAttachments, postsByChannel } = this.state;
+    if (!postDraft.trim() && !postAttachments.length) return;
+    const next = Object.assign({}, postsByChannel);
+    const body = postDraft + (postAttachments.length ? '\n\n' + postAttachments.map(n => '\u2013 ' + n).join('\n') : '');
+    next.me = [{ id:'n'+Date.now(), author:'You', handle:'@you', time:'now', date:'Today', body, replyCount:0 }].concat(next.me || []);
+    this.setState({ postsByChannel: next, composingPost: false, postDraft:'', postAttachments:[] });
+  };
+  setFeedDraft = (v) => this.setState({ feedDraft: v });
+  sendFeed = () => {
+    const { feedOpen, feedDraft, postsByChannel } = this.state;
+    if (!feedDraft.trim()) return;
+    const next = Object.assign({}, postsByChannel);
+    next[feedOpen] = [{ id:'n'+Date.now(), author:'You', handle:'@you', time:'now', date:'Today', body:feedDraft, replyCount:0 }].concat(next[feedOpen] || []);
+    this.setState({ postsByChannel: next, feedDraft: '' });
+  };
+
+  openAddBridge = () => this.setState({ addBridgeOpen: true, addBridgeValue: '' });
+  closeAddBridge = () => this.setState({ addBridgeOpen: false });
+  setAddBridgeKind = (k) => this.setState({ addBridgeKind: k, addBridgeValue: '' });
+  setAddBridgeValue = (v) => this.setState({ addBridgeValue: ev(v) });
+  confirmAddBridge = () => {
+    const { addBridgeKind, addBridgeValue, bridges } = this.state;
+    if (!addBridgeValue.trim()) return;
+    this.setState({
+      bridges: bridges.concat([{ id:'b'+Date.now(), kind:addBridgeKind, label:addBridgeValue, up:true, error:null, in:'0 KB', out:'0 KB' }]),
+      addBridgeOpen: false
+    });
+  };
+  openBridgeDiag = (id) => this.setState({ bridgeDiagOpen: id });
+  closeBridgeDiag = () => this.setState({ bridgeDiagOpen: null });
+  removeBridge = (id) => this.setState(s => ({ bridges: s.bridges.filter(b => b.id !== id), bridgeDiagOpen: null }));
+  grantDevice = (id) => this.setState(s => ({ devices: s.devices.map(d => d.id === id ? Object.assign({}, d, { granted: true }) : d) }));
+  openBridgesScreen = () => this.setScreen('bridges');
+
+  setContactsSearch = (v) => this.setState({ contactsSearch: ev(v) });
+  showContactsView = () => this.setState({ contactsView: 'contacts' });
+  showSeenView = () => this.setState({ contactsView: 'seen' });
+  addSeenContact = (addr) => this.setState(s => {
+    const seen = s.seenContacts.find(x => x.addr === addr);
+    if (!seen) return null;
+    return {
+      contacts2: s.contacts2.concat([{ addr:seen.addr, claimedName:seen.claimedName, localName:null, avatarState:'none', blocked:false }]),
+      seenContacts: s.seenContacts.filter(x => x.addr !== addr)
+    };
+  });
+  openEditContact = (addr, current, blocked) => this.setState({ editContactAddr: addr, editNameDraft: current || '', editContactBlocked: !!blocked });
+  closeEditContact = () => this.setState({ editContactAddr: null });
+  openContactFolder = () => this.setState(s => ({ contactFolderAddr: s.editContactAddr, editContactAddr: null, screen: 'files', pane: 'detail' }));
+  openContactFolderForAddr = (addr) => this.setState({ contactFolderAddr: addr, screen: 'files', pane: 'detail' });
+  closeContactFolder = () => this.setState({ contactFolderAddr: null });
+  setFolderSearchQuery = (v) => this.setState({ folderSearchQuery: ev(v) });
+  selectFolderContact = (addr) => this.setState({ contactFolderAddr: addr, folderSearchQuery: '' });
+  fetchContactFile = (id) => this.setState(s => ({ fetchedContactFiles: Object.assign({}, s.fetchedContactFiles, { [id]: true }) }));
+  setEditNameDraft = (v) => this.setState({ editNameDraft: ev(v) });
+  toggleEditContactBlocked = () => this.setState(s => ({ editContactBlocked: !s.editContactBlocked }));
+  toggleFollowing = (addr, name) => this.setState(s => {
+    const following = s.channels.some(c => !c.isMine && c.owner === addr);
+    if (following) return { channels: s.channels.filter(c => c.isMine || c.owner !== addr) };
+    return { channels: s.channels.concat([{ id:'w'+addr, name, handle:'@'+name.toLowerCase().replace(/[^a-z0-9]/g,''), description:'', owner:addr, isMine:false }]) };
+  });
+  saveEditContact = () => this.setState(s => ({
+    contacts2: s.contacts2.map(c => c.addr === s.editContactAddr ? Object.assign({}, c, { localName: s.editNameDraft || null, blocked: s.editContactBlocked }) : c),
+    editContactAddr: null
+  }));
+  openAddContact = () => this.setState({ addContactOpen: true, addContactValue: '' });
+  closeAddContact = () => this.setState({ addContactOpen: false });
+  setAddContactValue = (v) => this.setState({ addContactValue: ev(v) });
+  confirmAddContact = () => {
+    const { addContactValue, contacts2 } = this.state;
+    if (!addContactValue.trim()) return;
+    const addr = (addContactValue.replace(/[^0-9a-fA-F]/g,'') + '0000000000000000').slice(0,16).toUpperCase();
+    this.setState({ contacts2: contacts2.concat([{ addr, claimedName: addContactValue, localName:null, avatarState:'none', blocked:false }]), addContactOpen: false });
+  };
+  openQrMeetup = () => this.setState({ qrMeetupOpen: true });
+  closeQrMeetup = () => this.setState({ qrMeetupOpen: false });
+
+  openShareFile = () => this.setState({ shareFileOpen: true });
+  closeShareFile = () => this.setState({ shareFileOpen: false });
+  addSharedFile = (files) => {
+    const f = files && files[0];
+    if (!f) return;
+    this.setState(s => ({ myFiles: s.myFiles.concat([{ id:'f'+Date.now(), name: f.name || 'file', size: '\u2014', state:'local' }]), shareFileOpen: false }));
+  };
+  deleteMyFile = (id) => this.setState(s => ({ myFiles: s.myFiles.filter(f => f.id !== id) }));
+
+  openAvatarSheet = () => this.setState({ avatarSheetOpen: true });
+  closeAvatarSheet = () => this.setState({ avatarSheetOpen: false });
+  editTargetId = () => this.state.editIdentityId || this.state.activeIdentityId;
+  openEditIdentity = (id) => this.setState({ editIdentityId: id });
+  closeEditIdentity = () => this.setState({ editIdentityId: null });
+  setMyAvatar = (files) => { const f = files && files[0]; if (!f) return; this.setState(s => ({ identities: s.identities.map(i => i.id === this.editTargetId() ? Object.assign({}, i, { avatar: f.name }) : i), avatarSheetOpen: false })); };
+  setPetname = (v) => this.setState(s => ({ identities: s.identities.map(i => i.id === this.editTargetId() ? Object.assign({}, i, { petname: ev(v) }) : i) }));
+  openIdentityScreen = () => this.setState({ screen: 'identity', pane: 'detail', identityMenuOpen: false, editIdentityId: null });
+  switchIdentity = (id) => this.setState({ activeIdentityId: id, identityMenuOpen: false });
+  toggleIdentityMenu = () => this.setState(s => ({ identityMenuOpen: !s.identityMenuOpen }));
+  closeIdentityMenu = () => this.setState({ identityMenuOpen: false });
+  addIdentityFromMenu = () => { this.addIdentity(); this.setState({ identityMenuOpen: false }); };
+  addIdentity = () => {
+    const id = 'id' + Date.now();
+    const addr = Array.from({length:16}, () => '0123456789ABCDEF'[Math.floor(Math.random()*16)]).join('');
+    this.setState(s => ({ identities: s.identities.concat([{ id, petname:'New identity', avatar:null, addr }]), activeIdentityId: id, screen:'identity', pane:'detail', editIdentityId: id }));
+  };
+  openImportIdentity = () => this.setState({ importIdentityOpen: true, importIdentityValue: '' });
+  closeImportIdentity = () => this.setState({ importIdentityOpen: false });
+  setImportIdentityValue = (v) => this.setState({ importIdentityValue: ev(v) });
+  confirmImportIdentity = () => {
+    const val = this.state.importIdentityValue.trim();
+    if (!val) return;
+    const id = 'id' + Date.now();
+    const addr = (val.replace(/[^0-9a-fA-F]/g,'') + '0000000000000000').slice(0,16).toUpperCase();
+    this.setState(s => ({ identities: s.identities.concat([{ id, petname:'Imported identity', avatar:null, addr }]), activeIdentityId: id, importIdentityOpen: false }));
+  };
+  openDeleteIdentity = (id) => this.setState({ deleteIdentityId: id });
+  closeDeleteIdentity = () => this.setState({ deleteIdentityId: null });
+  confirmDeleteIdentity = () => this.setState(s => {
+    const remaining = s.identities.filter(i => i.id !== s.deleteIdentityId);
+    if (remaining.length === 0) {
+      const id = 'id' + Date.now();
+      const fresh = { id, petname: 'New identity', avatar: null, addr: (Math.random().toString(16).slice(2,10).toUpperCase() + Math.random().toString(16).slice(2,10).toUpperCase()).slice(0,16) };
+      clearTimeout(this._identityToastTimer);
+      this._identityToastTimer = setTimeout(() => this.setState({ identityToastMsg: null }), 3000);
+      return { identities: [fresh], activeIdentityId: id, deleteIdentityId: null, editIdentityId: id, identityToastMsg: 'Last identity deleted — a new one was created automatically.' };
+    }
+    const activeIdentityId = s.deleteIdentityId === s.activeIdentityId ? remaining[0].id : s.activeIdentityId;
+    return { identities: remaining, activeIdentityId, deleteIdentityId: null };
+  });
+  openExportIdentity = (id) => this.setState({ exportIdentityId: id });
+  closeExportIdentity = () => this.setState({ exportIdentityId: null });
+  openSeedDialog = () => this.setState({ seedDialogOpen: true });
+  closeSeedDialog = () => this.setState({ seedDialogOpen: false });
+  openWipeDialog = () => this.setState({ wipeDialogOpen: true });
+  closeWipeDialog = () => this.setState({ wipeDialogOpen: false });
+  doWipe = () => this.setState({ wipeDialogOpen: false, started: false, onboardStep: 0, seedConfirmed: false });
+  togglePersistHistory = () => this.setState(s => ({ persistHistory: !s.persistHistory }));
+  toggleComments = (id) => this.setState(s => ({ expandedPosts: Object.assign({}, s.expandedPosts, { [id]: !s.expandedPosts[id] }) }));
+  manualAnnounce = () => this.setState({ announceStatus: 'Announced just now.' });
+  shareLink = (postId, ownerAddr) => {
+    const link = 'spore://post/' + ownerAddr + '/' + postId;
+    navigator.clipboard && navigator.clipboard.writeText(link);
+    this.setState({ shareToastLink: link });
+    clearTimeout(this._shareToastTimer);
+    this._shareToastTimer = setTimeout(() => this.setState({ shareToastLink: null }), 3000);
+  };
+  dismissShareToast = () => this.setState({ shareToastLink: null });
+  setReplyDraft = (postId, v) => this.setState(s => ({ replyDrafts: Object.assign({}, s.replyDrafts, { [postId]: ev(v) }) }));
+  sendReply = (postId) => {
+    const draft = (this.state.replyDrafts[postId] || '').trim();
+    if (!draft) return;
+    const next = Object.assign({}, this.state.postsByChannel);
+    const list = next[this.state.feedOpen] || [];
+    next[this.state.feedOpen] = list.map(p => p.id === postId ? Object.assign({}, p, { comments: (p.comments || []).concat([{ author: 'You', time: 'now', body: draft }]) }) : p);
+    this.setState({ postsByChannel: next, replyDrafts: Object.assign({}, this.state.replyDrafts, { [postId]: '' }) });
+  };
+  copyAddr = () => { const t = this.state.identities.find(i=>i.id===this.editTargetId()); navigator.clipboard && t && navigator.clipboard.writeText(t.addr); };
+
+  componentDidMount() {
+    document.documentElement.setAttribute('data-accent', this.props.accent || 'red');
+  }
+  componentDidUpdate() {
+    document.documentElement.setAttribute('data-accent', this.props.accent || 'red');
+  }
+
+  renderVals() {
+    const N = this.ns();
+    const e = React.createElement;
+    const s = this.state;
+
+    const VALID_SCREENS = ['contacts','chat','blogs','files','settings','bridges','identity'];
+    const screen = VALID_SCREENS.includes(s.screen) ? s.screen : 'chat';
+    const isOnboarding = !s.started;
+    const isApp = s.started;
+    const isContacts = screen === 'contacts';
+    const isChat = screen === 'chat';
+    const isBlogs = screen === 'blogs';
+    const isFiles = screen === 'files';
+    const isSettings = screen === 'settings';
+    const isIdentity = screen === 'identity';
+    const isBridges = screen === 'bridges';
+
+    const dests = [
+      { id:'contacts', label:'Contacts', icon:ICONS.users },
+      { id:'chat', label:'Chat', icon:ICONS.messageCircle },
+      { id:'blogs', label:'Blogs', icon:ICONS.article },
+      { id:'files', label:'Fileshare', icon:ICONS.folder },
+      { id:'identity', label:'Identity', icon:ICONS.user },
+      { id:'settings', label:'Settings', icon:ICONS.settings }
+    ];
+
+    const upCount = s.bridges.filter(b => b.up).length;
+    const statusText = upCount + ' bridge' + (upCount===1?'':'s') + ' up \u00b7 1 queued \u00b7 this tab is the node';
+
+    const navValue = screen === 'bridges' ? 'settings' : (s.identityMenuOpen ? 'identity' : screen);
+    const activeIdt = this.activeIdentity();
+    const identityQuickMenu = N.Sheet ? e(N.Sheet, { open: s.identityMenuOpen, onClose: this.closeIdentityMenu, label: 'Switch identity' },
+      e('h2', { style:{margin:'0 0 var(--gap)',fontSize:'var(--text-h4)'} }, 'Switch identity'),
+      e('div', { style:{display:'flex',flexDirection:'column',gap:'var(--space-1)'} },
+        s.identities.map(idt => e(N.ListRow ? N.ListRow : 'div', { key:idt.id, as:'button', selected:idt.id===s.activeIdentityId, onClick:()=>this.switchIdentity(idt.id),
+          title:idt.petname, subtitle:formatAddr(idt.addr), meta: idt.id===s.activeIdentityId && N.Badge ? e(N.Badge,{tone:'success'},'ACTIVE') : null }))
+      ),
+      e('div', { style:{display:'flex',gap:'var(--gap-tight)',marginTop:'var(--gap)'} },
+        N.Button ? e(N.Button, { onClick:this.openIdentityScreen, style:{flex:1} }, 'Manage') : null
+      )
+    ) : null;
+    const railFooter = e('div', {style:{width:'100%',display:'flex',flexDirection:'column',alignItems:'center',gap:'var(--space-2)'}},
+      N.ThemeToggle ? e(N.ThemeToggle,null) : null
+    );
+    const rail = N.NavRail ? e(N.NavRail, { brand:'H', value:navValue, onChange:this.setScreen, items:dests, footer:railFooter }) : null;
+
+    let sidebar = null, barTitle = '', barSubtitle = '', barLeading = null, barActions = null;
+    let chatMessages = [], chatKeyBadge='', chatKeyIcon=null, chatKeyLabel='', hasChatDraft = !!s.chatDraft, heardFrom = [], inviteArmor = '';
+    let feedName='', feedHandle='', feedDescription='', feedOwnerAddr='', feedIsMine=true, feedHeaderActions=null, posts=[], hasFeedDraft = !!s.feedDraft;
+    let bridgeRows = [], deviceRows = [];
+    let copyAddrButton=null, petnameInput=null, avatarControlEl=null, accentSwatchesEl=null, themeToggleEl=null, persistHistorySwitchEl=null;
+    let seedDialogActions=null, wipeDialogActions=null, diagTitle='', diagDescription='', diagIn='', diagOut='', diagActions=null;
+    let contactRows = [], editContactName = '', editContactUnchanged = true, editContactFollowing = false, contactsEmpty = false;
+    let contactFolderName = '', contactFolderTitle = 'Public folder', contactFolderAddrFmt = '', contactFolderIcon = ICONS.folder, contactFilesColumns = ['File','Size','Seeding',''], contactFilesTableRows = [], contactFilesEmpty = false, folderSuggestions = [];
+    let myFileRows = [];
+
+    if (isChat) {
+      const convo = s.conversations.find(c => c.id === s.chatOpen) || s.conversations[0];
+      sidebar = e('div', {style:{display:'flex',flexDirection:'column',height:'100%'}},
+        e('div', {className:'app-bar', style:{minHeight:'60px',height:'60px',boxSizing:'border-box'}}, e('span',{className:'app-bar-title'}, e('b',null,'Chat'))),
+        e('div', {className:'pane-body scroll-y', style:{padding:'var(--pad-tight)'}},
+          e('div', { className:'list', role:'list', 'aria-label':'Conversations' },
+            s.conversations.slice().sort((a,b)=>b.activity-a.activity).map(c => {
+              const isGroup = c.type === 'group';
+              const badgedAvatar = N.Avatar ? e('span', { style:{position:'relative',display:'inline-block',width:'40px',height:'40px',flex:'0 0 auto'} },
+                e(N.Avatar, { name:c.name, group:isGroup }),
+                e('span', { style:{position:'absolute',left:'-7px',bottom:'-7px',width:'16px',height:'16px',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--ink)',color:'var(--paper)',border:'2px solid var(--paper)',lineHeight:1,zIndex:1}, 'aria-label':isGroup?'Group':'Direct message' }, e('span',{style:{width:'10px',height:'10px'}}, isGroup ? ICONS.users : ICONS.user))
+              ) : null;
+              return N.ListRow ? e(N.ListRow, { key:c.id, as:'button', selected:c.id===s.chatOpen, onClick:()=>this.selectChat(c.id),
+                avatar:badgedAvatar, title:c.name, subtitle:truncate(c.lastMsg,40), meta:e('span',null,c.lastTime) }) : null;
+            })
+          )));
+      const isGroup = convo.type === 'group';
+      barTitle = convo.name;
+      if (isGroup) {
+        barActions = N.Button ? e(React.Fragment, null,
+          e(N.Button, { kind:'secondary', size:'sm', onClick:this.openMembers }, 'Members'),
+          !convo.public ? e(N.Button, { kind:'secondary', size:'sm', onClick:this.openInvite }, 'Invite') : null
+        ) : null;
+        chatKeyBadge = convo.public ? 'badge-quiet' : 'badge-success';
+        chatKeyIcon = convo.public ? ICONS.ban : ICONS.check;
+        chatKeyLabel = convo.public ? 'OPEN TOPIC \u2014 CLEARTEXT' : 'KEYED TOPIC \u2014 SEALED';
+      } else {
+        barActions = N.Button ? e(N.Button, { kind:'secondary', iconOnly:true, icon:ICONS.dots, 'aria-label':'More' }) : null;
+        const k = KEYSTATE[convo.key];
+        chatKeyBadge = k.badge; chatKeyIcon = ICONS[k.icon];
+        chatKeyLabel = k.label === 'CLEARTEXT' ? 'CLEARTEXT \u2014 NO PREKEY HEARD' : 'SEALED TO ' + convo.name.toUpperCase();
+      }
+      heardFrom = (s.heardFromByConvo[s.chatOpen] || []).map(h => ({
+        avatar: N.Avatar ? e(N.Avatar, { name: h.petname }) : null,
+        petname: h.petname, addr: h.addr ? formatAddr(h.addr) : null, since: h.since
+      }));
+      inviteArmor = this.inviteArmorFor(s.chatOpen);
+      chatMessages = (s.threads[s.chatOpen] || []).map(m => {
+        if (!m.attachments) return m;
+        const a = m.attachments;
+        if (a.kind === 'image') {
+          return Object.assign({}, m, { body:null, attachments: e('div', { style:{ display:'flex', flexDirection:'column', gap:'var(--space-2)' } },
+            e('img', { src:IMG_PLACEHOLDER, alt:a.name || '', style:{ width:'100%', maxWidth:'260px', display:'block', border:'var(--border-thin)' } }),
+            m.body ? e('span', { style:{ whiteSpace:'pre-wrap' } }, m.body) : null
+          ) });
+        }
+        if (a.kind === 'link') {
+          return Object.assign({}, m, { attachments: N.LinkPreview ? e(N.LinkPreview, { href:a.href, title:a.title, description:a.description, host:a.host }) : null });
+        }
+        return Object.assign({}, m, { attachments: N.FileAttachment ? e(N.FileAttachment, { name:a.name, size:a.size, state:a.kind==='downloading' ? 'uploading' : undefined, progress:a.progress }) : null });
+      });
+    }
+
+    if (isBlogs) {
+      const ch = s.channels.find(x => x.id === s.feedOpen) || s.channels[0];
+      { const mine = s.channels.find(x => x.isMine);
+        const q = s.feedSearch.trim().toLowerCase();
+        const others = s.channels.filter(x => !x.isMine && (!q || x.name.toLowerCase().includes(q) || formatAddr(x.owner).toLowerCase().includes(q)));
+      sidebar = e('div', {style:{display:'flex',flexDirection:'column',height:'100%'}},
+        e('div', {className:'app-bar', style:{minHeight:'60px',height:'60px',boxSizing:'border-box'}},
+          e('span',{className:'app-bar-title'}, e('b',null,'Blogs'))),
+        mine && N.ListRow ? e('div', {style:{padding:'var(--pad-tight)',borderBottom:'var(--border)'}},
+          e(N.ListRow, { as:'button', selected:s.feedOpen===mine.id && !s.composingPost, onClick:()=>this.selectFeed(mine.id),
+            avatar: N.Avatar ? e(N.Avatar,{name:mine.name}) : null,
+            title:'Your wall', subtitle:formatAddr(mine.owner),
+            meta: N.Button ? e(N.Button, { kind:'primary', size:'sm', icon:ICONS.plus, onClick:(ev2)=>{ev2.stopPropagation();this.openComposePost();} }, 'New post') : null,
+            style:{borderColor:'var(--accent)',boxShadow:'var(--e2)'} })) : null,
+        e('div', {style:{padding:'var(--space-2) var(--pad-tight) 0'}},
+          e('div', {style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'var(--space-1)'}},
+            e('span', {className:'text-xs mono text-uppercase text-muted'}, 'Following'),
+            e('span', {style:{position:'relative',display:'inline-flex'}},
+              N.Button ? e(N.Button, {kind:'tertiary', size:'sm', iconOnly:true, icon:ICONS.help, 'aria-label':'Help', onClick:this.toggleFeedHelp}) : null,
+              N.Popover ? e(N.Popover, {open:s.feedHelpOpen, onClose:this.closeFeedHelp, align:'right', label:'Following help'},
+                e('p', {className:'text-sm', style:{margin:0,maxWidth:'220px'}}, 'Go to Contacts to toggle who you\u2019re following \u2014 more blogs show up here as you add people.')
+              ) : null
+            )
+          )),
+        e('div', {className:'pane-body scroll-y', style:{padding:'var(--pad-tight)'}},
+          others.length ? (N.ConversationList ? e(N.ConversationList, { items:others.map(x=>({id:x.id,name:x.name,preview:formatAddr(x.owner),time:''})), value:s.feedOpen, onSelect:this.selectFeed }) : null)
+            : (N.EmptyState ? e(N.EmptyState, { mark:'?', title:'No contacts found' }, 'Add contacts from the Contacts screen to see their walls here.') : null))); }
+      feedName = ch.name; feedHandle = ch.handle; feedDescription = ch.description; feedOwnerAddr = formatAddr(ch.owner);
+      feedIsMine = !!ch.isMine;
+      feedHeaderActions = (!feedIsMine && N.Button) ? e(N.Button, { kind:'secondary', size:'sm' }, 'Mute') : null;
+      if (s.composingPost) {
+        barTitle = 'New post'; barSubtitle = 'Posting to your wall'; barLeading = null;
+        barActions = N.Button ? e(N.Button, { kind:'secondary', iconOnly:true, icon:ICONS.x, 'aria-label':'Cancel', onClick:this.closeComposePost }) : null;
+      } else {
+        barTitle = feedIsMine ? 'Your wall' : ch.name;
+        barActions = feedHeaderActions;
+      }
+      const raw = s.postsByChannel[s.feedOpen] || [];
+      posts = raw.map(p => {
+        const expanded = !!s.expandedPosts[p.id];
+        return Object.assign({}, p, {
+          body: '*' + (p.date ? p.date + ' \u00b7 ' : '') + p.time + (p.time === 'now' ? '*\n\n' : ' ago*\n\n') + p.body,
+          avatar: N.Avatar ? e(N.Avatar, { name:p.author, group:p.group }) : null,
+          reactions: p.reactions && N.ReactionBar ? e(N.ReactionBar, { reactions:p.reactions, onToggle:()=>{}, onAdd:()=>{} }) : null,
+          onReply: p.comments ? () => this.toggleComments(p.id) : null,
+          replyCount: p.comments ? p.comments.length : (p.replyCount || 0),
+          children: N.Button ? e('div', { style:{ display:'flex', gap:'var(--gap-tight)', marginTop:'var(--space-3)', paddingTop:'var(--space-3)', borderTop:'var(--border-thin)' } },
+            e(N.Button, { kind:'secondary', size:'sm', icon:ICONS.messageCircle, onClick: p.comments ? () => this.toggleComments(p.id) : undefined }, String((p.comments ? p.comments.length : (p.replyCount || 0)) || '')),
+            e(N.Button, { kind:'secondary', size:'sm', iconOnly:true, icon:ICONS.share2, 'aria-label':'Share', onClick: () => this.shareLink(p.id, ch.owner) })
+          ) : null,
+          comments: (expanded && p.comments && N.Comment) ? [
+            (N.Input && N.Button) ? e('div', { key:'composer', style:{ display:'flex', gap:'var(--gap-tight)', padding:'var(--pad-tight)', borderBottom:'var(--border-thin)' } },
+              e(N.Input, { value:s.replyDrafts[p.id] || '', onChange:v=>this.setReplyDraft(p.id, v), placeholder:'Write a reply\u2026', style:{flex:1} }),
+              e(N.Button, { size:'sm', onClick:()=>this.sendReply(p.id), disabled: !(s.replyDrafts[p.id] || '').trim() }, 'Send')
+            ) : null
+          ].concat(p.comments.map((c,i) => e(N.Comment, { key:i, author:c.author, time:c.time, body:c.body }))) : null
+        });
+      });
+    }
+
+    let identityRows = [];
+    const editTarget = s.identities.find(i => i.id === (s.editIdentityId || s.activeIdentityId)) || this.activeIdentity();
+    if (isSettings || isIdentity) {
+      identityRows = s.identities.map(idt => ({
+        title: N.Avatar ? e('span', { style:{display:'flex',alignItems:'center',gap:'var(--gap-tight)'} },
+          e(N.Avatar, { name: idt.avatar || idt.petname, size:'sm' }), idt.petname
+        ) : idt.petname,
+        description: formatAddr(idt.addr),
+        control: e('div', {style:{display:'flex',gap:'var(--gap-tight)',alignItems:'center'}},
+          idt.id === s.activeIdentityId ? (N.Badge ? e(N.Badge, { tone:'success' }, 'ACTIVE') : null) : null,
+          N.Button ? e(N.Button, { kind:'secondary', size:'sm', onClick:() => this.openEditIdentity(idt.id) }, 'Edit') : null,
+          N.Button ? e(N.Button, { kind:'secondary', size:'sm', onClick:() => this.openExportIdentity(idt.id) }, 'Export') : null,
+          N.Button ? e(N.Button, { kind:'danger', size:'sm', iconOnly:true, icon:ICONS.trash, 'aria-label':'Delete identity', onClick:() => this.openDeleteIdentity(idt.id) }) : null
+        )
+      }));
+    }
+    if (isSettings) {
+      bridgeRows = s.bridges.map(b => ({
+        title: b.label,
+        subtitle: b.kind.toUpperCase() + (b.error ? ' \u2014 ' + b.error : ''),
+        meta: N.Badge ? e(N.Badge, { tone: b.up ? 'success' : 'danger' }, b.up ? 'UP' : 'DOWN') : null,
+        onOpen: () => this.openBridgeDiag(b.id)
+      }));
+      deviceRows = s.devices.map(d => ({
+        title: d.label,
+        subtitle: d.granted ? 'Access granted' : 'Gesture required',
+        meta: N.Button ? e(N.Button, { kind:'secondary', size:'sm', disabled:d.granted, onClick:()=>this.grantDevice(d.id) }, d.granted ? 'Granted' : 'Grant access') : null
+      }));
+      if (s.bridgeDiagOpen) {
+        const b = s.bridges.find(x => x.id === s.bridgeDiagOpen);
+        if (b) {
+          diagTitle = b.label; diagDescription = b.kind.toUpperCase() + ' \u2014 ' + (b.up ? 'connected' : ('down: ' + b.error));
+          diagIn = b.in; diagOut = b.out;
+          diagActions = N.Button ? e(React.Fragment, null,
+            e(N.Button, { kind:'secondary', onClick:this.closeBridgeDiag }, 'Close'),
+            e(N.Button, { kind:'danger', onClick:() => this.removeBridge(b.id) }, 'Remove')
+          ) : null;
+        }
+      }
+    }
+
+    let contactsViewLabel = '';
+    if (isContacts) {
+      barTitle = 'Contacts';
+      const q = s.contactsSearch.trim().toLowerCase();
+      if (s.contactsView === 'contacts') {
+        contactsViewLabel = 'Seen announces';
+        const filtered = s.contacts2.filter(c => !q || (c.localName||c.claimedName).toLowerCase().includes(q) || formatAddr(c.addr).toLowerCase().includes(q));
+        contactsEmpty = filtered.length === 0;
+        contactRows = filtered.map(c => ({
+          asTag: 'button',
+          title: c.localName || c.claimedName,
+          subtitle: formatAddr(c.addr) + (c.blocked ? ' \u2014 blocked' : ''),
+          avatar: N.Avatar ? e(N.Avatar, { name: c.avatarState === 'ready' ? c.claimedName : '?', src: c.avatarState === 'ready' ? AVATAR_PLACEHOLDER : undefined }) : null,
+          meta: e('span', {style:{display:'flex',alignItems:'center',gap:'var(--gap-tight)'}},
+            c.blocked ? (N.Badge ? e(N.Badge, { tone:'danger' }, 'BLOCKED') : null)
+              : (c.localName ? e('span', { className:'mono text-xs', style:{color:'var(--success)',display:'inline-flex',alignItems:'center',gap:'4px'} }, e('span',{style:{width:12,height:12,display:'inline-flex'}},ICONS.check), 'Verified') : null),
+            N.Button ? e(N.Button, { kind: s.channels.some(ch=>!ch.isMine && ch.owner===c.addr) ? 'primary' : 'secondary', size:'sm', iconOnly:true, icon:ICONS.article, 'aria-label':'Toggle following', 'aria-pressed': String(s.channels.some(ch=>!ch.isMine && ch.owner===c.addr)), onClick:(ev2)=>{ev2.stopPropagation();this.toggleFollowing(c.addr, c.localName||c.claimedName);} }) : null
+          ),
+          onOpen: () => this.openEditContact(c.addr, c.localName, c.blocked)
+        }));
+      } else {
+        contactsViewLabel = 'Contacts';
+        const filtered = s.seenContacts.filter(c => !q || c.claimedName.toLowerCase().includes(q) || formatAddr(c.addr).toLowerCase().includes(q))
+          .slice().sort((a,b) => b.ts - a.ts);
+        contactsEmpty = filtered.length === 0;
+        contactRows = filtered.map(c => ({
+          asTag: 'div',
+          title: c.claimedName,
+          subtitle: formatAddr(c.addr) + ' \u00b7 seen ' + c.lastSeen,
+          avatar: null,
+          meta: N.Button ? e(N.Button, { kind:'secondary', size:'sm', onClick:(ev2)=>{ev2.stopPropagation();this.addSeenContact(c.addr);} }, 'Add') : null,
+          onOpen: () => this.openContactFolderForAddr(c.addr)
+        }));
+      }
+      if (s.editContactAddr) {
+        const c = s.contacts2.find(x => x.addr === s.editContactAddr);
+        editContactName = c ? c.claimedName : '';
+        editContactUnchanged = c ? ((s.editNameDraft || null) === (c.localName || null) && s.editContactBlocked === c.blocked) : true;
+        editContactFollowing = s.channels.some(ch => !ch.isMine && ch.owner === s.editContactAddr);
+      }
+    }
+    if (s.contactFolderAddr) {
+      const c = s.contacts2.find(x => x.addr === s.contactFolderAddr);
+      contactFolderName = c ? (c.localName || c.claimedName) : '';
+      contactFolderTitle = contactFolderName ? ('Public folder of ' + contactFolderName + ' (' + formatAddr(s.contactFolderAddr) + ')') : 'Public folder';
+      contactFolderAddrFmt = formatAddr(s.contactFolderAddr);
+      const files = s.contactFiles[s.contactFolderAddr] || [];
+      contactFilesEmpty = files.length === 0;
+      contactFilesTableRows = files.map(f => [f.name, f.size,
+        e('span', { className:'mono text-xs', style:{display:'inline-flex',alignItems:'center',gap:'4px'} }, e('span',{style:{width:12,height:12,display:'inline-flex'}},ICONS.swap), f.peers + ' peer' + (f.peers===1?'':'s')),
+        s.fetchedContactFiles[f.id]
+          ? e('span', { className:'mono text-xs', style:{color:'var(--success)',display:'inline-flex',alignItems:'center',gap:'4px'} }, e('span',{style:{width:12,height:12,display:'inline-flex'}},ICONS.check), 'Fetched')
+          : (N.Button ? e(N.Button, { kind:'secondary', size:'sm', onClick:() => this.fetchContactFile(f.id) }, 'Fetch') : null)
+      ]);
+    }
+    if (isFiles) {
+      const fq = s.folderSearchQuery.trim().toLowerCase();
+      if (fq) {
+        const contactMatches = s.contacts2.filter(c => c.addr !== s.contactFolderAddr && ((c.localName||c.claimedName).toLowerCase().includes(fq) || formatAddr(c.addr).toLowerCase().includes(fq))).map(c => ({
+          title: c.localName || c.claimedName, subtitle: formatAddr(c.addr), onOpen: () => this.selectFolderContact(c.addr)
+        }));
+        const fileMatches = [];
+        s.contacts2.forEach(c => {
+          if (c.addr === s.contactFolderAddr) return;
+          (s.contactFiles[c.addr] || []).forEach(f => {
+            if (f.name.toLowerCase().includes(fq)) fileMatches.push({
+              title: f.name, subtitle: 'in ' + (c.localName || c.claimedName) + '\u2019s folder', onOpen: () => this.selectFolderContact(c.addr)
+            });
+          });
+        });
+        folderSuggestions = contactMatches.concat(fileMatches).slice(0,6);
+      }
+    }
+
+    let myFilesColumns = ['File','Size','Seeding',''], myFilesTableRows = [];
+    if (isFiles) {
+      barTitle = 'Fileshare';
+      const delBtn = (onClick) => N.Button ? e(N.Button, { kind:'danger', size:'sm', iconOnly:true, icon:ICONS.trash, 'aria-label':'Delete', onClick }) : null;
+      myFilesTableRows = s.myFiles.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(f => [f.name, f.size,
+        e('span', { className:'mono text-xs', style:{display:'inline-flex',alignItems:'center',gap:'4px'} }, e('span',{style:{width:12,height:12,display:'inline-flex'}},ICONS.swap), f.peers + ' peer' + (f.peers===1?'':'s')),
+        delBtn(() => this.deleteMyFile(f.id))]);
+    }
+
+    if (isIdentity) {
+      barTitle = s.editIdentityId ? editTarget.petname : 'Identity';
+    }
+
+    if (isSettings || isIdentity) {
+      copyAddrButton = N.Button ? e(N.Button, { kind:'secondary', size:'sm', onClick:this.copyAddr }, 'Copy') : null;
+      petnameInput = N.Input ? e(N.Input, { value:editTarget.petname, onChange:this.setPetname, style:{maxWidth:'160px'} }) : null;
+      avatarControlEl = N.Avatar && N.Button ? e(React.Fragment, null,
+        e(N.Avatar, { name: editTarget.avatar || editTarget.petname }),
+        e(N.Button, { kind:'secondary', size:'sm', onClick:this.openAvatarSheet }, editTarget.avatar ? 'Change' : 'Add')
+      ) : null;
+      seedDialogActions = N.Button ? e(React.Fragment, null,
+        e(N.Button, { kind:'secondary', onClick:this.closeSeedDialog }, 'Close'),
+        e(N.Button, { onClick:this.closeSeedDialog }, 'I\u2019ve backed it up')
+      ) : null;
+    }
+
+    if (isSettings) {
+      barTitle = 'Settings';
+      accentSwatchesEl = N.AccentSwatches ? e(N.AccentSwatches, { onChange:a => document.documentElement.setAttribute('data-accent', a) }) : null;
+      themeToggleEl = N.ThemeToggle ? e(N.ThemeToggle, null) : null;
+      persistHistorySwitchEl = N.Switch ? e(N.Switch, { checked:s.persistHistory, onChange:this.togglePersistHistory, 'aria-label':'Keep history on this device' }) : null;
+      wipeDialogActions = N.Button ? e(React.Fragment, null,
+        e(N.Button, { kind:'secondary', onClick:this.closeWipeDialog }, 'Cancel'),
+        e(N.Button, { kind:'danger', onClick:this.doWipe }, 'Wipe')
+      ) : null;
+    }
+
+    const addBridgeKindOptions = [
+      { id:'websocket', label:'Relay' },
+      { id:'webrtc', label:'WebRTC' },
+      { id:'nostr', label:'Nostr' },
+      { id:'webtorrent', label:'Swarm' }
+    ];
+    const fieldMap = {
+      websocket: { label:'Relay URL', hint:'wss:// address', placeholder:'wss://relay.spore.example' },
+      webrtc: { label:'Handshake', hint:'Paste the offer or answer text', placeholder:'v=0 offer\u2026' },
+      nostr: { label:'Relay URL', hint:'wss:// address of a Nostr relay', placeholder:'wss://relay.nostr.example' },
+      webtorrent: { label:'Swarm name', hint:'Any shared string both sides use', placeholder:'spore-mesh-01' }
+    };
+    const fm = fieldMap[s.addBridgeKind];
+
+    const steps = [0,1,2].map(i => ({ color: i <= s.onboardStep ? 'var(--accent)' : 'var(--sunken)' }));
+
+    return {
+      isOnboarding, isApp, isContacts, isChat, isBlogs, isFiles, isSettings, isIdentity, isBridges, navValue,
+      contactRows, contactsEmpty, contactsViewLabel, toggleContactsView: this.toggleContactsView,
+      contactsViewIsContacts: s.contactsView === 'contacts', contactsViewIsSeen: s.contactsView === 'seen',
+      showContactsView: this.showContactsView, showSeenView: this.showSeenView,
+      contactsIntro: s.contactsView === 'contacts' ? 'Names and avatars are unauthenticated claims from announce. A checkmark means you\u2019ve labeled someone yourself.' : 'Nodes whose announce this tab has heard, most recent first \u2014 not yet added as contacts.', contactsView: s.contactsView, setContactsView: this.setContactsView, contactsViewOptions:['known','seen'].map(v=>({value:v,label:v==='known'?'Known':'Seen'})),
+      contactsSearch: s.contactsSearch, setContactsSearch: this.setContactsSearch,
+      editContactAddr: s.editContactAddr, editContactName, editNameDraft: s.editNameDraft, setEditNameDraft: this.setEditNameDraft,
+      editContactBlocked: s.editContactBlocked, toggleEditContactBlocked: this.toggleEditContactBlocked,
+      editContactFollowing, toggleEditContactFollowing: () => this.toggleFollowing(s.editContactAddr, editContactName),
+      editContactUnchanged,
+      closeEditContact: this.closeEditContact, saveEditContact: this.saveEditContact,
+      openContactFolder: this.openContactFolder, closeContactFolder: this.closeContactFolder,
+      contactFolderAddr: s.contactFolderAddr, contactFolderTitle, contactFolderName, contactFolderAddrFmt, contactFolderIcon, contactFilesColumns, contactFilesTableRows, contactFilesEmpty,
+      folderSearchQuery: s.folderSearchQuery, setFolderSearchQuery: this.setFolderSearchQuery, folderSuggestions, hasFolderSuggestions: folderSuggestions.length > 0,
+      addContactOpen: s.addContactOpen, openAddContact: this.openAddContact, closeAddContact: this.closeAddContact,
+      addContactValue: s.addContactValue, setAddContactValue: this.setAddContactValue, confirmAddContact: this.confirmAddContact,
+      qrMeetupOpen: s.qrMeetupOpen, openQrMeetup: this.openQrMeetup, closeQrMeetup: this.closeQrMeetup,
+      myFilesColumns, myFilesTableRows, shareFileOpen: s.shareFileOpen, openShareFile: this.openShareFile, closeShareFile: this.closeShareFile, addSharedFile: this.addSharedFile,
+      openBridgesScreen: this.openBridgesScreen,
+      bridgesUpSummary: s.bridges.filter(b=>b.up).length + ' of ' + s.bridges.length + ' up',
+      step0: s.onboardStep===0, step1: s.onboardStep===1, step2: s.onboardStep===2, steps,
+      addrFormatted: formatAddr(editTarget.addr), seedWords: 'ripple canyon violet mantle ember cactus glacier finch harbor lumen orbit quartz',
+      activePetname: this.activeIdentity().petname, identityRows,
+      identitySummary: formatAddr(this.addr()) + ' \u00b7 ' + s.identities.length + ' identit' + (s.identities.length===1?'y':'ies') + ' on this device',
+      openIdentityScreen: this.openIdentityScreen, addIdentity: this.addIdentity,
+      importIdentityOpen: s.importIdentityOpen, openImportIdentity: this.openImportIdentity, closeImportIdentity: this.closeImportIdentity,
+      importIdentityValue: s.importIdentityValue, setImportIdentityValue: this.setImportIdentityValue, confirmImportIdentity: this.confirmImportIdentity,
+      deleteIdentityId: s.deleteIdentityId, closeDeleteIdentity: this.closeDeleteIdentity, confirmDeleteIdentity: this.confirmDeleteIdentity,
+      deleteIdentityName: (s.identities.find(i=>i.id===s.deleteIdentityId)||{}).petname || '',
+      exportIdentityId: s.exportIdentityId, closeExportIdentity: this.closeExportIdentity,
+      exportIdentityTitle: 'Export ' + ((s.identities.find(i=>i.id===s.exportIdentityId)||{}).petname || ''),
+      exportIdentitySeed: 'ripple canyon violet mantle ember cactus glacier finch harbor lumen orbit quartz',
+      seedConfirmed: s.seedConfirmed, toggleSeedConfirmed: this.toggleSeedConfirmed,
+      obRelayUrl: s.obRelayUrl, setObRelayUrl: this.setObRelayUrl,
+      nextStep: this.nextStep, skipOnboarding: this.skipOnboarding, finishOnboarding: this.finishOnboarding,
+
+      screen: s.screen, setScreen: this.setScreen, pane: s.pane, goBack: s.editIdentityId ? this.closeEditIdentity : (this.canGoBack(s.screen) ? this.goBack : null),
+      dests, rail, sidebar, barTitle, barSubtitle, barLeading, barActions, statusText, identityQuickMenu,
+      editIdentityId: s.editIdentityId, closeEditIdentity: this.closeEditIdentity, editTargetPetname: editTarget.petname,
+
+      chatMessages, chatDraft: s.chatDraft, setChatDraft: this.setChatDraft, sendChat: this.sendChat, hasChatDraft,
+      chatKeyBadge, chatKeyIcon, chatKeyLabel,
+      heardFrom, membersSheetOpen: s.membersSheetOpen, closeMembers: this.closeMembers,
+      inviteSheetOpen: s.inviteSheetOpen, closeInvite: this.closeInvite, inviteArmor, copyInvite: this.copyInvite,
+
+      feedName, feedHandle, feedDescription, feedOwnerAddr, feedIsMine, feedHeaderActions, posts, feedDraft: s.feedDraft, setFeedDraft: this.setFeedDraft, sendFeed: this.sendFeed, hasFeedDraft,
+      composingPost: s.composingPost, openComposePost: this.openComposePost, closeComposePost: this.closeComposePost,
+      postDraft: s.postDraft, setPostDraft: this.setPostDraft, hasPostDraft: !!(s.postDraft.trim() || s.postAttachments.length),
+      boldMark: this.boldMark, italicMark: this.italicMark, headingMark: this.headingMark, linkMark: this.linkMark, listMark: this.listMark,
+      addPostAttachment: this.addPostAttachment, publishPost: this.publishPost,
+      hasPostAttachments: s.postAttachments.length > 0,
+      postAttachmentChips: s.postAttachments.map(n => ({ name:n, onRemove:() => this.removePostAttachment(n) })),
+      feedEmpty: posts.length === 0,
+      feedEmptyTitle: feedIsMine ? 'Nothing posted yet' : 'No posts yet',
+      feedEmptyBody: feedIsMine ? 'Say something. Markdown works.' : (feedName + ' hasn\u2019t posted here.'),
+      addIcon: ICONS.plus, xIcon: ICONS.x,
+      followSheetOpen: s.followSheetOpen, closeFollowSheet: this.closeFollowSheet, followValue: s.followValue, setFollowValue: this.setFollowValue, confirmFollow: this.confirmFollow,
+
+      bridgeRows, deviceRows, openAddBridge: this.openAddBridge,
+      addBridgeOpen: s.addBridgeOpen, closeAddBridge: this.closeAddBridge,
+      addBridgeKind: s.addBridgeKind, setAddBridgeKind: this.setAddBridgeKind, addBridgeKindOptions,
+      addBridgeFieldLabel: fm.label, addBridgeFieldHint: fm.hint, addBridgeFieldPlaceholder: fm.placeholder,
+      addBridgeValue: s.addBridgeValue, setAddBridgeValue: this.setAddBridgeValue, confirmAddBridge: this.confirmAddBridge,
+      bridgeDiagOpen: s.bridgeDiagOpen, closeBridgeDiag: this.closeBridgeDiag, diagTitle, diagDescription, diagIn, diagOut, diagActions,
+
+      copyAddrButton, petnameInput, avatarControlEl, avatarSheetOpen: s.avatarSheetOpen, openAvatarSheet: this.openAvatarSheet, closeAvatarSheet: this.closeAvatarSheet, setMyAvatar: this.setMyAvatar,
+      accentSwatchesEl, themeToggleEl, persistHistorySwitchEl,
+      persistHistoryDesc: s.persistHistory ? 'Kept in this browser (IndexedDB), off by default.' : 'Off. Messages, threads and transfers vanish when this tab closes.',
+      seedDialogOpen: s.seedDialogOpen, closeSeedDialog: this.closeSeedDialog, seedDialogActions,
+      openSeedDialog: this.openSeedDialog, openWipeDialog: this.openWipeDialog,
+      wipeDialogOpen: s.wipeDialogOpen, closeWipeDialog: this.closeWipeDialog, wipeDialogActions,
+      manualAnnounce: this.manualAnnounce, announceStatus: s.announceStatus, replayOnboarding: this.replayOnboarding,
+      shareToastLink: s.shareToastLink, dismissShareToast: this.dismissShareToast,
+      identityToastMsg: s.identityToastMsg
+    };
+  }
+}
+
+</script>
+</body>
+</html>

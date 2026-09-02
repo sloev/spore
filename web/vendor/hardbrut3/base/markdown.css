@@ -1,0 +1,43 @@
+/* Every element markdown can produce, styled once. Scoped to .md so app
+   chrome (bars, lists, composer) is never hit by prose rules. */
+.md{max-width:100%}
+.md>*+*{margin-top:var(--space-3)}
+.md>h1,.md>h2,.md>h3,.md>h4{margin-top:var(--space-5)}
+.md>*:first-child{margin-top:0}
+.md>*:last-child{margin-bottom:0}
+.md p{max-width:var(--measure)}
+.md del,.md s{text-decoration:line-through;text-decoration-thickness:2px}
+.md u,.md ins{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:2px}
+.md sub,.md sup{font-size:.75em;line-height:0;position:relative;vertical-align:baseline}
+.md sup{top:-.5em}.md sub{top:.25em}
+.md code,.md kbd,.md samp{font-family:var(--font-mono);font-size:.85em;padding:1px 5px;border:var(--border-thin);background:var(--paper);white-space:nowrap}
+.md pre{border:var(--border);box-shadow:var(--e2);padding:var(--pad);background:var(--paper);overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.md pre code{border:0;padding:0;background:none;white-space:pre;font-size:.88em}
+.md blockquote{border-left:6px solid var(--ink);padding:var(--space-3) var(--pad);background:var(--paper);font-style:italic}
+.md ul,.md ol{padding-left:1.4em}
+.md li+li{margin-top:var(--space-1)}
+.md li>ul,.md li>ol{margin-top:var(--space-1)}
+.md dt{font-weight:800}
+.md dd{margin-left:1.4em}
+.md hr{border:0;border-top:var(--border);margin:var(--space-5) 0}
+.md img{border:var(--border-thin);box-shadow:var(--e1);max-width:100%}
+.md figcaption{font-size:var(--text-sm);color:var(--muted);margin-top:var(--space-2)}
+.md a{text-decoration:underline}
+/* Tables scroll instead of breaking narrow layouts. */
+.md table,.table{width:100%;border-collapse:collapse;border:var(--border);box-shadow:var(--e2);display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.md th,.md td,.table th,.table td{border:var(--border-thin);padding:var(--space-2) var(--space-3);text-align:left}
+.md th,.table th{background:var(--ink);color:var(--paper);font-family:var(--font-display);font-weight:900;text-transform:uppercase;font-size:var(--text-label);letter-spacing:var(--tracking-label);white-space:nowrap}
+.md tr:nth-child(even) td,.table tr:nth-child(even) td{background:var(--paper)}
+.md tr:nth-child(odd) td,.table tr:nth-child(odd) td{background:var(--bg)}
+.md details,.details{border:var(--border);box-shadow:var(--e1);background:var(--paper);transition:box-shadow var(--dur-1) var(--ease)}
+.md details[open],.details[open]{box-shadow:var(--e2)}
+.md summary,.details>summary{
+  display:flex;align-items:center;gap:var(--space-2);min-height:var(--control-h);
+  padding:var(--space-2) var(--pad);cursor:pointer;list-style:none;user-select:none;
+  font-family:var(--font-display);font-weight:900;font-size:var(--text-sm);
+  text-transform:uppercase;letter-spacing:.02em;
+}
+.md summary::-webkit-details-marker,.details>summary::-webkit-details-marker{display:none}
+.md summary::before,.details>summary::before{content:"+";font-family:var(--font-mono);font-weight:400;font-size:1.1rem;width:1.2em;text-align:center}
+.md details[open]>summary::before,.details[open]>summary::before{content:"\2212"}
+.md details>:not(summary),.details>:not(summary){padding:0 var(--pad) var(--pad)}

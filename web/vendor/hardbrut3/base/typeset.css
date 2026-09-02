@@ -1,0 +1,24 @@
+h1,h2,h3,h4,h5,h6,.t-display,.t-h1,.t-h2,.t-h3,.t-h4,.t-label{
+  font-family:var(--font-display);font-weight:900;text-transform:uppercase;
+  line-height:var(--leading-tight);letter-spacing:var(--tracking-display);
+}
+h1,h2,h3,h4,h5,h6{margin:var(--space-6) 0 var(--space-3)}
+:where(h1,h2,h3,h4,h5,h6):first-child{margin-top:0}
+.t-display{font-size:var(--text-display)}
+h1,.t-h1{font-size:var(--text-h1)}
+h2,.t-h2{font-size:var(--text-h2)}
+h3,.t-h3{font-size:var(--text-h3)}
+h4,h5,h6,.t-h4{font-size:var(--text-h4);letter-spacing:0}
+.t-label{font-size:var(--text-label);letter-spacing:var(--tracking-label);line-height:var(--leading-snug)}
+p{margin-bottom:var(--space-3);max-width:var(--measure)}
+p:last-child{margin-bottom:0}
+strong,b{font-weight:800}
+em,i{font-style:italic}
+small,.t-sm{font-size:var(--text-sm)}
+.t-xs{font-size:var(--text-xs)}
+.t-mono{font-family:var(--font-mono);font-size:var(--text-mono)}
+.t-muted{color:var(--muted)}
+a{color:var(--ink);text-underline-offset:3px;text-decoration-thickness:2px}
+a:hover{background:var(--accent);color:var(--accent-ink)}
+::selection{background:var(--accent);color:var(--accent-ink)}
+mark{background:var(--accent);color:var(--accent-ink);padding:0 2px}

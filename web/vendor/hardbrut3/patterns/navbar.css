@@ -1,0 +1,10 @@
+/* Marketing / docs navbar. Product surfaces use .app-bar instead. */
+.navbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--gap-tight);padding:var(--space-3) var(--pad);padding-top:calc(var(--space-3) + var(--safe-t));background:var(--paper);border-bottom:var(--border-heavy);position:sticky;top:0;z-index:var(--z-sticky)}
+.navbar-brand{font-family:var(--font-display);font-weight:900;font-size:1.75rem;line-height:1.4;text-transform:uppercase;letter-spacing:-0.05em;text-decoration:none;padding:0 var(--space-2);border:var(--border);background:var(--accent);color:var(--accent-ink);box-shadow:var(--e2)}
+.navbar-brand:hover{background:var(--accent);text-decoration:underline;text-underline-offset:4px}
+.navbar-links{display:flex;gap:var(--space-1);margin:0;padding:0}
+.navbar-links a{display:inline-flex;align-items:center;min-height:var(--tap-min);padding:0 var(--space-3);text-decoration:none;font-family:var(--font-display);font-weight:900;font-size:var(--text-label);text-transform:uppercase;letter-spacing:var(--tracking-label);border:var(--bw-thin) solid transparent;color:var(--ink)}
+.navbar-links a:hover,.navbar-links a[aria-current]{background:var(--accent);color:var(--accent-ink);border-color:var(--ink);box-shadow:var(--e1)}
+.navbar-toggle{display:none;align-items:center;justify-content:center;min-height:var(--control-h);padding:0 var(--space-3);background:var(--paper);color:var(--ink);border:var(--border);box-shadow:var(--e1);font-family:var(--font-display);font-weight:900;font-size:var(--text-label);text-transform:uppercase;letter-spacing:var(--tracking-label);cursor:pointer}
+.navbar-toggle:hover{background:var(--accent);color:var(--accent-ink)}
+@media (max-width:820px){.navbar-toggle{display:inline-flex}.navbar-links{display:none;flex-direction:column;width:100%}.navbar-links.open{display:flex}.navbar-links a{border-color:var(--ink);background:var(--paper)}}

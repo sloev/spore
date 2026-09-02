@@ -1,0 +1,54 @@
+/* ============================================================================
+   HARDBRUT/3 — neubrutalist design system for desktop web, mobile web + Android.
+   Aesthetics inherited from supernihil/hardbrut; architecture rewritten so one
+   component set serves all three surfaces. Imports only — no rules in this file.
+   ========================================================================== */
+
+/* 1. Foundations */
+@import url("tokens/fonts.css");
+@import url("tokens/palette.css");
+@import url("tokens/color-roles.css");
+@import url("tokens/typography.css");
+@import url("tokens/space.css");
+@import url("tokens/shape.css");
+@import url("tokens/elevation.css");
+@import url("tokens/motion.css");
+@import url("tokens/controls.css");
+@import url("tokens/layers.css");
+
+/* 2. Base */
+@import url("base/reset.css");
+@import url("base/typeset.css");
+@import url("base/markdown.css");
+@import url("base/a11y.css");
+
+/* 3. Layout + navigation shells */
+@import url("patterns/layout.css");
+@import url("patterns/app-shell.css");
+@import url("patterns/app-bar.css");
+@import url("patterns/nav-rail.css");
+@import url("patterns/bottom-nav.css");
+@import url("patterns/navbar.css");
+
+/* 4. Controls */
+@import url("patterns/buttons.css");
+@import url("patterns/forms.css");
+@import url("patterns/segmented.css");
+@import url("patterns/tabs.css");
+
+/* 5. Surfaces + feedback */
+@import url("patterns/card.css");
+@import url("patterns/list.css");
+@import url("patterns/feedback.css");
+@import url("patterns/sheet.css");
+@import url("patterns/toast.css");
+
+/* 6. Product patterns */
+@import url("patterns/chat.css");
+@import url("patterns/files.css");
+@import url("patterns/feed.css");
+@import url("patterns/settings.css");
+
+/* 7. Utilities + themes (last: themes must win) */
+@import url("patterns/utilities.css");
+@import url("themes/dark.css");

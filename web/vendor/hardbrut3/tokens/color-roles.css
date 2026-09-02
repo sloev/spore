@@ -1,0 +1,40 @@
+/* Semantic roles. Components read ONLY these. Themes reassign them. */
+:root{
+  color-scheme:light;
+
+  /* structural */
+  --ink:var(--ink-900);            /* borders, text, hard shadows */
+  --paper:var(--paper-000);        /* raised surfaces: cards, bars, bubbles */
+  --bg:var(--sand-050);            /* page behind everything */
+  --muted:var(--grey-500);         /* secondary text */
+  --sunken:color-mix(in srgb, var(--ink) 6%, var(--bg));  /* wells, tracks */
+
+  /* accent (swappable, 6 shipped values) */
+  --accent:var(--yellow);
+  --accent-ink:#000;
+
+  /* status — the accent stays decorative, these carry meaning */
+  --danger:var(--red);
+  --danger-ink:#000;
+  --success:var(--green);
+  --success-ink:#000;
+  --info:var(--blue);
+  --info-ink:#000;
+
+  /* aliases used by content code */
+  --text-body:var(--ink);
+  --text-muted:var(--muted);
+  --surface-page:var(--bg);
+  --surface-card:var(--paper);
+  --surface-accent:var(--accent);
+  --text-on-accent:var(--accent-ink);
+  --scrim:rgba(0,0,0,.5);
+}
+
+/* The six accents. Set data-accent on <html>. */
+[data-accent="yellow"]{--accent:var(--yellow);--accent-ink:#000}
+[data-accent="red"]{--accent:var(--red);--accent-ink:#000}
+[data-accent="blue"]{--accent:var(--blue);--accent-ink:#000}
+[data-accent="green"]{--accent:var(--green);--accent-ink:#000}
+[data-accent="pink"]{--accent:var(--pink);--accent-ink:#000}
+[data-accent="purple"]{--accent:var(--purple);--accent-ink:#000}

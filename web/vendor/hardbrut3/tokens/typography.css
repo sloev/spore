@@ -1,0 +1,37 @@
+:root{
+  /* Display face is Inter 900 (the only webfont). Body and UI use the platform
+     sans so text renders natively on Android, macOS and Windows alike. */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Size ramp. Stepped rather than fluid so every value is inspectable and
+     1:1 portable to Android sp units. Phone values are set in the query below. */
+  --text-display:2.5rem;   /* 40 — hero / marketing only */
+  --text-h1:2rem;          /* 32 */
+  --text-h2:1.5rem;        /* 24 */
+  --text-h3:1.25rem;       /* 20 */
+  --text-h4:1.125rem;      /* 18 — card and bar titles */
+  --text-body:1.0625rem;   /* 17 — running text, message bodies */
+  --text-sm:0.9375rem;     /* 15 — subtitles, secondary rows */
+  --text-xs:0.8125rem;     /* 13 — metadata, timestamps, receipts */
+  --text-label:0.8125rem;  /* 13 — uppercase display labels */
+  --text-mono:0.8125rem;   /* 13 — code, badges, handles */
+
+  /* Form text never drops below 16px: iOS Safari auto-zooms under it. */
+  --text-input:1rem;
+
+  --leading-tight:1.1;     /* display + headings */
+  --leading-snug:1.35;     /* UI, inputs, list rows */
+  --leading-body:1.6;      /* running text and message bodies */
+  --tracking-display:-0.02em;
+  --tracking-label:0.06em;
+  --measure:65ch;
+  --measure-narrow:44ch;
+}
+@media (min-width:900px){
+  :root{--text-display:4rem;--text-h1:3rem;--text-h2:2.25rem;--text-h3:1.625rem}
+}
+@media (max-width:480px){
+  :root{--text-display:2.25rem;--text-h1:1.75rem;--text-body:1rem;--leading-body:1.55}
+}

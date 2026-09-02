@@ -366,29 +366,41 @@ class SporeNode {
   publishFile(name, data, dest, now_sec) {
     const np = this.s._put(new TextEncoder().encode(name));
     const dp = this.s._put(data);
-    const dst = dest || new Uint8Array(8);
+    // `dest` is `*const u8` in the ABI (wasm.rs reads 8 bytes from it), so it
+    // has to be copied into wasm memory like every other slice. Passing the
+    // Uint8Array itself coerced to 0, and the node then read whatever happened
+    // to sit at address 0 as the destination address.
+    const dstBytes = dest || new Uint8Array(8);
+    const dst = this.s._put(dstBytes);
     const packed = this.s._unpack(this.s.ex.spore_node_publish_file(this.ptr, np, name.length, dp, data.length, dst, now_sec || now()));
     this.s.ex.spore_free(np, name.length);
     this.s.ex.spore_free(dp, data.length);
+    this.s.ex.spore_free(dst, dstBytes.length);
     const magnet = packed.slice(0, 16);
     return magnet;
   }
 
   /** Fetch a file by magnet (16 bytes). Returns the forwards to dispatch. */
   fetchFile(magnet, now_sec) {
-    const packed = this.s._unpack(this.s.ex.spore_node_fetch_file(this.ptr, magnet, now_sec || now()));
+    const mp = this.s._put(magnet);
+    const packed = this.s._unpack(this.s.ex.spore_node_fetch_file(this.ptr, mp, now_sec || now()));
+    this.s.ex.spore_free(mp, magnet.length);
     return this.s._parse(packed);
   }
 
   /** Get file bytes for a magnet. null if not found. */
   fileBytes(magnet) {
-    const packed = this.s._unpack(this.s.ex.spore_node_file_bytes(this.ptr, magnet));
+    const mp = this.s._put(magnet);
+    const packed = this.s._unpack(this.s.ex.spore_node_file_bytes(this.ptr, mp));
+    this.s.ex.spore_free(mp, magnet.length);
     return packed.length ? packed : null;
   }
 
   /** Get filename for a magnet. null if not found. */
   fileName(magnet) {
-    const packed = this.s._unpack(this.s.ex.spore_node_file_name(this.ptr, magnet));
+    const mp = this.s._put(magnet);
+    const packed = this.s._unpack(this.s.ex.spore_node_file_name(this.ptr, mp));
+    this.s.ex.spore_free(mp, magnet.length);
     return packed.length ? new TextDecoder().decode(packed) : null;
   }
 

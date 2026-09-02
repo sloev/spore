@@ -1,0 +1,19 @@
+/* Dark mode reassigns roles only. No component rule is repeated here — that is
+   the whole point of the role layer. Paper stays above bg in both themes. */
+@media (prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --ink:var(--ink-100);
+    --paper:var(--paper-900);
+    --bg:var(--coal-950);
+    --muted:var(--grey-300);
+  }
+}
+/* Explicit overrides come last, so a data-theme always beats the media query. */
+[data-theme="dark"]{color-scheme:dark;--ink:var(--ink-100);--paper:var(--paper-900);--bg:var(--coal-950);--muted:var(--grey-300)}
+[data-theme="light"]{color-scheme:light;--ink:var(--ink-900);--paper:var(--paper-000);--bg:var(--sand-050);--muted:var(--grey-500)}
+/* One thing cannot be role-driven: a link hover paints the accent, so its text
+   colour must flip to accent-ink rather than follow --ink. */
+@media (prefers-color-scheme:dark){a:hover{color:var(--accent-ink)}}
+[data-theme="dark"] a:hover{color:var(--accent-ink)}
+[data-theme="light"] a:hover{color:var(--accent-ink)}

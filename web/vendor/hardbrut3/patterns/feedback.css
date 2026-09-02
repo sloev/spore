@@ -1,0 +1,40 @@
+/* Tone is carried by a fill, never by a coloured left border. */
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:22px;padding:1px var(--space-2);font-family:var(--font-mono);font-size:var(--text-xs);line-height:1.5;text-transform:uppercase;letter-spacing:0.04em;background:var(--accent);color:var(--accent-ink);border:var(--border-thin);box-shadow:var(--e1)}
+.badge-count{font-family:var(--font-display);font-weight:900;padding-inline:var(--space-1)}
+.badge-danger{background:var(--danger);color:var(--danger-ink)}
+.badge-success{background:var(--success);color:var(--success-ink)}
+.badge-info{background:var(--info);color:var(--info-ink)}
+.badge-quiet{background:var(--paper);color:var(--muted)}
+.message,.callout,.alert{display:flex;align-items:flex-start;gap:var(--gap-tight);padding:var(--pad-tight) var(--pad);font-weight:700;background:var(--accent);color:var(--accent-ink);border:var(--border);box-shadow:var(--e1)}
+.callout{box-shadow:var(--e2);padding:var(--pad)}
+.alert-danger,.message-danger{background:var(--danger);color:var(--danger-ink)}
+.alert-success,.message-success{background:var(--success);color:var(--success-ink)}
+.alert-info,.message-info{background:var(--info);color:var(--info-ink)}
+.alert-quiet,.message-quiet{background:var(--paper);color:var(--ink)}
+.alert-title{display:block;font-family:var(--font-display);font-weight:900;text-transform:uppercase;font-size:var(--text-label);letter-spacing:var(--tracking-label);margin-bottom:2px}
+.chip{display:inline-flex;align-items:center;gap:var(--space-1);min-height:32px;padding:0 var(--space-3);font-family:var(--font-mono);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;background:var(--paper);color:var(--ink);border:var(--border-thin);box-shadow:var(--e1);cursor:pointer;transition:transform var(--dur-1) var(--ease),box-shadow var(--dur-1) var(--ease)}
+.chip:hover{transform:translate(-1px,-1px);box-shadow:var(--e2)}
+.chip:active{transform:translate(1px,1px);box-shadow:var(--e0)}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.chip-static{cursor:default}
+.chip-static:hover{transform:none;box-shadow:var(--e1)}
+.progress{height:20px;padding:2px;background:var(--sunken);border:var(--border);box-shadow:var(--e1)}
+.progress-fill{height:100%;background-color:var(--accent);background-image:repeating-linear-gradient(90deg,var(--paper) 0,var(--paper) 3px,transparent 3px,transparent 14px);transition:width var(--dur-3) var(--ease-out)}
+.progress-sm{height:12px;padding:2px;box-shadow:var(--e0)}
+.spinner{display:inline-flex;gap:4px;vertical-align:middle}
+.spinner span{width:9px;height:9px;background:var(--ink);opacity:.25;animation:hb-blink 1s steps(1) infinite}
+.spinner span:nth-child(2){animation-delay:.15s}
+.spinner span:nth-child(3){animation-delay:.3s}
+.spinner span:nth-child(4){animation-delay:.45s}
+@keyframes hb-blink{0%,100%{opacity:.25}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.spinner span{animation:none;opacity:.55}}
+/* Skeleton: a hatched block, not a shimmer. Reads as structure-known,
+   content-unknown, and needs no gradient. */
+.skeleton{background-color:var(--sunken);background-image:repeating-linear-gradient(45deg,color-mix(in srgb,var(--ink) 12%,transparent) 0,color-mix(in srgb,var(--ink) 12%,transparent) 4px,transparent 4px,transparent 10px);border:var(--border-thin)}
+.skeleton-line{height:14px;margin-bottom:var(--space-2)}
+.skeleton-line:last-child{margin-bottom:0}
+.skeleton-block{height:72px}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--gap);min-height:220px;padding:var(--section) var(--pad);text-align:center}
+.empty-mark{display:flex;align-items:center;justify-content:center;width:72px;height:72px;background:var(--accent);color:var(--accent-ink);border:var(--border);box-shadow:var(--e2);font-family:var(--font-display);font-weight:900;font-size:2rem;line-height:1}
+.empty>h3{margin:0}
+.empty>p{max-width:var(--measure-narrow);color:var(--muted);margin:0}

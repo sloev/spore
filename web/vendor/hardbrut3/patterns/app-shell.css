@@ -1,0 +1,17 @@
+/* Desktop: rail + sidebar + main. Tablet: sidebar + main. Phone: one pane at a
+   time — data-pane on the shell says which one is showing. */
+.app-shell{display:grid;grid-template-columns:var(--rail-w) var(--sidebar-w) minmax(0,1fr);height:100dvh;background:var(--bg)}
+.app-shell-rail{grid-column:1;min-width:0}
+.app-shell-side{grid-column:2;min-width:0;display:flex;flex-direction:column;border-right:var(--border-heavy);background:var(--bg)}
+.app-shell-main{grid-column:3;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+@media (max-width:1180px){.app-shell{grid-template-columns:var(--sidebar-w) minmax(0,1fr)}.app-shell-rail{display:none}.app-shell-side{grid-column:1}.app-shell-main{grid-column:2}}
+@media (max-width:820px){
+  .app-shell{grid-template-columns:minmax(0,1fr)}
+  .app-shell-side,.app-shell-main{grid-column:1;grid-row:1}
+  .app-shell-side{border-right:0}
+  .app-shell[data-pane="list"] .app-shell-main{display:none}
+  .app-shell[data-pane="detail"] .app-shell-side{display:none}
+}
+.pane-head{flex:0 0 auto}
+.pane-body{flex:1 1 auto;min-height:0}
+.pane-foot{flex:0 0 auto}

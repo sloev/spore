@@ -1,0 +1,8 @@
+/* Segmented control: 2-4 mutually exclusive views of the SAME data (All /
+   Unread / Groups). Tabs switch panels; a segmented control filters one panel. */
+.segmented{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;width:100%;border:var(--border);box-shadow:var(--e1);background:var(--paper)}
+.segmented-item{min-height:var(--control-h-sm);padding:0 var(--space-3);background:none;color:var(--ink);border:0;border-right:var(--border-thin);box-shadow:none;font-family:var(--font-display);font-weight:900;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:var(--tracking-label);cursor:pointer}
+.segmented-item:last-child{border-right:0}
+.segmented-item:hover{background:var(--sunken);transform:none;box-shadow:none}
+.segmented-item:active{transform:none;box-shadow:none}
+.segmented-item[aria-selected="true"],.segmented-item[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}

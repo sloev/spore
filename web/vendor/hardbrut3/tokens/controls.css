@@ -1,0 +1,21 @@
+:root{
+  /* One height floor for every control so mixed rows always align. 48px is the
+     Android/Material minimum touch target and the WCAG 2.2 AA target size. */
+  --control-h:48px;
+  --control-h-sm:40px;      /* fine pointers only, secondary controls */
+  --control-h-lg:56px;      /* primary mobile CTA */
+  --control-pad-x:var(--space-5);
+  --control-pad-x-sm:var(--space-3);
+  --tap-min:48px;           /* never ship an interactive box smaller than this */
+  --field-h:48px;
+  --icon:20px;              /* glyph box inside a control */
+  --icon-lg:24px;
+  --bar-h:56px;             /* app bar / bottom nav */
+  --avatar:40px;
+  --avatar-sm:32px;
+  --avatar-lg:56px;
+}
+/* Coarse pointers get a little more room; nothing else changes. */
+@media (pointer:coarse){
+  :root{--control-h:52px;--control-h-sm:48px;--field-h:52px;--tap-min:48px;--bar-h:60px}
+}

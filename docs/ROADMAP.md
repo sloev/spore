@@ -617,6 +617,112 @@ the argument for doing the remaining audit rows rather than only the prose.
 
 ---
 
+## Milestone 10 — One application layer, three UI shims
+
+**Goal:** stop reimplementing the communicator (conversations, contacts, unread,
+delivery state) once per platform. Promote it into the Rust core so CLI, Android
+and web differ only in their UI shim, and rebuild the web node on HARDBRUT/3 as
+the first consumer of that contract.
+
+**The finding that motivates this** (verified against the tree, not assumed): the
+kernel owns **no application state at all**. `unread` has zero real occurrences in
+`src/`; `thread` is entirely `std::thread`; `petname` exists only as an ANNOUNCE
+protocol field (`src/node/ingest.rs`) and a CLI config key — there is no contact
+book, no conversation store and no message history anywhere in `src/`. Above that
+kernel sit **three independent host layers that have already diverged**:
+
+| Host layer | Lines | Exports | Holds state? |
+|---|---|---|---|
+| `src/wasm.rs` (web) | 645 | 34 | no |
+| `src/ffi.rs` (C ABI, frozen) | 491 | 20 | no |
+| `android/jni/src/lib.rs` | 1637 | 64 | **yes** — `Runtime{inbox, ifaces, demod, direct, stream_stop}` |
+
+`send_direct` / `open_dm` / `acked` / `node_new_seeded` / `group_invite_*` exist in
+WASM but not the C ABI; `armor_wrap` / `keypair` / `message_*` exist in the C ABI
+but not WASM; Android shares almost nothing with either. The communicator logic is
+then written a *third* and *fourth* time on top — ~6130 lines of Kotlin
+(`NodeController.kt` alone is 1389) and ~1300 lines of JS embedded in
+`build-standalone.mjs`'s template literal.
+
+`android/jni/src/lib.rs` is the proof this milestone is **consolidation, not
+invention**: 1637 lines of Rust already holding a stateful runtime over the
+kernel. It is simply Android-only and in the wrong directory.
+
+**Feasibility (verified).** The crate is already shaped for this: 64
+`cfg(not(target_arch = "wasm32"))` gates, wasm-bindgen-free plain WebAssembly, and
+`getrandom`'s `custom` backend already routed to a JS import (`spore_fill_random`)
+— the exact pattern a wasm storage port needs. `Store::set_spill_backend(Box<dyn
+SpillBackend>)` is existing precedent for a pluggable port.
+
+**Sequencing (locked): contract first, stores after.** The `SporeClient`
+command+event interface is defined *first* and is the UI's only contract. The web
+UI is built against it immediately, backed initially by thin JS stores; those
+stores then migrate into Rust one at a time **behind an unchanged interface**. The
+design ships without waiting on M10-A/B, and the Rust consolidation is not
+foreclosed. The deliberate cost is ~300 lines of throwaway JS store code.
+
+**Kernel gaps blocking the HARDBRUT/3 design:**
+
+| # | Gap | Blocks |
+|---|---|---|
+| G1 | No conversation / message history store | Chat, Blogs |
+| G2 | No contact/petname book (petname is an ANNOUNCE field only) | Contacts |
+| G3 | No unread/read state | chat-list badges, `.chat-unread` divider |
+| G4 | No drafts | composer `data-draft="true"` |
+| G5 | **No wasm storage port** — `FsSpill` is `cfg(not(wasm32))`, `SpillBackend` has no wasm impl | G1–G4; nothing can persist |
+| G6 | Three divergent ABIs | one app-level ABI needed |
+| G7 | Files are flat (`publish`/`fetch`/`list`); design wants per-contact folders + suggestions | Files |
+
+G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
+
+**Tasks** (each a PR):
+
+| Task | Status | Notes |
+|---|---|---|
+| M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ⬜ not started | Same pattern as `spore_fill_random`; `SpillBackend` is the in-tree precedent |
+| M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
+| M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
+| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | ⬜ not started | First consumer of the contract; see design-system note below |
+| M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
+
+**Scope: the web node is not the landing site.** Two different products live in
+this repo and M10 touches exactly one of them.
+
+| | Source | Output | Audience |
+|---|---|---|---|
+| **Web node** | `web/` | `web/spore-standalone.html`, one self-contained file, zero external requests | someone *running a node* |
+| **Landing site** | `site/` | GitHub Pages | someone *reading about* SPORE |
+
+They are separate builds with separate artefacts. The only coupling is that
+`site/build.mjs` imports `requireHardbrutCss` from `../web/hardbrut-import.mjs`
+(the vendoring helper, not the node) and renders `web/README.md` as
+`webguide.html`. **M10 rebuilds the web node only.** The Pages site keeps its
+current markup and its flat `hardbrut.css`, and no task in this milestone
+changes it. If the site is ever moved onto HARDBRUT/3 that is its own milestone
+with its own definition of done — a docs site and a mesh client have almost no
+components in common, and conflating them is how the design language forked the
+first time (see M6/M7).
+
+**Design system.** M10-D consumes **HARDBRUT/3**, a three-layer rebuild
+(primitive tokens → semantic roles → patterns) of `supernihil/hardbrut`, vendored
+at `web/vendor/hardbrut3/` — 36 CSS files (63.5 KB) plus `inter-900-latin.woff2`
+(23,900 bytes, verified byte-identical to upstream). This supersedes the flat
+`web/vendor/hardbrut/hardbrut.css` **for the web app only**; the Pages site and
+Android still consume the flat vendored copy, so the hard rule naming
+`web/vendor/hardbrut/hardbrut.css` needs amending when M10-D lands, not before.
+Two open questions inherited from the design system, both flagged upstream as
+unresolved: it substitutes **Unicode glyphs in the mono face** for a real icon set,
+and it renders the brand as **type** — the latter already agrees with this repo's
+"no icon, no mascot" hard rule.
+
+**Definition of done:** one Rust implementation of conversations, contacts,
+unread and delivery state, consumed by web, Android and CLI through a single
+app-level ABI; `NodeController.kt` and the JS app blob reduced to UI shims; the
+standalone still makes zero external requests (Inter 900 inlined base64, not
+fetched); no screen renders a control whose backend is missing.
+
+---
+
 ## Explicitly out of scope / non-goals (locked)
 
 | Item | Decision |
