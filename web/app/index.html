@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en" data-accent="red">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SPORE — web node (dev)</title>
+
+<!--
+  Development harness for the M10-D web node.
+
+  This is NOT the shipped artefact. The real one is web/spore-standalone.html,
+  built by build-standalone.mjs, which inlines the wasm and every stylesheet so
+  it makes zero external requests. This page loads them as separate files so a
+  reload picks up an edit without a rebuild; it therefore needs a static server
+  and the wasm built:
+
+      cargo build --release --lib --target wasm32-unknown-unknown
+      python3 -m http.server -d . 8000
+      # open http://localhost:8000/web/app/
+
+  Import order matters and mirrors hardbrut3/styles.css exactly: tokens, then
+  base, then patterns, then the theme last so it can win.
+-->
+
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/fonts.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/palette.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/color-roles.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/typography.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/space.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/shape.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/elevation.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/motion.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/controls.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/tokens/layers.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/base/reset.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/base/typeset.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/base/markdown.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/base/a11y.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/layout.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/app-shell.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/app-bar.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/nav-rail.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/bottom-nav.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/navbar.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/buttons.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/forms.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/segmented.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/tabs.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/card.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/list.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/feedback.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/sheet.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/toast.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/chat.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/files.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/feed.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/settings.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/patterns/utilities.css">
+<link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="../vendor/hardbrut3/themes/dark.css">
+</head>
+<body>
+<a class="skip-link" href="#app">Skip to content</a>
+<div id="app"></div>
+<script type="module" src="./main.mjs"></script>
+</body>
+</html>

@@ -146,6 +146,24 @@ export class SporeClient {
     return this.identity;
   }
 
+  /**
+   * The 32-byte identity seed as 64 hex characters, for the one screen allowed
+   * to show it (onboarding backup, and the settings row that repeats it).
+   *
+   * Secret material: this is the whole identity. Anyone who reads it *is* this
+   * node. It is deliberately a method rather than a property so that reading it
+   * is a visible act at every call site, and it is never included in any event,
+   * log line or fault message.
+   *
+   * Note it does not carry the prekey ring — restoring from the seed alone comes
+   * back unable to open mail sealed to a rotated prekey (S-022). That is the
+   * documented trade-off of a seed backup, not a defect.
+   */
+  exportSeed() {
+    this._assertReady();
+    return hex(this.node.seed());
+  }
+
   /** Stop the loop, close every bridge, free the node. Idempotent. */
   dispose() {
     if (this._disposed) return;
