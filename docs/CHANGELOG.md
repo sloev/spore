@@ -18,6 +18,25 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Fixed: the web node could never read a file back.** `spore.mjs`'s
+  `fileBytes`, `fileName` and `fetchFile` passed the 16-byte magnet
+  `Uint8Array` straight to exports declared `magnet: *const u8`. JS coerces an
+  object argument to `0`, so the node read 16 bytes from wasm address 0, matched
+  nothing, and returned `null` every time — for a magnet `listFiles()` was
+  simultaneously reporting as present. The shipped standalone calls
+  `fileBytes`/`fileName` in five places, so **every file fetch resolved to null**
+  and no received attachment ever rendered or downloaded. `publishFile` had the
+  same defect on its `dest` parameter, which `wasm.rs` also reads as
+  `*const u8`: the destination was taken from address 0 rather than the eight
+  zero bytes meaning "public", so published manifests were addressed to whatever
+  happened to sit at the base of linear memory. All four now copy through
+  `_put()`/`spore_free()` like every other slice in the file. Caught by the new
+  `SporeClient` contract test, which asserts a publish/list/read round-trip
+  against the real wasm rather than trusting the binding. Wire format unchanged
+  (`reference/vectors.json` byte-for-byte); the *destination address* a published
+  file carries does change, from garbage to the public address it always
+  intended.
+
 - **Multiple files per send, on both surfaces (M2 carried-forward gap).**
   `Markdown.parseAttach` (Android) and `mdWithAttachments` (web) both moved
   from matching the first `📎 name | spore:magnet | mime` marker line to
