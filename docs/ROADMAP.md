@@ -175,7 +175,7 @@ work below is the code half that changes what is on screen.
 - [ ] The web node has a persistent identity + status header.
 - [ ] Reduced motion is fully static; the standalone still makes zero external requests.
 - [x] ~~Baud appears only on empty states and completions.~~ Superseded: Baud is removed entirely — brand is the SPORE wordmark only, no mascot (see the hard rules).
-- [ ] The only brand icon is Antenna + Seed; no mushroom anywhere.
+- [x] ~~The only brand icon is Antenna + Seed; no mushroom anywhere.~~ Superseded: there is no brand icon at all — wordmark only (see the hard rules).
 
 **Definition of done:** every surface passes visual review and the mushroom icon is
 gone from the repo's rendered assets. (Historical: at the time this milestone shipped,
@@ -310,10 +310,11 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 
 **Definition of done:** all three surfaces render HARDBRUT (cream paper, black
 ink, yellow primary / white cancel, zero radius, hard no-blur shadows held on
-every element); Antenna + Seed persists ink-on-paper; Baud is restyled; the
-standalone still makes zero external requests and is fully static under reduced
-motion; the drift job regenerates HARDBRUT tokens into all three surfaces and
-passes.
+every element); the standalone still makes zero external requests and is fully
+static under reduced motion; the drift job regenerates HARDBRUT tokens into all
+three surfaces and passes. (Antenna + Seed and Baud, both mentioned as kept/
+restyled above, were later retired entirely — see the hard rules: the brand is
+the wordmark, nothing stands in for it.)
 
 ---
 
