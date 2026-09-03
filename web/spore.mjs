@@ -404,6 +404,32 @@ class SporeNode {
     return packed.length ? new TextDecoder().decode(packed) : null;
   }
 
+  /** Peers we have heard from, freshest first.
+   *
+   * Returns `[{addr, ageSecs, hasPrekey, claimedName}]`. `claimedName` is what
+   * the peer announced about itself — anyone may announce any name, so it is a
+   * display hint and never identity. Show it as a claim and let the user assign
+   * the local petname that is actually trusted. `hasPrekey` is what decides
+   * whether a message to them can be sealed. */
+  peers(now_sec) {
+    const packed = this.s._unpack(this.s.ex.spore_node_peers(this.ptr, now_sec || now()));
+    if (!packed.length) return [];
+    const dv = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    let o = 0;
+    const n = dv.getUint32(o, false); o += 4;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const addr = packed.slice(o, o + 8); o += 8;
+      const ageSecs = dv.getUint32(o, false); o += 4;
+      const hasPrekey = packed[o] === 1; o += 1;
+      const nlen = dv.getUint32(o, false); o += 4;
+      const claimedName = nlen ? new TextDecoder().decode(packed.slice(o, o + nlen)) : null;
+      o += nlen;
+      out.push({ addr, ageSecs, hasPrekey, claimedName });
+    }
+    return out;
+  }
+
   /** List all stored files. Returns [{name, magnet}]. */
   listFiles() {
     const packed = this.s._unpack(this.s.ex.spore_node_list_files(this.ptr));

@@ -11,10 +11,12 @@
 
 import { SporeClient, localStorageAdapter } from './spore-client.mjs';
 import { ThreadStore, groupThread } from './stores/threads.mjs';
+import { ContactStore, contactRows } from './stores/contacts.mjs';
 import { el, mount } from './ui/dom.mjs';
 import { appShell, appBar, defaultPaneFor, canGoBack, DESTINATIONS } from './ui/shell.mjs';
 import { renderOnboarding } from './screens/onboarding.mjs';
 import { renderChatList, renderChatThread } from './screens/chat.mjs';
+import { renderContacts } from './screens/contacts.mjs';
 import { formatAddr, dayLabel } from './ui/format.mjs';
 
 const K_ONBOARDED = 'spore.onboarded';
@@ -41,10 +43,18 @@ const state = {
   sending: false,
   newConvoOpen: false,
   newConvoError: null,
+
+  contactsView: 'contacts',
+  contactsQuery: '',
+  editingContact: null,
+  contactDraft: null,
+  addingContact: false,
+  addContactError: null,
 };
 
 let client = null;
 let threads = null;
+let contacts = null;
 let root = null;
 
 // ------------------------------------------------------------------- helpers
@@ -70,6 +80,7 @@ const onboardingActions = {
   generate: () => guard(async () => {
     const identity = await client.init(wasmSource());
     await threads.load();
+    await contacts.load();
     setState({ identity, seedHex: client.exportSeed() });
   }),
   next: () => setState({ step: state.step + 1, error: null }),
@@ -189,6 +200,68 @@ const chatActions = {
   },
 };
 
+// ------------------------------------------------------------------ contacts
+
+const contactsActions = {
+  setView: (view) => setState({ contactsView: view, editingContact: null, addingContact: false }),
+  setQuery: (q) => setState({ contactsQuery: q }),
+
+  openAdd: () => setState({ addingContact: true, addContactError: null, editingContact: null }),
+  closeAdd: () => setState({ addingContact: false, addContactError: null }),
+
+  confirmAdd: (value) => {
+    const addr = normaliseAddr(value);
+    if (!addr) { setState({ addContactError: 'An address is 16 hexadecimal digits. Check what you pasted.' }); return; }
+    if (addr === state.identity.addrHex) { setState({ addContactError: 'That is this node\u2019s own address.' }); return; }
+    contacts.setLabel(addr, '');
+    contacts.save();
+    setState({ addingContact: false, addContactError: null });
+    contactsActions.openEdit(addr);
+  },
+
+  openEdit: (addr) => {
+    const c = contacts.get(addr);
+    setState({
+      editingContact: addr,
+      addingContact: false,
+      contactDraft: {
+        label: c && c.label ? c.label : '',
+        following: Boolean(c && c.following),
+        blocked: Boolean(c && c.blocked),
+      },
+    });
+  },
+  closeEdit: () => setState({ editingContact: null, contactDraft: null }),
+
+  saveEdit: (addr, { label, following, blocked }) => {
+    contacts.setLabel(addr, label);
+    contacts.setFollowing(addr, following);
+    contacts.setBlocked(addr, blocked);
+    contacts.save();
+    setState({ editingContact: null, contactDraft: null });
+  },
+
+  messageAddr: (addr) => openChat(addr),
+};
+
+/** 16 hex digits, tolerant of spacing and the middot the UI formats with. */
+function normaliseAddr(value) {
+  const a = (value || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
+  return ADDR_RE.test(a) ? a : null;
+}
+
+/**
+ * The display name for an address, and whether it is only a claim. A label the
+ * user typed wins; an announced name is a fallback that must be marked.
+ */
+function nameFor(addr) {
+  const label = contacts.labelFor(addr);
+  if (label) return { name: label, isClaim: false };
+  const p = client.peers().find((x) => x.addrHex === addr);
+  if (p && p.claimedName) return { name: p.claimedName, isClaim: true };
+  return { name: null, isClaim: false };
+}
+
 // ---------------------------------------------------------------- rendering
 
 function notBuiltYet(name) {
@@ -230,7 +303,11 @@ function chatConversations() {
   if (state.chatOpen && !rows.some((r) => r.addr === state.chatOpen)) {
     rows.unshift({ addr: state.chatOpen, lastBody: '', lastAt: 0, lastSelf: false, unread: 0 });
   }
-  return rows.map((r) => ({ ...r, name: null, keyState: client.keyStateFor(r.addr) }));
+  return rows
+    // A blocked address is hidden from the conversation list; the thread is not
+    // deleted, because blocking is a display decision and not a data one.
+    .filter((r) => !contacts.isBlocked(r.addr))
+    .map((r) => ({ ...r, ...nameFor(r.addr), keyState: client.keyStateFor(r.addr) }));
 }
 
 function renderChatScreen() {
@@ -278,6 +355,22 @@ function renderApp() {
 
   if (state.screen === 'chat') {
     ({ side, main } = renderChatScreen());
+  } else if (state.screen === 'contacts') {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({ title: 'Contacts', subtitle: null, onBack: null, actions: [] }),
+      renderContacts({
+        rows: contactRows(client.peers(), contacts, { view: state.contactsView, query: state.contactsQuery }),
+        view: state.contactsView,
+        query: state.contactsQuery,
+        editing: state.editingContact,
+        draft: state.contactDraft || { label: '', following: false, blocked: false },
+        adding: state.addingContact,
+        addError: state.addContactError,
+        addValue: '',
+        ownAddrHex: state.identity ? state.identity.addrHex : '',
+        actions: contactsActions,
+      }),
+    );
   } else {
     main = el('div', { style: { display: 'contents' } },
       appBar({
@@ -337,10 +430,14 @@ export async function boot(container) {
   const storage = localStorageAdapter();
   client = new SporeClient({ storage });
   threads = new ThreadStore({ storage });
+  contacts = new ContactStore({ storage });
 
   client.on((e) => {
     switch (e.type) {
       case 'EnvelopeReceived': {
+        // Blocking hides a sender rather than discarding their traffic: the
+        // envelope was still authenticated and still cost the mesh a relay, so
+        // it is recorded and simply not surfaced.
         const addr = threads.receive(e);
         // Reading a thread you are looking at should not leave it unread.
         if (addr && addr === state.chatOpen && state.pane === 'detail') threads.markRead(addr);
@@ -376,6 +473,7 @@ export async function boot(container) {
   if (hasSeed) {
     const identity = await client.init(wasmSource());
     await threads.load();
+    await contacts.load();
     state.booted = true;
     state.identity = identity;
     state.onboarding = !onboarded;

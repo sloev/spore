@@ -50,6 +50,32 @@ Two conventions specific to this project:
   inside the bound while a real efficiency regression still trips it. Caught
   because it failed a pull request that changed no Rust at all. Wire unchanged:
   test only.
+- **Web node: Contacts, and the browser can finally see its peers (M10-D).**
+  Adds `spore_node_peers` to the WASM ABI. The browser had **no way to enumerate
+  peers at all**, while Android's JNI has had `nativePeers` since M8 — a concrete
+  instance of the three-ABI divergence M10 exists to close. The capability was
+  already in the portable core (`Node::peers`, `Node::peer_name`); only the
+  export was missing, so this is ~25 lines and no new kernel behaviour. It
+  returns address, age, whether we hold their prekey, and the name they announce.
+  `ContactStore` is the odd one of the six domain stores: it holds **no Spore
+  data at all**. Every field is a local decision — label, following, blocked —
+  and none of it is ever merged with anything authenticated. That mirrors the
+  core's own reasoning: a name in an ANNOUNCE is what a node *claims* to be
+  called, and anyone may announce anything, so `labelFor()` deliberately does
+  **not** fall back to a claimed name. Joining the two is the screen's job, and
+  the screen marks a claim as `CLAIMED` rather than presenting it as settled.
+  Contacts and "Seen announces" are two genuinely different lists — what you
+  kept, versus who the node has heard from and you have not — not a filter of
+  one. Blocking hides a sender from the conversation list without discarding
+  their traffic: the envelope was still authenticated and still cost the mesh a
+  relay, so it is recorded and simply not surfaced. The payoff lands in Chats,
+  which now shows labels instead of raw addresses. 13 store tests, plus one on
+  the client asserting `peers()[].hasPrekey` agrees with `canSealTo()` rather
+  than being derived twice. One accessibility defect found by driving it: the
+  toolbar "Add" and the form's "Add" were visible simultaneously — two controls
+  with the same accessible name doing different things — so the toolbar one is
+  now hidden while the form is open and the form's reads "Add contact". Wire
+  unchanged; the WASM ABI gains an export and loses nothing.
 
 - **Web node: Chats, with the URL as the router (M10-D).** `web/app/stores/
   threads.mjs` is the first of the six domain stores — direct messages keyed by

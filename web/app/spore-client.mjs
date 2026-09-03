@@ -269,6 +269,29 @@ export class SporeClient {
     return { topic: topicName, body, at: nowSec() };
   }
 
+  /**
+   * Peers this node has heard from, freshest first.
+   *
+   * Each is `{ addrHex, ageSecs, hasPrekey, claimedName }`. **`claimedName` is a
+   * claim, not a fact** — anyone may announce any name, so it is only ever a
+   * default to offer when the user assigns a local petname, and the UI must show
+   * it as unauthenticated. `hasPrekey` is what decides whether a message to them
+   * can actually be sealed.
+   *
+   * Until this landed the browser had no way to enumerate peers at all, while
+   * Android's JNI has had `nativePeers` since M8 — one of the concrete ABI
+   * divergences M10 exists to close.
+   */
+  peers() {
+    this._assertReady();
+    return this.node.peers(nowSec()).map((p) => ({
+      addrHex: hex(p.addr),
+      ageSecs: p.ageSecs,
+      hasPrekey: p.hasPrekey,
+      claimedName: p.claimedName,
+    }));
+  }
+
   /** Follow a topic so `pollFeed` starts yielding its events. */
   subscribe(topicName) {
     this._assertReady();
