@@ -10,12 +10,15 @@
 // identity exists. Hiding buttons is not a gate.
 
 import { SporeClient, localStorageAdapter } from './spore-client.mjs';
+import { ThreadStore, groupThread } from './stores/threads.mjs';
 import { el, mount } from './ui/dom.mjs';
 import { appShell, appBar, defaultPaneFor, canGoBack, DESTINATIONS } from './ui/shell.mjs';
 import { renderOnboarding } from './screens/onboarding.mjs';
-import { formatAddr } from './ui/format.mjs';
+import { renderChatList, renderChatThread } from './screens/chat.mjs';
+import { formatAddr, dayLabel } from './ui/format.mjs';
 
 const K_ONBOARDED = 'spore.onboarded';
+const ADDR_RE = /^[0-9a-f]{16}$/i;
 
 const state = {
   booted: false,
@@ -32,9 +35,16 @@ const state = {
 
   identity: null,
   bridges: [],
+
+  chatOpen: null,
+  chatDraft: '',
+  sending: false,
+  newConvoOpen: false,
+  newConvoError: null,
 };
 
 let client = null;
+let threads = null;
 let root = null;
 
 // ------------------------------------------------------------------- helpers
@@ -44,18 +54,13 @@ function setState(patch) {
   render();
 }
 
-function fault(message) {
-  setState({ error: message, busy: false });
-}
-
-/** Never let a rejected promise vanish into the console. */
 async function guard(fn) {
   try {
     setState({ busy: true, error: null });
     await fn();
     setState({ busy: false });
   } catch (err) {
-    fault(String((err && err.message) || err));
+    setState({ error: String((err && err.message) || err), busy: false });
   }
 }
 
@@ -64,24 +69,17 @@ async function guard(fn) {
 const onboardingActions = {
   generate: () => guard(async () => {
     const identity = await client.init(wasmSource());
+    await threads.load();
     setState({ identity, seedHex: client.exportSeed() });
   }),
-
   next: () => setState({ step: state.step + 1, error: null }),
-
   toggleSeedConfirmed: () => setState({ seedConfirmed: !state.seedConfirmed }),
-
-  copySeed: (seed) => {
-    if (navigator.clipboard) navigator.clipboard.writeText(seed);
-  },
-
-  setRelayUrl: (v) => { state.relayUrl = v; }, // no re-render: the input owns its own text
-
+  copySeed: (seed) => { if (navigator.clipboard) navigator.clipboard.writeText(seed); },
+  setRelayUrl: (v) => { state.relayUrl = v; }, // the input owns its own text
   connectAndFinish: () => guard(async () => {
     await client.addBridge({ kind: 'websocket', url: state.relayUrl.trim() });
     finishOnboarding();
   }),
-
   finishWithoutBridge: () => finishOnboarding(),
 };
 
@@ -89,27 +87,110 @@ function finishOnboarding() {
   localStorage.setItem(K_ONBOARDED, '1');
   // The seed is dropped from memory here: step 2 said it could not be shown
   // again, and keeping it around would make that a lie.
-  setState({ onboarding: false, seedHex: null, step: 0 });
+  state.onboarding = false;
+  state.seedHex = null;
+  state.step = 0;
+  if ((location.hash || '') === '') location.hash = '#/chats';
+  applyHash();
 }
 
 // -------------------------------------------------------------------- routing
+//
+// The URL is the source of truth, not a mirror of it: navigation writes a hash
+// and the hashchange handler is the only thing that moves the app. That buys
+// three things at once — a thread is refresh-safe and shareable because the
+// param IS the 16-hex address the domain layer uses, the browser back button is
+// a real navigation rather than app-managed slide state, and there is exactly
+// one code path into a screen instead of two that can disagree.
+
+/** Screen id -> URL segment. Only these five are routable. */
+const SEGMENTS = { contacts: 'contacts', chat: 'chats', blogs: 'blogs', files: 'files', settings: 'settings' };
+const SCREEN_OF = Object.fromEntries(Object.entries(SEGMENTS).map(([k, v]) => [v, k]));
+
+function hashFor(screen, chatOpen) {
+  if (screen === 'chat' && chatOpen) return '#/chats/' + chatOpen;
+  return '#/' + (SEGMENTS[screen] || 'chats');
+}
 
 function navigate(screen) {
-  if (!DESTINATIONS.some((d) => d.id === screen)) return;
-  setState({ screen, pane: defaultPaneFor(screen) });
+  if (!SEGMENTS[screen]) return;
+  // Leaving chat drops the open thread from the URL; coming back to chat lands
+  // on the list, which is what the pane rules expect.
+  location.hash = hashFor(screen, screen === 'chat' ? state.chatOpen : null);
+}
+
+function openChat(addr) {
+  location.hash = hashFor('chat', addr);
 }
 
 function goBack() {
-  setState({ pane: 'list' });
+  // On a phone this is the list/detail step. Going "back" from a thread means
+  // dropping the address from the URL, so the browser's own back button and
+  // this button do the same thing rather than diverging.
+  if (state.screen === 'chat' && state.chatOpen) location.hash = '#/chats';
+  else setState({ pane: 'list' });
 }
+
+/** Parse the hash and move the app to it. The only writer of screen/chatOpen. */
+function applyHash() {
+  const raw = (location.hash || '').replace(/^#\/?/, '');
+  const [seg, param] = raw.split('/');
+  const screen = SCREEN_OF[seg] || 'chat';
+
+  let chatOpen = null;
+  if (screen === 'chat' && param && ADDR_RE.test(param)) chatOpen = param.toLowerCase();
+
+  if (chatOpen) {
+    threads.markRead(chatOpen);
+    threads.save();
+  }
+  setState({
+    screen,
+    chatOpen,
+    pane: chatOpen ? 'detail' : defaultPaneFor(screen),
+    chatDraft: chatOpen === state.chatOpen ? state.chatDraft : '',
+    newConvoOpen: false,
+    newConvoError: null,
+  });
+}
+
+// ----------------------------------------------------------------- chat
+
+const chatActions = {
+  select: (addr) => openChat(addr),
+
+  setDraft: (v) => { state.chatDraft = v; }, // no re-render: see renderComposer
+
+  send: () => guard(async () => {
+    const body = state.chatDraft.trim();
+    if (!body || !state.chatOpen) return;
+    setState({ sending: true });
+    const envelope = client.sendDirect(state.chatOpen, new TextEncoder().encode(body));
+    threads.send({ ...envelope, body });
+    await threads.save();
+    setState({ chatDraft: '', sending: false });
+  }),
+
+  openNew: () => setState({ newConvoOpen: true, newConvoError: null }),
+  closeNew: () => setState({ newConvoOpen: false, newConvoError: null }),
+
+  startNew: (value) => {
+    const addr = (value || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
+    if (!ADDR_RE.test(addr)) {
+      setState({ newConvoError: 'An address is 16 hexadecimal digits. Check what you pasted.' });
+      return;
+    }
+    if (addr === state.identity.addrHex) {
+      setState({ newConvoError: 'That is this node’s own address.' });
+      return;
+    }
+    setState({ newConvoOpen: false, newConvoError: null });
+    openChat(addr);
+  },
+};
 
 // ---------------------------------------------------------------- rendering
 
-/**
- * Screens still to be built in M10-D. Rendered as an explicit, labelled gap
- * rather than a plausible-looking empty state — an empty Contacts list would
- * claim "you have no contacts", which is a different and false statement.
- */
 function notBuiltYet(name) {
   return el('div', { class: 'pane-body scroll-y' },
     el('div', { class: 'empty' },
@@ -120,29 +201,96 @@ function notBuiltYet(name) {
   );
 }
 
+function newConversationForm() {
+  let value = '';
+  return el('div', { class: 'card', style: { marginBottom: 'var(--gap)' } },
+    el('div', { class: 'card-body', style: { display: 'flex', flexDirection: 'column', gap: 'var(--gap-tight)' } },
+      el('div', { class: 'field' },
+        el('label', { for: 'new-convo' }, 'Address'),
+        el('input', {
+          id: 'new-convo', type: 'text', placeholder: '3F2A9C1088E4001B',
+          oninput: (e) => { value = e.target.value; },
+          onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); chatActions.startNew(value); } },
+        }),
+        el('div', { class: 'field-hint' }, '16 hexadecimal digits. There is no directory to search.'),
+      ),
+      state.newConvoError ? el('div', { class: 'field-error', role: 'alert' }, state.newConvoError) : null,
+      el('div', { class: 'cluster-tight' },
+        el('button', { class: 'btn btn-secondary btn-sm', type: 'button', onclick: chatActions.closeNew }, 'Cancel'),
+        el('button', { class: 'btn btn-sm', type: 'button', onclick: () => chatActions.startNew(value) }, 'Open'),
+      ),
+    ),
+  );
+}
+
+function chatConversations() {
+  const rows = threads.conversations();
+  // An open-but-empty conversation is real state: the user opened an address
+  // and has not sent anything yet. It belongs in the list.
+  if (state.chatOpen && !rows.some((r) => r.addr === state.chatOpen)) {
+    rows.unshift({ addr: state.chatOpen, lastBody: '', lastAt: 0, lastSelf: false, unread: 0 });
+  }
+  return rows.map((r) => ({ ...r, name: null, keyState: client.keyStateFor(r.addr) }));
+}
+
+function renderChatScreen() {
+  const side = el('div', { style: { display: 'contents' } },
+    state.newConvoOpen
+      ? el('div', { class: 'pane-body scroll-y', style: { padding: 'var(--pad-tight)' } }, newConversationForm())
+      : renderChatList({
+          conversations: chatConversations(),
+          selected: state.chatOpen,
+          onSelect: chatActions.select,
+          onNewConversation: chatActions.openNew,
+          unauthenticatedCount: threads.unauthenticatedCount,
+        }),
+  );
+
+  const main = el('div', { style: { display: 'contents' } },
+    appBar({
+      title: state.chatOpen ? formatAddr(state.chatOpen) : 'Chats',
+      subtitle: state.chatOpen ? null : 'Direct messages',
+      onBack: state.pane === 'detail' ? goBack : null,
+      actions: [],
+    }),
+    renderChatThread({
+      addr: state.chatOpen,
+      items: state.chatOpen ? groupThread(threads.messages(state.chatOpen), (s) => dayLabel(s * 1000)) : [],
+      keyState: state.chatOpen ? client.keyStateFor(state.chatOpen) : 'cleartext',
+      draft: state.chatDraft,
+      onDraft: chatActions.setDraft,
+      onSend: chatActions.send,
+      sending: state.sending,
+    }),
+  );
+
+  return { side, main };
+}
+
 function screenTitle() {
   const d = DESTINATIONS.find((x) => x.id === state.screen);
   return d ? d.label : 'SPORE';
 }
 
 function renderApp() {
-  const main = el('div', { style: { display: 'contents' } },
-    appBar({
-      title: screenTitle(),
-      subtitle: state.identity ? formatAddr(state.identity.addrHex) : null,
-      onBack: canGoBack(state.screen) && state.pane === 'detail' ? goBack : null,
-      actions: [],
-    }),
-    notBuiltYet(screenTitle()),
-  );
+  let side = null;
+  let main;
 
-  return appShell({
-    screen: state.screen,
-    pane: state.pane,
-    side: null,
-    main,
-    onNavigate: navigate,
-  });
+  if (state.screen === 'chat') {
+    ({ side, main } = renderChatScreen());
+  } else {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({
+        title: screenTitle(),
+        subtitle: state.identity ? formatAddr(state.identity.addrHex) : null,
+        onBack: canGoBack(state.screen) && state.pane === 'detail' ? goBack : null,
+        actions: [],
+      }),
+      notBuiltYet(screenTitle()),
+    );
+  }
+
+  return appShell({ screen: state.screen, pane: state.pane, side, main, onNavigate: navigate });
 }
 
 function render() {
@@ -186,11 +334,35 @@ function wasmSource() {
 
 export async function boot(container) {
   root = container;
-  client = new SporeClient({ storage: localStorageAdapter() });
+  const storage = localStorageAdapter();
+  client = new SporeClient({ storage });
+  threads = new ThreadStore({ storage });
 
   client.on((e) => {
-    if (e.type === 'BridgeStateChanged') setState({ bridges: client.bridges() });
-    if (e.type === 'ClientFault') setState({ error: e.message });
+    switch (e.type) {
+      case 'EnvelopeReceived': {
+        const addr = threads.receive(e);
+        // Reading a thread you are looking at should not leave it unread.
+        if (addr && addr === state.chatOpen && state.pane === 'detail') threads.markRead(addr);
+        threads.save();
+        render();
+        break;
+      }
+      case 'EnvelopeAcked':
+        if (threads.setStatus(e.id, 'acked')) { threads.save(); render(); }
+        break;
+      case 'EnvelopeExpired':
+        if (threads.setStatus(e.id, 'expired')) { threads.save(); render(); }
+        break;
+      case 'BridgeStateChanged':
+        setState({ bridges: client.bridges() });
+        break;
+      case 'ClientFault':
+        setState({ error: e.message });
+        break;
+      default:
+        break;
+    }
   });
 
   // The gate: an identity already on disk means onboarding is done. We check
@@ -199,9 +371,16 @@ export async function boot(container) {
   const hasSeed = Boolean(localStorage.getItem('spore.seed'));
   const onboarded = Boolean(localStorage.getItem(K_ONBOARDED));
 
+  window.addEventListener('hashchange', () => { if (!state.onboarding) applyHash(); });
+
   if (hasSeed) {
     const identity = await client.init(wasmSource());
-    setState({ booted: true, identity, onboarding: !onboarded });
+    await threads.load();
+    state.booted = true;
+    state.identity = identity;
+    state.onboarding = !onboarded;
+    if (state.onboarding) render();
+    else applyHash(); // restores the open thread from the URL on a reload
   } else {
     setState({ booted: true, onboarding: true });
   }

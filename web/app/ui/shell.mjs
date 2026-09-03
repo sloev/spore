@@ -47,7 +47,7 @@ export function appBar({ title, subtitle, onBack = null, actions = [] }) {
       class: 'btn btn-icon btn-tertiary app-bar-back',
       'aria-label': 'Back',
       onclick: onBack,
-    }, icon(ICONS.swap, { size: '18px' })),
+    }, icon(ICONS.chevronLeft, { size: '18px' })),
     el('div', { class: 'app-bar-title' },
       el('b', {}, title || ''),
       subtitle ? el('span', {}, subtitle) : null,

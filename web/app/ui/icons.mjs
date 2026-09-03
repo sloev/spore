@@ -43,6 +43,8 @@ export const ICONS = {
   refresh: svg(path('M4 12a8 8 0 0 1 13.7-5.7L20 8M4 12a8 8 0 0 0 13.7 5.7L20 16M20 8v-4M20 8h-4M20 16v4M20 16h-4')),
   ban: svg(circle(12, 12, 8) + path('M6.3 6.3l11.4 11.4')),
   swap: svg(path('M4 9h13l-3-3M20 15H7l3 3')),
+  chevronLeft: svg(path('M15 5l-7 7 7 7')),
+  chevronRight: svg(path('M9 5l7 7-7 7')),
   help: svg(circle(12, 12, 9) + path('M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-1 .5-1 1.2-1 2.2') + path('M12 17v.01')),
 };
 
