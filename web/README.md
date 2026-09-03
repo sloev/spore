@@ -134,6 +134,24 @@ tap-to-seed). Each is a `send`/`receive` pair over its own API; the hub and node
 above don't change.
 </details>
 
+## The app
+
+`web/app/` is the node's user interface, and it is ordinary files — until M10-D it
+lived inside one template literal in `build-standalone.mjs`.
+
+| Path | What it is |
+| --- | --- |
+| `spore-client.mjs` | The single seam between the UI and the kernel: sole caller of `spore.mjs`, sole owner of the node pointer, sole owner of a timer. |
+| `transports.mjs` | The **browser** transport registry. A host with more reach (a desktop build is a webview *and* a daemon) passes its own superset. |
+| `main.mjs` | Owns all state; the only module that talks to the client. The URL is the router. |
+| `stores/` | Domain stores — conversations, contacts. JS for now; Milestone 10-B moves them into Rust behind the same interface. |
+| `screens/` | Pure render functions of a view model. No client access, no state. |
+| `ui/` | DOM helper, icon set, formatting, app shell. |
+| `index.html` | Dev harness — loads the modules unbundled so a reload picks up an edit. Not the shipped artefact. |
+
+Screens never read a store or the client directly. That is what lets a store move
+into Rust without any screen changing.
+
 ## Run the tests
 
 ```sh
@@ -141,12 +159,22 @@ above don't change.
 cargo build --release --lib --target wasm32-unknown-unknown
 
 cd web
-node test.mjs           # loopback: two hubs, one link, publish + verify
-npm install             # pulls `ws` for the next one
-node ws-test.mjs        # real WebSocket relay: A -> relay -> B
+node test.mjs                     # loopback: two hubs, one link, publish + verify
+node codec-test.mjs               # frame codecs: KISS, Meshtastic, audio, NDEF
+node feed-test.mjs                # feed publish/poll round-trip
+node ui/markdown.test.mjs         # the message renderer
+node app/spore-client.test.mjs    # the client contract, against the real wasm
+node app/ui/format.test.mjs       # formatting + shell routing rules
+node app/stores/threads.test.mjs  # conversations, receipts, authentication
+node app/stores/contacts.test.mjs # local labels vs announced claims
+
+npm install                       # pulls `ws` for the next one
+node ws-test.mjs                  # real WebSocket relay: A -> relay -> B
 ```
 
-Both print an `OK` line. `test.mjs` needs nothing but Node (it runs the wasm);
+Everything above runs on plain Node — no browser, no bundler, no framework. The
+client and store suites exercise the **real** wasm kernel rather than a fake, which
+is the point: they are the same artefact Android and the CLI build from.
 `ws-test.mjs` stands up a throwaway `ws` relay on a random port and sends a signed
 message through it.
 
@@ -155,13 +183,17 @@ message through it.
 `node build-standalone.mjs` inlines the wasm and **every transport** into a single
 `spore-standalone.html` — a complete, functional node that runs from a `file://`
 path, a USB stick, or an email attachment, making **zero network requests until you
-add a bridge**. It boots one live node, then lets you wire it at runtime to a
-WebSocket relay, a direct WebRTC peer, a Nostr relay, a Meshtastic or Reticulum
-LoRa radio (USB or Bluetooth), the speakers/mic (audio modem), or a WebTorrent
-swarm — signing, relaying, and delivering across all of them at once. Its identity
-and its bridges are remembered in the browser's local storage (the 32-byte signing
-seed via `node.seed()` / `newNode(seed)`), so it returns as the same node; network
-bridges reconnect on load, device bridges wait for a click. It's the smallest
+add a bridge**. It boots one live node with an identity of its own,
+remembered in the browser's local storage (the 32-byte signing seed via
+`node.seed()` / `newNode(seed)`), so it returns as the same node.
+
+**Milestone 10-D is mid-flight, and the app is being rebuilt screen by screen.**
+Today it has onboarding, the app shell, Chats and Contacts. Onboarding can attach a
+WebSocket relay; the screen for adding the other transports at runtime has not been
+rebuilt yet, and Blogs, Files and Settings render an explicit "not built yet" panel
+rather than a plausible-looking empty one. Every transport listed under
+[Transports](#transports) still ships in the bundle and is reachable from
+`SporeClient`; what is missing is the UI in front of them. It's the smallest
 "a whole node in one file" seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
 
 This same file *is* the **web node** (the site's `/demo/` page): the Pages workflow

@@ -418,7 +418,13 @@ function render() {
  */
 function wasmSource() {
   if (globalThis.SPORE_WASM_BYTES) return globalThis.SPORE_WASM_BYTES;
-  const url = new URL('../../target/wasm32-unknown-unknown/release/spore.wasm', import.meta.url);
+  // Resolved against the document, not `import.meta.url`. The standalone
+  // concatenates every module into one *classic* script, where `import.meta` is
+  // a syntax error — and a syntax error there kills the whole script silently,
+  // leaving a page that simply never initialises. `document.baseURI` gives the
+  // same answer in the dev harness and costs the standalone nothing, since it
+  // never reaches this branch.
+  const url = new URL('../../target/wasm32-unknown-unknown/release/spore.wasm', document.baseURI);
   return fetch(url).then((r) => {
     if (!r.ok) throw new Error('could not load spore.wasm (' + r.status + ') — run: cargo build --release --lib --target wasm32-unknown-unknown');
     return r.arrayBuffer();
