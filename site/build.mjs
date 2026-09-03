@@ -64,7 +64,6 @@ const pages = [
   ['web/README.md', 'webguide.html', null],
   ['docs/CONTRIBUTING.md', 'contributing.html', null],
   ['docs/DEV_GUIDE.md', 'dev-guide.html', null],
-  ['docs/PROXY_SETUP.md', 'proxy-setup.html', null],
 ];
 
 // Product pages that hang off "Get a node" rather than the Developer hub. They
@@ -127,7 +126,6 @@ const titles = new Map([
   ['bridges.html', 'SPORE — bridges'],
   ['rebuild.html', 'SPORE — rebuild guide'],
   ['continuity.html', 'SPORE — continuity'],
-  ['proxy-setup.html', 'SPORE — proxy setup'],
 ]);
 
 const descriptions = new Map([
@@ -151,7 +149,6 @@ const descriptions = new Map([
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
   ['design.html', 'The application layer above the wire: layers, the core-vs-runtime model, and why each piece is shaped the way it is.'],
   ['rebuild.html', 'Reimplementing SPORE from scratch in another language, with worked byte-for-byte examples.'],
-  ['proxy-setup.html', 'Fronting a SPORE bridge with Caddy or Nginx.'],
 ]);
 
 // "Web node" (the live demo) sits between the picker and the technical hub —

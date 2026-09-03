@@ -308,7 +308,7 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 | Site (`site/style.css` + `build.mjs` + `home.md`) → HARDBRUT | ✅ shipped | Solid paper header + 4px ink bottom border; zero radius; hard `var(--shadow)`; CRT VFX removed; SVG illustrations recoloured |
 | Android (`Chrome.kt` + all Compose screens) → HARDBRUT | ✅ shipped | Flat two-theme Palette (suffixless light + `Dark`-suffixed dark); scanslines/bloom removed; crate = zero-radius paper + hard shadow; two button kinds via `CrateButton` face |
 | Rewrite `docs/VISUALDESIGN.md` to the HARDBRUT language (new tokens, components, contrast, screen structures) | ✅ shipped | Intro, §1 heading, §3 components and §4 VFX rewritten; the old Neo-Tokyo §1/§3/§4 content superseded |
-| Android adaptation guide committed into the repo | ✅ shipped | `docs/HARDBRUT-ANDROID.md` (token mapping, hard-shadow workaround, two button kinds, typography) |
+| Android adaptation guide committed into the repo | ✅ shipped | Now the "Android → HARDBRUT token mapping" section of `docs/DEV_GUIDE.md` (token mapping, hard-shadow workaround, two button kinds, typography) — folded in from the standalone `HARDBRUT-ANDROID.md`, which wasn't a site page and had no other referrer |
 
 **Definition of done:** all three surfaces render HARDBRUT (cream paper, black
 ink, yellow primary / white cancel, zero radius, hard no-blur shadows held on

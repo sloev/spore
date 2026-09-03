@@ -21,7 +21,6 @@ site. Pick a row.
 
 <div class="list-rows">
 <a class="list-row" href="dev-guide.html"><div class="list-row-body"><span class="list-row-title">Dev guide</span><span class="list-row-subtitle">Repo map, build commands per area, and where to look for what.</span></div></a>
-<a class="list-row" href="proxy-setup.html"><div class="list-row-body"><span class="list-row-title">Proxy setup</span><span class="list-row-subtitle">Fronting a bridge with Caddy or Nginx.</span></div></a>
 </div>
 
 ## Project
