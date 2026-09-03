@@ -59,25 +59,48 @@ fn pack(v: Vec<u8>) -> i64 {
     (ptr << 32) | len
 }
 
-fn blob(forwards: Vec<Vec<u8>>, delivered: Vec<Vec<u8>>) -> Vec<u8> {
+/// How a forward should travel, carried across the ABI so the caller does not
+/// have to guess. See [`forward_wires`].
+const FWD_FLOOD: u8 = 0;
+const FWD_DIRECTED: u8 = 1;
+
+fn blob(forwards: Vec<(u8, Iface, Vec<u8>)>, delivered: Vec<Vec<u8>>) -> Vec<u8> {
     let mut o = Vec::new();
-    let mut put = |list: &[Vec<u8>]| {
-        o.extend_from_slice(&(list.len() as u32).to_le_bytes());
-        for item in list {
-            o.extend_from_slice(&(item.len() as u32).to_le_bytes());
-            o.extend_from_slice(item);
-        }
-    };
-    put(&forwards);
-    put(&delivered);
+    o.extend_from_slice(&(forwards.len() as u32).to_le_bytes());
+    for (kind, iface, item) in &forwards {
+        o.push(*kind);
+        o.extend_from_slice(&iface.to_le_bytes());
+        o.extend_from_slice(&(item.len() as u32).to_le_bytes());
+        o.extend_from_slice(item);
+    }
+    o.extend_from_slice(&(delivered.len() as u32).to_le_bytes());
+    for item in &delivered {
+        o.extend_from_slice(&(item.len() as u32).to_le_bytes());
+        o.extend_from_slice(item);
+    }
     o
 }
 
-fn forward_wires(fs: Vec<Forward>) -> Vec<Vec<u8>> {
+/// Wires plus **how each one should travel**.
+///
+/// The router has already decided this — `Flood` names the interface to skip,
+/// `Directed` names the one to use — and flattening both variants to bare bytes
+/// threw that decision away. A caller with no routing information then has to
+/// guess, and the only available guess (never send back where it came from) is
+/// correct for a flood and wrong for a directed reply: on a link with a single
+/// interface it silently drops every delivery receipt, because the receipt's only
+/// route home is the one the guess excludes.
+///
+/// So the kind **and the interface** travel with the bytes: a consumer applies
+/// split-horizon only to a `FWD_FLOOD` whose interface is not `NO_IFACE`.
+fn forward_wires(fs: Vec<Forward>) -> Vec<(u8, Iface, Vec<u8>)> {
     fs.into_iter()
         .map(|f| match f {
-            Forward::Flood { bytes, .. } => bytes,
-            Forward::Directed { bytes, .. } => bytes,
+            // For a flood the interface is the one to SKIP; NO_IFACE means skip
+            // nothing, which is what a locally-originated envelope says.
+            Forward::Flood { except, bytes } => (FWD_FLOOD, except, bytes),
+            // For a directed forward it is the one to USE.
+            Forward::Directed { iface, bytes, .. } => (FWD_DIRECTED, iface, bytes),
         })
         .collect()
 }
@@ -298,7 +321,10 @@ pub unsafe extern "C" fn spore_node_publish_file(
     let (magnet, forwards) = node.publish_file(&n_str, bytes.as_slice(), d, now);
     let mut out = Vec::with_capacity(16 + 4);
     out.extend_from_slice(&magnet);
-    let fw = forward_wires(forwards);
+    // This payload has its own (big-endian) shape and JS reads only the magnet
+    // from it, so it keeps bare wires rather than growing a kind byte nothing
+    // would read.
+    let fw: Vec<Vec<u8>> = forward_wires(forwards).into_iter().map(|(_, _, b)| b).collect();
     out.extend_from_slice(&(fw.len() as u32).to_be_bytes());
     for w in &fw {
         out.extend_from_slice(&(w.len() as u32).to_be_bytes());

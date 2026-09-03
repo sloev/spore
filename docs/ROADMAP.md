@@ -1,6 +1,6 @@
 # SPORE roadmap — milestones
 
-**Project:** `sloev/spore` · **Version:** 0.6.0 (`Cargo.toml`).
+**Project:** `sloev/spore` · **Version:** 0.7.0 (`Cargo.toml`).
 
 This is the single forward-looking plan, organised as **milestones** rather than
 a flat PR map. Each milestone is a coherent body of work with a clear definition
@@ -26,9 +26,8 @@ spec here; the code is the truth.
   **no fake UI** — never a control whose backend is missing.
 - **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for colour, contrast,
   motion and components — SPORE no longer maintains its own design-language document;
-  `web/vendor/hardbrut/hardbrut.css` is vendored at build time and trusted as-is. The
-  one SPORE-specific rule HARDBRUT has no opinion on: the icon system is Antenna +
-  Seed. Never signal failure by colour alone.
+  `web/vendor/hardbrut/hardbrut.css` is vendored at build time and trusted as-is.
+  Never signal failure by colour alone.
 - **Zero external network requests** in `web/spore-standalone.html` (CI greps for it).
 - Motion fully static under reduced motion / `ANIMATOR_DURATION_SCALE == 0`. Sound and
   particle bursts stay **off** until the user enables them.
@@ -76,6 +75,8 @@ claim the code actually honours.
 | Store horizon clamp to 30 d at the single choke point (`store_put`) | ✅ shipped (#113) | Matching clamp on dedup retain |
 | Field-verify the offline window end-to-end on a device | ⬜ deferred to hardware QA | Unit tests prove deadline/clamping; needs a real clock/delivery run (M4) |
 | Backup exclusion + migration tested on hardware | ⬜ deferred to hardware QA | No device in CI; tracked in `android/TESTING.md` |
+| Benchmark suite: throughput/memory, reproducible, tracked per platform | ⬜ todo | No performance baseline exists today. [Prns](https://github.com/KenAKAFrosty/Prns) — a comparable Rust mesh-network core (Reticulum reimplementation) — publishes per-platform `benchmarks/RESULTS-*.md` against a reference implementation; SPORE has nothing analogous to catch a performance regression before a user does |
+| `unsafe`-code snapshot tracked and diffed in CI | ⬜ todo | No inventory of `unsafe` blocks exists today. Prns keeps `audits/unsafe-snapshot.json`, diffed so new unsafe code is a visible, reviewable event rather than something that can land unnoticed |
 
 **Definition of done:** every SPEC claim about forward secrecy and store bounds is
 backed by a test; the `## Unreleased` SECURITY_FINDINGS Still-open list has no P0
@@ -255,8 +256,10 @@ same envelopes). Chats is one unified list; Feed is personal + subscribed.
 
 ## Milestone 5 — Polish & hardening
 
-**Goal:** the sweep-up after the above. **Only start this milestone once M1–M4 are
-done.** Nothing here is load-bearing for a credible node.
+**Goal:** the sweep-up after the above. **The milestone as a whole waits on M1–M4**,
+though small opportunistic fixes may land early when they're cheap and isolated —
+two already have (Android bridge sync check, `with_node` reentrancy guard). Nothing
+here is load-bearing for a credible node.
 
 | Task | Status | Notes |
 |---|---|---|
@@ -287,8 +290,8 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 | Question | Decision |
 |---|---|
 | Does HARDBRUT replace the Neo-Tokyo palette? | **Yes, entirely.** `--void`/`--phosphor`/`--pink-on-olive` and the CRT look are retired. `design/tokens.json` is rewritten to HARDBRUT tokens and regenerated into all three surfaces. |
-| Antenna + Seed icon | **Kept.** It is brand identity, orthogonal to palette; HARDBRUT has no logo opinion. Rendered ink-on-paper (mono) rather than phosphor-on-dark. |
-| Baud mascot | **Kept**, restyled to HARDBRUT (flat black ink, yellow accents, hard outline) — still empty-state/completion only. |
+| Antenna + Seed icon | ~~Kept. It is brand identity, orthogonal to palette; HARDBRUT has no logo opinion. Rendered ink-on-paper (mono) rather than phosphor-on-dark.~~ Superseded: the icon was later retired entirely — brand is the SPORE wordmark only, no icon, no mascot (see the hard rules). |
+| Baud mascot | ~~Kept, restyled to HARDBRUT (flat black ink, yellow accents, hard outline) — still empty-state/completion only.~~ Superseded: Baud was later removed entirely, same rule. |
 | Zero external requests / reduced motion | **Unchanged — CI-enforced hard rules.** HARDBRUT already gates motion on `prefers-reduced-motion`; the standalone must stay self-contained (no webfonts, no CDN). |
 | Impact display face | HARDBRUT's `--font-display` is `Impact, "Arial Narrow Bold", Haettenschweiler` — a system stack, no webfont, which satisfies constraint 1 exactly as the old stack did. |
 | The `--prose` long-read token | **Dropped.** HARDBRUT body copy is full ink on paper — already the most readable pairing, no desaturation needed. |
@@ -505,6 +508,7 @@ scoped.
 | [Bridges](BRIDGES.md): move each of the three from ⚪ planned to 🧪 as its board-side half lands (E6) | ⬜ todo | The entries themselves already exist and are accurate — 802.11 gained the ESP path, the `probe` filter's role and the regulatory note in #172. What is left is a status change per bridge, landing with that bridge's own PR, not new prose |
 | Full combined run: two boards, flash store live, an envelope relayed over raw 802.11, one board bridged to a phone over USB, BLE exercised as the fallback (E6) | ⬜ todo | One [Hardware verification](HARDWARE.md) row per path, matching the existing one-row-per-path convention |
 | Flash-cycle re-confirmation in the combined rig: power-cycle one board mid-session, confirm it resumes relaying with its spilled store intact (E6) | ⬜ todo | Distinct from E3's isolated test — proves persistence holds while the radio and USB paths are also live |
+| Firmware update path for a fielded board — no factory re-flash required (E7) | ⬜ todo | Not scoped by #149; no signing/staged-rollout/rollback story exists yet. [Prns](https://github.com/KenAKAFrosty/Prns)'s ESP32 equivalent ("Hopspot") ships a full candidate → sign → promote → rollback CI pipeline for exactly this — worth studying before designing SPORE's own, given M8 boards are meant to run unattended in the field |
 
 **On [esp32-open-mac](https://github.com/esp32-open-mac/esp32-open-mac) (considered, not usable yet).**
 A reverse-engineered, blob-free 802.11 MAC — written in Rust, and philosophically a
@@ -753,31 +757,25 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress — **the old app is deleted and the standalone now ships this one** | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 | M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
+| M10-G SDK packaging/release plan for the app-level ABI, once M10-C lands | ⬜ not started | [Prns](https://github.com/KenAKAFrosty/Prns) already ships "one core, many language bindings" at wider scope — Rust/TS/Python/.NET/Go/Swift/JVM/Julia/C via `prns-host/bindings/*`, with a staged qualify→promote pipeline per SDK. A concrete reference for how each UI shim's release process could work; M10 doesn't currently address packaging at all, only that the ABI exists |
 
-**Known bug found during M10-D: delivery receipts never come back on a
-two-node link.** Pre-existing, not introduced by the rewrite — the pre-M10 app had
-the same defect, so M9's "delivered" state has never been reachable in a browser
-between two directly-linked nodes.
+**Fixed during M10-D: delivery receipts could not reach the sender on a two-node
+link.** Pre-existing on *every* platform, not a browser quirk — M9's "delivered"
+had never been reachable point-to-point.
 
-The core already decides routing and says so in its own types:
+`src/node/ingest.rs` emitted the receipt with the **arrival** interface as its
+`except`, where every other origination in the crate passes `NO_IFACE`. `except`
+is the relay parameter — "do not echo a frame back where it came from" — and for
+a receipt the arrival interface is precisely the route home. Both hubs honour
+`except` (`src/bridge/hub.rs` skips it explicitly), so on a link with one
+interface the only route back was the one excluded, and the receipt was dropped.
 
-```rust
-Forward::Flood    { except: Iface, bytes }      // send everywhere except here
-Forward::Directed { iface: Iface, nbr, bytes }  // send exactly here
-```
-
-`forward_wires()` in `src/wasm.rs` flattens both variants to bare bytes, throwing
-that decision away. `Hub` in `web/spore.mjs` then re-invents split-horizon and
-applies it to *every* forward — including a directed receipt heading back to the
-sender. On a link with one transport the receipt's only route out is the one the
-Hub excludes, so it is dropped. Verified: feeding the same forwards back by hand
-makes `acked(id)` true.
-
-The fix is to stop discarding the core's answer — carry a kind byte per forward
-across the wasm blob so `Hub` applies split-horizon to floods only. The blob format
-is internal (`web/spore.mjs` is its only consumer; `bindings/` uses the C ABI and
-Android uses JNI), so this needs no frozen-file change. Its own PR, not folded into
-a screen.
+The wasm ABI made it unfixable from JS as well: `forward_wires` flattened
+`Forward::Flood { except }` and `Forward::Directed { iface }` to bare bytes, so
+`Hub` had no routing information and substituted a blanket split-horizon of its
+own. Both now carry kind + interface, and `Hub` withholds a forward from the
+arrival link only when the router actually asked. Wire format unchanged —
+`reference/vectors.json` is byte-identical; this is routing, not encoding.
 
 **Scope: the web node is not the landing site.** Two different products live in
 this repo and M10 touches exactly one of them.
@@ -866,6 +864,9 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
 8. **M8 — Embedded ESP32 runtime** (raw-802.11 relay; first real MCU target) — after the still-open carried-forward items in M2/M4/M5, not ahead of them, unless deliberately reprioritized
 9. **M9 — Threat-model legibility & anti-abuse guardrails** ✅ complete
+10. **M10 — One application layer, three UI shims** — already underway in parallel
+    with M8's remaining items (M10-D shipped shell, nav and onboarding); not
+    strictly queued behind M8/M9
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a

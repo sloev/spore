@@ -397,7 +397,19 @@ impl Node {
                     ack.sign(&self.sk);
                     self.mark_seen(&ack);
                     self.store_put(&ack, now);
-                    rx.forwards.append(&mut self.forward_intents(&ack, iface, now));
+                    // NO_IFACE, not `iface`: this receipt is an envelope *this*
+                    // node originates, and every other origination in the crate
+                    // says NO_IFACE. `iface` is the relay parameter — "do not
+                    // echo a frame back where it came from" — and it is actively
+                    // wrong here, because for a receipt the interface it came in
+                    // on is precisely the route back to the sender.
+                    //
+                    // With `iface`, a link that has only that one interface
+                    // (a direct UDP peer, one serial cable, a single browser
+                    // transport) drops every receipt: the hubs honour `except`,
+                    // so the only route home is the one excluded. That made
+                    // "delivered" unreachable point-to-point on every platform.
+                    rx.forwards.append(&mut self.forward_intents(&ack, NO_IFACE, now));
                 }
             }
         }

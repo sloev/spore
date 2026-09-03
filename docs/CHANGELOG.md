@@ -50,6 +50,31 @@ Two conventions specific to this project:
   inside the bound while a real efficiency regression still trips it. Caught
   because it failed a pull request that changed no Rust at all. Wire unchanged:
   test only.
+- **Fixed: a delivery receipt could never reach the sender on a two-node link.**
+  Pre-existing on every platform — native, Android and browser alike — so M9's
+  "delivered" state has never been reachable point-to-point. `src/node/ingest.rs`
+  emitted the receipt with the **arrival** interface as its `except`, where every
+  other origination in the crate passes `NO_IFACE`. `except` is the relay
+  parameter ("do not echo a frame back where it came from") and for a receipt the
+  arrival interface is exactly the route home. Both hubs honour it —
+  `src/bridge/hub.rs` skips that interface explicitly — so on a link with a single
+  interface (a direct UDP peer, one serial cable, one browser transport) the only
+  route back was the one excluded. The wasm ABI made it unfixable from the JS side
+  too: `forward_wires` flattened `Forward::Flood { except }` and
+  `Forward::Directed { iface }` into bare bytes, leaving `Hub` no routing
+  information, so it substituted a blanket split-horizon that was right for a
+  flood and wrong for a directed reply. Both variants now carry kind **and**
+  interface across the blob, and `Hub` withholds a forward from the arrival link
+  only when the router asked. The metadata rides along as properties on each wire
+  rather than wrapping it, so `forwards` stays an array of byte arrays — the
+  shape `web/test.mjs` pins as the frozen JS contract, which stays untouched and
+  passes unmodified. Found while building M10-D's Chats screen, which
+  can render a "delivered" state the network could not produce. Regression tests
+  at both levels: a core test asserting the receipt floods with `NO_IFACE` and
+  arrives, and an end-to-end client test over a loopback pair. **Wire format
+  unchanged** — `reference/vectors.json` is byte-identical; this is routing, not
+  encoding.
+
 - **The old web node is deleted; the standalone now ships the M10-D app.**
   `build-standalone.mjs` used to *contain* the app — ~1580 lines inside one
   template literal — and now reads `web/app/` from disk like every other module.

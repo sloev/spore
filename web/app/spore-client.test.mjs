@@ -153,6 +153,30 @@ await test('one second past the boundary it expires', async () => {
   alice.dispose();
 });
 
+await test('a delivery receipt comes home on a two-node link', async () => {
+  // This is the end-to-end form of the core regression test: until receipts
+  // stopped being emitted with the arrival interface as their `except`, the
+  // only route back to the sender was the one link the hub excluded, so
+  // "delivered" was unreachable between two directly-linked browser nodes.
+  const alice = new SporeClient({ storage: memoryAdapter() });
+  const bob = new SporeClient({ storage: memoryAdapter() });
+  await alice.init(wasmBytes);
+  const idB = await bob.init(wasmBytes);
+
+  const [ta, tb] = loopbackPair();
+  alice.attachTransport('loopback', ta);
+  bob.attachTransport('loopback', tb);
+
+  const sent = alice.sendDirect(idB.addrHex, enc('ack me'));
+  const acked = await waitFor(alice, 'EnvelopeAcked');
+  assert.strictEqual(acked.id, sent.id);
+  // Once acked it leaves _pending, so a later tick can never call it expired.
+  assert.strictEqual(alice._pending.has(sent.id), false);
+
+  alice.dispose();
+  bob.dispose();
+});
+
 await test('an unroutable DM expires rather than spinning forever', async () => {
   const alice = new SporeClient({ storage: memoryAdapter() });
   await alice.init(wasmBytes);
