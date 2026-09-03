@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import assert from 'node:assert';
 import { SporeClient, memoryAdapter } from './spore-client.mjs';
+import { BROWSER_TRANSPORTS } from './transports.mjs';
 import { loopbackPair } from '../transports/loopback.mjs';
 
 const wasmPath = new URL('../../target/wasm32-unknown-unknown/release/spore.wasm', import.meta.url);
@@ -144,10 +145,38 @@ await test('availableTransports() feature-detects and hides what Node cannot run
   for (const absent of ['webserial', 'webbluetooth', 'meshtastic_serial', 'meshtastic_ble', 'reticulum_serial', 'reticulum_ble', 'audio']) {
     assert.ok(!kinds.includes(absent), absent + ' must not be offered without its API');
   }
-  // The eleven daemon-only bridges are not in the registry at all.
-  for (const daemon of ['udp', 'tcp', 'tor', 'i2p', 'icmp', 'iroh', 'ssb', 'copyparty', 'spool', 'foldersync']) {
-    assert.ok(!kinds.includes(daemon), daemon + ' is daemon-only and must never reach a browser');
+  // The eleven native bridges are not in the BROWSER registry. They are not
+  // forbidden everywhere — a desktop host that can genuinely open them supplies
+  // them — but a browser cannot, so offering one here would be a control whose
+  // backend is missing.
+  for (const native of ['udp', 'tcp', 'tor', 'i2p', 'icmp', 'iroh', 'ssb', 'copyparty', 'spool', 'foldersync']) {
+    assert.ok(!kinds.includes(native), native + ' cannot be opened by a browser');
   }
+  client.dispose();
+});
+
+await test('a host with more capability can supply its own registry', async () => {
+  // A Tauri desktop build is a webview AND a daemon: it offers the browser
+  // transports plus the native bridges, proxied to Rust. Which transports exist
+  // is a property of the host, so the client takes a registry instead of
+  // importing one.
+  const desktopRegistry = [
+    ...BROWSER_TRANSPORTS,
+    { kind: 'udp', label: 'UDP — native', available: () => true, open: async () => ({ send() {}, receive() {} }) },
+    { kind: 'tor', label: 'Tor — native', available: () => true, open: async () => ({ send() {}, receive() {} }) },
+  ];
+  const client = new SporeClient({ storage: memoryAdapter(), transports: desktopRegistry });
+  await client.init(wasmBytes);
+
+  const kinds = client.availableTransports().map((t) => t.kind);
+  assert.ok(kinds.includes('udp'), 'a desktop host may offer UDP');
+  assert.ok(kinds.includes('tor'), 'a desktop host may offer Tor');
+  assert.ok(kinds.includes('websocket'), 'and still offers the browser set');
+
+  // And it can actually open one, rather than merely listing it.
+  const handle = await client.addBridge({ kind: 'udp' });
+  assert.strictEqual(handle.kind, 'udp');
+  assert.ok(client.bridges().some((b) => b.kind === 'udp' && b.up));
   client.dispose();
 });
 

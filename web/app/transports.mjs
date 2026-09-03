@@ -1,11 +1,17 @@
-// The browser transport registry (M10).
+// The BROWSER transport registry (M10).
 //
-// One spec per transport the browser can actually run. `SporeClient.available
-// Transports()` filters this by `available()` — feature detection, never a
-// user-agent string — and the bridge-add screen renders only what survives.
-// That is how the eleven daemon-only bridges (UDP, TCP, Tor, I2P, ICMP, iroh,
-// Meshtastic-over-MQTT, SSB, copyparty, spool, foldersync) never appear in a
-// browser: they are simply not in this file.
+// One spec per transport a browser can actually run. `SporeClient` takes a
+// registry rather than importing one, and filters it by `available()` — feature
+// detection, never a user-agent string — so the bridge-add screen renders only
+// what survives.
+//
+// **Which transports exist is a property of the host, not of this file.** A
+// browser gets this set. A Tauri desktop build is a webview *and* a daemon, so
+// it passes a superset: these plus the eleven native bridges (UDP, TCP, Tor,
+// I2P, ICMP, iroh, SSB, copyparty, spool, foldersync, AX.25) proxied through to
+// Rust, which the webview alone could never open. The earlier framing here —
+// that those bridges are "simply not in this file" — was wrong the moment
+// desktop stopped being a browser.
 //
 // Carried forward from the pre-M10 node's BRIDGES table, which was the proven
 // acquisition logic — each transport already exposes a static `open()` that
@@ -57,7 +63,7 @@ const hasMic = () => Boolean(globalThis.navigator && navigator.mediaDevices && n
  */
 
 /** @type {TransportSpec[]} */
-export const TRANSPORTS = [
+export const BROWSER_TRANSPORTS = [
   {
     kind: 'websocket',
     label: 'WebSocket relay',
