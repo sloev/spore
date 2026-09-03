@@ -35,6 +35,21 @@ Two conventions specific to this project:
   should follow M10-C rather than precede it, since it is then the same
   app-level ABI over IPC that the browser reaches over wasm. Wire unchanged: no
   core or ABI change.
+- **Fixed a flaky core test that failed CI roughly once in 600 runs.**
+  `fountain_decodes_from_a_lossy_subset` asserts a numeric bound on fountain
+  overhead (`fed <= count + 10`). Its packet-loss pattern is a deterministic LCG,
+  but its signing key came from `keypair()`, which is `OsRng` — and the key
+  changes the signature, which changes the envelope id, which is what seeds the
+  repair symbols' mixing. So the assertion was silently re-rolled every run.
+  Measured rather than guessed: over 3000 random keys the overhead is median 1,
+  p95 5, p99 8, max 12, with **5 keys in 3000 (0.17%) exceeding 10**. So the
+  bound is a fair description of the algorithm but a coin flip as an assertion.
+  Loosening it would throw away the regression guard, so the key is fixed
+  instead — six of them, keeping the coverage a single random key was buying,
+  and over all 256 `[b; 32]` keys the overhead never exceeds 8, so they sit
+  inside the bound while a real efficiency regression still trips it. Caught
+  because it failed a pull request that changed no Rust at all. Wire unchanged:
+  test only.
 
 - **Web node: Chats, with the URL as the router (M10-D).** `web/app/stores/
   threads.mjs` is the first of the six domain stores — direct messages keyed by

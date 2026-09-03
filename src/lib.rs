@@ -1036,43 +1036,66 @@ mod tests {
 
     #[test]
     fn fountain_decodes_from_a_lossy_subset() {
-        // Build a signed envelope big enough to need many chunks.
-        let sk = keypair();
-        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, vec![0xABu8; 4000]);
-        e.sign(&sk);
-        let wire = e.wire();
-        let id = e.id();
-        let cs = 200usize;
-        let count = wire.len().div_ceil(cs);
+        // Fixed keys, not `keypair()`. The loss pattern below is a deterministic
+        // LCG, but the signing key was random — and the key changes the
+        // signature, which changes the envelope id, which is what seeds the
+        // repair symbols' mixing. So the overhead assertion at the end was
+        // silently re-rolled every run, and failed CI on a branch that touched
+        // no Rust at all.
+        //
+        // Measured, so the bound is not guesswork. Over 3000 random keys the
+        // overhead (`fed - count`) is: median 1, p95 5, p99 8, max 12 — and
+        // **5 keys in 3000 (0.17%) exceed 10**. So `count + 10` is a fair
+        // description of the algorithm but a coin flip as an assertion: roughly
+        // one run in 600 fails for no reason a reader could act on.
+        //
+        // Fixing that by loosening the bound would throw away the regression
+        // guard; fixing it by fixing the key keeps the guard and makes any
+        // failure reproducible. Several keys keep the coverage a single random
+        // one was buying. Over all 256 `[b; 32]` keys the overhead never exceeds
+        // 8, so these six sit comfortably inside the bound and a real efficiency
+        // regression still trips it.
+        for key_byte in [1u8, 7, 42, 99, 200, 255] {
+            let sk = ed25519_dalek::SigningKey::from_bytes(&[key_byte; 32]);
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_000_000, vec![0xABu8; 4000]);
+            e.sign(&sk);
+            let wire = e.wire();
+            let id = e.id();
+            let cs = 200usize;
+            let count = wire.len().div_ceil(cs);
 
-        // Emit data + plenty of repair, drop ~40% with a deterministic LCG.
-        let indices: Vec<u8> = (0..(count as u8).saturating_add(60)).collect();
-        let frags = fragment(&wire, cs, 16, e.expiry, ZERO_DEST, id, &indices);
+            // Emit data + plenty of repair, drop ~40% with a deterministic LCG.
+            let indices: Vec<u8> = (0..(count as u8).saturating_add(60)).collect();
+            let frags = fragment(&wire, cs, 16, e.expiry, ZERO_DEST, id, &indices);
 
-        let mut f = Fountain::new();
-        let mut rng: u64 = 0x1234_5678;
-        let mut fed = 0;
-        let mut recovered = None;
-        for fr in &frags {
-            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
-            if (rng >> 33) % 100 < 40 {
-                continue; // 40% loss
+            let mut f = Fountain::new();
+            let mut rng: u64 = 0x1234_5678;
+            let mut fed = 0;
+            let mut recovered = None;
+            for fr in &frags {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if (rng >> 33) % 100 < 40 {
+                    continue; // 40% loss
+                }
+                fed += 1;
+                let idx = fr.payload[16];
+                let cnt = fr.payload[17];
+                let chunk = fr.payload[18..].to_vec();
+                if let Some(w) = f.add(&id, idx, cnt, chunk) {
+                    recovered = Some(w);
+                    break;
+                }
             }
-            fed += 1;
-            let idx = fr.payload[16];
-            let cnt = fr.payload[17];
-            let chunk = fr.payload[18..].to_vec();
-            if let Some(w) = f.add(&id, idx, cnt, chunk) {
-                recovered = Some(w);
-                break;
-            }
+            let w = recovered.expect("should reassemble");
+            assert_eq!(w, wire, "reassembled bytes must equal original");
+            let (d, _) = Envelope::decode(&w).unwrap();
+            assert!(d.verify(), "reassembled signature must verify");
+            assert!(fed >= count, "need at least `count` independent chunks");
+            assert!(
+                fed <= count + 10,
+                "fountain overhead should be small (key {key_byte}: fed {fed}, count {count})"
+            );
         }
-        let w = recovered.expect("should reassemble");
-        assert_eq!(w, wire, "reassembled bytes must equal original");
-        let (d, _) = Envelope::decode(&w).unwrap();
-        assert!(d.verify(), "reassembled signature must verify");
-        assert!(fed >= count, "need at least `count` independent chunks");
-        assert!(fed <= count + 10, "fountain overhead should be small");
     }
 
     #[test]
