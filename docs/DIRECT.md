@@ -56,7 +56,7 @@ The conventional ones:
 | `udp` | yes | high | ≥1200 | one datagram = one record |
 | `tcp` | yes | high | ≥1400 | `u32be len ‖ record` framing |
 | `ble` | yes | low–med | 20–200 | may chunk below the record |
-| `esp-now` | yes | ~200–500 kb | ~250 | no adapter in-tree yet |
+| `esp-now` | yes | ~200–500 kb | ~218 | no adapter in-tree yet; MTU is [zh_network](https://github.com/aZholtikov/zh_network)'s measured real-world ceiling for this mechanism, not a guess |
 
 Nothing enforces that list, which is the point: SPORE Direct runs over a medium
 this codebase has never heard of, and the core does not need an edit or an
