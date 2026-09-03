@@ -18,6 +18,36 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Web node: Chats, with the URL as the router (M10-D).** `web/app/stores/
+  threads.mjs` is the first of the six domain stores — direct messages keyed by
+  peer address, deliberately in JS and deliberately temporary, since M10's
+  sequencing builds screens against the contract first and moves each store into
+  Rust afterwards without its callers changing. It enforces two rules worth
+  naming: a thread is keyed on the **authenticated** sender only, so an unsigned
+  envelope, a bad signature or SRC8 (`from: null`) is counted and surfaced but
+  never filed into a conversation, because a list keyed on anything weaker is
+  spoofable; and an optimistic send is a real row carrying the true envelope id,
+  so acks reconcile by id rather than by position. 13 tests.
+  `web/app/screens/chat.mjs` renders the list, thread, day separators, author
+  runs and composer; Enter sends and Shift+Enter newlines, and the composer
+  toggles its own Send button in place rather than re-rendering, which would
+  destroy the textarea mid-typing and drop the caret.
+  **The URL is now the source of truth** rather than a mirror: navigation writes
+  a hash and the `hashchange` handler is the only thing that moves the app, so a
+  thread is refresh-safe and shareable (the param *is* the 16-hex address the
+  domain layer uses), the browser back button is a real navigation instead of
+  app-managed slide state, and there is one code path into a screen rather than
+  two that can disagree. `SporeClient` gains `keyStateFor()`, which reports
+  sealed / ratchet / cleartext from observed evidence — ratchet only when a
+  ratcheted envelope has actually arrived from that peer, never guessed.
+  Three defects found by looking at the rendered result: every outgoing bubble
+  sat permanently at 60% opacity, because the design system's momentary
+  `data-state="sending"` fade was mapped onto "still travelling", a state that
+  lasts until the envelope's TTL expires — the receipt line carries it in words
+  instead, which is also the accessible form; own messages rendered an empty
+  bordered avatar box beside every bubble; and the app bar's back control used
+  the swap glyph instead of a chevron. Wire unchanged: no core or ABI change.
+
 - **Web node: shell, navigation and onboarding on HARDBRUT/3 (M10-D, partial).**
   `web/app/` gains the first screens built against the `SporeClient` contract:
   the app shell (nav rail, bottom nav, app bar, one-pane/two-pane rules), the

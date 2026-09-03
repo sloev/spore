@@ -97,6 +97,7 @@ export class SporeClient {
     this._listeners = new Set();
     this._bridges = new Map(); // id -> { id, kind, transport, up, sent, received, lastFrameAt }
     this._pending = new Map(); // idHex -> { id, at, expiresAt }
+    this._ratchetPeers = new Set(); // peers observed using a live §7 ratchet
     this._timer = null;
     this._announceEveryMs = ANNOUNCE_MIN_MS;
     this._announceAt = 0;
@@ -232,6 +233,25 @@ export class SporeClient {
   canSealTo(toHex) {
     this._assertReady();
     return this.node.canSealTo(unhex(toHex));
+  }
+
+  /**
+   * How a DM to this peer would actually go out, as one of three states the
+   * node can genuinely answer:
+   *
+   *   'ratchet'   — a live §7 session exists, evidenced by a ratcheted envelope
+   *                 having arrived from them.
+   *   'sealed'    — their prekey is known, so a one-shot seal is possible.
+   *   'cleartext' — their ANNOUNCE has never been heard; there is no key, and
+   *                 the message really does travel in the clear.
+   *
+   * Ratchet is reported only from observed evidence rather than guessed, so the
+   * badge never claims a session the node cannot demonstrate.
+   */
+  keyStateFor(toHex) {
+    this._assertReady();
+    if (this._ratchetPeers.has(toHex)) return 'ratchet';
+    return this.canSealTo(toHex) ? 'sealed' : 'cleartext';
   }
 
   /** Publish to a feed topic (one-to-many, cleartext by design). */
@@ -451,7 +471,11 @@ export class SporeClient {
       let body = this.spore.payload(env);
 
       if (encrypted && from) {
-        const opened = this.node.openDm(from, body, (flags & FLAG_RATCHET) !== 0);
+        const ratcheted = (flags & FLAG_RATCHET) !== 0;
+        // Evidence of a live session, recorded so keyStateFor() reports the
+        // ratchet state from something observed rather than assumed.
+        if (ratcheted) this._ratchetPeers.add(hex(from));
+        const opened = this.node.openDm(from, body, ratcheted);
         if (!opened) {
           // A real state, not a bug: a prekey may have expired past the offline
           // window. Surface it rather than dropping the message silently.
