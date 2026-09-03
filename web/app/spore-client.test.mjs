@@ -227,5 +227,35 @@ await test('publishFile() then listFiles() round-trips through the kernel', asyn
   client.dispose();
 });
 
+await test('peers() enumerates what the browser previously could not see', async () => {
+  const alice = new SporeClient({ storage: memoryAdapter() });
+  const bob = new SporeClient({ storage: memoryAdapter() });
+  const idA = await alice.init(wasmBytes);
+  const idB = await bob.init(wasmBytes);
+
+  assert.deepStrictEqual(alice.peers(), [], 'a node that has heard nothing knows nobody');
+
+  const [ta, tb] = loopbackPair();
+  alice.attachTransport('loopback', ta);
+  bob.attachTransport('loopback', tb);
+
+  // A DM is signed traffic, which is what puts a peer on the list.
+  const heard = waitFor(bob, 'EnvelopeReceived');
+  alice.sendDirect(idB.addrHex, enc('hello'));
+  await heard;
+
+  const seen = bob.peers();
+  assert.ok(seen.some((p) => p.addrHex === idA.addrHex), 'bob has now heard from alice');
+  const a = seen.find((p) => p.addrHex === idA.addrHex);
+  assert.strictEqual(typeof a.ageSecs, 'number');
+  assert.strictEqual(typeof a.hasPrekey, 'boolean');
+  // hasPrekey is what makes sealing possible, so the two must agree rather than
+  // being derived separately in the UI.
+  assert.strictEqual(a.hasPrekey, bob.canSealTo(idA.addrHex));
+
+  alice.dispose();
+  bob.dispose();
+});
+
 console.log(failures ? '\n' + failures + ' failing' : '\nall passing');
 process.exit(failures ? 1 : 0);

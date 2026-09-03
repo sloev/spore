@@ -349,6 +349,39 @@ pub unsafe extern "C" fn spore_node_file_name(n: *mut Node, magnet: *const u8) -
     }
 }
 
+/// Peers we have heard from, freshest first. Returns packed
+/// `[n:4 BE] ([addr:8] [age_secs:4 BE] [has_prekey:1] [name_len:4 BE] [name])...`
+///
+/// The browser had no way to enumerate peers at all, while Android's JNI has had
+/// `nativePeers` since M8 — one of the concrete divergences Milestone 10 exists
+/// to close. The capability itself is already in the portable core
+/// (`Node::peers`, `Node::peer_name`); only this export was missing.
+///
+/// `name` is what the peer **claims** to be called in its ANNOUNCE. Anyone may
+/// announce any name, so it is a display hint and never identity — offer it as
+/// the default when the user assigns a local petname, and show it as a claim.
+/// `has_prekey` is what decides whether a message to them can actually be
+/// sealed, which is why it travels with the address rather than being guessed.
+///
+/// # Safety
+/// `n` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_peers(n: *mut Node, now: u32) -> i64 {
+    let node = &*n;
+    let peers = node.peers(now);
+    let mut out = Vec::new();
+    out.extend_from_slice(&(peers.len() as u32).to_be_bytes());
+    for (addr, age, has_prekey) in &peers {
+        out.extend_from_slice(addr);
+        out.extend_from_slice(&age.to_be_bytes());
+        out.push(u8::from(*has_prekey));
+        let name = node.peer_name(addr).unwrap_or("");
+        out.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        out.extend_from_slice(name.as_bytes());
+    }
+    pack(out)
+}
+
 /// List all locally stored files. Returns packed `[n:4 BE] [name_len:4 BE] [name] [magnet:16] ...`
 ///
 /// # Safety
