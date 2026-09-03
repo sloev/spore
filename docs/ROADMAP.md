@@ -699,6 +699,29 @@ dead weight. The communicator is a Cargo feature, default on, off for ESP32 —
 excluded by design, not by limitation. Portability of the *kernel* is the win;
 the app layer goes where there is a user.
 
+**Desktop is a webview *and* a daemon — not the web node in a window.** If the
+desktop build is Tauri (or equivalent), it reuses the web UI, but it is not
+limited to what a browser can do: it also has every native bridge. So the host,
+not the UI, decides which transports exist. `SporeClient` therefore takes a
+transport registry rather than importing one — a browser gets
+`BROWSER_TRANSPORTS`, a desktop host passes that plus the eleven native bridges
+proxied to Rust.
+
+That leaves one open decision, and it is the more consequential half:
+
+| | Where the node runs | Consequence |
+|---|---|---|
+| **A** | wasm in the webview; native bridges proxied in over IPC | Two envelope paths to keep in step; the node still has no threads, no sockets, no filesystem |
+| **B** | native Rust node; the webview is pure UI over IPC | The daemon *is* the app. Real sockets, threads and filesystem, all eleven bridges natively, one node |
+
+**B is the better shape**, and it is the strongest argument yet for M10-B/C: if
+the communicator is in Rust behind one app-level ABI, then desktop is that ABI
+over IPC and the browser is the same ABI over wasm. The screens cannot tell the
+difference, because they only ever talk to `SporeClient`. That is precisely what
+contract-first was meant to buy, and it means **desktop should follow M10-C
+rather than precede it** — building it before then would mean writing the IPC
+layer against an interface that is about to be replaced.
+
 **Sequencing (locked): contract first, stores after.** The `SporeClient`
 command+event interface is defined *first* and is the UI's only contract. The web
 UI is built against it immediately, backed initially by thin JS stores; those
@@ -729,6 +752,7 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
 | M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
+| M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
 
 **Scope: the web node is not the landing site.** Two different products live in
 this repo and M10 touches exactly one of them.

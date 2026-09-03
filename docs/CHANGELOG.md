@@ -18,6 +18,24 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **Transports are host-provided, not browser-assumed.** `SporeClient` now takes
+  a transport registry instead of importing one, and `TRANSPORTS` is renamed
+  `BROWSER_TRANSPORTS` to say what it actually is. The previous framing — that
+  the eleven native bridges are "simply not in this file" — silently hardcoded
+  *browser* as the only host, which stops being true the moment desktop is a
+  Tauri build: that is a webview **and** a daemon, so it offers the browser set
+  plus UDP, TCP, Tor, I2P, ICMP, iroh, SSB, copyparty, spool, foldersync and
+  AX.25 proxied to Rust. A browser still cannot open any of them, so the
+  bridge-add screen still hides them there — the rule is "a control whose
+  backend is missing", not "these bridges are forbidden". Tested both ways: the
+  browser registry excludes them, and a host supplying its own can list *and*
+  open one. `docs/ROADMAP.md` gains M10-F and records the consequential half of
+  the decision — whether desktop runs wasm in the webview or a native node with
+  the webview as pure UI. The latter is the better shape and means desktop
+  should follow M10-C rather than precede it, since it is then the same
+  app-level ABI over IPC that the browser reaches over wasm. Wire unchanged: no
+  core or ABI change.
+
 - **Web node: Chats, with the URL as the router (M10-D).** `web/app/stores/
   threads.mjs` is the first of the six domain stores — direct messages keyed by
   peer address, deliberately in JS and deliberately temporary, since M10's

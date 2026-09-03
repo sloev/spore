@@ -20,7 +20,7 @@
 //   const identity = await client.init(fetch('./spore.wasm'));
 
 import { loadSpore, Hub, FLAG_ENCRYPTED, FLAG_RATCHET, ZERO_DEST } from '../spore.mjs';
-import { TRANSPORTS } from './transports.mjs';
+import { BROWSER_TRANSPORTS } from './transports.mjs';
 
 /** Storage keys. Deliberately the same strings the pre-M10 node used, so an
  * existing standalone keeps its identity across the rewrite instead of silently
@@ -85,10 +85,17 @@ export class SporeClient {
    * @param {Object}  opts.storage  the storage port — { get, set, remove }, sync
    *   or async. M10-A replaces this with a Rust-side port; keep every call to it
    *   awaited so that swap is invisible here.
+   * @param {Array}   [opts.transports]  the transport registry this host can
+   *   actually open. Defaults to the browser set. A host with more capability
+   *   supplies a superset: a Tauri desktop build is a webview *and* a daemon, so
+   *   it offers the browser transports plus the eleven native bridges (UDP, TCP,
+   *   Tor, I2P, ICMP, iroh, SSB, copyparty, spool, foldersync, AX.25) proxied to
+   *   Rust. Which transports exist is a property of the host, not of this file.
    */
-  constructor({ storage } = {}) {
+  constructor({ storage, transports = BROWSER_TRANSPORTS } = {}) {
     if (!storage) throw new Error('SporeClient needs a storage port');
     this.storage = storage;
+    this.transports = transports;
     this.spore = null;
     this.node = null;
     this.hub = null;
@@ -307,14 +314,15 @@ export class SporeClient {
 
   /**
    * Which transports can actually run here, answered by feature-detecting the
-   * registry — never by user-agent sniffing. The bridge-add screen renders only
-   * what this returns, which is how the eleven daemon-only bridges never appear
-   * in the browser at all.
+   * host's registry — never by user-agent sniffing. The bridge-add screen
+   * renders only what this returns, which is how the eleven native bridges never
+   * appear in a *browser* while still being offered by a desktop host that can
+   * genuinely open them.
    *
    * @returns {Array<{kind: string, label: string, needsGesture: boolean}>}
    */
   availableTransports() {
-    return TRANSPORTS.filter((t) => {
+    return this.transports.filter((t) => {
       try { return t.available(); } catch { return false; }
     }).map(({ kind, label, needsGesture }) => ({ kind, label, needsGesture }));
   }
@@ -328,7 +336,7 @@ export class SporeClient {
    */
   async addBridge(config) {
     this._assertReady();
-    const spec = TRANSPORTS.find((t) => t.kind === config.kind);
+    const spec = this.transports.find((t) => t.kind === config.kind);
     if (!spec) throw new Error('unknown transport kind: ' + config.kind);
 
     if (!spec.open) throw new Error(config.kind + ' cannot be opened from a config; build it and call attachTransport()');
