@@ -533,6 +533,11 @@ export class SporeClient {
     }
   }
 
+  /**
+   * Send locally-originated forwards on every bridge. No split-horizon applies
+   * here: nothing arrived, so there is no link to exclude. The Hub handles the
+   * received case, where the forward's kind decides.
+   */
   _dispatch(forwards) {
     for (const f of forwards) {
       for (const r of this._bridges.values()) {

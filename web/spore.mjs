@@ -60,20 +60,40 @@ class Spore {
   _parse(blob) {
     const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
     let o = 0;
-    const list = () => {
-      const n = dv.getUint32(o, true);
+
+    // Forwards carry the router's own decision about how they travel, so the
+    // caller never has to guess. See FORWARD_FLOOD / FORWARD_DIRECTED.
+    const nf = dv.getUint32(o, true);
+    o += 4;
+    const forwards = [];
+    for (let i = 0; i < nf; i++) {
+      const kind = blob[o];
+      o += 1;
+      const iface = dv.getUint16(o, true);
+      o += 2;
+      const l = dv.getUint32(o, true);
       o += 4;
-      const arr = [];
-      for (let i = 0; i < n; i++) {
-        const l = dv.getUint32(o, true);
-        o += 4;
-        arr.push(blob.slice(o, o + l));
-        o += l;
-      }
-      return arr;
-    };
-    const forwards = list();
-    const delivered = list();
+      // The routing metadata rides along as properties on the byte array rather
+      // than wrapping it. `forwards` stays an array of wires — the shape
+      // web/test.mjs pins as the frozen JS contract — so every existing consumer
+      // (`recv(f)`, `t.send(f)`) keeps working untouched, while a caller that
+      // cares about routing can read `f.kind` / `f.iface`.
+      const wire = blob.slice(o, o + l);
+      wire.kind = kind;
+      wire.iface = iface;
+      forwards.push(wire);
+      o += l;
+    }
+
+    const nd = dv.getUint32(o, true);
+    o += 4;
+    const delivered = [];
+    for (let i = 0; i < nd; i++) {
+      const l = dv.getUint32(o, true);
+      o += 4;
+      delivered.push(blob.slice(o, o + l));
+      o += l;
+    }
     return { forwards, delivered };
   }
 
@@ -192,6 +212,24 @@ class Spore {
     return { key: out.slice(0, 32), name: new TextDecoder().decode(out.slice(32)) };
   }
 }
+
+/**
+ * How a forward should travel, as decided by the router rather than guessed by
+ * the caller. Each forward carries a kind and an interface:
+ *
+ *   FORWARD_FLOOD    — `iface` is the one to SKIP. `NO_IFACE` means skip
+ *                      nothing, which is what a locally-originated envelope
+ *                      says: a delivery receipt is created here, not relayed,
+ *                      so there is no arrival link to withhold it from.
+ *   FORWARD_DIRECTED — `iface` is the one to USE, toward a known neighbour.
+ *
+ * Guessing this instead of reading it is what used to drop every receipt on a
+ * two-node link: the only route home was the one link a blanket split-horizon
+ * excluded.
+ */
+export const FORWARD_FLOOD = 0;
+export const FORWARD_DIRECTED = 1;
+export const NO_IFACE = 0xffff;
 
 /** Envelope flag bits the DM path needs (§2). */
 export const FLAG_ENCRYPTED = 0x01;
@@ -476,9 +514,27 @@ export class Hub {
     for (const env of delivered) if (this.onDeliver) this.onDeliver(env);
     this._dispatch(forwards, from);
   }
+  /**
+   * Relay forwards, honouring the kind the router assigned.
+   *
+   * Split-horizon (never send back where it came from) applies to **floods
+   * only**. A directed forward is aimed at a specific neighbour, and on a link
+   * with one transport the arrival link is the only way to reach them — so
+   * excluding it there silently drops the message. That is exactly what used to
+   * happen to delivery receipts, which is why "delivered" was unreachable
+   * between two directly-linked browser nodes.
+   */
   _dispatch(forwards, except) {
-    for (const f of forwards)
-      for (const t of this.transports) if (t !== except) t.send(f);
+    for (const f of forwards) {
+      // Withhold from the arrival link only when the router actually asked for
+      // it: a flood naming a real interface. A directed forward, or a flood
+      // marked NO_IFACE (this node originated it), goes out everywhere.
+      const withhold = f.kind === FORWARD_FLOOD && f.iface !== NO_IFACE;
+      for (const t of this.transports) {
+        if (withhold && t === except) continue;
+        t.send(f);
+      }
+    }
   }
   /** Originate a message from this node onto every transport. */
   send(dest, payload) {

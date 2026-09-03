@@ -1098,6 +1098,54 @@ mod tests {
         }
     }
 
+    /// A delivery receipt must be able to reach the sender on a link that has
+    /// only one interface — a direct UDP peer, one serial cable, one browser
+    /// transport. It could not, until the receipt stopped being emitted with the
+    /// arrival interface as its `except`: hubs honour `except`, so the only
+    /// route home was the one excluded, and "delivered" was unreachable
+    /// point-to-point on every platform.
+    #[test]
+    fn a_receipt_can_reach_the_sender_on_a_single_interface_link() {
+        fn pump(to: &mut Node, fs: Vec<Forward>, iface: Iface, now: u32) -> Vec<Forward> {
+            let mut out = Vec::new();
+            for f in fs {
+                let bytes = match f {
+                    Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+                };
+                out.extend(to.on_rx(&bytes, iface, None, now).forwards);
+            }
+            out
+        }
+
+        let mut a = Node::new("a", &[]);
+        let mut b = Node::new("b", &[]);
+        let now = 1_700_000_000u32;
+
+        let fa = a.build_announce(now);
+        pump(&mut b, fa, 0, now);
+        let fb = b.build_announce(now);
+        pump(&mut a, fb, 0, now);
+
+        let dest = b.addr;
+        let (id, forwards, _) = a.send_direct(dest, b"ping", now);
+        let back = pump(&mut b, forwards, 0, now);
+        assert!(!back.is_empty(), "B must emit a receipt for an ACKREQ message");
+
+        // The receipt is this node's own origination, so it excludes nothing.
+        // Anything else and a single-interface hub drops it.
+        for f in &back {
+            if let Forward::Flood { except, .. } = f {
+                assert_eq!(
+                    *except, NO_IFACE,
+                    "a receipt must not be withheld from the interface it would travel home on"
+                );
+            }
+        }
+
+        pump(&mut a, back, 0, now);
+        assert!(a.acked(&id), "the sender must learn its message was delivered");
+    }
+
     #[test]
     fn seal_open_roundtrip() {
         let bob = Node::new("bob", &[]);
