@@ -1470,8 +1470,12 @@ Carried deliberately, not overlooked.
   diverge onto different keys; `topic::key_id` makes that legible but does not
   resolve it. Solving it properly is distributed agreement, not cryptography, and it
   is the largest honest gap between a SPORE group and a messenger's.
-- **`with_node` reentrancy** is documented but not enforced. An embedder whose
-  closure calls back into the hub self-deadlocks; a re-entrant guard or a `&Node`
-  variant would make that unrepresentable.
+- ~~**`with_node` reentrancy** is documented but not enforced. An embedder whose
+  closure calls back into the hub self-deadlocks.~~ **Fixed:** a per-hub,
+  per-thread `ReentrancyGuard` now panics naming the bug instead of deadlocking
+  silently (`with_node_reentry_panics_instead_of_deadlocking`,
+  `src/bridge/hub.rs`). The call shape itself is still unsupported — a closure
+  that calls back into its own hub still cannot succeed — but the failure is now
+  a diagnosable panic instead of a silent hang.
 - **Hardware-verified status** for every 🧪 bridge. No marketing claim until the
   `HARDWARE.md` procedure has actually been run.
