@@ -344,7 +344,6 @@ Status is the emoji on each name. Follow the link for the deep dive.
 | Protocol | Form | `U` | MTU | One-line |
 |---|---|---|---|---|
 || [UDP / IPv4 broadcast ✅](#udp) | dgram | `SocketAddr` | 1400 | LAN flood over limited or primary-subnet broadcast |
-|| [WebTransport 🧪](#webtransport) | dgram | `Url` | 1400 | Browser→Native via TLS-terminating proxy |
 | [Ethernet 802.3 ⚪](#ethernet) | dgram | `[u8;6]` | 1500 | raw L2 frames, EtherType-tagged |
 | [Wi-Fi 802.11 ⚪](#wifi) | dgram | `[u8;6]` | 2304 | raw/monitor-mode frames |
 | [Wi-Fi Direct 🟡](#wifi-direct) | dgram | `Ipv4Addr` | 1500 | UDP bridge over the P2P group interface |
@@ -410,7 +409,7 @@ unchanged** — point it at the right address on the overlay's interface.
 | [libp2p (gossipsub) ⚪](#libp2p) | stream | PeerId | var | pub/sub overlay; IPFS swarm |
 | [TCP (KISS) ✅](#tcp) | stream | conn | 64 K | point-to-point KISS over a socket; what Tor fronts |
 | [WebSocket ✅](#websocket) | stream | conn | 64 K | binary frames to a relay or peer |
-| [WebTransport ⚪](#webtransport) | stream | conn | var | QUIC datagrams/streams in the browser |
+| [WebTransport 🟡](#webtransport) | dgram | connection/session | ~1200 | Browser↔native via TLS-terminating proxy; browser shim written, unwired |
 | [WebRTC DataChannel 🧪](#webrtc) | stream | `String` | 16 K | direct browser P2P, serverless signaling |
 | [WebTorrent swarm 🧪](#webtorrent) | stream | `String` | 16 K | tracker rendezvous, then WebRTC P2P |
 | [Web Serial / USB 🧪](#web-serial) | stream | conn | var | KISS to a TNC/RNode/ESP32 from a tab |
@@ -1792,8 +1791,8 @@ with lower latency and no head-of-line blocking.
 | `U` | connection/session |
 | MTU | ~1200 (QUIC datagram) |
 | State | stateful |
-| Status | ⚪ planned |
-| Code | browser `WebTransport` shim |
+| Status | 🟡 partial — browser shim written, not wired in; no native endpoint |
+| Code | `web/transports/webtransport.mjs` (browser `WebTransport` shim) |
 
 <details><summary>Deep dive</summary>
 
@@ -1801,9 +1800,62 @@ with lower latency and no head-of-line blocking.
 per datagram) or a bidirectional stream with KISS framing. Needs an HTTP/3 server
 endpoint. `U` is the session.
 
+**Current state.** `web/transports/webtransport.mjs` implements a real
+`WebTransportBridge` — connect, send, a datagram read loop — but it is not
+imported by `web/spore.mjs` or `build-standalone.mjs`, so nothing in the app
+can reach it today. There is no native/server counterpart either: the
+`spikes/001-webtransport-native` spike validated feasibility (a feature-gated
+`wtransport`+`quinn` server mapping onto `DatagramPort`, same shape as
+`IrohPort`) but nothing from it has landed outside the spike branch. Both
+halves are tracked as the same open item in [Roadmap](ROADMAP.md) M2
+("browser↔native over QUIC/WebTransport").
+
 **Note on references.** WebTransport is **not** a numbered RFC yet — it is a **W3C
 Working Draft** plus IETF drafts, transported over HTTP/3. (Do not confuse it with
 RFC 9297, *Proxying UDP in HTTP*, which is a different mechanism.)
+
+**Deployment: fronting with a reverse proxy.** Once this bridge exists, browser
+WebTransport requires HTTPS termination, so a production deployment needs a
+reverse proxy handling TLS and converting WebTransport to plain UDP in front of
+the SPORE daemon. This is forward-looking — write-ahead for when the bridge
+above moves past ⚪ planned, not a procedure that works today.
+
+<details><summary>Caddy / Nginx sketch</summary>
+
+```caddy
+# Caddyfile
+proxy.spore.example {
+  reverse_proxy https://spore-daemon.internal {
+    transport http {
+      versions h3
+    }
+    rewrite /spore-transport /udp/127.0.0.1:7439
+  }
+}
+```
+
+```nginx
+# nginx.conf
+server {
+  listen 443 ssl http2;
+  server_name proxy.spore.example;
+
+  ssl_certificate /path/to/cert.pem;
+  ssl_certificate_key /path/to/key.pem;
+
+  location /spore-transport {
+    proxy_pass http://127.0.0.1:7439/udp;
+    proxy_http_version 3.0;
+  }
+}
+```
+
+Production notes: use Let's Encrypt for certificates; bind to port 443 (browsers
+require the standard HTTPS port); allow UDP 7439 through the firewall; for
+development, self-signed certificates work with `#certhash` in the URL —
+`https://localhost:4433/spore-transport#sha-256=...`.
+
+</details>
 
 **References.** [W3C WebTransport](https://www.w3.org/TR/webtransport/);
 [draft-ietf-webtrans-http3](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/);
@@ -2680,37 +2732,4 @@ Building a new bridge? Work down this list:
 `src/bridge/` must be documented here, and every path or `bridge::` module this
 document cites must exist. A bridge and its description cannot drift apart without
 failing the build.*
-
-
-#### WebTransport
-
-<details>
-<summary>WebTransport bridge - Browser API for HTTP/3 communication</summary>
-
-**Status**: 🟢 implemented (browser side)
-
-WebTransport is a browser API for sending and receiving data over HTTP/3. SPORE uses it to connect browsers to native nodes via a proxy that terminates TLS and forwards UDP.
-
-##### Bridge mapping
-- **Form**: Datagram (`dgram`)
-- **Underlay address (`U`)**: `Url` (the WebTransport URL)
-- **MTU**: 1400 bytes (same as UDP)
-
-##### Implementation
-The browser-side implementation is in `web/transports/webtransport.mjs`. It:
-1. Opens a WebTransport session to the proxy URL
-2. Uses the datagram API for bidirectional communication
-3. Bridges datagrams to the SPORE hub interface
-
-The native side requires a proxy that:
-- Terminates TLS (Caddy/Nginx)
-- Forwards WebTransport datagrams to UDP port 7439
-- Runs on port 443 (browser requirement)
-
-```
-Browser  --WebTransport (HTTPS)-->  Proxy  --plaintext UDP-->  SPORE Daemon
-Browser  <--WebTransport datagrams--  Proxy  <--UDP responses--  SPORE Daemon
-```
-
-See [Proxy setup](../docs/PROXY_SETUP.md) for sample configurations.
 </details>
