@@ -25,9 +25,11 @@ spec here; the code is the truth.
 - **Honesty over polish:** 🧪 markers, "Still open", served-vs-fetching language, and
   **no fake UI** — never a control whose backend is missing.
 - **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for colour, contrast,
-  motion and components — SPORE no longer maintains its own design-language document;
-  `web/vendor/hardbrut/hardbrut.css` is vendored at build time and trusted as-is.
-  Never signal failure by colour alone.
+  motion and components — SPORE no longer maintains its own design-language document.
+  The flat `web/vendor/hardbrut/hardbrut.css` is vendored at build time and trusted
+  as-is for the Pages site and Android; the web app (the standalone) instead
+  consumes **HARDBRUT/3** at `web/vendor/hardbrut3/` (M10-D) — both are upstream,
+  neither is a SPORE-authored fork. Never signal failure by colour alone.
 - **Zero external network requests** in `web/spore-standalone.html` (CI greps for it).
 - Motion fully static under reduced motion / `ANIMATOR_DURATION_SCALE == 0`. Sound and
   particle bursts stay **off** until the user enables them.

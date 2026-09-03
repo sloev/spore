@@ -49,8 +49,8 @@ prebuilt binary is published yet; build it from source.</p>
 <h2 class="text-h5">📡 ESP32 relay <span class="badge">In development</span></h2>
 <p class="text-muted">A $5 board as a standalone relay — no OS, no server, cheap
 enough to leave somewhere and not worry about.</p>
-<p class="text-muted">Not runnable yet: the core builds for the board, the radio
-and storage are still being written.</p>
+<p class="text-muted">Not runnable yet: the core boots on a real board, but the
+radio, storage and phone-link code is untested over the air.</p>
 </div>
 <div class="card-footer cluster">
 <a class="btn btn-cancel" href="esp32.html">How it works</a>

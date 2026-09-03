@@ -72,7 +72,9 @@ Report these only if you can show something *worse* than what is written here.
   size classes.
 - **No third-party audit** has been performed on any part of this.
 - **`with_node` is not reentrant** — an embedder whose closure calls back into the
-  hub deadlocks that thread. Documented, not prevented.
+  hub used to deadlock that thread silently. It now panics naming the bug instead
+  (per-hub, per-thread guard), which is a diagnosable failure rather than a hang,
+  but the underlying call shape is still not supported.
 - **The remaining still-open items** are listed at the end of
   [`docs/SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md). They are carried
   deliberately and are not secrets.

@@ -19,9 +19,10 @@ on either side is running "gateway" code: the board passes messages between the
 things it's connected to, the phone does the same, and a route through both is
 just what that adds up to.
 
-**You cannot run this yet.** The toolchain and the core are done and building in
-CI; the radio, the storage and the phone link are not written. The honest state
-of each part is in the table further down, and the
+**You cannot run this yet.** The toolchain and the core are done, verified on a
+real board; the radio, storage and phone-link code is written but has not yet
+carried a real envelope over the air. The honest state of each part is in the
+table further down, and the
 [roadmap](roadmap.html#milestone-8--embedded-esp32-runtime-raw-80211-relay) tracks
 the rest.
 
@@ -93,15 +94,18 @@ plan rather than a thing you can use:
 |---|---|
 | The SPORE core runs on ESP32-S3 | ✅ builds and links in CI, unmodified — no ESP-specific branches |
 | Footprint measured | ✅ ~13% of a 4 MB flash part, ~13% of 512 KB RAM |
-| Booting on a real board | ⬜ never flashed — the binary exists, nothing has run it |
-| Raw 802.11 send/receive | ⬜ not written |
-| Flash storage | ⬜ not written |
-| USB and Bluetooth link to a phone | ⬜ not written |
+| Booting on a real board | ✅ verified — a LOLIN S2 Mini boots, derives an identity, and a signature it makes verifies on the board itself |
+| Raw 802.11 receive | ✅ the promiscuous filter that separates SPORE frames from everything else in the air is shipped and fuzz-tested |
+| Raw 802.11 send | 🧪 the injection code is written; nothing has been transmitted over the air yet |
+| Flash storage | 🧪 the partition layout and boot-time adoption are written; untested on hardware |
+| USB link to a phone | 🧪 the wired-tether code is written; untested on hardware |
+| Bluetooth link to a phone | ⬜ not built |
 
-No claim on this page has been checked on hardware. Everything green above is a
-build-time fact, which is a different and much weaker thing —
-[Hardware verification](hardware.html) is where a real device run gets recorded,
-and there is not one for this yet.
+Two rows are checked against a real device — [Hardware
+verification](hardware.html) row 21 is where that run is recorded. Everything
+else marked 🧪 is real code that has not yet touched hardware, which is a
+different and much weaker thing than ✅; the [roadmap](roadmap.html#milestone-8--embedded-esp32-runtime-raw-80211-relay)
+tracks each remaining device-pair run.
 
 ## Building it yourself
 
