@@ -50,6 +50,36 @@ Two conventions specific to this project:
   inside the bound while a real efficiency regression still trips it. Caught
   because it failed a pull request that changed no Rust at all. Wire unchanged:
   test only.
+- **The old web node is deleted; the standalone now ships the M10-D app.**
+  `build-standalone.mjs` used to *contain* the app — ~1580 lines inside one
+  template literal — and now reads `web/app/` from disk like every other module.
+  It shrinks from 1650 lines to ~185. Three things follow. The backtick hazard is
+  gone (a backtick anywhere in the app source used to end the literal early and
+  break the build); the app is editable, greppable and testable as ordinary
+  files; and the design system is inlined from `web/vendor/hardbrut3/` in the
+  order its own `styles.css` declares, so it cannot drift from upstream. Inter 900
+  is inlined as a data URL, keeping the zero-external-request guarantee — verified
+  by the two checks CI runs plus a browser drive of the built file.
+  **A build-time self-check was added because a browser was the only thing that
+  caught the first bug here:** the emitted app is one *classic* script, where
+  `import.meta` is a syntax error, and a syntax error in a classic script fails
+  **silently** — the page loads, the script never runs, and you get a blank shell.
+  `node --check` cannot catch it, because each module is valid on its own; it is
+  the classic-script context that changes what is legal. The build now parses its
+  own output and fails with a line number instead. `main.mjs` resolves the dev
+  wasm path from `document.baseURI` rather than `import.meta.url`.
+  Deleted `web/ui/delivery-status.mjs`: `chat.mjs` supersedes it and it emitted
+  `--ok`/`--warn` CSS variables that do not exist in HARDBRUT/3. Its nine boundary
+  tests were not dropped but **moved to `spore-client.test.mjs`**, which is where
+  the expiry rule now lives. `web/README.md` is corrected — its claim that the
+  one-file node lets you wire every transport at runtime described the deleted
+  bridges UI, which has not been rebuilt yet. **What the standalone loses for
+  now:** the bridge add/manage screen, feeds, the file browser and diagnostics.
+  Onboarding can still attach a WebSocket relay, every transport still ships in
+  the bundle and is reachable from `SporeClient` — what is missing is the UI in
+  front of them, and Blogs/Files/Settings say so rather than showing a plausible
+  empty state. Wire unchanged: no core or ABI change.
+
 - **Web node: Contacts, and the browser can finally see its peers (M10-D).**
   Adds `spore_node_peers` to the WASM ABI. The browser had **no way to enumerate
   peers at all**, while Android's JNI has had `nativePeers` since M8 — a concrete

@@ -750,9 +750,34 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ⬜ not started | Same pattern as `spore_fill_random`; `SpillBackend` is the in-tree precedent |
 | M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
-| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |
+| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress — **the old app is deleted and the standalone now ships this one** | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 | M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
+
+**Known bug found during M10-D: delivery receipts never come back on a
+two-node link.** Pre-existing, not introduced by the rewrite — the pre-M10 app had
+the same defect, so M9's "delivered" state has never been reachable in a browser
+between two directly-linked nodes.
+
+The core already decides routing and says so in its own types:
+
+```rust
+Forward::Flood    { except: Iface, bytes }      // send everywhere except here
+Forward::Directed { iface: Iface, nbr, bytes }  // send exactly here
+```
+
+`forward_wires()` in `src/wasm.rs` flattens both variants to bare bytes, throwing
+that decision away. `Hub` in `web/spore.mjs` then re-invents split-horizon and
+applies it to *every* forward — including a directed receipt heading back to the
+sender. On a link with one transport the receipt's only route out is the one the
+Hub excludes, so it is dropped. Verified: feeding the same forwards back by hand
+makes `acked(id)` true.
+
+The fix is to stop discarding the core's answer — carry a kind byte per forward
+across the wasm blob so `Hub` applies split-horizon to floods only. The blob format
+is internal (`web/spore.mjs` is its only consumer; `bindings/` uses the C ABI and
+Android uses JNI), so this needs no frozen-file change. Its own PR, not folded into
+a screen.
 
 **Scope: the web node is not the landing site.** Two different products live in
 this repo and M10 touches exactly one of them.

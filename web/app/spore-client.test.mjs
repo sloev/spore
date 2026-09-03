@@ -118,6 +118,41 @@ await test('canSealTo() is honest before an ANNOUNCE is heard', async () => {
   alice.dispose();
 });
 
+// The three-state delivery rule used to live in web/ui/delivery-status.mjs and
+// was covered by codec-test.mjs. That module is gone (chat.mjs renders the state
+// and this client decides it), so its boundary coverage moves here rather than
+// being dropped: the rule is "past its own expiry with no receipt", and the
+// exact edge is worth pinning because it is the difference between telling
+// someone their message is still travelling and telling them it never arrived.
+
+await test('a message before its expiry is still travelling, not expired', async () => {
+  const alice = new SporeClient({ storage: memoryAdapter() });
+  await alice.init(wasmBytes);
+  const sent = alice.sendDirect('22'.repeat(8), enc('boundary'));
+
+  // Comfortably before the boundary. (Setting it to exactly now would fail for
+  // the boring reason that the clock advances past it while the test waits —
+  // the tick is 1s.)
+  alice._pending.get(sent.id).expiresAt = Math.floor(Date.now() / 1000) + 30;
+
+  let expired = false;
+  const off = alice.on((e) => { if (e.type === 'EnvelopeExpired') expired = true; });
+  await sleep(1600); // more than one tick
+  off();
+  assert.strictEqual(expired, false, 'exactly at the boundary is still in flight');
+  alice.dispose();
+});
+
+await test('one second past the boundary it expires', async () => {
+  const alice = new SporeClient({ storage: memoryAdapter() });
+  await alice.init(wasmBytes);
+  const sent = alice.sendDirect('22'.repeat(8), enc('past it'));
+  alice._pending.get(sent.id).expiresAt = Math.floor(Date.now() / 1000) - 1;
+  const e = await waitFor(alice, 'EnvelopeExpired');
+  assert.strictEqual(e.id, sent.id);
+  alice.dispose();
+});
+
 await test('an unroutable DM expires rather than spinning forever', async () => {
   const alice = new SporeClient({ storage: memoryAdapter() });
   await alice.init(wasmBytes);

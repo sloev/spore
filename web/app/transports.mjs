@@ -163,4 +163,3 @@ export const BROWSER_TRANSPORTS = [
   },
 ];
 
-export { LoopbackTransport };
