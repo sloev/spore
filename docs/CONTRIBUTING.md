@@ -107,19 +107,22 @@ exactly the drift this section forbids.
 **Actions → "release bump" → Run workflow → `minor` or `major`.** That is the whole
 procedure. The workflow reads `Cargo.toml`, computes the next version (major resets
 minor to zero; the patch is always `0`, because rolling builds generate their own
-from the merge time), retitles the CHANGELOG's `## Unreleased` heading, and opens a
-PR. Merge it and the release publishes itself.
+from the merge time), and opens a PR. Merge it and the release publishes itself.
+Release notes are generated from the commits since the previous tag, so what a
+release says it contains is what actually merged — there is no changelog file to
+keep in step, and none to forget.
 
 Two things it refuses to do, both deliberately:
 
-- **Release with an empty `## Unreleased`.** A release nobody can read about is worse
-  than no release. Write entries as work merges — that is what the section is for.
+- **Release with no commits behind it.** A release nobody needs is worse than no
+  release.
 - **Reuse an existing tag.** It fails rather than clobbering.
 
 Before pressing it, make sure "Running everything locally" passes on `master`, and
 check the register's **Still open** section: anything there a user would reasonably
-assume is closed belongs in the CHANGELOG, not only in the register. Shipping a
-release that oversells is the failure mode this project cares about.
+assume is closed should be said plainly in the release notes, not left only in the
+register. Shipping a release that oversells is the failure mode this project cares
+about. Write commit subjects accordingly — they *are* the release notes.
 
 Afterwards, confirm the release actually serves bytes —
 `curl -fsI https://github.com/sloev/spore/releases/latest/download/spore-android.apk`.

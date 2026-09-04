@@ -114,7 +114,7 @@ impl TokenBucket {
 /// affordable once for a genuinely urgent message and ruinous for a flooder who
 /// must pay it *per envelope*. Below this class mail still flows — charged to its
 /// source's budget like anything else — and stamp still orders eviction and TX
-/// priority (§10.3). This constant governs one thing: skipping the bucket.
+/// priority (§5.3). This constant governs one thing: skipping the bucket.
 ///
 /// Deployers who need the old permissive behaviour can lower it; see the deployer
 /// note in `docs/BRIDGES.md`.

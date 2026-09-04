@@ -159,7 +159,7 @@ reproduce because the victim's envelope happened to carry class 2. Instrumented:
 
 **Patch.** `STAMP_QUOTA_BYPASS_BITS = 16` (~65k tries) replaces `> 0` in both
 paths. Below that class mail still flows, charged to its source's budget, and
-stamp still orders eviction and TX priority (§10.3).
+stamp still orders eviction and TX priority (§5.3).
 
 **Behaviour change.** Yes, and it is the reason this finding needed sign-off. A
 node running this throttles low-class stamped traffic that older nodes pass —

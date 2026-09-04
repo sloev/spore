@@ -6,13 +6,12 @@ This is the single forward-looking plan, organised as **milestones** rather than
 a flat PR map. Each milestone is a coherent body of work with a clear definition
 of done; PRs are the merge units inside a milestone, not the plan itself.
 
-"What shipped" lives in exactly one place — [Changelog](CHANGELOG.md)
-`## Unreleased` and the **Status** column in each milestone — so no second
-progress table can drift. Shipped work keeps its CHANGELOG entry and loses its
-spec here; the code is the truth.
+"What shipped" lives in git history and in the **Status** column of each
+milestone — so no second progress table can drift. Shipped work loses its spec
+here and keeps its commit; the code is the truth.
 
 **Read order for agents:** [Mission](MISSION.md) → this file →
-[Changelog](CHANGELOG.md) → SPEC/CONTINUITY only as needed. See
+[Spec](SPEC.md) as needed, plus `git log` for what shipped. See
 [Dev guide](DEV_GUIDE.md) for the full repo map.
 
 ---
@@ -35,7 +34,7 @@ spec here; the code is the truth.
   particle bursts stay **off** until the user enables them.
 - One concern per PR (CI-green alone). Security and design-language work are orthogonal
   when independent.
-- Distinguish **Verified** (code/CHANGELOG) vs **Reasoned** vs **Needs device run**. Do
+- Distinguish **Verified** (code/tests) vs **Reasoned** vs **Needs device run**. Do
   not claim hardware verification that was not run, or invent protocol features.
 - **No icon, no mascot.** SPORE's brand is the wordmark — plain "SPORE" text — on
   every surface. Nothing stands in for it, not even a monogram; Android's
@@ -79,6 +78,7 @@ claim the code actually honours.
 | Backup exclusion + migration tested on hardware | ⬜ deferred to hardware QA | No device in CI; tracked in `android/TESTING.md` |
 | Benchmark suite: throughput/memory, reproducible, tracked per platform | ⬜ todo | No performance baseline exists today. [Prns](https://github.com/KenAKAFrosty/Prns) publishes per-platform `benchmarks/RESULTS-*.md` against a reference implementation; SPORE has nothing analogous to catch a regression before a user does |
 | `unsafe`-code snapshot tracked and diffed in CI | ⬜ todo | No inventory of `unsafe` blocks exists today. Prns keeps `audits/unsafe-snapshot.json`, diffed so new unsafe code is a visible, reviewable event rather than something that can land unnoticed |
+| §5.6 says "no echo/**ACK** → resend"; the code only checks the ACK | ⬜ todo | A spec claim the code does not honour, which is this milestone's stated job. `Node::resend_unacked` (`src/node/send.rs`) drops a pending entry only when a signed receipt arrives (`self.acked`); overhearing your own envelope being rebroadcast — the "echo" half of the sentence — suppresses nothing, so a sender keeps re-flooding a message the mesh demonstrably carried. Not exploitable and bounded (§5.4d caps retries at 5), but it is wasted airtime on exactly the links that can least afford it. Two honest fixes, and the choice is the work: implement echo suppression (`Csma` already tracks `overheard` per id, but per-bridge, not on the originator's `pending`), or delete "echo/" from §5.6. Meshtastic treats a rebroadcast as an implicit ack for broadcasts, so the mechanism is proven — but it means "the mesh took it", never "it was delivered", and must not be allowed to flip a delivery state |
 
 **Definition of done:** every SPEC claim about forward secrecy and store bounds is
 backed by a test; the `## Unreleased` SECURITY_FINDINGS Still-open list has no P0
@@ -269,9 +269,11 @@ here is load-bearing for a credible node.
 | Ring health UI + Export with FS warning | 🟡 ring health shipped (#67); export polish open | |
 | Private group `key_id` divergence badge | ⬜ todo | Warn on mismatch in a sealed group chat; never claim roster consensus |
 | Boot receiver (optional, default off) | ⬜ todo | |
-| Sound + particles behind a setting, default off | ⬜ todo | Gated by §0.2/§8 |
+| Sound + particles behind a setting, default off | ⬜ todo | Gated by the hard rule above: motion static under reduced motion, sound and particle bursts off until the user enables them |
 | Android bridge list ⊆ BRIDGES.md sync check | ✅ shipped | In `check_docs_sync.py`. Fails if the app offers a bridge with no BRIDGES.md entry, or one still marked ⚪ planned — a control with no backend. Found the **TCP** bridge shipping in the app undocumented; entry added |
 | `with_node` reentrancy guard | ✅ shipped | Was a silent permanent deadlock — no panic, no log, a thread parked on a lock it held itself. Now panics naming the bug. Per-hub and per-thread, so contention between bridge threads and nesting across two hubs both stay legal |
+| SNR-weighted contention window on shared media | ⬜ todo | Today `Csma::schedule` waits a **random** 1–5× airtime before a flood and cancels if the id is overheard (§5.5); there is no signal-quality input anywhere in `src/`. [Meshtastic](https://meshtastic.org/docs/overview/mesh-algo/) instead gives the node that heard a frame *weakest* the **shortest** delay, so the most distant node rebroadcasts first and each hop covers the most ground, with nearer nodes then cancelling. That is a strict improvement to a mechanism SPORE already has: `schedule()` already takes the delay as a parameter, so only the delay computation and one signal-quality argument change — no wire change, pure local policy. The input is already in hand where it matters first: `esp32/src/radio.rs` reads `pkt.rx_ctrl` for `sig_len()`, and RSSI is a sibling field in that same struct (M8/E2) |
+| A node that carries its own traffic but relays nothing (a "companion" profile) | ⬜ todo | `set_bulk_budget`/`register_limited` cap *other people's file chunks* only; messages, announces, receipts and manifests always pass, so there is no way to say "do not relay for others" — the case for a phone on battery, or a node on a metered link. [MeshCore](https://github.com/meshcore-dev/MeshCore) ships this as a fixed `Companion` role that never repeats, which it argues also keeps bad paths out of the routing table. For SPORE it must be **local policy, not a protocol role** — a relay budget of zero, chosen by the operator and invisible on the wire — because M8's locked rule is that gateway behaviour is emergent and "if a gateway role ever needs writing, something has gone wrong." Needs an honest UI: a node that relays nothing is a worse citizen, and should say so rather than look identical to one that does |
 | Beacon duty-cycle measurement | ⬜ todo | HARDWARE.md procedure |
 | Two-real-NATs Direct punch verification | ⬜ todo | `HARDWARE.md` row 19; loopback-only today |
 | Hardware matrix pass (backup exclusion + migration + 7-day FS) | ⬜ todo | Needs a device; `android/TESTING.md` checklist exists |
@@ -594,12 +596,10 @@ delivery state) once per platform. Promote it into the Rust core so CLI, Android
 and web differ only in their UI shim, and rebuild the web node on HARDBRUT/3 as
 the first consumer of that contract.
 
-**The finding that motivates this** (verified against the tree, not assumed): the
-kernel owns **no application state at all**. `unread` has zero real occurrences in
-`src/`; `thread` is entirely `std::thread`; `petname` exists only as an ANNOUNCE
-protocol field (`src/node/ingest.rs`) and a CLI config key — there is no contact
-book, no conversation store and no message history anywhere in `src/`. Above that
-kernel sit **three independent host layers that have already diverged**:
+**The finding that motivates this** (verified against the tree): the kernel owns
+**no application state at all** — no contact book, no conversation store, no
+message history anywhere in `src/`; `petname` exists only as an ANNOUNCE field and
+a CLI config key. Above it sit **three host layers that have already diverged**:
 
 | Host layer | Lines | Exports | Holds state? |
 |---|---|---|---|
@@ -607,27 +607,21 @@ kernel sit **three independent host layers that have already diverged**:
 | `src/ffi.rs` (C ABI, frozen) | 491 | 20 | no |
 | `android/jni/src/lib.rs` | 1637 | 64 | **yes** — `Runtime{inbox, ifaces, demod, direct, stream_stop}` |
 
-`send_direct` / `open_dm` / `acked` / `node_new_seeded` / `group_invite_*` exist in
-WASM but not the C ABI; `armor_wrap` / `keypair` / `message_*` exist in the C ABI
-but not WASM; Android shares almost nothing with either. The communicator logic is
-then written a *third* and *fourth* time on top — ~6130 lines of Kotlin
-(`NodeController.kt` alone is 1389) and ~1300 lines of JS embedded in
-`build-standalone.mjs`'s template literal.
+Each exports what the others don't (`send_direct`/`acked` in wasm only,
+`armor_wrap`/`keypair` in the C ABI only), and the communicator is then written a
+*third* and *fourth* time on top — ~6130 lines of Kotlin and ~1300 of JS embedded
+in `build-standalone.mjs`'s template literal. `android/jni/src/lib.rs` is the proof
+this is **consolidation, not invention**: 1637 lines of Rust already holding a
+stateful runtime over the kernel, simply Android-only and in the wrong directory.
 
-`android/jni/src/lib.rs` is the proof this milestone is **consolidation, not
-invention**: 1637 lines of Rust already holding a stateful runtime over the
-kernel. It is simply Android-only and in the wrong directory.
-
-**Feasibility (verified).** The crate is already shaped for this: 64
+**Feasibility (verified).** The crate is already shaped for it: 64
 `cfg(not(target_arch = "wasm32"))` gates, wasm-bindgen-free plain WebAssembly, and
-`getrandom`'s `custom` backend already routed to a JS import (`spore_fill_random`)
-— the exact pattern a wasm storage port needs. `Store::set_spill_backend(Box<dyn
-SpillBackend>)` is existing precedent for a pluggable port.
+`getrandom`'s `custom` backend already routed to a JS import — the exact pattern a
+wasm storage port needs, with `set_spill_backend` as the in-tree precedent for a
+pluggable one.
 
-**Portability is a hard requirement, and it is already met — keep it that way.**
-The kernel must run on ESP32, Android, Windows, Linux, macOS and in the browser.
-That is not aspirational: every one of those is already built on **every PR**,
-from the same crate.
+**Portability is a hard requirement and is already met — keep it that way.** Every
+target below is built on **every PR**, from the same crate.
 
 | Target | CI job | How |
 |---|---|---|
@@ -725,23 +719,11 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
 | M10-G SDK packaging/release plan for the app-level ABI, once M10-C lands | ⬜ not started | [Prns](https://github.com/KenAKAFrosty/Prns) already ships "one core, many language bindings" at wider scope — Rust/TS/Python/.NET/Go/Swift/JVM/Julia/C via `prns-host/bindings/*`, with a staged qualify→promote pipeline per SDK. A concrete reference for how each UI shim's release process could work; M10 doesn't currently address packaging at all, only that the ABI exists |
 
-**Fixed during M10-D: delivery receipts could not reach the sender on a two-node
-link.** Pre-existing on *every* platform, not a browser quirk — M9's "delivered"
-had never been reachable point-to-point.
-
-`src/node/ingest.rs` emitted the receipt with the **arrival** interface as its
-`except`, where every other origination in the crate passes `NO_IFACE`. `except`
-is the relay parameter — "do not echo a frame back where it came from" — and for
-a receipt the arrival interface is precisely the route home. Both hubs honour
-`except` (`src/bridge/hub.rs` skips it explicitly), so on a link with one
-interface the only route back was the one excluded, and the receipt was dropped.
-
-The wasm ABI made it unfixable from JS as well: `forward_wires` flattened
-`Forward::Flood { except }` and `Forward::Directed { iface }` to bare bytes, so
-`Hub` had no routing information and substituted a blanket split-horizon of its
-own. Both now carry kind + interface, and `Hub` withholds a forward from the
-arrival link only when the router actually asked. Wire format unchanged —
-`reference/vectors.json` is byte-identical; this is routing, not encoding.
+**Fixed during M10-D:** delivery receipts could never reach the sender on a
+two-node link — a pre-existing bug on every platform, so M9's "delivered" had
+never been reachable point-to-point. Receipts were emitted with the *arrival*
+interface as `except`, which is precisely the route home. Fixed in the core and
+in the wasm forward encoding; wire unchanged.
 
 **Scope: the web node is not the landing site.** Two different products live in
 this repo and M10 touches exactly one of them.
@@ -751,27 +733,21 @@ this repo and M10 touches exactly one of them.
 | **Web node** | `web/` | `web/spore-standalone.html`, one self-contained file, zero external requests | someone *running a node* |
 | **Landing site** | `site/` | GitHub Pages | someone *reading about* SPORE |
 
-They are separate builds with separate artefacts. The only coupling is that
-`site/build.mjs` imports `requireHardbrutCss` from `../web/hardbrut-import.mjs`
-(the vendoring helper, not the node) and renders `web/README.md` as
-`webguide.html`. **M10 rebuilds the web node only.** The Pages site keeps its
-current markup and its flat `hardbrut.css`, and no task in this milestone
-changes it. If the site is ever moved onto HARDBRUT/3 that is its own milestone
-with its own definition of done — a docs site and a mesh client have almost no
-components in common, and conflating them is how the design language forked the
-first time (see M6/M7).
+Separate builds, separate artefacts; the only coupling is that `site/build.mjs`
+imports the vendoring helper and renders `web/README.md`. **M10 rebuilds the web
+node only** — moving the site onto HARDBRUT/3 would be its own milestone, since a
+docs site and a mesh client share almost no components, and conflating them is how
+the design language forked the first time (M6/M7).
 
 **Design system.** M10-D consumes **HARDBRUT/3**, a three-layer rebuild
 (primitive tokens → semantic roles → patterns) of `supernihil/hardbrut`, vendored
 at `web/vendor/hardbrut3/` — 36 CSS files (63.5 KB) plus `inter-900-latin.woff2`
-(23,900 bytes, verified byte-identical to upstream). This supersedes the flat
-`web/vendor/hardbrut/hardbrut.css` **for the web app only**; the Pages site and
-Android still consume the flat vendored copy, so the hard rule naming
-`web/vendor/hardbrut/hardbrut.css` needs amending when M10-D lands, not before.
-Two open questions inherited from the design system, both flagged upstream as
-unresolved: it substitutes **Unicode glyphs in the mono face** for a real icon set,
-and it renders the brand as **type** — the latter already agrees with this repo's
-"no icon, no mascot" hard rule.
+(23,900 bytes, verified byte-identical to upstream). It supersedes the flat
+`web/vendor/hardbrut/hardbrut.css` **for the web app only** — the Pages site and
+Android still consume the flat copy, and the hard rule now records that split.
+Two open questions inherited from the design system: it substitutes **Unicode
+glyphs in the mono face** for a real icon set, and renders the brand as **type**
+— the latter already agreeing with the "no icon, no mascot" rule.
 
 **Definition of done:** one Rust implementation of conversations, contacts,
 unread and delivery state, consumed by web, Android and CLI through a single
@@ -863,7 +839,7 @@ hardware/community concepts, so there is nothing for it to be normative about.
 | P-Direct-NAT | Folded into **M2**, marked ✅ | Shipped (#114); punch 🧪 until two-real-NATs test |
 | P-Mix-Runner | Kept, moved to **M5** | Anonymity toggle + example operator; not load-bearing for a credible node |
 | P-Group-Roster | Out of scope (locked) | Sealed topic + honest UX is the shippable answer; real roster is a future protocol project |
-| Track H (H1–H7 hardware/community) | Removed from the plan | `⬜ concept` with no software dependency; lives in VISUALDESIGN §6b as inspiration |
+| Track H (H1–H7 hardware/community) | Removed from the plan | `⬜ concept` with no software dependency; was written up in the now-retired `VISUALDESIGN.md` §6b as inspiration |
 | Suggested calendar / branch-naming sections | Removed | A milestone plan does not carry a week-by-week calendar that is immediately stale |
 | PR write-up template | Removed | Shipped PRs don't need it; open PRs inherit the milestone's acceptance criteria |
 | Conformance gaps section | Folded into **M2** | One row (browser↔native over QUIC/WebTransport) remains open and is now in M2 |
