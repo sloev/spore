@@ -6,13 +6,12 @@ This is the single forward-looking plan, organised as **milestones** rather than
 a flat PR map. Each milestone is a coherent body of work with a clear definition
 of done; PRs are the merge units inside a milestone, not the plan itself.
 
-"What shipped" lives in exactly one place — [Changelog](CHANGELOG.md)
-`## Unreleased` and the **Status** column in each milestone — so no second
-progress table can drift. Shipped work keeps its CHANGELOG entry and loses its
-spec here; the code is the truth.
+"What shipped" lives in git history and in the **Status** column of each
+milestone — so no second progress table can drift. Shipped work loses its spec
+here and keeps its commit; the code is the truth.
 
 **Read order for agents:** [Mission](MISSION.md) → this file →
-[Changelog](CHANGELOG.md) → SPEC/CONTINUITY only as needed. See
+[Spec](SPEC.md) as needed, plus `git log` for what shipped. See
 [Dev guide](DEV_GUIDE.md) for the full repo map.
 
 ---
@@ -35,7 +34,7 @@ spec here; the code is the truth.
   particle bursts stay **off** until the user enables them.
 - One concern per PR (CI-green alone). Security and design-language work are orthogonal
   when independent.
-- Distinguish **Verified** (code/CHANGELOG) vs **Reasoned** vs **Needs device run**. Do
+- Distinguish **Verified** (code/tests) vs **Reasoned** vs **Needs device run**. Do
   not claim hardware verification that was not run, or invent protocol features.
 - **No icon, no mascot.** SPORE's brand is the wordmark — plain "SPORE" text — on
   every surface. Nothing stands in for it, not even a monogram; Android's

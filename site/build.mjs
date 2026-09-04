@@ -55,7 +55,6 @@ const pages = [
   ['docs/SECURITY.md', 'security-policy.html', null],
   ['docs/SECURITY_FINDINGS.md', 'security.html', null],
   ['docs/THREAT_MODEL.md', 'threat-model.html', null],
-  ['docs/CHANGELOG.md', 'changelog.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
   ['bindings/README.md', 'bindings.html', null],
@@ -106,7 +105,6 @@ const titles = new Map([
   ['index.html', 'SPORE — messages that still get through'],
   ['security-policy.html', 'SPORE — reporting a vulnerability'],
   ['security.html', 'SPORE — security findings'],
-  ['changelog.html', 'SPORE — changelog'],
   ['roadmap.html', 'SPORE — engineering roadmap'],
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
@@ -387,7 +385,7 @@ function anchorHeadings(html) {
 
 // Pages long enough that a reader needs a map before they scan them — the bridge
 // reference alone is ~70 tables under one H1.
-const TOC_PAGES = new Set(['spec.html', 'bridges.html', 'changelog.html', 'security.html', 'roadmap.html']);
+const TOC_PAGES = new Set(['spec.html', 'bridges.html', 'security.html', 'roadmap.html']);
 
 // Contents list built from the page's own top-level (H2) headings — no separate
 // outline to keep in sync, since it is generated from whatever anchorHeadings

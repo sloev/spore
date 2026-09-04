@@ -159,6 +159,6 @@ If the answer is fuzzy, **stop** and tighten the design.
 decision test get cut or rewritten.
 
 **Read order for agents:** `MISSION.md` → handoff (if any) →
-[Roadmap](ROADMAP.md) + [Changelog](CHANGELOG.md) →
+[Roadmap](ROADMAP.md) + `git log` →
 SPEC/CONTINUITY only as needed. See also
 [Dev guide](DEV_GUIDE.md) for the full repo map.

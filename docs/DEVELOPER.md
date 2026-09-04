@@ -26,7 +26,7 @@ site. Pick a row.
 
 <div class="list-rows">
 <a class="list-row" href="roadmap.html"><div class="list-row-body"><span class="list-row-title">Roadmap</span><span class="list-row-subtitle">The engineering plan, milestone by milestone.</span></div></a>
-<a class="list-row" href="changelog.html"><div class="list-row-body"><span class="list-row-title">Changelog</span><span class="list-row-subtitle">What shipped, in order.</span></div></a>
+<a class="list-row" href="https://github.com/sloev/spore/releases"><div class="list-row-body"><span class="list-row-title">Releases</span><span class="list-row-subtitle">What shipped, in order, with notes generated from the commits.</span></div></a>
 <a class="list-row" href="mission.html"><div class="list-row-body"><span class="list-row-title">Mission</span><span class="list-row-subtitle">The project charter and the decision test every change is held to.</span></div></a>
 <a class="list-row" href="contributing.html"><div class="list-row-body"><span class="list-row-title">Contributing</span><span class="list-row-subtitle">Freeze rules, CI, branches, releases.</span></div></a>
 </div>
