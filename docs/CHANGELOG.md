@@ -18,6 +18,19 @@ Two conventions specific to this project:
 <!-- Add `- ` bullets here as work merges. This note is a comment so it
      cannot reach a release page; the bump refuses if there are no bullets. -->
 
+- **One technical reference.** `docs/DESIGN.md` is merged into `docs/SPEC.md`,
+  which is now the single document describing what SPORE is and how it works:
+  Parts 1–2 the normative wire format and bindings, Part 3 the application layer
+  built on it, Part 4 the portable kernel and what a runtime owes it. 1,073
+  lines become 786 with nothing dropped — the saving is duplication, since the
+  runtime contract, the five medium shapes and the crypto layers were each
+  explained twice across the two files. New in the merge: a "What stops what"
+  index mapping every threat to the mechanism that answers it and the section
+  that defines it, plus an explicit account of what the proof-of-work stamp does
+  **not** do (it prices one envelope, is not bound to an identity, and is
+  therefore not Sybil resistance). §0–§11, §7.1/§7.2 and "Page 2" keep their
+  exact headings, so the 305 `§`-references across the docs and `src/` comments
+  stay valid. Wire unchanged: documentation only.
 - **Transports are host-provided, not browser-assumed.** `SporeClient` now takes
   a transport registry instead of importing one, and `TRANSPORTS` is renamed
   `BROWSER_TRANSPORTS` to say what it actually is. The previous framing — that
@@ -362,7 +375,7 @@ Two conventions specific to this project:
   format that drifts. In the web node the invite is behind an **Invite** button
   rather than displayed beside the conversation, because the string is the key and
   a screenshot is a membership grant; the field that creates a group also accepts a
-  pasted invite. [Design](DESIGN.md) now separates the three key changes that were
+  pasted invite. [Spec](SPEC.md) now separates the three key changes that were
   previously all called "rotation": `rekey_seal` evicts and binds forward-only,
   `rotate` gives forward secrecy and evicts nobody, `contribute` heals after a
   copied key. An invite cannot be recalled, and SPORE holds no roster — so no
@@ -1518,7 +1531,7 @@ node running this interoperates with a v1 peer that is simply more permissive.
   the per-source quota or a busy peer's backpressure.
 - Relays **verify a signature before writing identity into local state** (neighbour,
   path and quota tables). Forwarding still does no crypto. Rationale and the cost on
-  constrained hardware: [`docs/DESIGN.md`](DESIGN.md).
+  constrained hardware: [`docs/SPEC.md`](SPEC.md).
 
 ### Changed — API
 

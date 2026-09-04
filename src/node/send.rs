@@ -277,7 +277,7 @@ impl Node {
     }
 
     /// The node's periodic work — **the scheduling nutrient** a runtime supplies
-    /// (`docs/DESIGN.md`; SPEC's runtime contract makes it normative).
+    /// (`docs/SPEC.md`'s runtime contract makes it normative).
     ///
     /// Call it on a timer, roughly once a second; it is cheap and self-gating, so
     /// calling it more often costs almost nothing and less often only makes the

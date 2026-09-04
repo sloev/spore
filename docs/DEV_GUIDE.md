@@ -20,7 +20,7 @@ branches, releases). Read those once; this one is a lookup table.
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
 | Change a colour | Edit upstream `supernihil/hardbrut`, then `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` → `python3 design/generate.py` (Android) |
 | Change an Android-only size (control/chip/row/touch floor) | `design/tokens.json` → `python3 design/generate.py` |
-| Decide core vs runtime | `docs/DESIGN.md` § "The spore and the soil". Platform-specific means runtime, not `src/` |
+| Decide core vs runtime | `docs/SPEC.md` Part 4, "Where the core runs". Platform-specific means runtime, not `src/` |
 
 ## Repo map
 
@@ -232,9 +232,8 @@ old `Void/Asphalt/Amber/Pink/Cyan/Phosphor/Kevlar/Dim` palette members.
 | Doc | For |
 |---|---|
 | `docs/MISSION.md` | What SPORE is for, and the decision test |
-| `docs/SPEC.md` | The wire format — normative |
+| `docs/SPEC.md` | The technical reference: wire format (normative), application layer, runtime model |
 | `docs/REBUILD.md` | Reimplementing in another language, with worked bytes |
-| `docs/DESIGN.md` | Application layers, and the core-vs-runtime model |
 | `docs/BRIDGES.md` | Every bridge: wire format, mapping, security profile |
 | `docs/DIRECT.md` | SPORE Direct |
 | `docs/CONTINUITY.md` | SPORE as a seed; what survives, and what guarantees it |

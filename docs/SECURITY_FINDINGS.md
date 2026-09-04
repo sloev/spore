@@ -131,7 +131,7 @@ is confined to the paths that *bind local trust state* — neighbour table, path
 table, quota attribution — computed once per envelope and only after the dedup and
 expiry checks, not on every relayed envelope. This is a real cost on constrained
 hardware (an Ed25519 verify per newly-seen signed envelope) and was accepted
-deliberately; see `docs/DESIGN.md`.
+deliberately; see `docs/SPEC.md`.
 
 **Tests.** `a_forged_signature_cannot_bind_a_victims_address`,
 `a_short_source_is_a_claim_not_evidence`,

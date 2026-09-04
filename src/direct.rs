@@ -58,7 +58,7 @@ pub const VERSION: u8 = 3;
 /// A transport-capable medium, named by **convention rather than by code**.
 ///
 /// This was a closed `#[repr(u8)]` enum, which was the wrong shape twice over.
-/// `DESIGN.md`'s model already says the nutrient list is closed while the
+/// `SPEC.md`'s model already says the nutrient list is closed while the
 /// *bridge* list stays open — a medium is the Direct plane's version of a bridge,
 /// so enumerating them in the core made every new one an edit to `src/`, and an
 /// allocation somebody had to hand out. A name needs neither: run SPORE Direct

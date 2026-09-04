@@ -35,7 +35,7 @@ unchanged in the browser. You can confirm the single import with
 `WebAssembly.Module.imports(new WebAssembly.Module(bytes))`.
 
 That single import is the clearest example of the model in
-[Design](../docs/DESIGN.md)'s "The spore and the soil": the core asks its
+[Spec](../docs/SPEC.md) Part 4, "Where the core runs": the core asks its
 **runtime** for randomness rather than reaching for a source itself, which is
 exactly why the same build runs in a browser tab and in a daemon. Time works the
 same way (`now` is a parameter, never a clock the core reads). The browser is a

@@ -47,7 +47,6 @@ const pages = [
   // Secondary guides: rendered + linkable, kept off the top nav
   ['docs/MISSION.md', 'mission.html', null],
   ['docs/SPEC.md', 'spec.html', null],
-  ['docs/DESIGN.md', 'design.html', null],
   ['docs/BRIDGES.md', 'bridges.html', null],
   ['docs/REBUILD.md', 'rebuild.html', null],
   ['docs/CONTINUITY.md', 'continuity.html', null],
@@ -121,8 +120,7 @@ const titles = new Map([
   ['how-it-works.html', 'SPORE — how it works'],
   ['developer.html', 'SPORE — developer'],
   ['esp32.html', 'SPORE — the ESP32 relay'],
-  ['spec.html', 'SPORE — wire format spec'],
-  ['design.html', 'SPORE — application design'],
+  ['spec.html', 'SPORE — the technical reference'],
   ['bridges.html', 'SPORE — bridges'],
   ['rebuild.html', 'SPORE — rebuild guide'],
   ['continuity.html', 'SPORE — continuity'],
@@ -147,7 +145,6 @@ const descriptions = new Map([
   ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
   ['security.html', 'The SPORE findings register: what was found, how it was reproduced, what was changed, and what is still open.'],
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
-  ['design.html', 'The application layer above the wire: layers, the core-vs-runtime model, and why each piece is shaped the way it is.'],
   ['rebuild.html', 'Reimplementing SPORE from scratch in another language, with worked byte-for-byte examples.'],
 ]);
 

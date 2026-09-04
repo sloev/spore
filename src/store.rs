@@ -107,7 +107,7 @@ pub fn bound_known(known: &mut HashSet<String>) {
 pub const MAX_ADOPT_BYTES: u64 = 1024 * 1024;
 
 /// Where the store's bytes live when they are not resident in memory — the
-/// **storage nutrient** a runtime supplies (see `docs/DESIGN.md`).
+/// **storage nutrient** a runtime supplies (see `docs/SPEC.md`).
 ///
 /// A backend moves dumb bytes and nothing else. It never decides what is valid:
 /// every check that matters — the id matching its content, the wire being

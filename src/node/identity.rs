@@ -134,7 +134,7 @@ impl Node {
 
     /// Spill to storage that is not a filesystem — the same contract as
     /// [`Node::set_spill_dir`], for a runtime whose storage nutrient is browser
-    /// IndexedDB, MCU flash, or anything else (see `docs/DESIGN.md`).
+    /// IndexedDB, MCU flash, or anything else (see `docs/SPEC.md`).
     ///
     /// Adoption and its verification are identical either way: a backend is
     /// never trusted to have kept the bytes it was handed, because an id *is*

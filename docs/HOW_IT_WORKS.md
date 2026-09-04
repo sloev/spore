@@ -41,7 +41,7 @@ radio link.</p>
 <p class="text-muted">A message to one person is sealed and only they can
 read it. A post to an open group travels in the clear, deliberately — that's
 what lets a stranger's device carry it forward.</p>
-<p><a href="design.html">Privacy model →</a></p>
+<p><a href="spec.html#7-crypto--forward-secrecy">Privacy model →</a></p>
 </div></div></div>
 
 <div class="col-6"><div class="card"><div class="card-body">

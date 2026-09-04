@@ -6,8 +6,7 @@ site. Pick a row.
 ## Protocol
 
 <div class="list-rows">
-<a class="list-row" href="spec.html"><div class="list-row-body"><span class="list-row-title">Spec</span><span class="list-row-subtitle">The wire format in full — enough to reimplement it.</span></div></a>
-<a class="list-row" href="design.html"><div class="list-row-body"><span class="list-row-title">Design</span><span class="list-row-subtitle">The application layer above the wire, and why it's shaped this way.</span></div></a>
+<a class="list-row" href="spec.html"><div class="list-row-body"><span class="list-row-title">Technical reference</span><span class="list-row-subtitle">The wire format, the application layer on top, and where the core runs.</span></div></a>
 <a class="list-row" href="bridges.html"><div class="list-row-body"><span class="list-row-title">Bridges</span><span class="list-row-subtitle">Every medium SPORE speaks, and which are verified on real hardware.</span></div></a>
 <a class="list-row" href="direct.html"><div class="list-row-body"><span class="list-row-title">Direct</span><span class="list-row-subtitle">The low-latency peer-to-peer pipe, and how NAT traversal works.</span></div></a>
 <a class="list-row" href="rebuild.html"><div class="list-row-body"><span class="list-row-title">Rebuild</span><span class="list-row-subtitle">Reimplementing SPORE from scratch, with worked byte examples.</span></div></a>
