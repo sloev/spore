@@ -106,7 +106,7 @@ pub struct GroupInvite {
 /// **This string is the key.** An address invite ([`encode`]) is public — it says
 /// where to find someone and nothing more. This one carries the pre-shared key
 /// itself, because in a group with no roster that key *is* the membership: holding
-/// it is what "being a member" means (see [Design](../docs/DESIGN.md)).
+/// it is what "being a member" means (see [Spec](../docs/SPEC.md)).
 ///
 /// Two consequences the caller has to surface rather than hide:
 ///

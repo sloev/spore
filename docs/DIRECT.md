@@ -60,7 +60,7 @@ The conventional ones:
 
 Nothing enforces that list, which is the point: SPORE Direct runs over a medium
 this codebase has never heard of, and the core does not need an edit or an
-allocation from anyone to allow it — the same reason `DESIGN.md` keeps the
+allocation from anyone to allow it — the same reason [Spec](SPEC.md) keeps the
 *bridge* list open while the nutrient list stays closed. Two implementations that
 spell a medium differently have two mediums, so use the conventional name where
 one exists and namespace anything new (`acme.lora-p2p`).

@@ -126,7 +126,7 @@ that are verified, with honest limits on the ones that aren't.
   `.value`, so N marker lines can never be built by inserting text into the
   box the way one marker could. Every publish is size-checked before any file
   in the batch is published, so a refusal never leaves orphaned manifests
-  behind. See Appendix A in DESIGN.md for the wire-level convention.
+  behind. See the attachments appendix in SPEC.md for the wire-level convention.
 - [ ] ExoPlayer audio/video inline preview + playback
 - [ ] Edit / remove an attachment after send
 - [ ] Merge the bubble for public/unsealed files (needs `nativeEnvId` at `route()` time)
@@ -240,7 +240,7 @@ blob safely; this and the documented revoke limit are W7.
 | WYSIWYG everywhere — a formatting toolbar over every writer: 1:1, open group, private group, microblog (W12) | ✅ shipped | Web already had it: one `wireFormatting(toolbar, input, preview)` helper serves both composers. Android was the gap — its chat composer gains B / i / `</>` / 🔗, and (the half that makes a toolbar honest rather than a syntax generator) bubbles now render those marks via `Markdown.render` instead of printing them literally. Composer state moved `String` → `TextFieldValue` because a formatting button needs the caret. Android's private-group *rows* remain W9–W11 |
 | W9–W11 Android parity — Chats list adds private groups; Feed adds per-address subscribe; formatting in chats | ⬜ todo | Android Chats already mixes DMs + PUBLIC; add private-group rows + per-address feed |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
-| Private-group invite flow + documented revoke-by-rotation limit (W7) | ✅ shipped | `spore-group:<key hex>?n=…&k=…` — a prefix deliberately distinct from `spore:` so the two invite kinds cannot be pasted for one another. `invite::encode_group`/`decode_group` live in core and are exported to wasm, so browser and core cannot drift on the format. The checksum covers key *and* name: a mistyped key would otherwise open a room that is cryptographically fine and socially empty. The invite string **is** the key, so the UI reveals it only on request and states plainly that it cannot be recalled. Revoke limits in [Design](DESIGN.md) |
+| Private-group invite flow + documented revoke-by-rotation limit (W7) | ✅ shipped | `spore-group:<key hex>?n=…&k=…` — a prefix deliberately distinct from `spore:` so the two invite kinds cannot be pasted for one another. `invite::encode_group`/`decode_group` live in core and are exported to wasm, so browser and core cannot drift on the format. The checksum covers key *and* name: a mistyped key would otherwise open a room that is cryptographically fine and socially empty. The invite string **is** the key, so the UI reveals it only on request and states plainly that it cannot be recalled. Revoke limits in [Spec](SPEC.md) |
 | Continuity polish: export seed from new UI, docs updates (W8) | ⬜ todo | |
 | Zero-config bridge discovery: web node auto-probes a well-known local port/hostname + fetches a small catalog, instead of the user typing a bridge address | ⬜ todo | [Prns](https://github.com/KenAKAFrosty/Prns)'s browser SDK does this ("Auto Wi-Fi"): probes `ws://localhost:<port>` and `ws://<name>.local:<port>` plus a `GET /.well-known/…` catalog, with per-candidate exponential backoff and a seeded deterministic pick so concurrent tabs don't pile onto one gateway. SPORE's `bag` API already listens on a fixed port (7373) to localhost and the LAN — this is a client-side convention over what exists, not a new server surface |
 
@@ -379,7 +379,7 @@ nothing stands in for it.)
 ## Milestone 8 — Embedded ESP32 runtime (raw-802.11 relay)
 
 **Goal:** the first real implementation of the `Embedded (ESP32)` runtime
-`docs/DESIGN.md` already names ("little memory, no filesystem, one or two
+`docs/SPEC.md` already names ("little memory, no filesystem, one or two
 bridges") — a standalone, headless ESP32-S3 that relays real envelopes over raw
 802.11, persists its store to flash, and bridges to a phone or laptop over USB
 or BLE when one is nearby. Filed as
@@ -448,7 +448,7 @@ over a rule the operator may not even be subject to is not this project's call.
 on this board, in this much RAM, under esp-idf-sys?* — nothing else is worth
 building until it does. **Nutrient work stays distinct from bridge work:** E1
 and E3 supply the four nutrients this runtime owes the *existing* core contract
-(randomness, time, scheduling, storage — [Design](DESIGN.md)), while E2, E4 and
+(randomness, time, scheduling, storage — [Spec](SPEC.md)), while E2, E4 and
 E5 put the board on the *open* bridge list; conflating the two is how a runtime
 ends up inventing protocol. **Solo before paired:** each phase names what one
 board alone can prove, so only the rows that say so need a second device.
@@ -465,7 +465,7 @@ design task; what is missing is the firmware side of each.
 | esp-idf-sys toolchain scaffold: core builds and links for ESP32-S3, with a CI cross-compile job (E1) | ✅ shipped | `esp32/`, its own workspace root like `android/jni`. The core cross-compiles **unmodified** — no ESP `cfg` branches, no feature gates, a plain path dependency. CI builds it in Espressif's Docker image (Xtensa is not an upstream Rust target) and reports the footprint |
 | Randomness nutrient: confirm `OsRng` resolves to ESP-IDF's hardware TRNG (E1) | ✅ shipped — **no shim needed** | The `cfg(target_arch = "wasm32")` getrandom block in `Cargo.toml` had no ESP counterpart to write: getrandom 0.2 supports `target_os = "espidf"` natively and routes to `esp_fill_random`. Verified by compiling; that it returns real entropy is a device-run claim |
 | Time nutrient: a `now: u32` source, shipping [Spec](SPEC.md) §Time's no-trusted-clock behaviour first (E1) | ✅ **run on hardware** | A cold-booted board with no RTC battery *is* the "no trusted clock" node the spec already covers: relay regardless, age by dwell, drop after 7 local days. NTP-over-Wi-Fi is a stretch goal, not a blocker |
-| Scheduling nutrient: a FreeRTOS periodic task calling `Node::tick` (E1) | ✅ **run on hardware** | Absent from the previous version of this table. Without it the runtime silently regresses to maintaining itself only when traffic happens to arrive ([Design](DESIGN.md), nutrient table) — worst on exactly this kind of solo, often-offline node |
+| Scheduling nutrient: a FreeRTOS periodic task calling `Node::tick` (E1) | ✅ **run on hardware** | Absent from the previous version of this table. Without it the runtime silently regresses to maintaining itself only when traffic happens to arrive ([Spec](SPEC.md), runtime contract) — worst on exactly this kind of solo, often-offline node |
 | Solo bring-up smoke test: boot, fresh identity, one self-signed envelope logged over UART, a tick observed firing (E1) | ✅ **verified on hardware** | LOLIN S2 Mini (ESP32-S2FNR2 rev v1.0), 2026-08-25. Boots, generates an identity (`addr=8a82bcbd735aed52`), and **a signature it makes verifies on the board** (`sig=ok`) — ed25519 works on this silicon, not merely compiles for it. Tick loop on schedule; **live heap 226,368 bytes free**, the runtime figure section sizes cannot give. Checked by `esp32/diagnose.py`, not by reading a log |
 | Promiscuous RX filter: SPORE v1 header match, instant-discard on miss (E2) | ✅ shipped (#171) | `Envelope::probe` — walks the header, returns the wire length or `None`, allocates nothing. Structural only: a hit means "worth decoding", never "authentic". Agreement with `decode` is asserted as a fuzz invariant, since it is a second front door for hostile bytes |
 | `esp_wifi_80211_tx` injection wired as `DatagramTransport::send`, RX as `::recv`, driven through `run_datagram` (E2) | 🧪 written, not run | `esp32/src/radio.rs` (ESP-IDF glue) over `bridge::ieee80211` (the codec, portable and CI-tested, shared with E2d). Promiscuous RX filtered to management frames in hardware, then `ieee80211::parse` → bounded queue → `recv`. Builds clean; **nothing has been transmitted or received on air** |

@@ -681,7 +681,7 @@ mod store;
 ///
 /// `FsSpill` is what a daemon, desktop or Android node uses. `SpillBackend` is
 /// public so a runtime whose storage is *not* a filesystem — a browser tab, an
-/// MCU — can supply its own; see `docs/DESIGN.md`'s "The spore and the soil".
+/// MCU — can supply its own; see `docs/SPEC.md` Part 4, "Where the core runs".
 pub use store::{FsSpill, SpillBackend};
 
 // ---------------------------------------------------------------------------

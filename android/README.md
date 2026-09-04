@@ -1,6 +1,6 @@
 # SPORE Communicator (Android)
 
-A native SPORE node in your pocket. See [`docs/DESIGN.md`](../docs/DESIGN.md) for the
+A native SPORE node in your pocket. See [`docs/SPEC.md`](../docs/SPEC.md) for the
 architecture and [`docs/ROADMAP.md`](../docs/ROADMAP.md) for what's next.
 
 **Downloads and what the app does:** [`docs/APPS.md`](../docs/APPS.md). This file

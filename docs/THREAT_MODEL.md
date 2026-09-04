@@ -139,7 +139,7 @@ mechanism cannot tell them apart, because it was never asked to.
 **Key compromise — a real, unaddressed gap.** Topic (group) keys have a full
 answer: `rotate` for forward secrecy, `rekey_seal` for eviction,
 `contribute`/`absorb` for healing after a copied key (§7.1,
-[Design](DESIGN.md#invites-and-what-revoke-can-and-cannot-mean-w7)). A
+[Spec](SPEC.md#groups-invites-and-what-revoke-can-mean)). A
 node's **identity** signing key has none of this. If the seed that derives
 it is stolen, the thief can sign as that address indefinitely — there is no
 revocation certificate, no protocol-level "this address's key is no longer
@@ -154,8 +154,7 @@ in a doc pass — recorded here so it is a stated gap, not a silent one.
 **Prekeys are a separate, already-solved problem.** A stolen *prekey* secret
 is bounded by the 7-day offline window and daily rotation (§7.2) — narrower
 blast radius than an identity key by design, and already documented in
-[Design](DESIGN.md)'s "Prekey ring (§7)" section, "what is still not
-solved," point 2.
+[Spec](SPEC.md) §7.2 and Part 3's "two things this does not solve".
 
 **Multi-device identity — tracked, not decided.** One keypair per device
 today (§1, §11: "ratchet state is per-device — give each device its own

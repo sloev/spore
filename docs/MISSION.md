@@ -45,7 +45,7 @@ company.
    binding, an OS process, a browser worker, an MCU firmware — each supplying
    the same four **nutrients** (randomness, time, storage, scheduling) across
    the transport boundary. Runtimes vary; the nutrients do not. See
-   [`docs/DESIGN.md`](DESIGN.md)'s "The spore and the soil" for the model
+   [`docs/SPEC.md`](SPEC.md) Part 4, "Where the core runs", for the model
    and the word legend these docs hold to.
 5. **A holdable protocol story** — two-sided A4 / `spore-v1` one-pager that
    stays true to [`docs/SPEC.md`](SPEC.md); not a 200-page religion to
@@ -107,7 +107,7 @@ Chat UI is **one client**, not the product definition.
 | Asset | Role |
 |---|---|
 | **Two-sided A4 / spore-v1 diagram** | Whole protocol in one holdable artifact; keep updated when v1 surface changes |
-| **[SPEC](SPEC.md) + [DESIGN](DESIGN.md)** | Implementer truth; not required reading to *send a note* |
+| **[SPEC](SPEC.md)** | Implementer truth — wire, app layer, runtime model; not required reading to *send a note* |
 | **[CONTINUITY](CONTINUITY.md)** | Seed, paper, cold start, standalone node, "network without us" |
 | **[REBUILD](REBUILD.md) / [reference](../reference/README.md) / vectors** | Independent reimplementation and verify |
 | **[Standalone HTML](../web/README.md) / offline bundle** | Run a node with no app store and no CDN |
