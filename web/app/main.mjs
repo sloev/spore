@@ -17,6 +17,7 @@ import { appShell, appBar, defaultPaneFor, canGoBack, DESTINATIONS } from './ui/
 import { renderOnboarding } from './screens/onboarding.mjs';
 import { renderChatList, renderChatThread } from './screens/chat.mjs';
 import { renderContacts } from './screens/contacts.mjs';
+import { renderSettings } from './screens/settings.mjs';
 import { formatAddr, dayLabel } from './ui/format.mjs';
 
 const K_ONBOARDED = 'spore.onboarded';
@@ -43,6 +44,13 @@ const state = {
   sending: false,
   newConvoOpen: false,
   newConvoError: null,
+
+  accent: 'red',
+  theme: 'system',
+  keepHistory: true,
+  lastAnnounceAt: null,
+  addingBridge: null,
+  confirmingWipe: false,
 
   contactsView: 'contacts',
   contactsQuery: '',
@@ -262,6 +270,93 @@ function nameFor(addr) {
   return { name: null, isClaim: false };
 }
 
+// ------------------------------------------------------------------ settings
+
+const K_ACCENT = 'spore.accent';
+const K_THEME = 'spore.theme';
+const K_KEEP_HISTORY = 'spore.keepHistory';
+
+/** Appearance is applied to <html>, which is where the design system reads it. */
+function applyAppearance() {
+  const root = document.documentElement;
+  root.setAttribute('data-accent', state.accent);
+  if (state.theme === 'system') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', state.theme);
+}
+
+const settingsActions = {
+  setAccent: (a) => {
+    state.accent = a;
+    localStorage.setItem(K_ACCENT, a);
+    applyAppearance();
+    render();
+  },
+  setTheme: (t) => {
+    state.theme = t;
+    localStorage.setItem(K_THEME, t);
+    applyAppearance();
+    render();
+  },
+
+  setKeepHistory: (on) => {
+    localStorage.setItem(K_KEEP_HISTORY, on ? '1' : '0');
+    threads.storage = on ? localStorageAdapter() : null;
+    // Turning it off must actually forget, not just stop writing -- otherwise
+    // the switch claims something the disk contradicts.
+    if (!on) localStorage.removeItem('spore.threads');
+    setState({ keepHistory: on });
+  },
+
+  startWipe: () => setState({ confirmingWipe: true }),
+  cancelWipe: () => setState({ confirmingWipe: false }),
+  confirmWipe: () => {
+    client.dispose();
+    localStorage.clear();
+    location.hash = '';
+    location.reload();
+  },
+
+  copyAddress: (addr) => { if (navigator.clipboard) navigator.clipboard.writeText(addr); },
+
+  announceNow: () => {
+    client.announceNow();
+    setState({ lastAnnounceAt: Date.now() });
+  },
+
+  openAddBridge: () => {
+    const first = client.availableTransports()[0];
+    setState({ addingBridge: { kind: first ? first.kind : null, fields: {}, error: null, busy: false } });
+  },
+  closeAddBridge: () => setState({ addingBridge: null }),
+  setAddBridgeKind: (kind) => setState({ addingBridge: { ...state.addingBridge, kind, fields: {}, error: null } }),
+  setAddBridgeField: (k, v) => {
+    // No re-render: the input owns its own text, as in the composer.
+    state.addingBridge.fields[k] = v;
+  },
+
+  confirmAddBridge: async () => {
+    const a = state.addingBridge;
+    if (!a || !a.kind) return;
+    const spec = client.availableTransports().find((t) => t.kind === a.kind);
+    const cfg = { kind: a.kind };
+    for (const f of (spec && spec.fields) || []) {
+      cfg[f.k] = a.fields[f.k] !== undefined ? a.fields[f.k] : (f.value || '');
+    }
+    setState({ addingBridge: { ...a, busy: true, error: null } });
+    try {
+      await client.addBridge(cfg);
+      setState({ addingBridge: null, bridges: client.bridges() });
+    } catch (err) {
+      setState({ addingBridge: { ...state.addingBridge, busy: false, error: String((err && err.message) || err) } });
+    }
+  },
+
+  removeBridge: (id) => {
+    client.removeBridge(id);
+    setState({ bridges: client.bridges() });
+  },
+};
+
 // ---------------------------------------------------------------- rendering
 
 function notBuiltYet(name) {
@@ -355,6 +450,22 @@ function renderApp() {
 
   if (state.screen === 'chat') {
     ({ side, main } = renderChatScreen());
+  } else if (state.screen === 'settings') {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({ title: 'Settings', subtitle: null, onBack: null, actions: [] }),
+      renderSettings({
+        bridges: state.bridges,
+        available: client.availableTransports(),
+        adding: state.addingBridge,
+        accent: state.accent,
+        theme: state.theme,
+        keepHistory: state.keepHistory,
+        lastAnnounceAt: state.lastAnnounceAt,
+        addrHex: state.identity ? state.identity.addrHex : '',
+        confirmingWipe: state.confirmingWipe,
+        actions: settingsActions,
+      }),
+    );
   } else if (state.screen === 'contacts') {
     main = el('div', { style: { display: 'contents' } },
       appBar({ title: 'Contacts', subtitle: null, onBack: null, actions: [] }),
@@ -460,6 +571,9 @@ export async function boot(container) {
       case 'BridgeStateChanged':
         setState({ bridges: client.bridges() });
         break;
+      case 'AnnounceSent':
+        setState({ lastAnnounceAt: Date.now() });
+        break;
       case 'ClientFault':
         setState({ error: e.message });
         break;
@@ -473,6 +587,12 @@ export async function boot(container) {
   // genuinely generates rather than reporting something already created.
   const hasSeed = Boolean(localStorage.getItem('spore.seed'));
   const onboarded = Boolean(localStorage.getItem(K_ONBOARDED));
+
+  state.accent = localStorage.getItem(K_ACCENT) || 'red';
+  state.theme = localStorage.getItem(K_THEME) || 'system';
+  state.keepHistory = localStorage.getItem(K_KEEP_HISTORY) !== '0';
+  applyAppearance();
+  if (!state.keepHistory) threads.storage = null;
 
   window.addEventListener('hashchange', () => { if (!state.onboarding) applyHash(); });
 

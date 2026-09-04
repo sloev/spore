@@ -108,11 +108,36 @@ const MODULES = [
   'app/screens/onboarding.mjs',
   'app/screens/chat.mjs',
   'app/screens/contacts.mjs',
+  'app/screens/settings.mjs',
   'app/transports.mjs',
   'app/spore-client.mjs',
   // boots on load — must be last
   'app/main.mjs',
 ];
+
+// Every app module on disk must be in MODULES. Forgetting one does not fail the
+// build — it produces a standalone that is silently missing a screen, which is
+// exactly how `app/screens/settings.mjs` nearly shipped as a file nobody loaded.
+// The transports and infrastructure above are listed deliberately (order and
+// membership are chosen), so only `app/` is swept.
+function assertEveryAppModuleIsInlined() {
+  const listed = new Set(MODULES);
+  const onDisk = [];
+  (function walk(dir) {
+    for (const f of fs.readdirSync(path.join(here, dir))) {
+      const rel = dir + '/' + f;
+      if (fs.statSync(path.join(here, rel)).isDirectory()) walk(rel);
+      else if (f.endsWith('.mjs') && !f.includes('.test.')) onDisk.push(rel);
+    }
+  })('app');
+  const missing = onDisk.filter((f) => !listed.has(f));
+  if (missing.length) {
+    console.error('\nThese app modules exist but are not inlined:\n  ' + missing.join('\n  '));
+    console.error('\nAdd them to MODULES (order matters — see the note above it).\n');
+    process.exit(1);
+  }
+}
+assertEveryAppModuleIsInlined();
 
 const modules = MODULES.map((m) => '// ---- ' + m + '\n' + inlineModule(read(m))).join('\n\n');
 
