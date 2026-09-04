@@ -1419,6 +1419,76 @@ so the fix cannot be satisfied by simply breaking receipts.
 
 ---
 
+## S-033
+
+**A long-lived Direct pipe reuses its AEAD nonce.** High. `src/direct.rs` —
+`Pipe::send` and `nonce`.
+
+**Root cause.** The record nonce *is* the sequence number:
+
+```rust
+fn nonce(seq: u16) -> [u8; 12] {
+    let mut n = [0u8; 12];
+    n[10..].copy_from_slice(&seq.to_be_bytes());  // ten zero bytes, then seq
+    n
+}
+```
+
+`tx_seq` was a `u16` advanced with `wrapping_add`, and `tx_key` never changes for
+the life of a pipe — there is no REKEY in v1 of the profile. So after 65_536
+records the counter silently returned to 0 and every subsequent record reused a
+nonce that had already been used under the same key.
+
+The mistaken assumption is that a wrapping counter is a replay question, to be
+handled by a sliding window "for apps that care". It is not. For
+ChaCha20-Poly1305, nonce reuse is a **cryptographic** failure and no receiver-side
+window can undo it.
+
+**Exploit.** An observer who captures two records sharing a nonce learns the XOR
+of their plaintexts, which is often enough on structured media frames. Worse, the
+Poly1305 one-time authentication key is derived from (key, nonce): reusing the
+pair lets an attacker who has two ciphertexts under it recover that key and
+**forge** records the peer will accept, because the MAC — not the `pipe_id[..4]`
+prefix — is what authenticates a record.
+
+This is reachable in ordinary use rather than a theoretical bound. Direct exists
+for "full-duplex, low-latency media (voice, telemetry, a live terminal)"; at 50
+records per second a voice pipe wraps in about **22 minutes**.
+
+**Reproduced.** `a_pipe_refuses_to_send_rather_than_reuse_a_nonce` sends 65_536
+records over a negotiated loopback pipe and then one more. Against the previous
+code the 65_537th succeeded, reusing nonce 0.
+
+**Patch.** `tx_seq` becomes `Option<u16>` advanced with `checked_add`. When the
+sequence is exhausted the pipe refuses to send, with an error naming the reason,
+and stays refused. The caller must open a fresh pipe — new ephemeral DH, new
+keys, seq back to 0.
+
+Refusing is the conservative half of the fix. The complete answer is either a
+64-bit nonce or a mandatory REKEY before exhaustion, and both are profile changes
+(`direct::VERSION`); refusing needs neither and can never be unsafe. What it costs
+is a media pipe that must be re-established roughly every 22 minutes at voice
+rates — visible and recoverable, where the previous behaviour was silent and not.
+
+**Freeze impact?** None. Direct is an application profile carried as opaque `SPDR`
+payload; no envelope byte changes and `tests/api_freeze.rs` passes untouched. The
+record header is unchanged — this only stops the sender emitting past the limit.
+
+**Behaviour change.** Yes: a pipe that previously ran forever now returns an error
+after 65_536 records. Nothing in-tree consumes Direct records yet
+(`docs/DIRECT.md` Status), so no shipped surface changes today.
+
+**Test.** `a_pipe_refuses_to_send_rather_than_reuse_a_nonce` — asserts every
+sequence number up to the last still sends (so the fix cannot be satisfied by
+breaking the pipe early), that the record past the end is refused with a
+reason, and that it stays refused rather than wrapping on the next call.
+
+**Credit.** Found by an external review of the published docs (`DIRECT.md` D6),
+which reasoned from the documented `seq` width to the conclusion before reading
+the code — the same way S-032 was found by checking a claim rather than a line.
+
+---
+
 ## Investigated and not a finding
 
 Recorded because a cleared hypothesis is worth as much as a confirmed one, and

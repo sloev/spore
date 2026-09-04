@@ -73,10 +73,10 @@ keys by QR/paper/voice. Petnames are local.
 
 ```
 off len field
-0   1   ver    = 0x01  (layout frozen; forward envelopes with unknown flag bits set)
+0   1   ver    = 0x01  (exact match to decode; see "Versioning and unknown bits")
 1   1   type   0=DATA 1=INV 2=WANT 3=ANNOUNCE
 2   1   flags  b0 ENCRYPTED b1 SIGNED b2 FRAGMENT b3 ACKREQ b4 FLOOD b5 SRC8
-               b6 RATCHET (0x40, §7)   b7 reserved, MUST be 0
+               b6 RATCHET (0x40, §7)   b7 unassigned in v1
 3   1   hops   remaining relays (default 16; relays clamp incoming to ≤ 16)
 4   4   expiry unix seconds u32 (stores clamp horizon to 30 d)
 8   8   dest   address | topic | 0x00×8 = public
@@ -86,6 +86,15 @@ off len field
     64  sig    Ed25519 over all bytes above with hops zeroed
 -- unsigned: no src, no sig; rides last everywhere --
 ```
+
+**Versioning and unknown bits.** `ver` is an exact match: a decoder MUST reject
+any `ver != 0x01` rather than guess, so v2 is a hard fork and not a negotiation.
+**Flags are the extension point instead.** Bits defined in v1 MUST be interpreted
+as named; a bit a node does not understand MUST be ignored, MUST be forwarded
+unchanged, and MUST NOT cause a drop. That is what makes b7 usable later without
+a version bump — and it is why the table above says *unassigned*, not *must be
+zero*: forbidding the bit and relying on it as the agility hatch cannot both be
+true, and the forwarding rule is the one the code implements.
 
 **ID** = first 16 B of SHA-256(envelope, hops zeroed); computed, never
 transmitted (except inside INV/WANT/frag/ack). Zeroing `hops` is what keeps the
@@ -129,8 +138,15 @@ attacker's own direct neighbours ([Threat model](THREAT_MODEL.md) ch. 5).
 
 **ANNOUNCE** (type 3, signed): payload =
 `[prekey:32][nt:1][topic×8 ea][np:1][(addr:8, age_min:2) ea][petname…]` — your
-current encryption prekey (§7), topics you collect, freshest paths. Link HELLO =
+current encryption prekey (§7), topics you collect, and a path list. Link HELLO =
 hops 0; flooded = hops 16.
+
+A node MUST accept any `np` the envelope can hold. A node MAY ignore the path
+list, and **the reference build does**: it always sends `np = 0` and skips the
+field when parsing, so paths here are learned only from the first copy of signed
+traffic and from an ANNOUNCE's own `src`. Third-party path advertisement is
+reserved rather than implemented — turning it on is a Sybil and wormhole
+analysis, not a parser change.
 
 ## 5. Forwarding rules (the entire router)
 
@@ -153,8 +169,10 @@ hops 0; flooded = hops 16.
    overheard ≥ 2×; ≥ 1× for directed) · **unicast + fresh path** → that
    interface/neighbor only · **unicast, no path** → silent, unless you hold
    custody and the path died: set FLOOD, continue.
-6. Originator: no echo/ACK → resend with FLOOD per 4d. Flooding **is** route
-   discovery; replies teach reverse paths and heal blackholes.
+6. Originator: no receipt (§8) → resend with FLOOD per 4d. Flooding **is** route
+   discovery; replies teach reverse paths and heal blackholes. A receipt is the
+   only delivery signal: overhearing your own envelope rebroadcast means the mesh
+   took it, not that anyone received it, and MUST NOT clear a pending resend.
 7. Untrusted clock? Relay regardless of expiry; age by dwell, drop after 7 local
    days.
 
@@ -227,8 +245,7 @@ nonce. See Part 3 for the layer built on this.
     cannot disagree.
   - Compromise leaks nothing older than one ratchet turn.
 - **Encrypted topics:** pre-shared key, XChaCha20-Poly1305, 24-B nonce prefixed.
-  **Rotation:** flood `KEYROT <newpub>` signed by the old key. **Ham bands:
-  ENCRYPTED=0** — signing identifies, ciphering is illegal there.
+  **Rotation:** flood `KEYROT <newpub>` signed by the old key.
 
 ### 7.1 Topic key schedule
 
@@ -333,7 +350,9 @@ cap it.
 is signed. Unsigned mail rides last.
 
 **Trust.** Prefer keys you have met or your operator vouches for; confirm a peer
-out of band by address emoji-hash. Convention: topic `sos` outranks policy.
+out of band by address emoji-hash. No topic is privileged: there is no string a
+sender can choose that buys priority, quota, or a relay it would not otherwise
+get.
 
 ## 11. Defaults
 

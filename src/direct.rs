@@ -496,7 +496,7 @@ impl Answering {
 
     /// Attach the port the runtime opened, completing the pipe.
     pub fn over<P: DatagramPort>(self, port: P) -> Pipe<P> {
-        Pipe { tx_key: self.tx_key, rx_key: self.rx_key, pipe_id: self.pipe_id, tx_seq: 0, port }
+        Pipe { tx_key: self.tx_key, rx_key: self.rx_key, pipe_id: self.pipe_id, tx_seq: Some(0), port }
     }
 }
 
@@ -662,7 +662,8 @@ pub struct Pipe<P: DatagramPort> {
     tx_key: [u8; 32],
     rx_key: [u8; 32],
     pipe_id: [u8; 16],
-    tx_seq: u16,
+    /// Next nonce to use. `None` once exhausted — see [`Pipe::send`] (S-033).
+    tx_seq: Option<u16>,
     port: P,
 }
 
@@ -752,15 +753,31 @@ impl<P: DatagramPort> Pipe<P> {
         let shared = dh(&pending.eph_sec, eph_pub);
         let (init_tx, init_rx) =
             derive(&shared, &pending.pipe_id, &pending.from, &pending.to, &chosen.medium);
-        Some(Pipe { tx_key: init_tx, rx_key: init_rx, pipe_id: pending.pipe_id, tx_seq: 0, port })
+        Some(Pipe { tx_key: init_tx, rx_key: init_rx, pipe_id: pending.pipe_id, tx_seq: Some(0), port })
     }
 
     /// Seal `payload` as one record and hand it to the transport. The record's
     /// header (version, type, seq, pipe-id prefix) is authenticated as AAD, so a
     /// flipped type or seq fails the peer's MAC.
+    ///
+    /// **Refuses to send once the sequence is exhausted (S-033).** `seq` *is* the
+    /// ChaCha20-Poly1305 nonce — [`nonce`] is ten zero bytes followed by it — and
+    /// `tx_key` never changes for the life of the pipe. Wrapping the counter
+    /// would therefore reuse a nonce under one key, which for this AEAD leaks the
+    /// XOR of the two plaintexts *and* reuses the Poly1305 one-time key, making
+    /// forgery possible. It is not a replay question and no sliding window helps.
+    ///
+    /// v1 of this profile has no REKEY, so the only safe answer is to stop and
+    /// make the caller open a fresh pipe (new ephemeral DH, new keys, seq 0). At
+    /// 50 records/s — a voice pipe — this arrives after about 22 minutes, so it
+    /// is reachable in ordinary use rather than a theoretical bound.
     pub fn send(&mut self, typ: RecordType, payload: &[u8]) -> std::io::Result<()> {
-        let seq = self.tx_seq;
-        self.tx_seq = self.tx_seq.wrapping_add(1);
+        let seq = self.tx_seq.ok_or_else(|| {
+            std::io::Error::other(
+                "direct pipe sequence exhausted: open a new pipe (reusing the nonce would break the AEAD)",
+            )
+        })?;
+        self.tx_seq = seq.checked_add(1);
         let mut header = Vec::with_capacity(8);
         header.push(VERSION);
         header.push(typ as u8);
@@ -1176,6 +1193,34 @@ mod tests {
         let (ans, resp) = Pipe::answer(&offer, to, &[Medium::udp()], b"127.0.0.1:0", rp);
         let init = Pipe::finish(pending, &Answer::decode(&ans).unwrap(), ip).unwrap();
         (init, resp.unwrap())
+    }
+
+    /// S-033. `seq` *is* the ChaCha20-Poly1305 nonce (ten zero bytes then the
+    /// counter) and `tx_key` is fixed for the pipe's life, so wrapping the
+    /// counter reuses a nonce under one key: the XOR of both plaintexts leaks and
+    /// the Poly1305 one-time key repeats, which makes forgery possible. The
+    /// counter used `wrapping_add`, so this happened silently after 65_536
+    /// records -- about 22 minutes of a 50 records/s voice pipe.
+    ///
+    /// v1 of the profile has no REKEY, so the pipe must refuse to send rather
+    /// than continue unsafely.
+    #[test]
+    fn a_pipe_refuses_to_send_rather_than_reuse_a_nonce() {
+        let (mut init, _resp) = negotiate([0xA1u8; 8], [0xB2u8; 8]);
+
+        // Walk it to the last usable sequence number rather than asserting on an
+        // internal: 0..=u16::MAX is exactly 65_536 records.
+        for _ in 0..=u16::MAX {
+            init.send(RecordType::Data, b"x").expect("every seq up to the last must send");
+        }
+
+        let err = init
+            .send(RecordType::Data, b"one too many")
+            .expect_err("the 65_537th record would reuse nonce 0 under the same key");
+        assert!(err.to_string().contains("exhausted"), "the refusal must say why, not fail obscurely: {err}");
+
+        // And it stays refused -- not a one-shot hiccup that then wraps anyway.
+        assert!(init.send(RecordType::Data, b"still no").is_err());
     }
 
     #[test]

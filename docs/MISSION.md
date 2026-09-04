@@ -97,7 +97,8 @@ Chat UI is **one client**, not the product definition.
   the tab closes, no radio — the runtime says so and the feature is absent,
   never a control with nothing behind it. A thin runtime is a profile, not a
   degraded build.
-- Freeze: wire, C ABI, vectors — change only with explicit process (see
+- Freeze: wire and vectors, plus the API pin; the C ABI is freeze-on-remove
+  (symbols may be added) — change only with explicit process (see
   [Contributing](CONTRIBUTING.md)).
 
 ---

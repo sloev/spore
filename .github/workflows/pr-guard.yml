@@ -1,12 +1,26 @@
 name: PR guard (API freeze)
 
-# Refuse pull requests that change the frozen v1 contract or the test suite that
-# guarantees it. Combined with branch protection (this check + CI required, no
-# direct pushes), this is what keeps `master` from ever silently breaking the API.
+# Refuse pull requests that change the frozen v1 contract.
 #
-# The frozen set: the golden contract test, the generated test vectors and the C
-# header they pin, the example that produces the vectors, and the CI/guard
-# workflows themselves (so the guard can't be weakened in the same PR).
+# The frozen set is deliberately small — three pinned files plus one
+# freeze-on-remove header:
+#
+#   reference/vectors.json    the golden wire bytes
+#   examples/gen_vectors.rs   the generator those bytes come from
+#   tests/api_freeze.rs       the mechanical pin of the public API shape
+#   bindings/spore.h          C ABI: symbols may be ADDED, never removed/renamed
+#
+# It used to be much wider: all of `tests/`, the web and seed test suites,
+# `examples/worked.rs`, `reference/test_t0.py`, and these workflow files. That
+# made "add a regression test" a backwards-incompatible act. S-032 and S-033 were
+# both found by writing a test; a guard that taxes the next one is protecting the
+# wrong thing. `api_freeze.rs` is the pin — a PR that changes *it* is changing the
+# API, and that is exactly what the label is for.
+#
+# The workflows are no longer frozen either. `.github/CODEOWNERS` already requires
+# a code-owner review on every path, and the ruleset enforces it, so the guard
+# cannot be quietly weakened in the same PR regardless. Freezing the YAML only
+# meant paying a major-version label to bump an action version.
 #
 # To change a frozen file on purpose — a deliberate, major-version decision — add
 # the `allow-frozen-change` label to the PR.
@@ -16,8 +30,7 @@ name: PR guard (API freeze)
 # started the run. Without them, adding the label did nothing: the default types
 # are opened/synchronize/reopened, so the only way to get a payload carrying the
 # label was to push another commit — and re-running the failed job replays the
-# original, label-free payload, so that did not work either. The instruction two
-# lines above was therefore false unless you already knew to push again.
+# original, label-free payload, so that did not work either.
 on:
   pull_request:
     branches: [master]
@@ -30,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Refuse edits to frozen contract / test files
+      - name: Refuse edits to frozen contract files
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -42,13 +55,36 @@ jobs:
           fi
           changed="$(git diff --name-only "$BASE" "$HEAD")"
           echo "Files changed in this PR:"; echo "$changed"
-          frozen='^(tests/|reference/vectors\.json|reference/test_t0\.py|bindings/spore\.h|examples/(gen_vectors|worked)\.rs|site/seed/.*\.test\.mjs|web/(test|ws-test)\.mjs|\.github/workflows/(ci|pr-guard)\.yml)'
+
+          # 1. Hard-frozen: the wire bytes, their generator, and the API pin.
+          frozen='^(reference/vectors\.json|examples/gen_vectors\.rs|tests/api_freeze\.rs)$'
           hits="$(echo "$changed" | grep -E "$frozen" || true)"
           if [ -n "$hits" ]; then
-            echo "::error::This PR modifies frozen v1 contract / test files:"
+            echo "::error::This PR modifies frozen v1 contract files:"
             echo "$hits"
-            echo "These files are frozen to guarantee the API and wire format. Changing them is a"
+            echo "These pin the wire format and the public API shape. Changing them is a"
             echo "backwards-incompatible (major-version) act — add the 'allow-frozen-change' label to proceed."
             exit 1
           fi
-          echo "OK — no frozen files touched."
+
+          # 2. The C ABI is freeze-on-remove, open-on-add. New symbols are how
+          #    M10's app-level ABI lands without a major-version label; deleting
+          #    or renaming an existing one still breaks every binding downstream.
+          if echo "$changed" | grep -qx 'bindings/spore\.h'; then
+            git show "$BASE:bindings/spore.h" | grep -oE '\bspore_[A-Za-z0-9_]+' | sort -u > /tmp/base_syms
+            git show "$HEAD:bindings/spore.h" | grep -oE '\bspore_[A-Za-z0-9_]+' | sort -u > /tmp/head_syms
+            gone="$(comm -23 /tmp/base_syms /tmp/head_syms)"
+            if [ -n "$gone" ]; then
+              echo "::error::This PR removes or renames frozen C ABI symbols:"
+              echo "$gone"
+              echo "Symbols may be added freely. Removing one breaks every binding that links it —"
+              echo "add the 'allow-frozen-change' label if that is genuinely intended."
+              exit 1
+            fi
+            added="$(comm -13 /tmp/base_syms /tmp/head_syms)"
+            if [ -n "$added" ]; then
+              echo "bindings/spore.h gains symbols (allowed, additive):"; echo "$added"
+            fi
+          fi
+
+          echo "OK — no frozen contract touched."

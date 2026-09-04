@@ -41,28 +41,40 @@ Branch protection requires both, plus a Code Owners review, before merge.
 These files define the compatibility surface and may not change while the wire
 format is v1 — regardless of what the crate's own version number says:
 
-**`pr-guard.yml`'s regex is the ground truth; this table mirrors it in full.** It
-listed five of the eight patterns for a while, which is worse than listing none —
-a contributor who checks the table, finds their file absent, and is then refused
-by CI has been told two different things by the same repo.
+**`pr-guard.yml` is the ground truth; this table mirrors it in full.**
 
-| File | Freezes |
-|---|---|
-| `tests/**` | the public API shape + the golden wire/crypto vectors |
-| `reference/vectors.json` | the cross-language test vectors (generated) |
-| `reference/test_t0.py` | the conformance check the Tier-0 decoder must keep passing |
-| `bindings/spore.h` | the C ABI symbols |
-| `examples/gen_vectors.rs` | the generator those vectors come from |
-| `examples/worked.rs` | the worked bytes `REBUILD.md` is checked against |
-| `site/seed/*.test.mjs` | the paper-seed tooling's own conformance tests |
-| `web/test.mjs`, `web/ws-test.mjs` | the browser node's end-to-end contract |
-| `.github/workflows/{ci,pr-guard}.yml` | the guards themselves |
+| File | Freezes | Rule |
+|---|---|---|
+| `reference/vectors.json` | the cross-language wire vectors | no change |
+| `examples/gen_vectors.rs` | the generator those vectors come from | no change |
+| `tests/api_freeze.rs` | the public API shape + golden wire/crypto values | no change |
+| `bindings/spore.h` | the C ABI symbols | **symbols may be added; none may be removed or renamed** |
 
-**Adding a test to a frozen test file still trips the guard.** That is the guard
-working as designed — it is mechanical precisely so it cannot be argued with — and
-the label is the intended way through. Say in the PR that the change is additive
-and names nothing existing, so a reviewer can confirm it in one look rather than
-diffing a file they assume is untouchable.
+**Everything else is not frozen**, including `tests/**` other than
+`api_freeze.rs`, `web/test.mjs`, `web/ws-test.mjs`, `site/seed/*.test.mjs`,
+`examples/worked.rs`, `reference/test_t0.py`, and the workflow files.
+
+That list used to be much longer, and the difference matters:
+
+- **Adding a regression test is not a breaking change.** The whole test tree was
+  frozen, so `tests/s_034_something.rs` needed a major-version label. S-032 and
+  S-033 were both found by writing a test; a guard that taxes the next one is
+  protecting the wrong thing. `api_freeze.rs` is the pin — a PR that changes
+  *that* file is changing the API, which is precisely what the label is for.
+- **The C ABI is freeze-on-remove, not freeze-on-touch.** Adding
+  `spore_thread_list` breaks nobody; deleting `spore_open` breaks every binding
+  that links it. The guard now diffs the `spore_*` symbols between base and head
+  and fails only on a disappearance, so M10's app-level ABI can land additively.
+- **The workflows are no longer frozen.** `CODEOWNERS` already requires a
+  code-owner review on every path and the ruleset enforces it, so the guard
+  cannot be quietly weakened in the same PR regardless. Freezing the YAML only
+  meant paying a major-version label to bump an action version.
+- `examples/worked.rs` is already checked by `scripts/check_docs_sync.py`, so
+  freezing it meant a docs-sync fix needed the label too.
+
+The label still exists and still means what it says: this PR is a deliberate,
+backwards-incompatible act against the v1 contract. It should now be rare enough
+that seeing it on a PR is informative.
 
 Everything the wire format touches — envelope layout, address/ID derivation,
 signing, armor, sealed boxes, encrypted topics — is pinned by `tests/api_freeze.rs`

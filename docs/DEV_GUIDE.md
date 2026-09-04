@@ -223,9 +223,9 @@ RoundedCornerShape(Metrics.Radius)` where `Radius = 0`).
 
 **What was dropped with the old language.** Scanlines/vignette/CRT bloom —
 HARDBRUT has no ambient VFX, removed entirely (`scanlines()` is gone). The
-pastel pink chibi Baud — restyled flat ink + yellow at HARDBRUT migration, then
-removed entirely: SPORE's brand is the wordmark only, no mascot, no icon. The
-old `Void/Asphalt/Amber/Pink/Cyan/Phosphor/Kevlar/Dim` palette members.
+old mascot — removed entirely: SPORE's brand is the wordmark only, no mascot,
+no icon. The old `Void/Asphalt/Amber/Pink/Cyan/Phosphor/Kevlar/Dim` palette
+members.
 
 ## Where to go deeper
 

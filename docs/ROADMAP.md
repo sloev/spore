@@ -18,9 +18,12 @@ here and keeps its commit; the code is the truth.
 
 ## Hard rules (do not violate)
 
-- **Frozen:** wire format, C ABI (`bindings/spore.h`), `reference/vectors.json`, and
-  the API surface in `tests/api_freeze.rs`. No change without the `allow-frozen-change`
-  label.
+- **Frozen:** the wire format — `reference/vectors.json`, its generator
+  `examples/gen_vectors.rs`, and the API pin `tests/api_freeze.rs`. No change
+  without the `allow-frozen-change` label. The C ABI (`bindings/spore.h`) is
+  **freeze-on-remove**: symbols may be added freely, none may be removed or
+  renamed. Nothing else is frozen — adding a test is not a breaking change. See
+  [Contributing](CONTRIBUTING.md#the-frozen-v1-contract).
 - **Honesty over polish:** 🧪 markers, "Still open", served-vs-fetching language, and
   **no fake UI** — never a control whose backend is missing.
 - **HARDBRUT upstream (`supernihil/hardbrut`) is normative** for colour, contrast,
@@ -52,7 +55,7 @@ here and keeps its commit; the code is the truth.
 | Move `MISSION.md`, `SECURITY.md`, `CHANGELOG.md`, `CONTRIBUTING.md` into `docs/` | ✅ shipped |
 | Update all internal links, CI workflows (release, android, pages), site generator, CODEOWNERS | ✅ shipped |
 | Root holds only `README.md`, source, build files, licenses, config | ✅ shipped |
-| Rewrite `VISUALDESIGN.md` for the new design language (Antenna + Seed, three sizes, density, screen structures) | ✅ shipped |
+| Rewrite `VISUALDESIGN.md` for the new design language | ✅ shipped |
 | Rewrite this ROADMAP into milestone form | ✅ shipped |
 
 **Definition of done:** `ls` at repo root shows only `README.md`, source dirs,
@@ -140,7 +143,7 @@ exclusion + migration). Direct connects on a LAN and degrades honestly on a WAN.
 
 ## Milestone 3 — Design language implementation
 
-**Goal:** every surface adopts Antenna + Seed, the three control sizes, the density
+**Goal:** every surface adopts the three control sizes, the density
 rules, and the screen structures the design language called for at the time.
 Superseded by **Milestone 6** (HARDBRUT); kept here as a historical record — the
 old SPORE-authored design document this milestone shipped is retired.
@@ -157,11 +160,7 @@ work below is the code half that changes what is on screen.
 | Android `Chip` + `ListRow` primitives; route ad-hoc sizes through them (C5 Kotlin half) | ✅ shipped (#133) | Chip (32dp preset) + ListRow (56dp row) |
 | Density & type hierarchy pass (C4) — ≤1 instructional sentence, progressive disclosure | ✅ shipped (#134) | Compact status, details disclosure, Mail h2 removed |
 | Bridges & Advanced information architecture (C6) — uniform rows, grouped sections | ✅ shipped (#136) | ListRow-based BridgeRow, Chip toggles |
-| Empty-state & status-line diet (B11) | ✅ shipped (#135) | Baud mascot on all panels, compact status |
-| Replace mushroom icon with Antenna + Seed on Android | ✅ done | `ic_spore.xml` now Antenna + Seed |
-| Replace mushroom icon with Antenna + Seed on web node | ✅ done | Favicon (data URI) + header mark in `build-standalone.mjs` |
-| Replace mushroom icon with Antenna + Seed on site (favicon, hero, nav) | ✅ done | `site/antenna-seed.svg` + brand mark in `build.mjs` + `style.css` |
-| Persistent identity + status header on web node (WV0) | ✅ shipped (#130) | Tokens, identity header, Baud empty states |
+| Persistent identity + status header on web node (WV0) | ✅ shipped (#130) | Tokens, identity header |
 | Web node IA — distinct surfaces Mail / Feed / Bridges / Seed (WV1) | ✅ shipped (#132) | Tabbed navigation with 5 panels |
 | Site design-language execution (Site-2) — usage matrix + density everywhere | ✅ shipped (#138) | Hard edges everywhere (2px radius) |
 | Site navigation chrome + human/builder paths (Site-3) | ✅ shipped (#137) | 5 nav items: Try it, How it works, Get a node, Spec, Web node |
@@ -176,11 +175,8 @@ work below is the code half that changes what is on screen.
 - [ ] The site has persistent, clear navigation.
 - [ ] The web node has a persistent identity + status header.
 - [ ] Reduced motion is fully static; the standalone still makes zero external requests.
-- [x] ~~Baud appears only on empty states and completions.~~ Superseded: Baud is removed entirely — brand is the SPORE wordmark only, no mascot (see the hard rules).
-- [x] ~~The only brand icon is Antenna + Seed; no mushroom anywhere.~~ Superseded: there is no brand icon at all — wordmark only (see the hard rules).
 
-**Definition of done:** every surface passes visual review and the mushroom icon is
-gone from the repo's rendered assets. (Historical: at the time this milestone shipped,
+**Definition of done:** every surface passes visual review. (Historical: at the time this milestone shipped,
 the checklist lived in the now-retired `docs/VISUALDESIGN.md` §8; superseded by M6/M7,
 which hold HARDBRUT upstream normative instead.)
 
@@ -295,8 +291,6 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 | Question | Decision |
 |---|---|
 | Does HARDBRUT replace the Neo-Tokyo palette? | **Yes, entirely.** `--void`/`--phosphor`/`--pink-on-olive` and the CRT look are retired. `design/tokens.json` is rewritten to HARDBRUT tokens and regenerated into all three surfaces. |
-| Antenna + Seed icon | ~~Kept. It is brand identity, orthogonal to palette; HARDBRUT has no logo opinion. Rendered ink-on-paper (mono) rather than phosphor-on-dark.~~ Superseded: the icon was later retired entirely — brand is the SPORE wordmark only, no icon, no mascot (see the hard rules). |
-| Baud mascot | ~~Kept, restyled to HARDBRUT (flat black ink, yellow accents, hard outline) — still empty-state/completion only.~~ Superseded: Baud was later removed entirely, same rule. |
 | Zero external requests / reduced motion | **Unchanged — CI-enforced hard rules.** HARDBRUT already gates motion on `prefers-reduced-motion`; the standalone must stay self-contained (no webfonts, no CDN). |
 | Impact display face | HARDBRUT's `--font-display` is `Impact, "Arial Narrow Bold", Haettenschweiler` — a system stack, no webfont, which satisfies constraint 1 exactly as the old stack did. |
 | The `--prose` long-read token | **Dropped.** HARDBRUT body copy is full ink on paper — already the most readable pairing, no desaturation needed. |
@@ -307,7 +301,7 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 | Task | Status | Notes |
 |---|---|---|
 | Rewrite `design/tokens.json` to HARDBRUT values + regenerate `site/style.css`, `web/build-standalone.mjs`, Android `Chrome.kt`, and VISUALDESIGN's contrast table | ✅ shipped | `design/generate.py` inverted to light-first; `--ink #000`, `--paper #fff`, `--bg #fdfaf2`, `--yellow #ffd23f`, `--muted #666`, radius 0, border 3px, throw 5px, plus an `--onyellow` dark-mode token. CI drift job keeps them in sync |
-| Web node → HARDBRUT (css tokens + components: two buttons, zero radius, hard shadows, restyled header/mascot) | ✅ shipped | Inline `<style>` in `build-standalone.mjs`; zero external requests + reduced-motion kept; Baud restyled flat; Antenna+Seed recoloured |
+| Web node → HARDBRUT (css tokens + components: two buttons, zero radius, hard shadows) | ✅ shipped | Inline `<style>` in `build-standalone.mjs`; zero external requests + reduced-motion kept |
 | Site (`site/style.css` + `build.mjs` + `home.md`) → HARDBRUT | ✅ shipped | Solid paper header + 4px ink bottom border; zero radius; hard `var(--shadow)`; CRT VFX removed; SVG illustrations recoloured |
 | Android (`Chrome.kt` + all Compose screens) → HARDBRUT | ✅ shipped | Flat two-theme Palette (suffixless light + `Dark`-suffixed dark); scanslines/bloom removed; crate = zero-radius paper + hard shadow; two button kinds via `CrateButton` face |
 | Rewrite `docs/VISUALDESIGN.md` to the HARDBRUT language (new tokens, components, contrast, screen structures) | ✅ shipped | Intro, §1 heading, §3 components and §4 VFX rewritten; the old Neo-Tokyo §1/§3/§4 content superseded |
@@ -317,9 +311,7 @@ press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
 ink, yellow primary / white cancel, zero radius, hard no-blur shadows held on
 every element); the standalone still makes zero external requests and is fully
 static under reduced motion; the drift job regenerates HARDBRUT tokens into all
-three surfaces and passes. (Antenna + Seed and Baud, both mentioned as kept/
-restyled above, were later retired entirely — see the hard rules: the brand is
-the wordmark, nothing stands in for it.)
+three surfaces and passes.
 
 ---
 
@@ -372,9 +364,7 @@ web surfaces on the next `hardbrut-sync.mjs` + rebuild, Android on the next
 external requests; Android's `Chrome.kt` aliases the vendored `Hardbrut.kt`'s
 tokens and shadow primitive rather than maintaining its own copy, keeping only
 the product-specific primitives (touch targets, press feedback,
-`Chip`/`ListRow`/etc.) that file doesn't provide. (Antenna + Seed and Baud
-were later retired entirely — see the hard rules: the brand is the wordmark,
-nothing stands in for it.)
+`Chip`/`ListRow`/etc.) that file doesn't provide.
 
 ---
 
@@ -799,7 +789,7 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 
 1. **M1 — Security & correctness** (no P0 stays open)
 2. **M2 — Core functionality** (credible phone + daemon node)
-3. **M3 — Design language** (Antenna + Seed, three sizes, density, screen structures)
+3. **M3 — Design language** (three sizes, density, screen structures)
 4. **M4 — Webnode as daily driver** (first runtime on the storage seam)
 5. **M5 — Polish & hardening** (only after the above)
 6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
