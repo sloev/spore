@@ -31,6 +31,103 @@ fn wasm_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
 }
 getrandom::register_custom_getrandom!(wasm_getrandom);
 
+// -- storage: routed to JS imports, the same way randomness is ---------------
+//
+// The browser has no filesystem, so `FsSpill` cannot run there and a browser
+// node's custody store was memory-only: every envelope it was holding for
+// someone else vanished on reload. That is the one capability gap the portable
+// core had on wasm — ESP32 mounts SPIFFS through ESP-IDF's VFS and runs
+// `FsSpill` unmodified, and every other target has a real filesystem.
+//
+// The core already anticipated this: `Node::set_spill_backend` exists precisely
+// "for a runtime whose storage nutrient is browser IndexedDB, MCU flash, or
+// anything else". This supplies that backend, and nothing about the trait, the
+// store, or adoption changes — an adopted entry is still re-verified against
+// its content-derived id, so a host that returns the wrong bytes is caught.
+//
+// The host MUST supply all four imports. They are declared unconditionally
+// because a wasm module cannot conditionally import; a host that never calls
+// `spore_node_use_js_store` can supply no-ops. See `web/spore.mjs`.
+#[link(wasm_import_module = "env")]
+extern "C" {
+    fn spore_store_put(id: *const u8, wire: *const u8, wire_len: usize);
+    /// Packed `(ptr << 32) | len` of a buffer allocated with `spore_alloc`, or 0
+    /// when absent. Ownership passes to the core, which frees it.
+    fn spore_store_get(id: *const u8) -> i64;
+    fn spore_store_remove(id: *const u8);
+    /// Packed buffer of concatenated 16-byte ids, allocated with `spore_alloc`.
+    fn spore_store_ids() -> i64;
+}
+
+/// Take ownership of a packed buffer the host allocated with `spore_alloc`.
+///
+/// # Safety
+/// `packed` must be 0 or a live `spore_alloc` allocation.
+unsafe fn take_packed(packed: i64) -> Option<Vec<u8>> {
+    if packed == 0 {
+        return None;
+    }
+    let ptr = (packed >> 32) as usize as *mut u8;
+    let len = (packed & 0xffff_ffff) as usize;
+    if ptr.is_null() {
+        return None;
+    }
+    let out = std::slice::from_raw_parts(ptr, len).to_vec();
+    spore_free(ptr, len);
+    Some(out)
+}
+
+/// A [`SpillBackend`] whose storage is the host's, reached through the imports
+/// above. Holds no state: the host owns the store, exactly as it owns the clock
+/// and the CSPRNG.
+struct JsSpill;
+
+impl SpillBackend for JsSpill {
+    fn put(&mut self, id: &Id, wire: &[u8]) {
+        unsafe { spore_store_put(id.as_ptr(), wire.as_ptr(), wire.len()) };
+    }
+
+    fn get(&self, id: &Id) -> Option<Vec<u8>> {
+        let bytes = unsafe { take_packed(spore_store_get(id.as_ptr())) }?;
+        // Same bound the filesystem backend applies. A host is not trusted to
+        // have kept what it was handed, and "adopt whatever is here" must not
+        // mean "read anything the host feels like returning".
+        if bytes.len() as u64 > crate::store::MAX_ADOPT_BYTES {
+            return None;
+        }
+        Some(bytes)
+    }
+
+    fn remove(&mut self, id: &Id) {
+        unsafe { spore_store_remove(id.as_ptr()) };
+    }
+
+    fn ids(&self) -> Vec<Id> {
+        let Some(blob) = (unsafe { take_packed(spore_store_ids()) }) else { return Vec::new() };
+        blob.chunks_exact(16)
+            .map(|c| {
+                let mut id = [0u8; 16];
+                id.copy_from_slice(c);
+                id
+            })
+            .collect()
+    }
+}
+
+/// Spill this node's store to the host's storage, adopting whatever the last run
+/// left behind. Returns how many envelopes were adopted.
+///
+/// Every adopted entry is re-verified against its content-derived id before it
+/// counts, so a host that lost, truncated or altered bytes simply contributes
+/// fewer — it cannot inject one.
+///
+/// # Safety
+/// `n` is valid, and the host has supplied the four `spore_store_*` imports.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_use_js_store(n: *mut Node, now: u32) -> usize {
+    (*n).set_spill_backend(Box::new(JsSpill), now)
+}
+
 // -- raw memory the JS side allocates/frees ---------------------------------
 
 /// Allocate `len` zeroed bytes in wasm memory; returns a pointer JS writes into.

@@ -701,7 +701,7 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 
 | Task | Status | Notes |
 |---|---|---|
-| M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ⬜ not started | Same pattern as `spore_fill_random`; `SpillBackend` is the in-tree precedent |
+| M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ✅ shipped | The trait and the native impl already existed; only the wasm backend was missing, and `Node::set_spill_backend` already existed "for a runtime whose storage nutrient is browser IndexedDB, MCU flash, or anything else". Four `spore_store_*` imports, same pattern as `spore_fill_random`. Synchronous by necessity — a wasm import cannot await, which rules IndexedDB out and makes `localStorage` (quota-bounded) the browser backing |
 | M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
 | M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress — **the old app is deleted and the standalone now ships this one**. Onboarding, shell, Chats, Contacts and Settings done; Blogs and Files remain | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |

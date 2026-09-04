@@ -19,7 +19,11 @@
 //   const off = client.on((e) => { if (e.type === 'EnvelopeReceived') ... });
 //   const identity = await client.init(fetch('./spore.wasm'));
 
-import { loadSpore, Hub, FLAG_ENCRYPTED, FLAG_RATCHET, ZERO_DEST } from '../spore.mjs';
+// One line, deliberately: build-standalone.mjs strips imports with a
+// single-line pattern, so a wrapped import survives into the emitted classic
+// script and breaks it. The build's self-check catches that, but not wrapping
+// is cheaper than being caught.
+import { loadSpore, Hub, FLAG_ENCRYPTED, FLAG_RATCHET, ZERO_DEST, localStorageSpillStore, memorySpillStore } from '../spore.mjs';
 import { BROWSER_TRANSPORTS } from './transports.mjs';
 
 /** Storage keys. Deliberately the same strings the pre-M10 node used, so an
@@ -85,6 +89,11 @@ export class SporeClient {
    * @param {Object}  opts.storage  the storage port — { get, set, remove }, sync
    *   or async. M10-A replaces this with a Rust-side port; keep every call to it
    *   awaited so that swap is invisible here.
+   * @param {Object}  [opts.spillStore]  where the node keeps envelopes it is
+   *   carrying for other people. Defaults to localStorage in a browser and to
+   *   memory elsewhere. **Synchronous by necessity** — a wasm import cannot
+   *   await, which is why this is not the same port as `storage` above and why
+   *   IndexedDB cannot back it.
    * @param {Array}   [opts.transports]  the transport registry this host can
    *   actually open. Defaults to the browser set. A host with more capability
    *   supplies a superset: a Tauri desktop build is a webview *and* a daemon, so
@@ -92,9 +101,13 @@ export class SporeClient {
    *   Tor, I2P, ICMP, iroh, SSB, copyparty, spool, foldersync, AX.25) proxied to
    *   Rust. Which transports exist is a property of the host, not of this file.
    */
-  constructor({ storage, transports = BROWSER_TRANSPORTS } = {}) {
+  constructor({ storage, transports = BROWSER_TRANSPORTS, spillStore } = {}) {
     if (!storage) throw new Error('SporeClient needs a storage port');
     this.storage = storage;
+    this.spillStore = spillStore
+      || (globalThis.localStorage ? localStorageSpillStore() : memorySpillStore());
+    /** Envelopes adopted from the host store at init — see `init()`. */
+    this.adoptedOnStart = 0;
     this.transports = transports;
     this.spore = null;
     this.node = null;
@@ -124,7 +137,7 @@ export class SporeClient {
    */
   async init(wasmSource) {
     if (this.spore) return this.identity;
-    this.spore = await loadSpore(wasmSource);
+    this.spore = await loadSpore(wasmSource, { store: this.spillStore });
 
     const savedSeed = await this.storage.get(K_SEED);
     const restored = Boolean(savedSeed);
@@ -143,6 +156,15 @@ export class SporeClient {
     }
     await this._saveRing();
 
+    // Custody outlives the tab. Without this the node drops every envelope it
+    // was carrying for someone else the moment the page reloads — the browser
+    // was the only target that could not keep custody, since ESP32 reaches a
+    // filesystem through VFS and everything else has one outright.
+    //
+    // Adoption re-verifies each entry against its content-derived id, so a
+    // store that lost or altered bytes contributes fewer rather than injecting.
+    this.adoptedOnStart = this.node.useHostStore();
+
     this.hub = new Hub(this.node);
     this.hub.onDeliver = (env) => this._onDeliver(env);
 
@@ -150,7 +172,7 @@ export class SporeClient {
     this.identity = { addr, addrHex: hex(addr), restored };
 
     this._timer = setInterval(() => this._tick(), TICK_MS);
-    this._emit('Ready', { identity: this.identity });
+    this._emit('Ready', { identity: this.identity, adopted: this.adoptedOnStart });
     return this.identity;
   }
 
