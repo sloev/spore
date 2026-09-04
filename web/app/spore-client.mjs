@@ -292,6 +292,21 @@ export class SporeClient {
     }));
   }
 
+  /**
+   * Announce now, and restart the §5.4b Trickle from its floor.
+   *
+   * Beaconing is normally the loop's job — a screen must not own a timer — but
+   * "tell the mesh I exist" is a thing a user can reasonably ask for when a
+   * bridge has just come up and nobody has heard them yet. Resetting the
+   * backoff is the honest part: an announce that did not reset it would be
+   * followed by silence for up to 80 minutes.
+   */
+  announceNow() {
+    this._assertReady();
+    this._resetAnnounceBackoff();
+    this._maybeAnnounce();
+  }
+
   /** Follow a topic so `pollFeed` starts yielding its events. */
   subscribe(topicName) {
     this._assertReady();
@@ -347,7 +362,10 @@ export class SporeClient {
   availableTransports() {
     return this.transports.filter((t) => {
       try { return t.available(); } catch { return false; }
-    }).map(({ kind, label, needsGesture }) => ({ kind, label, needsGesture }));
+    }).map(({ kind, label, needsGesture, manual, fields, persist }) => ({
+      kind, label, needsGesture: Boolean(needsGesture), manual: Boolean(manual),
+      persist: Boolean(persist), fields: fields || [],
+    }));
   }
 
   /**
