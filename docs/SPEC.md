@@ -8,9 +8,20 @@ Worked bytes for every rule here: [Rebuild guide](REBUILD.md). Per-medium
 parameters (≈70 media): [Bridges](BRIDGES.md). Adversaries in depth, with
 residual risk stated per row: [Threat model](THREAT_MODEL.md).
 
-Parts 1 and 2 are **normative** — implement them and you are wire-compatible.
-Parts 3 and 4 are **conventions and architecture**: change them freely without
-breaking a peer.
+**Four parts, and the headings below are them** — the previous text promised
+"Parts 1 and 2" against a document that had no Part 1 and a *Page* 2, so the
+claim could not be checked against anything.
+
+| Part | Contains | Status | A peer that implements it |
+|---|---|---|---|
+| **I — Wire** | §§1–3 | Frozen v1 | is wire-compatible |
+| **II — Relay** | §§4–6, bindings | Frozen behaviour; local constants MAY vary | is a SPORE router |
+| **III — Endpoint profiles and local policy** | §§7–11, application layer | Versioned per profile; relays ignore | talks to other endpoints |
+| **IV — Host contract** | runtime contract, where the core runs | Architecture, not wire | can embed the crate |
+
+Parts I and II are **normative**: implement them and you interoperate. Part III
+is what endpoints say to each other, and a relay MUST NOT require any of it.
+Part IV is how the core is embedded, and changes nothing on the wire.
 
 <p align="center"><a href="spore-v1.png"><img src="spore-v1-thumb.jpg" alt="SPORE v1 one-page visual reference" width="820" height="547" /></a></p>
 
@@ -34,34 +45,10 @@ MITM'd. Links are trusted with *nothing*; authenticity and secrecy live only in
 the envelope. Attackers can drop or delay; redundancy and flood-fallback heal
 both.
 
-## The runtime contract — what the host must supply
 
-The protocol is pure; it holds no OS. A conformant node needs four things from
-whatever runs it, and gets them wrong silently if it does not ask.
+---
 
-- **Randomness.** A CSPRNG for the signing seed, prekey secrets, ratchet keys,
-  mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and
-  MUST NOT be derivable from the identity seed** (§7.2).
-- **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST
-  NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7
-  local days (§5.7). Time is supplied per call, never read by the protocol.
-- **Custody.** Received envelopes are held until expiry and served on WANT (§6).
-  The bytes may live anywhere — memory, disk, flash, remote store. Custody is
-  untrusted storage: **an entry read back MUST be re-verified against its ID
-  before it is served**, and a mismatch MUST read as "not held" so the mesh
-  re-fetches. An ID is the hash of its bytes, so this is always checkable.
-- **Scheduling.** Four duties MUST run on a timer, not only on arrival: expiry
-  sweep, prekey rotation (§7.2), Trickle beacons (§5.4b), and ACKREQ resend
-  backoff (§5.4d). **A node driven only by inbound traffic stalls all four** — it
-  stops pruning, stops advancing forward secrecy, and never retries. Three are
-  pure and belong to the protocol (here, `Node::tick`); **beaconing is the
-  runtime's own timer**, because deciding to emit on an interface lives on the
-  far side of the transport boundary. A runtime that drives only the core's tick
-  never beacons, and is not conformant.
-
-**Transport is not a fifth nutrient — it is the boundary the other four are
-stated across.** The protocol names interfaces but never opens one; bytes in and
-out are the edge. See Part 4 for the model and Page 2 for the shapes.
+# Part I — Wire (frozen v1)
 
 ## 1. Identity & addressing
 
@@ -102,7 +89,7 @@ ID stable while relays decrement the TTL.
 
 Overhead: 114 B signed, 90 B SRC8, 18 B unsigned. **SRC8** only toward peers that
 provably hold your key; relays never verify — endpoints do (see "Verify before
-binding trust state", Part 3). **No priority field: priority is bought, not
+binding trust state", Part II). **No priority field: priority is bought, not
 claimed** (§10 stamp).
 
 ## 3. Fragmentation — fountain coded
@@ -120,6 +107,11 @@ Receiver decodes when any received set reaches rank *count* (Gaussian eliminatio
 over GF(2)); typically *count*+2 arrivals suffice at any loss rate, in any order,
 even one-way. Verify the reassembled signature; commit only what verifies.
 Rateless: works on simplex radio, CW, paper tape.
+
+
+---
+
+# Part II — Relay
 
 ## 4. Routing state (T2)
 
@@ -211,7 +203,110 @@ and one signature at any file size, and only the root is signed (an ID is the
 hash of its bytes, so the tree authenticates itself). Sealed to one recipient:
 `[0x09][depth:1][hdr_len:2][hdr]…`, `hdr` = the file key + real name sealed to
 their prekey, each chunk then encrypted under that key with the chunk index as
-nonce. See Part 3 for the layer built on this.
+nonce. See Part III for the layer built on this.
+
+## Bindings — SPORE on everything
+
+**Every medium on Earth has one of five shapes.** Bind by shape; the router never
+changes. This section is normative for the *shapes*; the per-medium parameter tables
+(frequencies, port numbers, UUIDs, MTUs, firmware caveats) are the manual,
+[Bridges](BRIDGES.md).
+
+1. **Message pipe** → one envelope/fragment per message.
+2. **Byte stream** → KISS: frames delimited `0xC0`, escape `0xC0`→`0xDB 0xDC`,
+   `0xDB`→`0xDB 0xDD`, command byte `0x00`.
+3. **Text channel** → armor: `~S1.` + Base32(envelope) + `.` +
+   Base32(SHA-256[0:4]) + `~`, whitespace ignored.
+4. **Shared bus** → KISS + CSMA: listen-before-talk, backoff 1–5× airtime; no
+   native CRC → append SHA-256(envelope)[0:4], verify or drop.
+5. **Shared store** → write envelopes as entries named by hex ID; reading =
+   receiving; the store is a persistent INV.
+
+In this implementation those five collapse to **three driver forms** — `dgram`,
+`stream`, `store` — because a message pipe and a shared bus differ only in whether
+you listen before talking, and a text channel is a byte stream with an armor codec.
+
+**Underlays with their own routing = ONE interface.** Meshtastic, Reticulum,
+Yggdrasil, cjdns, BATMAN/OLSR, Tor/I2P, WireGuard, plain IP — each already moves
+bytes across many physical hops. Hand it one frame and decrement `hops` **once**
+for the whole crossing; its internal hops are invisible and free. Point-to-point
+backbone links may *restore* the hop so long hauls don't burn the budget. SPORE
+hops therefore count **gateways between networks**, not hops inside them — exactly
+IP over Ethernet. They are transports SPORE rides, not rivals.
+
+**Numbers worth memorising.** Port **7373** (UDP/TCP/WS), the same value as
+EtherType `0x7373` and multicast `239.73.73.73` / `ff02::7373`. Meshtastic
+portnum **256**. BLE rides the **Nordic UART Service** (`6e400001-…`, RX `…0002`,
+TX `…0003`) rather than a SPORE-specific UUID — it is what phones, hobby boards
+and RNodes already expose. Everything else: look it up.
+
+**Two address spaces.** *Who* = the SPORE address or topic — end-to-end,
+cryptographic, identical on every medium. *How* = the underlay's own naming (a
+node number, a destination hash, an `IP:port`, or nothing at all) — local to one
+link. A bridge owns exactly one interface and translates between them; the router
+never learns underlay addresses, the way an OS's ARP table maps IP→MAC. Bindings
+are learned by **snooping signed frames** — a signed envelope proves its own
+sender, so no handshake is needed — and a stale binding costs nothing, because
+flood-fallback (§5.6) routes around it.
+
+**A link may declare a bulk budget.** Since files are manifest trees they can be
+arbitrarily large, so any link can be conscripted into hauling one. An interface
+may cap bytes/second of *other people's file chunks* it will relay. Only chunks
+count: messages, announces, receipts and manifests always pass, so a paced link
+stays a full member of the mesh — it still carries the conversation and still
+tells everyone what exists. It declines only to be the pipe, and because chunks
+are named by content the fetch just asks again and another path answers.
+
+**Zero-rendezvous peering (browsers & phones).** A WebRTC session reduces to
+ufrag(4) + pwd(22) + DTLS fingerprint(32) + mDNS host candidate(16) ≈ **90 B**;
+both sides rebuild full SDP from a hardcoded template. Beep that descriptor over
+ultrasound or show it as a QR, answer, and the browser's own mDNS completes a
+direct DataChannel — no server, no typed IP, ≈15 s. Native nodes run **ice-lite
+with static ufrag/pwd/fingerprint**, so their descriptor is a constant you can
+print on the box — specified, not built: WebRTC here is browser-only, so the
+native half is a [Roadmap](ROADMAP.md) item.
+
+**App distribution:** a native node's HTTP bridge exposes the bag API —
+`POST /spore/push`, `GET /spore/inv`, `POST /spore/want`, MIME
+`application/x-spore` — on port 7373, to localhost and to the LAN at its IP.
+Serving the PWA itself from `/` is the intended end state (the app store is every
+node) but is **not implemented**: `bridge::bag` routes the three bag paths and
+404s everything else.
+
+---
+
+## Verify before binding trust state
+
+§2 says relays never verify. That is about the cost of *forwarding* — a relay moves
+bytes it cannot read toward a destination it is not, and checking a signature on
+every envelope in transit would tax the smallest nodes for a guarantee the endpoint
+provides anyway. It is **not** a licence to write unauthenticated claims into local
+state. A relay keeps three tables an attacker would like to choose the contents of:
+
+| Table | What a forged entry buys |
+|---|---|
+| Neighbour bindings | directed sends for a victim unicast to the attacker |
+| Path table | a victim's address bound to the attacker's interface |
+| Quota attribution | a victim's byte budget drained by an attacker's junk |
+
+All three once accepted the `SIGNED` **flag** as proof — one bit chosen by whoever
+wrote the frame — so all three were forgeable with a copied public key and 64 zero
+bytes ([S-002](SECURITY_FINDINGS.md#s-002), [S-004](SECURITY_FINDINGS.md#s-004)).
+The rule is therefore narrower than "relays verify" and wider than "relays never
+verify":
+
+> **Verify before binding trust state; do not verify to forward.**
+
+The cost is bounded on purpose: one verify per newly-seen signed envelope, reused
+across all three tables and run only *after* dedup and expiry, so replays and stale
+mail are dropped before any crypto. On an ESP32 relaying LoRa that is a real
+per-envelope cost, accepted knowingly — a relay that can be told a false address is
+worse than a relay that is slower.
+
+
+---
+
+# Part III — Endpoint profiles and local policy
 
 ## 7. Crypto & forward secrecy
 
@@ -377,12 +472,12 @@ analysis, with a residual-risk line on every row, is
 | Read the content | seal / ratchet / topic PSK | §7 |
 | Forge a sender | Ed25519 over the envelope, hops zeroed | §2 |
 | Replay an old frame | content-addressed ID + seen-set + expiry | §5.1 |
-| Forge a path or neighbour binding | verify the signature *before* binding trust state | §4, Part 3 |
+| Forge a path or neighbour binding | verify the signature *before* binding trust state | §4, Part II |
 | Forge "delivered" | receipt must be signed by the destination | §8 |
 | Flood cheaply | stamp PoW, per-source quotas | §10 |
 | Crowd out a link | relayed traffic ≤ 10% airtime; backpressure byte | §5.4a, §5.4c |
 | Amplify via WANT | per-interface service budget | §6 |
-| Conscript a slow link into hauling files | per-interface bulk budget (chunks only) | Part 3 |
+| Conscript a slow link into hauling files | per-interface bulk budget (chunks only) | §6, Part II |
 | Exhaust memory | every table bounded, eviction order stated | §5.3 |
 | Serve tampered bytes from custody | re-verify each entry against its ID on read | §6 |
 | Flatten a battery by beaconing | Trickle 5→80 min | §5.4b |
@@ -399,77 +494,7 @@ layer.
 
 ---
 
-# Page 2 — Bindings: SPORE on everything
-
-**Every medium on Earth has one of five shapes.** Bind by shape; the router never
-changes. This page is normative for the *shapes*; the per-medium parameter tables
-(frequencies, port numbers, UUIDs, MTUs, firmware caveats) are the manual,
-[Bridges](BRIDGES.md).
-
-1. **Message pipe** → one envelope/fragment per message.
-2. **Byte stream** → KISS: frames delimited `0xC0`, escape `0xC0`→`0xDB 0xDC`,
-   `0xDB`→`0xDB 0xDD`, command byte `0x00`.
-3. **Text channel** → armor: `~S1.` + Base32(envelope) + `.` +
-   Base32(SHA-256[0:4]) + `~`, whitespace ignored.
-4. **Shared bus** → KISS + CSMA: listen-before-talk, backoff 1–5× airtime; no
-   native CRC → append SHA-256(envelope)[0:4], verify or drop.
-5. **Shared store** → write envelopes as entries named by hex ID; reading =
-   receiving; the store is a persistent INV.
-
-In this implementation those five collapse to **three driver forms** — `dgram`,
-`stream`, `store` — because a message pipe and a shared bus differ only in whether
-you listen before talking, and a text channel is a byte stream with an armor codec.
-
-**Underlays with their own routing = ONE interface.** Meshtastic, Reticulum,
-Yggdrasil, cjdns, BATMAN/OLSR, Tor/I2P, WireGuard, plain IP — each already moves
-bytes across many physical hops. Hand it one frame and decrement `hops` **once**
-for the whole crossing; its internal hops are invisible and free. Point-to-point
-backbone links may *restore* the hop so long hauls don't burn the budget. SPORE
-hops therefore count **gateways between networks**, not hops inside them — exactly
-IP over Ethernet. They are transports SPORE rides, not rivals.
-
-**Numbers worth memorising.** Port **7373** (UDP/TCP/WS), the same value as
-EtherType `0x7373` and multicast `239.73.73.73` / `ff02::7373`. Meshtastic
-portnum **256**. BLE rides the **Nordic UART Service** (`6e400001-…`, RX `…0002`,
-TX `…0003`) rather than a SPORE-specific UUID — it is what phones, hobby boards
-and RNodes already expose. Everything else: look it up.
-
-**Two address spaces.** *Who* = the SPORE address or topic — end-to-end,
-cryptographic, identical on every medium. *How* = the underlay's own naming (a
-node number, a destination hash, an `IP:port`, or nothing at all) — local to one
-link. A bridge owns exactly one interface and translates between them; the router
-never learns underlay addresses, the way an OS's ARP table maps IP→MAC. Bindings
-are learned by **snooping signed frames** — a signed envelope proves its own
-sender, so no handshake is needed — and a stale binding costs nothing, because
-flood-fallback (§5.6) routes around it.
-
-**A link may declare a bulk budget.** Since files are manifest trees they can be
-arbitrarily large, so any link can be conscripted into hauling one. An interface
-may cap bytes/second of *other people's file chunks* it will relay. Only chunks
-count: messages, announces, receipts and manifests always pass, so a paced link
-stays a full member of the mesh — it still carries the conversation and still
-tells everyone what exists. It declines only to be the pipe, and because chunks
-are named by content the fetch just asks again and another path answers.
-
-**Zero-rendezvous peering (browsers & phones).** A WebRTC session reduces to
-ufrag(4) + pwd(22) + DTLS fingerprint(32) + mDNS host candidate(16) ≈ **90 B**;
-both sides rebuild full SDP from a hardcoded template. Beep that descriptor over
-ultrasound or show it as a QR, answer, and the browser's own mDNS completes a
-direct DataChannel — no server, no typed IP, ≈15 s. Native nodes run **ice-lite
-with static ufrag/pwd/fingerprint**, so their descriptor is a constant you can
-print on the box — specified, not built: WebRTC here is browser-only, so the
-native half is a [Roadmap](ROADMAP.md) item.
-
-**App distribution:** a native node's HTTP bridge exposes the bag API —
-`POST /spore/push`, `GET /spore/inv`, `POST /spore/want`, MIME
-`application/x-spore` — on port 7373, to localhost and to the LAN at its IP.
-Serving the PWA itself from `/` is the intended end state (the app store is every
-node) but is **not implemented**: `bridge::bag` routes the three bag paths and
-404s everything else.
-
----
-
-# Part 3 — The application layer
+## Application layer
 
 **The one rule this part is built on: nothing here touches relays.** Every
 feature below is a payload convention plus endpoint state — never a change to
@@ -680,34 +705,6 @@ visible is not solved. And **a stolen prekey secret still follows along**: heali
 contributions are sealed to members' prekeys, so someone holding a member's prekey
 secret opens every contribution addressed to it until that prekey ages out (§7.2).
 
-## Verify before binding trust state
-
-§2 says relays never verify. That is about the cost of *forwarding* — a relay moves
-bytes it cannot read toward a destination it is not, and checking a signature on
-every envelope in transit would tax the smallest nodes for a guarantee the endpoint
-provides anyway. It is **not** a licence to write unauthenticated claims into local
-state. A relay keeps three tables an attacker would like to choose the contents of:
-
-| Table | What a forged entry buys |
-|---|---|
-| Neighbour bindings | directed sends for a victim unicast to the attacker |
-| Path table | a victim's address bound to the attacker's interface |
-| Quota attribution | a victim's byte budget drained by an attacker's junk |
-
-All three once accepted the `SIGNED` **flag** as proof — one bit chosen by whoever
-wrote the frame — so all three were forgeable with a copied public key and 64 zero
-bytes ([S-002](SECURITY_FINDINGS.md#s-002), [S-004](SECURITY_FINDINGS.md#s-004)).
-The rule is therefore narrower than "relays verify" and wider than "relays never
-verify":
-
-> **Verify before binding trust state; do not verify to forward.**
-
-The cost is bounded on purpose: one verify per newly-seen signed envelope, reused
-across all three tables and run only *after* dedup and expiry, so replays and stale
-mail are dropped before any crypto. On an ESP32 relaying LoRa that is a real
-per-envelope cost, accepted knowingly — a relay that can be told a false address is
-worse than a relay that is slower.
-
 ## Appendix — chat attachments
 
 A UX convention that is not obvious from the code, kept so a later change doesn't
@@ -737,7 +734,41 @@ sender.
 
 ---
 
-# Part 4 — Where the core runs
+
+---
+
+# Part IV — Host contract
+
+## The runtime contract — what the host must supply
+
+The protocol is pure; it holds no OS. A conformant node needs four things from
+whatever runs it, and gets them wrong silently if it does not ask.
+
+- **Randomness.** A CSPRNG for the signing seed, prekey secrets, ratchet keys,
+  mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and
+  MUST NOT be derivable from the identity seed** (§7.2).
+- **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST
+  NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7
+  local days (§5.7). Time is supplied per call, never read by the protocol.
+- **Custody.** Received envelopes are held until expiry and served on WANT (§6).
+  The bytes may live anywhere — memory, disk, flash, remote store. Custody is
+  untrusted storage: **an entry read back MUST be re-verified against its ID
+  before it is served**, and a mismatch MUST read as "not held" so the mesh
+  re-fetches. An ID is the hash of its bytes, so this is always checkable.
+- **Scheduling.** Four duties MUST run on a timer, not only on arrival: expiry
+  sweep, prekey rotation (§7.2), Trickle beacons (§5.4b), and ACKREQ resend
+  backoff (§5.4d). **A node driven only by inbound traffic stalls all four** — it
+  stops pruning, stops advancing forward secrecy, and never retries. Three are
+  pure and belong to the protocol (here, `Node::tick`); **beaconing is the
+  runtime's own timer**, because deciding to emit on an interface lives on the
+  far side of the transport boundary. A runtime that drives only the core's tick
+  never beacons, and is not conformant.
+
+**Transport is not a fifth nutrient — it is the boundary the other four are
+stated across.** The protocol names interfaces but never opens one; bytes in and
+out are the edge. See Part IV for the model and Part II's bindings for the shapes.
+
+## Where the core runs
 
 The **core** is one implementation of the protocol — the same bytes on every
 machine, carrying nothing about where it landed. Anything that hosts it is a
@@ -795,7 +826,7 @@ stop compiling if they break, and the fourth written down because nothing catche
    parameter; clock reads stay in the native-only layer.
 
 **Bridges are open; nutrients are closed.** Anyone may add a bridge — it only moves
-envelope bytes in and out, and every medium is one of the five shapes on Page 2. But
+envelope bytes in and out, and every medium is one of the five shapes in Part II's bindings. But
 nothing may add a fifth nutrient, because that is the contract every runtime has to
 satisfy. `Neighbors<U>` is the shared address resolver every bridge uses — SPORE's
 ARP, where `U` is whatever the medium calls a peer.

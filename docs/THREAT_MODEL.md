@@ -154,7 +154,7 @@ in a doc pass — recorded here so it is a stated gap, not a silent one.
 **Prekeys are a separate, already-solved problem.** A stolen *prekey* secret
 is bounded by the 7-day offline window and daily rotation (§7.2) — narrower
 blast radius than an identity key by design, and already documented in
-[Spec](SPEC.md) §7.2 and Part 3's "two things this does not solve".
+[Spec](SPEC.md) §7.2 and Part III's "two things this does not solve".
 
 **Multi-device identity — tracked, not decided.** One keypair per device
 today (§1, §11: "ratchet state is per-device — give each device its own

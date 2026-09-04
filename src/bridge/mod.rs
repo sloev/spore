@@ -1,6 +1,6 @@
 //! Bridges — SPORE rides everything.
 //!
-//! Each medium on Earth has one of five shapes (spec Page 2); bind by shape and
+//! Each medium on Earth has one of five shapes (spec Part II); bind by shape and
 //! the router never changes. A bridge only moves envelope bytes in and out of a
 //! `Node` — it is not part of the protocol. HTTP, a folder, a serial line, a
 //! Meshtastic mesh: all just bridges, none more special than another.

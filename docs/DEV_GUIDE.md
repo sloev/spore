@@ -20,7 +20,7 @@ branches, releases). Read those once; this one is a lookup table.
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
 | Change a colour | Edit upstream `supernihil/hardbrut`, then `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` → `python3 design/generate.py` (Android) |
 | Change an Android-only size (control/chip/row/touch floor) | `design/tokens.json` → `python3 design/generate.py` |
-| Decide core vs runtime | `docs/SPEC.md` Part 4, "Where the core runs". Platform-specific means runtime, not `src/` |
+| Decide core vs runtime | `docs/SPEC.md` Part IV, "Where the core runs". Platform-specific means runtime, not `src/` |
 
 ## Repo map
 

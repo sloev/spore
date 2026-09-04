@@ -3,7 +3,7 @@
 use crate::*;
 
 /// The three transport-agnostic operations of a "bag" — a container that
-/// carries envelopes between two nodes (spec Page 2's HTTP bag API, but the
+/// carries envelopes between two nodes (spec Part II's HTTP bag API, but the
 /// same three ops serve a folder, a pastebin, or a BBS).
 pub enum Bag {
     /// Incoming envelopes (one or more concatenated wire forms).

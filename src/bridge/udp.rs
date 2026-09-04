@@ -68,7 +68,7 @@ pub fn run(
     run_datagram(hub, iface, rx, stop.as_ref(), Udp { sock, bcast })
 }
 
-/// The spec's multicast groups (Page 2). IPv6 has no broadcast, so an overlay
+/// The spec's multicast groups (Part II). IPv6 has no broadcast, so an overlay
 /// that is IPv6-only reaches its neighbours here instead.
 pub const SPORE_MCAST_V4: Ipv4Addr = Ipv4Addr::new(239, 73, 73, 73);
 /// Link-local scope, so it stays on the overlay rather than leaking upstream.
