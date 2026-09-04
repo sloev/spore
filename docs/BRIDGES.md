@@ -123,9 +123,9 @@ Each of these is covered by a test that fails if the bound is removed.
 <summary>Understanding stamp costs and deployment considerations</summary>
 
 `congestion::STAMP_QUOTA_BYPASS_BITS` is **16**. Mail stamped to at least that
-class skips the per-source quota (§10d) and a busy peer's backpressure (§10c);
+class skips the per-source quota (§10) and a busy peer's backpressure (§5.4c);
 below it, mail still flows but is charged to its source's budget like anything
-else, and stamp still orders eviction and TX priority (§10.3).
+else, and stamp still orders eviction and TX priority (§5.3).
 
 This was `stamp > 0`, which bounded nothing. A stamp is the leading zero bits of
 the envelope id, and the id is a hash, so class 1 costs about two tries and half
@@ -346,7 +346,7 @@ Status is the emoji on each name. Follow the link for the deep dive.
 || [UDP / IPv4 broadcast ✅](#udp) | dgram | `SocketAddr` | 1400 | LAN flood over limited or primary-subnet broadcast |
 | [Ethernet 802.3 ⚪](#ethernet) | dgram | `[u8;6]` | 1500 | raw L2 frames, EtherType-tagged |
 | [Wi-Fi 802.11 ⚪](#wifi) | dgram | `[u8;6]` | 2304 | raw/monitor-mode frames |
-| [Wi-Fi Direct 🟡](#wifi-direct) | dgram | `Ipv4Addr` | 1500 | UDP bridge over the P2P group interface |
+| [Wi-Fi Direct 🧪](#wifi-direct) | dgram | `Ipv4Addr` | 1500 | UDP bridge over the P2P group interface |
 | [ESP-NOW ⚪](#esp-now) | dgram | `[u8;6]` | 250 | connectionless 2.4 GHz on ESP32 |
 | [BLE GATT ⚪](#ble-gatt) | stream | `[u8;6]` | ~247 | serial-over-BLE via a GATT characteristic |
 | [BLE Mesh ⚪](#ble-mesh) | dgram | `u16` | 380 | managed-flood BLE mesh |
@@ -425,7 +425,7 @@ Systems that already store and pass on messages — the pattern SPORE *is*.
 | [HTTP bag ✅](#http-bag) | store | conn | 64 K | pull envelopes from an HTTP endpoint |
 | [Copyparty 🧪](#copyparty) | store | URL | 64 K | envelopes in a copyparty share (HTTP/WebDAV) |
 | [Text armor ✅](#text-armor) | store | — | ~150 | SMS/paper/voice-safe base32 with a checksum |
-| [Nostr 🟡](#nostr) | store | relay | var | events on any relay (kind-30078) |
+| [Nostr 🧪](#nostr) | store | relay | var | events on any relay (kind-30078) |
 | [SSB (Secure Scuttlebutt) 🟡](#ssb) | store | feed | var | `spore-v1` content in an append log |
 | [Matrix ⚪](#matrix) | store | room id | large | envelopes as room events |
 | [XMPP / Jabber ⚪](#xmpp) | stream | JID | large | message stanzas or PubSub |
@@ -1391,7 +1391,7 @@ over the same LoRa air Reticulum uses, but does not route RNS packets.
 | MTU | 500 (RNS) / ~255 (LoRa PHY) |
 | Bulk budget | 32 B/s (conservative default; the slowest interface on the path is what suffers) |
 | State | stateless (RNS) / stateful (serial, BLE) |
-| Status | 🧪 RNS payload (`bridge::reticulum` + companion, via stdio/TCP/UDP) · 🧪 Web Serial & BLE (RNode host mode) |
+| Status | 🧪 RNS payload (`bridge::reticulum` + companion, via stdio/TCP/UDP) · 🧪 Web Serial & BLE (RNode host mode) · ⚪ native RNode serial |
 | Code | `bridge::reticulum` + [`tools/reticulum_companion.py`](../tools/reticulum_companion.py); [`web/transports/reticulum.mjs`](../web/transports/reticulum.mjs) |
 
 <details><summary>Deep dive</summary>

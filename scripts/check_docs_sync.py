@@ -180,6 +180,84 @@ if os.path.exists(controller):
                 "a control with no backend is the fake UI the hard rules forbid"
             )
 
+# ---------------------------------------------------------------------------
+# 6. Every §-reference resolves to a section SPEC.md actually has.
+#
+# 305 of these are scattered across docs/ and src/ doc comments, and nothing
+# used to check them: renaming or renumbering a spec section left every citation
+# silently wrong, since a §ref is prose, not a link. Six were already dangling
+# when this check was written — §10.3 (three times, including in
+# src/congestion.rs), §10c and §10d cited a lettered subsection of §10 that has
+# never existed, and §0.2 pointed into the retired VISUALDESIGN.md's numbering.
+#
+# The valid set is derived from SPEC.md rather than hardcoded, so it stays
+# correct as the spec changes: `## N.` and `### N.M` headings, plus the ordered
+# rules inside a section (§5.1..§5.7) and their lettered sub-rules (§5.4a..d).
+spec = read("docs/SPEC.md")
+valid, cur, rule = set(), None, None
+for line in spec.split("\n"):
+    h = re.match(r"^## (\d+)\.", line)
+    if h:
+        cur = h.group(1); valid.add(f"§{cur}"); continue
+    sub = re.match(r"^### (\d+)\.(\d+)", line)
+    if sub:
+        valid.add(f"§{sub.group(1)}.{sub.group(2)}"); continue
+    if cur:
+        item = re.match(r"^(\d+)\. ", line)
+        if item:
+            rule = item.group(1)
+            valid.add(f"§{cur}.{rule}")
+        # Lettered sub-rules wrap onto continuation lines, so keep attributing
+        # them to the rule most recently opened rather than to one line of it.
+        if rule:
+            for letter in re.findall(r"\*\*\(([a-z])\)\*\*", line):
+                valid.add(f"§{cur}.{rule}{letter}")
+
+scan = sorted(glob.glob(os.path.join(root, "docs", "*.md"))
+              + glob.glob(os.path.join(root, "src", "**", "*.rs"), recursive=True))
+for f in scan:
+    rel = os.path.relpath(f, root)
+    for n, line in enumerate(open(f, encoding="utf-8", errors="ignore"), 1):
+        # A §ref explicitly attributed to another document is that document's
+        # numbering, not SPEC's — VISUALDESIGN.md is retired but still cited by
+        # name in the roadmap's history.
+        if "VISUALDESIGN" in line:
+            continue
+        for ref in re.findall(r"§\d+(?:\.\d+[a-z]?|[a-z])?", line):
+            if ref not in valid:
+                errors.append(f"{rel}:{n}: cites {ref}, which docs/SPEC.md does not have")
+
+# ---------------------------------------------------------------------------
+# 7. A bridge's index-table emoji agrees with its own Status row.
+#
+# BRIDGES.md states each bridge's maturity twice — once in the index tables near
+# the top, once in the deep dive's `| Status |` row — and nothing kept them in
+# step. Nostr was advertised 🟡 in the index while its own entry said "🧪
+# implemented (JS)", and Wi-Fi Direct likewise. The index is what a reader scans
+# first, so a stale emoji there oversells or undersells the bridge before they
+# reach the detail.
+#
+# An anchor may legitimately carry several emoji when one entry documents several
+# pipes (Meshtastic is ✅ over Wi-Fi-UDP and 🧪 over serial/BLE), so the rule is
+# containment, not equality: every emoji the index uses for an anchor must appear
+# in that anchor's Status row.
+EMOJI = "✅🧪🟡⚪"
+index_use = {}
+for m in re.finditer(r"\[\s*[^\]\[]*?\s*([%s])\s*\]\(#([a-z0-9-]+)\)" % EMOJI, bridges):
+    index_use.setdefault(m.group(2), set()).add(m.group(1))
+for m in re.finditer(r'<a id="([a-z0-9-]+)"></a>(.*?)(?=<a id="|\Z)', bridges, re.S):
+    anchor_id, body = m.group(1), m.group(2)
+    row = re.search(r"\|\s*Status\s*\|([^|]*)\|", body)
+    if not row:
+        continue
+    declared = set(re.findall("[%s]" % EMOJI, row.group(1)))
+    for used in sorted(index_use.get(anchor_id, set())):
+        if used not in declared:
+            errors.append(
+                f"docs/BRIDGES.md: the index shows {used} for #{anchor_id}, but its "
+                f"Status row says {''.join(sorted(declared)) or '(no emoji)'}"
+            )
+
 if errors:
     print("DOCS-SYNC FAIL — regenerate vectors and/or fix terminology:")
     print("  cargo run --example gen_vectors > reference/vectors.json")
