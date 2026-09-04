@@ -35,8 +35,8 @@ social graph.
 
 | Level | Capability | What SPORE does |
 |---|---|---|
-| Passive link observer | Receive and record traffic on one medium | Content: sealed (§7) or ratcheted; unreadable without the key |
-| Local traffic analyst | Correlate timing/size/frequency on one medium | Partially addressed — see residual risk |
+| Passive link observer | Receive and record traffic on one medium | Sealed or ratcheted 1:1 and PSK groups (§7): unreadable without the key. **Open groups and microblogs: readable, by design.** Unsigned DATA: readable and forgeable |
+| Local traffic analyst | Correlate timing/size/frequency on one medium | Partially addressed. Without mix, sizes and times are in the clear on the medium; mix padding and Poisson batching (§9) are the partial answer, and mix is off by default |
 | Global passive adversary | Observe a large fraction of the network at once | Addressed only while mix decoys flow (§9) |
 
 **Mitigation.** Content confidentiality is the baseline: `seal`/ratchet (§7)
@@ -85,7 +85,7 @@ is honest.
 | Forge a path-table entry to redirect unicast | Relays verify a signature before binding a path to it | [S-002](SECURITY_FINDINGS.md#s-002) |
 | Flood ten different growable tables | Bounded, with deliberate eviction order (expired → lowest stamp → largest → oldest) | [S-013](SECURITY_FINDINGS.md#s-013) |
 | Exhaust an MCU node's heap with desktop-sized ceilings | Every table ceiling derivable from a runtime's actual memory budget | audit [#189](https://github.com/sloev/spore/issues/189) rec. 2, `Limits::for_budget` |
-| Tamper with spilled/cached bytes | An entry read back is re-verified against its content-derived ID; a mismatch reads as "not held" | SPEC §5, "Custody is untrusted storage" |
+| Tamper with spilled/cached bytes | An entry read back is re-verified against its content-derived ID; a mismatch reads as "not held" | SPEC runtime contract + §6 (store) |
 
 **Residual risk — this is not solvable by cryptography, and the spec says
 so.** A relay can still drop, delay, or reorder anything that passes through
@@ -110,7 +110,7 @@ eliminated by them.
 **Asset:** the ability to speak *as* an address; group membership; the
 correctness of "who sent this."
 
-**Address = SHA-256(pubkey) (§1).** This sidesteps the classic TOFU
+**Address = first 8 B of SHA-256(pubkey) (§1).** This sidesteps the classic TOFU
 first-contact problem other systems have: there is no separate "channel key"
 someone can hand out that grants speaking rights for an identity that isn't
 theirs. What an [`invite.rs`](../src/invite.rs) *can* forge is the **hint**

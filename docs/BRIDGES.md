@@ -145,8 +145,6 @@ Consequences a deployer should know:
   flooder paying it per envelope. Raise it on fast networks; lower it (or set it
   to 1) to restore the old permissive behaviour if you need bit-identical
   admission against a 1.0 relay fleet.
-- **`sos` still outranks policy** by convention — that is a routing preference,
-  not a quota exemption, and is unaffected.
 </details>
 
 ## Bridge privacy — who sees what

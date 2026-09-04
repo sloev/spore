@@ -39,7 +39,13 @@ offer's ephemeral key to a real SPORE identity):
 2. **ANSWER** — responder → initiator: either **Ok** with a chosen candidate and
    its ephemeral public key, or **Reject** with a reason (`no_medium`,
    `throughput`, `busy`).
-3. **CLOSE** / optional **REKEY** — on the mesh plane only (a later increment).
+The handshake is those two messages. There is no third.
+
+**Not in v1 of this profile.** `CLOSE` and `REKEY` are not built and are not part
+of the handshake — a reimplementer must not wait for a third message. When they
+land they bump `direct::VERSION`, because the record and the signalling share one
+profile version. `REKEY` is also the principled answer to nonce exhaustion
+(S-033), which v1 handles by refusing to send instead.
 
 ## Medium selection
 
@@ -118,9 +124,19 @@ voice call.
   envelope: the OFFER/ANSWER are signed by the sender's SPORE key, so a
   man-in-the-middle cannot substitute its own `eph_pub` without also forging that
   signature.
-- **Replay** — `seq` is the nonce; an app that cares rejects a stale/duplicate seq
-  above the record (a sliding window), the same shape the datagram session layer
-  uses. Best-effort media typically doesn't bother.
+- **Replay** — an app that cares rejects a stale or duplicate `seq` above the
+  record (a sliding window), the same shape the datagram session layer uses.
+  Best-effort media typically doesn't bother.
+- **Nonce exhaustion (S-033)** — a separate matter from replay, and not optional.
+  `seq` *is* the ChaCha20-Poly1305 nonce and `tx_key` never changes for the life
+  of the pipe, so reusing a `seq` reuses a nonce: the XOR of both plaintexts
+  leaks and the Poly1305 one-time key repeats, which makes forgery possible. No
+  receiver-side window can undo that — it is a cryptographic failure, not an
+  application preference. `u16` gives 65_536 records, about **22 minutes** of a
+  50 records/s voice pipe. The pipe therefore **refuses to send** past the last
+  sequence number rather than wrapping; the caller opens a fresh pipe (new
+  ephemeral DH, new keys, `seq` 0). A 64-bit nonce or a mandatory REKEY would
+  raise the ceiling, and both are profile changes — see "Not in v1" below.
 - **Metadata** — the underlay sees two endpoints exchanging encrypted datagrams;
   it learns the medium locators (an `ip:port`), which is inherent to going direct.
   Peers that don't want to reveal a direct address simply don't offer a candidate
