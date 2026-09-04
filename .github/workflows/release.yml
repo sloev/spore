@@ -3,7 +3,7 @@ name: release bump
 # The one human action in versioning: pick major or minor and press the button.
 #
 # Everything else is derived. This workflow computes the next version from
-# `Cargo.toml`, retitles the CHANGELOG's `## Unreleased` section, and opens a PR.
+# `Cargo.toml` and opens a PR. Release notes come from git history.
 # Merging that PR is what cuts the release — `android.yml` sees a `Cargo.toml`
 # version with no tag behind it and creates the tag *and* publishes the release in
 # the same job it is already running.
@@ -44,7 +44,7 @@ permissions:
   contents: write
   pull-requests: write
 
-# Two bumps at once would race on the same branch name and the same CHANGELOG
+# Two bumps at once would race on the same branch name and the same
 # heading. Queue them.
 concurrency:
   group: release-bump
@@ -81,28 +81,25 @@ jobs:
           echo "next=$next" >> "$GITHUB_OUTPUT"
           echo "Bumping $cur -> $next (${{ inputs.bump }})"
 
-      # A release with no changelog entry is a release nobody can read. This is the
-      # check CONTRIBUTING previously asked a human to remember.
-      - name: Refuse a release with nothing written about it
+      # A release with nothing in it is a release nobody needs. The changelog file
+      # used to carry this check; git history carries it now, and cannot drift
+      # from what actually merged.
+      - name: Refuse a release with no commits behind it
         run: |
           set -euo pipefail
-          if ! grep -q '^## Unreleased' docs/CHANGELOG.md; then
-            echo "::error::docs/CHANGELOG.md has no '## Unreleased' section to release."
-            echo "Add one and describe what changed, then bump again."
+          prev=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -z "$prev" ]; then
+            echo "No previous tag — first release, nothing to compare against."
+            exit 0
+          fi
+          log=$(git log --no-merges --format='- %s' "${prev}..HEAD")
+          if [ -z "$log" ]; then
+            echo "::error::No commits since ${prev} — there is nothing to release."
             exit 1
           fi
-          # Require an actual bullet, not prose. The section carries a standing
-          # explanation of what it is for, and a plain "is it non-empty" check
-          # counts that as content — which would have cut 0.4.0 with a changelog
-          # section consisting of the boilerplate describing changelog sections.
-          entries=$(awk '/^## Unreleased/{f=1; next} /^## /{f=0} f && /^- /' docs/CHANGELOG.md || true)
-          if [ -z "$entries" ]; then
-            echo "::error::'## Unreleased' has no entries — write what changed, as '- ' bullets."
-            exit 1
-          fi
-          echo "Releasing with:"; echo "$entries"
+          echo "Releasing with:"; echo "$log"
 
-      - name: Bump Cargo.toml, Cargo.lock and the CHANGELOG heading
+      - name: Bump Cargo.toml and Cargo.lock
         run: |
           set -euo pipefail
           next='${{ steps.v.outputs.next }}'
@@ -114,19 +111,7 @@ jobs:
           ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
           # Keep the lockfile in step without touching dependency versions.
           cargo update -p spore --offline 2>/dev/null || cargo update -p spore
-          sed -i "0,/^## Unreleased$/s//## ${next} — $(date -u +'%Y-%m-%d')/" docs/CHANGELOG.md
-          # Leave a fresh Unreleased for the next cycle. The note is an HTML
-          # comment, not prose: anything readable sitting beside the bullets gets
-          # swept into the published release notes by the retitle above. v0.4.0
-          # shipped with "Entries accumulate here as work merges... Nothing yet."
-          # in its notes for exactly that reason, and reinserting a prose
-          # placeholder here would reproduce it on the very next bump.
-          # `&` is the matched heading, re-emitted below the new one. An anchor of
-          # `^` would match the start of *every* line and prepend the block to all
-          # of them — which it did, until this was dry-run against the real file.
-          sed -i "0,/^## ${next} —/s//## Unreleased\n\n<!-- Add \`- \` bullets here as work merges. This note is a comment so it\n     cannot reach a release page; the bump refuses if there are no bullets. -->\n\n&/" docs/CHANGELOG.md
           grep -n '^version = ' Cargo.toml | head -1
-          grep -n '^## ' docs/CHANGELOG.md | head -3
 
       - name: Open the release PR
         env:
@@ -138,7 +123,7 @@ jobs:
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git checkout -b "$branch"
-          git add Cargo.toml Cargo.lock docs/CHANGELOG.md
+          git add Cargo.toml Cargo.lock
           git commit -m "Release ${next}"
           # Force-with-lease: a previous run that got as far as pushing leaves the
           # branch behind, and a retry must not die on it. The branch is bot-owned
@@ -158,7 +143,7 @@ jobs:
           if ! gh pr create --base master --head "$branch" \
             --title "Release ${next}" \
             --body "$(printf '%s\n' \
-              "Bumps \`Cargo.toml\` ${{ steps.v.outputs.cur }} → **${next}** (\`${{ inputs.bump }}\`) and retitles the CHANGELOG's \`## Unreleased\` section." \
+              "Bumps \`Cargo.toml\` ${{ steps.v.outputs.cur }} → **${next}** (\`${{ inputs.bump }}\`). Release notes are generated from git history at publish time." \
               "" \
               "**Merging this cuts the release.** \`android.yml\` runs on every push to \`master\`; it will see that \`Cargo.toml\` names a version with no tag behind it, create \`v${next}\`, and publish the release with the APK in the same job." \
               "" \

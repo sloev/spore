@@ -388,13 +388,17 @@ jobs:
           # /releases/latest/download can point at.
           cp spore-android.apk "spore-${tag}.apk"
           sha256sum "spore-${tag}.apk" > "spore-${tag}.apk.sha256"
-          # Release notes: this version's CHANGELOG section, then the standing
-          # caveats. Written to a file so newlines survive.
-          awk -v v="$ver" '
-            $0 ~ ("^## " v " ") { f = 1; next }
-            /^## / { if (f) exit }
-            f
-          ' ../docs/CHANGELOG.md > notes.md
+          # Release notes: the commits since the previous tag, then the standing
+          # caveats. Written to a file so newlines survive. Git history is the
+          # record — there is no changelog file to drift from what merged.
+          prev=$(git -C .. describe --tags --abbrev=0 --match 'v*' --exclude "$tag" 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            git -C .. log --no-merges --format='- %s' "${prev}..HEAD" > notes.md
+            echo "" >> notes.md
+            echo "[Full diff](https://github.com/sloev/spore/compare/${prev}...${tag})" >> notes.md
+          else
+            git -C .. log --no-merges --format='- %s' -20 > notes.md
+          fi
           cat >> notes.md <<'NOTE'
 
           ---
@@ -425,9 +429,9 @@ jobs:
           NOTE
           echo "SHA-256 \`$(cut -d' ' -f1 "spore-${tag}.apk.sha256")\`" >> notes.md
           # `gh release create` uploads by basename, so these need no copying —
-          # `../` here is the same relative-to-CWD reference `../docs/CHANGELOG.md`
-          # already uses a few lines up. The glob picks up both the versioned
-          # and constant-named bundle copies built two steps ago.
+          # `../` here is the same relative-to-CWD reference the `git -C ..` log
+          # uses a few lines up. The glob picks up both the versioned and
+          # constant-named bundle copies built two steps ago.
           gh release create "$tag" \
             --target "$GITHUB_SHA" \
             --title "SPORE $tag" \
@@ -472,9 +476,7 @@ jobs:
 
             This number versions the **distribution**, not the protocol. The SPORE v1
             wire format and the `spore` crate's API are frozen at 1.x and unaffected
-            by it — the table at the top of
-            [CHANGELOG.md](https://github.com/sloev/spore/blob/master/docs/CHANGELOG.md)
-            says which number covers what.
+            by it.
 
             Before you rely on it: no radio bridge has been verified against real
             hardware (every 🧪 in

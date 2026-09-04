@@ -14,7 +14,7 @@ branches, releases). Read those once; this one is a lookup table.
 | Work on the Android app | `android/README.md`, then `android/app/src/main/kotlin/org/spore/node/` |
 | Work on the docs site | `site/build.mjs` + `site/home.md` |
 | Work on the browser node / wasm | `web/README.md`, `src/wasm.rs` |
-| Check what's shipped vs planned | `docs/CHANGELOG.md` `## Unreleased` and `docs/ROADMAP.md` — see [Status](#status) |
+| Check what's shipped vs planned | `git log`, the [releases](https://github.com/sloev/spore/releases), and `docs/ROADMAP.md` — see [Status](#status) |
 | Check a security question | `docs/SECURITY_FINDINGS.md`; `docs/SECURITY.md` to report one |
 | Verify a 🧪 claim | `docs/HARDWARE.md`, `android/TESTING.md` |
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
@@ -68,7 +68,7 @@ Exactly two places record state, and they answer different questions:
 
 | Source | Says |
 |---|---|
-| `docs/CHANGELOG.md` `## Unreleased` | What has **shipped** since the last release |
+| `git log` / [releases](https://github.com/sloev/spore/releases) | What has **shipped** |
 | `docs/ROADMAP.md` | What is **planned, in review, or carried forward** |
 
 Check both: a PR can be merged while part of its original scope stays open.
