@@ -726,6 +726,10 @@ machine, carrying nothing about where it landed. Anything that hosts it is a
 firmware. Runtimes vary enormously; what they must provide does not — the four
 nutrients in the runtime contract above, and nothing else.
 
+*The image, once, because it is the whole idea: the core is a **spore** and a
+runtime is the **soil** it lands in. Past this paragraph the docs use the plain
+words — core, runtime, nutrient — per the legend below.*
+
 **One noun per concept**, because six words for "the thing that hosts the core" is
 six chances to think they are different things:
 
