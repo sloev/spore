@@ -685,13 +685,13 @@ mod store;
 pub use store::{FsSpill, SpillBackend};
 
 // ---------------------------------------------------------------------------
-// Page 2, rule 2 — KISS framing for byte streams (TCP, serial, RFCOMM, TNCs).
+// Part II, rule 2 — KISS framing for byte streams (TCP, serial, RFCOMM, TNCs).
 // ---------------------------------------------------------------------------
 
 pub mod kiss;
 
 // ---------------------------------------------------------------------------
-// Page 2, rule 3 — text-channel armor (SMS, email, Usenet, paper, voice).
+// Part II, rule 3 — text-channel armor (SMS, email, Usenet, paper, voice).
 // ~S1.<base32(env)>.<base32(sha256(env)[..4])>~
 // ---------------------------------------------------------------------------
 
@@ -729,7 +729,7 @@ pub mod topic;
 // (source, manual, binaries) over the mesh, and pin it as a seed vault.
 pub mod bundle;
 
-// Bridges — SPORE rides everything (spec Page 2). See `src/bridge/` for the
+// Bridges — SPORE rides everything (spec Part II). See `src/bridge/` for the
 // per-medium modules; each only moves envelope bytes in and out of a `Node`.
 pub mod bridge;
 

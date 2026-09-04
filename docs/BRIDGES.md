@@ -326,7 +326,7 @@ medium already hand me clean frames, and if not, what am I adding to make it?"
   everyone in range hears everything. Every SPORE address maps to `()`, `resolve`
   trivially succeeds, and the envelope's own `dest` filters mail for others.
 
-> **Shapes vs. forms.** The spec (Page 2) names **five medium *shapes*** — message
+> **Shapes vs. forms.** The spec (Part II's bindings) names **five medium *shapes*** — message
 > pipe, byte stream, text channel, shared bus, shared store. In this reference they
 > collapse to the **three driver *forms*** above, because message pipes and shared
 > buses both ride the datagram driver, and text channels and shared stores both

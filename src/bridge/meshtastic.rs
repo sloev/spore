@@ -1,5 +1,5 @@
 //! Meshtastic frame codec: wrap a SPORE envelope as a Meshtastic `MeshPacket`
-//! (portnum 256 = PRIVATE_APP, spec Page 2) and read it back. Hand-rolled
+//! (portnum 256 = PRIVATE_APP, spec Part II) and read it back. Hand-rolled
 //! protobuf so there's no build-time codegen; portable, so a browser bridging to
 //! Meshtastic over WebSocket uses the same code as a native UDP bridge.
 //!

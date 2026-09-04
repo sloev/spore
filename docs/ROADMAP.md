@@ -555,7 +555,7 @@ documentation and UX legibility, not new protocol.
 **Explicitly not doing here** (already solved, would duplicate shipped work):
 replication/copy-count limits (§5.4 congestion control + dedup + store
 eviction), spam/"postage" (§10 stamp + quotas), forward secrecy (§7 ratchet +
-prekey ring + healing topic-key rotation), transport abstraction (Page 2 —
+prekey ring + healing topic-key rotation), transport abstraction (Part II's bindings —
 already the core design). Named "delivery policy" presets (Urgent/Efficient/
 Private/Carry/Emergency) were considered and deferred: the underlying knobs
 (stamp, hops, FLOOD, mix toggle) already exist, and packaging them as named

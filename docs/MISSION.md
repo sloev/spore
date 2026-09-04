@@ -45,7 +45,7 @@ company.
    binding, an OS process, a browser worker, an MCU firmware — each supplying
    the same four **nutrients** (randomness, time, storage, scheduling) across
    the transport boundary. Runtimes vary; the nutrients do not. See
-   [`docs/SPEC.md`](SPEC.md) Part 4, "Where the core runs", for the model
+   [`docs/SPEC.md`](SPEC.md) Part IV, "Where the core runs", for the model
    and the word legend these docs hold to.
 5. **A holdable protocol story** — two-sided A4 / `spore-v1` one-pager that
    stays true to [`docs/SPEC.md`](SPEC.md); not a 200-page religion to

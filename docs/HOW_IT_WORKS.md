@@ -60,7 +60,7 @@ copy disappear rather than serve corrupted.</p>
 already moves bytes across many physical hops. SPORE hands one of them a frame
 and treats the whole crossing as a single hop. They aren't rivals to replace;
 they're transports it can ride.</p>
-<p><a href="spec.html#page-2--bindings-spore-on-everything">Every medium is one of five shapes →</a></p>
+<p><a href="spec.html#bindings--spore-on-everything">Every medium is one of five shapes →</a></p>
 </div></div></div>
 
 <div class="col-6"><div class="card"><div class="card-body">
