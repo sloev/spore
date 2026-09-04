@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import assert from 'node:assert';
 import { SporeClient, memoryAdapter } from './spore-client.mjs';
 import { BROWSER_TRANSPORTS } from './transports.mjs';
+import { memorySpillStore } from '../spore.mjs';
 import { loopbackPair } from '../transports/loopback.mjs';
 
 const wasmPath = new URL('../../target/wasm32-unknown-unknown/release/spore.wasm', import.meta.url);
@@ -314,6 +315,63 @@ await test('peers() enumerates what the browser previously could not see', async
 
   alice.dispose();
   bob.dispose();
+});
+
+await test('custody survives a restart, and is re-verified on the way in', async () => {
+  // The client installs the host store at init. Two clients over one storage is
+  // what a page reload is; before M10-A the browser was the only target that
+  // could not keep custody at all.
+  const storage = memoryAdapter();
+  const spill = memorySpillStore();
+
+  const first = new SporeClient({ storage, spillStore: spill });
+  await first.init(wasmBytes);
+  // Something to carry for somebody else: a public post from a third party.
+  const other = new SporeClient({ storage: memoryAdapter(), spillStore: memorySpillStore() });
+  await other.init(wasmBytes);
+  const [ta, tb] = loopbackPair();
+  first.attachTransport('loopback', ta);
+  other.attachTransport('loopback', tb);
+  other.publish('weather', enc('squall on the ridge'));
+  await sleep(300);
+
+  const held = spill.ids().length;
+  assert.ok(held > 0, 'the node writes what it carries to the host store');
+  first.dispose();
+
+  const second = new SporeClient({ storage, spillStore: spill });
+  await second.init(wasmBytes);
+  assert.strictEqual(second.adoptedOnStart, held, 'a restart adopts what it was holding');
+  second.dispose();
+  other.dispose();
+});
+
+await test('a tampered host store contributes nothing', async () => {
+  const storage = memoryAdapter();
+  const spill = memorySpillStore();
+  const a = new SporeClient({ storage, spillStore: spill });
+  await a.init(wasmBytes);
+  const other = new SporeClient({ storage: memoryAdapter(), spillStore: memorySpillStore() });
+  await other.init(wasmBytes);
+  const [ta, tb] = loopbackPair();
+  a.attachTransport('loopback', ta);
+  other.attachTransport('loopback', tb);
+  other.publish('weather', enc('carry me'));
+  await sleep(300);
+  assert.ok(spill.ids().length > 0);
+  a.dispose();
+
+  for (const id of spill.ids()) {
+    const w = spill.get(id);
+    w[Math.floor(w.length / 2)] ^= 0xff;
+    spill.put(id, w);
+  }
+
+  const b = new SporeClient({ storage, spillStore: spill });
+  await b.init(wasmBytes);
+  assert.strictEqual(b.adoptedOnStart, 0, 'an id is the hash of its content; a mismatch is "not held"');
+  b.dispose();
+  other.dispose();
 });
 
 console.log(failures ? '\n' + failures + ' failing' : '\nall passing');

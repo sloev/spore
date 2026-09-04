@@ -12,13 +12,101 @@ export const ZERO_DEST = new Uint8Array(8); // all-zero = public
 
 const now = () => Math.floor(Date.now() / 1000);
 
-/** Instantiate the wasm and return a small typed API over it. */
-export async function loadSpore(source) {
-  let mem; // set after instantiation; the RNG import reads it lazily
+/**
+ * A custody store the wasm node can spill to.
+ *
+ * **Synchronous on purpose, and that rules IndexedDB out.** A wasm import cannot
+ * await, so the store the core reaches through must answer immediately.
+ * `localStorage` does; IndexedDB does not, and bridging it would mean buffering
+ * the whole store in memory first, which is the thing spilling exists to avoid.
+ * The cost is `localStorage`'s few-megabyte quota — a browser node keeps less
+ * custody than a daemon, which is true anyway.
+ *
+ * @typedef {Object} SpillStore
+ * @property {(idHex: string, wire: Uint8Array) => void} put
+ * @property {(idHex: string) => Uint8Array|null} get
+ * @property {(idHex: string) => void} remove
+ * @property {() => string[]} ids
+ */
+
+/** The default: no persistence, which is what a browser node had before. */
+export function memorySpillStore() {
+  const m = new Map();
+  return {
+    put: (id, wire) => { m.set(id, wire.slice()); },
+    get: (id) => m.get(id) || null,
+    remove: (id) => { m.delete(id); },
+    ids: () => [...m.keys()],
+  };
+}
+
+/**
+ * Spill to `localStorage`. Envelopes held for other people then survive a
+ * reload, which is the whole point: without it a browser node dropped every
+ * piece of custody it was carrying the moment the tab was refreshed.
+ *
+ * A full quota is not an error — a spill that does not land leaves the entry
+ * memory-only, exactly as with no backend at all.
+ */
+export function localStorageSpillStore(prefix = 'spore.mail.', ls = globalThis.localStorage) {
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  const un64 = (s) => { const b = atob(s); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+  return {
+    put(id, wire) { try { ls.setItem(prefix + id, b64(wire)); } catch { /* quota: stays memory-only */ } },
+    get(id) { const v = ls.getItem(prefix + id); return v ? un64(v) : null; },
+    remove(id) { ls.removeItem(prefix + id); },
+    ids() {
+      const out = [];
+      for (let i = 0; i < ls.length; i++) {
+        const k = ls.key(i);
+        if (k && k.startsWith(prefix)) out.push(k.slice(prefix.length));
+      }
+      return out;
+    },
+  };
+}
+
+/**
+ * Instantiate the wasm and return a small typed API over it.
+ *
+ * `store` is the host's storage nutrient. It is always wired, because a wasm
+ * module cannot import conditionally — a host that never calls
+ * `node.useHostStore()` simply never has it read.
+ */
+export async function loadSpore(source, { store = memorySpillStore() } = {}) {
+  let mem; // set after instantiation; the imports read it lazily
+  let ex;  // ditto, for allocating buffers handed back to the core
+  const hex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const idAt = (ptr) => hex(new Uint8Array(mem.buffer, ptr, 16));
+  // Hand bytes back as a packed (ptr << 32) | len. i64 crosses the boundary as
+  // a BigInt: the shifted pointer exceeds what a JS number holds exactly.
+  const give = (bytes) => {
+    if (!bytes) return 0n;
+    const p = ex.spore_alloc(bytes.length);
+    new Uint8Array(mem.buffer, p, bytes.length).set(bytes);
+    return (BigInt(p) << 32n) | BigInt(bytes.length);
+  };
   const imports = {
     env: {
       spore_fill_random(ptr, len) {
         crypto.getRandomValues(new Uint8Array(mem.buffer, ptr, len));
+      },
+      spore_store_put(idPtr, wirePtr, wireLen) {
+        store.put(idAt(idPtr), new Uint8Array(mem.buffer, wirePtr, wireLen).slice());
+      },
+      spore_store_get(idPtr) {
+        return give(store.get(idAt(idPtr)));
+      },
+      spore_store_remove(idPtr) {
+        store.remove(idAt(idPtr));
+      },
+      spore_store_ids() {
+        const ids = store.ids().filter((s) => /^[0-9a-f]{32}$/.test(s));
+        const out = new Uint8Array(ids.length * 16);
+        ids.forEach((s, i) => {
+          for (let j = 0; j < 16; j++) out[i * 16 + j] = parseInt(s.slice(j * 2, j * 2 + 2), 16);
+        });
+        return give(out);
       },
     },
   };
@@ -32,7 +120,7 @@ export async function loadSpore(source) {
   } else {
     result = await WebAssembly.instantiate(await source, imports);
   }
-  const ex = result.instance.exports;
+  ex = result.instance.exports;
   mem = ex.memory;
   return new Spore(ex);
 }
@@ -440,6 +528,14 @@ class SporeNode {
     const packed = this.s._unpack(this.s.ex.spore_node_file_name(this.ptr, mp));
     this.s.ex.spore_free(mp, magnet.length);
     return packed.length ? new TextDecoder().decode(packed) : null;
+  }
+
+  /** Spill this node's custody store to the host storage given to `loadSpore`,
+   * adopting whatever a previous run left. Returns how many envelopes were
+   * adopted — every one re-verified against its content-derived id first, so a
+   * store that lost or altered bytes contributes fewer rather than injecting. */
+  useHostStore(now_sec) {
+    return this.s.ex.spore_node_use_js_store(this.ptr, now_sec || now());
   }
 
   /** Peers we have heard from, freshest first.
