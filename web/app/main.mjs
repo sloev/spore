@@ -14,13 +14,15 @@ import { ThreadStore, groupThread } from './stores/threads.mjs';
 import { ContactStore, contactRows } from './stores/contacts.mjs';
 import { TopicStore } from './stores/topics.mjs';
 import { el, mount } from './ui/dom.mjs';
-import { appShell, appBar, defaultPaneFor, canGoBack, DESTINATIONS } from './ui/shell.mjs';
+import { appShell, appBar, defaultPaneFor, canGoBack, sheet, DESTINATIONS } from './ui/shell.mjs';
 import { renderOnboarding } from './screens/onboarding.mjs';
 import { renderChatList, renderChatThread } from './screens/chat.mjs';
 import { renderContacts } from './screens/contacts.mjs';
 import { renderSettings } from './screens/settings.mjs';
 import { renderFiles } from './screens/files.mjs';
 import { renderBlogs } from './screens/blogs.mjs';
+import { renderBridges, bridgeDiagnostics } from './screens/bridges.mjs';
+import { renderIdentity, identitySheet } from './screens/identity.mjs';
 import { formatAddr, dayLabel } from './ui/format.mjs';
 
 const K_ONBOARDED = 'spore.onboarded';
@@ -61,6 +63,11 @@ const state = {
   contactDraft: null,
   addingContact: false,
   addContactError: null,
+
+  petname: '',
+  identitySheetOpen: false,
+  seedShown: false,
+  bridgeDiagOpen: null,
 
   topicList: [],
   openTopic: null,
@@ -141,7 +148,13 @@ function finishOnboarding() {
 // one code path into a screen instead of two that can disagree.
 
 /** Screen id -> URL segment. Only these five are routable. */
-const SEGMENTS = { contacts: 'contacts', chat: 'chats', blogs: 'blogs', files: 'files', settings: 'settings' };
+// `identity` has no segment: the nav item opens a sheet over wherever you are,
+// so it is not a place the URL can point at. `bridges` has one and no nav item —
+// it is a real screen, reached from Settings, and deep-linking to it is useful.
+const SEGMENTS = {
+  contacts: 'contacts', chat: 'chats', blogs: 'blogs', files: 'files',
+  settings: 'settings', bridges: 'bridges', identity: 'identity',
+};
 const SCREEN_OF = Object.fromEntries(Object.entries(SEGMENTS).map(([k, v]) => [v, k]));
 
 function hashFor(screen, chatOpen) {
@@ -150,6 +163,12 @@ function hashFor(screen, chatOpen) {
 }
 
 function navigate(screen) {
+  // Identity is a nav item that is not a navigation: it opens a sheet over
+  // wherever you are, so choosing it never costs you the screen you were on.
+  if (screen === 'identity') {
+    setState({ identitySheetOpen: !state.identitySheetOpen });
+    return;
+  }
   if (!SEGMENTS[screen]) return;
   // Leaving chat drops the open thread from the URL; coming back to chat lands
   // on the list, which is what the pane rules expect.
@@ -164,7 +183,10 @@ function goBack() {
   // On a phone this is the list/detail step. Going "back" from a thread means
   // dropping the address from the URL, so the browser's own back button and
   // this button do the same thing rather than diverging.
-  if (state.screen === 'chat' && state.chatOpen) location.hash = '#/chats';
+  // Bridges is entered from Settings, so back means Settings — on every width,
+  // not only where the list/detail flip exists.
+  if (state.screen === 'bridges') location.hash = '#/settings';
+  else if (state.screen === 'chat' && state.chatOpen) location.hash = '#/chats';
   else setState({ pane: 'list' });
 }
 
@@ -188,6 +210,12 @@ function applyHash() {
     chatDraft: chatOpen === state.chatOpen ? state.chatDraft : '',
     newConvoOpen: false,
     newConvoError: null,
+    // Leaving a screen closes what was floating over it; a sheet that outlived
+    // its screen would be pointing at something no longer on the page.
+    petname: '',
+  identitySheetOpen: false,
+    bridgeDiagOpen: null,
+    seedShown: false,
   });
 }
 
@@ -402,6 +430,32 @@ function topicRows() {
   }));
 }
 
+const bridgesActions = {
+  openDiagnostics: (id) => setState({ bridgeDiagOpen: id }),
+  closeDiagnostics: () => setState({ bridgeDiagOpen: null }),
+  removeBridge: (id) => {
+    client.removeBridge(id);
+    setState({ bridgeDiagOpen: null, bridges: client.bridges() });
+  },
+  // A device transport needs a real click to reach its permission prompt, so
+  // this opens the add form pre-set to that kind rather than trying to open the
+  // device from a handler the browser will refuse.
+  grantDevice: (kind) => setState({ addingBridge: { kind, fields: {}, error: null, busy: false } }),
+};
+
+const identityActions = {
+  copyAddress: (addr) => { if (navigator.clipboard) navigator.clipboard.writeText(addr); },
+  copySeed: (seed) => { if (navigator.clipboard && seed) navigator.clipboard.writeText(seed); },
+  showSeed: () => setState({ seedShown: true, seedHex: client.exportSeed() }),
+  hideSeed: () => setState({ seedShown: false, seedHex: null }),
+  // Store what actually stuck, not what was typed: the core bounds the name to
+  // 32 characters with no control characters, so echoing the input back would
+  // show a name this node is not announcing.
+  setPetname: (v) => setState({ petname: client.setPetname(v) }),
+  closeIdentitySheet: () => setState({ identitySheetOpen: false }),
+  manageIdentity: () => { setState({ identitySheetOpen: false }); location.hash = '#/identity'; },
+};
+
 const filesActions = {
   setFetchValue: (v) => setState({ fetchValue: v, fetchError: null }),
 
@@ -447,6 +501,8 @@ const filesActions = {
 };
 
 const settingsActions = {
+  openBridges: () => { location.hash = '#/bridges'; },
+
   setAccent: (a) => {
     state.accent = a;
     localStorage.setItem(K_ACCENT, a);
@@ -635,6 +691,27 @@ function renderApp() {
         actions: settingsActions,
       }),
     );
+  } else if (state.screen === 'bridges') {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({ title: 'Bridges', subtitle: null, onBack: goBack, actions: [] }),
+      renderBridges({
+        bridges: state.bridges,
+        available: client.availableTransports(),
+        adding: state.addingBridge,
+        actions: { ...bridgesActions, ...settingsActions },
+      }),
+    );
+  } else if (state.screen === 'identity') {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({ title: 'Identity', subtitle: null, onBack: null, actions: [] }),
+      renderIdentity({
+        addrHex: state.identity ? state.identity.addrHex : '',
+        petname: state.petname,
+        seedShown: state.seedShown,
+        seedHex: state.seedHex,
+        actions: identityActions,
+      }),
+    );
   } else if (state.screen === 'blogs') {
     main = el('div', { style: { display: 'contents' } },
       appBar({ title: 'Blogs', subtitle: null, onBack: null, actions: [] }),
@@ -651,7 +728,7 @@ function renderApp() {
     );
   } else if (state.screen === 'files') {
     main = el('div', { style: { display: 'contents' } },
-      appBar({ title: 'Files', subtitle: null, onBack: null, actions: [] }),
+      appBar({ title: 'Fileshare', subtitle: null, onBack: null, actions: [] }),
       renderFiles({
         transfers: state.transfers,
         fetchValue: state.fetchValue,
@@ -689,7 +766,30 @@ function renderApp() {
     );
   }
 
-  return appShell({ screen: state.screen, pane: state.pane, side, main, onNavigate: navigate });
+  const openBridge = state.bridgeDiagOpen
+    ? state.bridges.find((b) => b.id === state.bridgeDiagOpen)
+    : null;
+  const sheets = el('div', {},
+    sheet({
+      open: state.identitySheetOpen, label: 'Identity',
+      onClose: identityActions.closeIdentitySheet,
+      children: identitySheet({
+        addrHex: state.identity ? state.identity.addrHex : '',
+        petname: state.petname,
+        actions: identityActions,
+      }),
+    }),
+    sheet({
+      open: Boolean(openBridge), label: 'Bridge diagnostics',
+      onClose: bridgesActions.closeDiagnostics,
+      children: openBridge ? bridgeDiagnostics(openBridge, bridgesActions) : null,
+    }),
+  );
+
+  return appShell({
+    screen: state.screen, pane: state.pane, side, main,
+    onNavigate: navigate, sheets, identitySheetOpen: state.identitySheetOpen,
+  });
 }
 
 function render() {
@@ -819,6 +919,7 @@ export async function boot(container) {
     state.transfers = client.transfers();
     resubscribe();
     state.topicList = topicRows();
+    state.petname = client.petname();
     state.onboarding = !onboarded;
     if (state.onboarding) render();
     else applyHash(); // restores the open thread from the URL on a reload

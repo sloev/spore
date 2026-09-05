@@ -77,7 +77,7 @@ export const EVENTS = /** @type {const} */ ([
   'EnvelopeAcked',      // { id }
   'EnvelopeExpired',    // { id } — travelled past its TTL, never acked
   'FeedEvent',          // { from, topicHex, body, at }
-  'BridgeStateChanged', // { id, kind, up, sent, received, lastFrameAt }
+  'BridgeStateChanged', // { id, kind, up, sent, received, bytesSent, bytesReceived, lastFrameAt }
   'TransferProgress',   // { magnet, name, bytes, complete }
   'AnnounceSent',       // { at, nextInMs }
   'ClientFault',        // { scope, message }
@@ -115,7 +115,7 @@ export class SporeClient {
     this.identity = null;
 
     this._listeners = new Set();
-    this._bridges = new Map(); // id -> { id, kind, transport, up, sent, received, lastFrameAt }
+    this._bridges = new Map(); // id -> { id, kind, transport, up, sent, received, bytes*, lastFrameAt }
     this._pending = new Map(); // idHex -> { id, at, expiresAt }
     this._ratchetPeers = new Set(); // peers observed using a live §7 ratchet
     this._transfers = new Map(); // magnetHex -> { chunksHeld, complete }, for diffing
@@ -343,6 +343,27 @@ export class SporeClient {
     this.node.subscribe(topicName);
   }
 
+  /**
+   * The name this node announces, and the setter for it.
+   *
+   * It is a **claim**, not identity: anyone may announce any name, so a peer
+   * shows it as a suggestion and keeps its own label. Every browser node
+   * announced the literal string "web" until `spore_node_set_petname` existed.
+   *
+   * `setPetname` returns what actually stuck — the core bounds the name to 32
+   * characters with no control characters, the same rule it applies to names it
+   * receives, so the caller must not assume its input survived intact.
+   */
+  petname() {
+    this._assertReady();
+    return this.node.petname();
+  }
+
+  setPetname(name) {
+    this._assertReady();
+    return this.node.setPetname(name);
+  }
+
   /** Stop following a topic. True if it was followed. */
   unsubscribe(topicName) {
     this._assertReady();
@@ -475,13 +496,21 @@ export class SporeClient {
   attachTransport(kind, transport) {
     this._assertReady();
     const id = 'b' + this._nextBridgeId++;
-    const record = { id, kind, transport, up: true, sent: 0, received: 0, lastFrameAt: 0 };
+    // Frames *and* bytes. Frames say whether anything is moving; bytes say how
+    // much a link is actually costing, which is the question a diagnostics view
+    // is opened to answer and the one a frame count cannot answer at all — a
+    // LoRa frame and a WebSocket frame differ by two orders of magnitude.
+    const record = {
+      id, kind, transport, up: true,
+      sent: 0, received: 0, bytesSent: 0, bytesReceived: 0, lastFrameAt: 0,
+    };
     this._bridges.set(id, record);
 
     // Count frames without the transports needing to know they are counted.
     const send = transport.send.bind(transport);
     transport.send = (bytes) => {
       record.sent++;
+      record.bytesSent += bytes ? bytes.length : 0;
       record.lastFrameAt = Date.now();
       this._emitBridge(record);
       return send(bytes);
@@ -490,6 +519,7 @@ export class SporeClient {
     const inbound = transport.receive;
     transport.receive = (bytes) => {
       record.received++;
+      record.bytesReceived += bytes ? bytes.length : 0;
       record.lastFrameAt = Date.now();
       this._emitBridge(record);
       return inbound(bytes);
@@ -516,13 +546,15 @@ export class SporeClient {
 
   /** Current bridge health, for a screen that mounts after the events fired. */
   bridges() {
-    return [...this._bridges.values()].map(({ id, kind, up, sent, received, lastFrameAt }) =>
-      ({ id, kind, up, sent, received, lastFrameAt }));
+    return [...this._bridges.values()].map(
+      ({ id, kind, up, sent, received, bytesSent, bytesReceived, lastFrameAt }) =>
+        ({ id, kind, up, sent, received, bytesSent, bytesReceived, lastFrameAt }));
   }
 
   _emitBridge(r) {
     this._emit('BridgeStateChanged', {
-      id: r.id, kind: r.kind, up: r.up, sent: r.sent, received: r.received, lastFrameAt: r.lastFrameAt,
+      id: r.id, kind: r.kind, up: r.up, sent: r.sent, received: r.received,
+      bytesSent: r.bytesSent, bytesReceived: r.bytesReceived, lastFrameAt: r.lastFrameAt,
     });
   }
 
