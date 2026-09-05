@@ -102,6 +102,7 @@ const MODULES = [
   'app/ui/dom.mjs',
   'app/ui/icons.mjs',
   'app/ui/format.mjs',
+  'app/ui/settings-list.mjs',
   'app/ui/shell.mjs',
   'app/stores/threads.mjs',
   'app/stores/contacts.mjs',
@@ -112,6 +113,8 @@ const MODULES = [
   'app/screens/settings.mjs',
   'app/screens/files.mjs',
   'app/screens/blogs.mjs',
+  'app/screens/bridges.mjs',
+  'app/screens/identity.mjs',
   'app/transports.mjs',
   'app/spore-client.mjs',
   // boots on load — must be last

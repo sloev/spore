@@ -304,6 +304,37 @@ pub unsafe extern "C" fn spore_node_subscribe(n: *mut Node, topic: *const u8, le
     (*n).subscribe(&s);
 }
 
+/// This node's announced petname, as UTF-8 bytes.
+///
+/// # Safety
+/// `n` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_petname(n: *mut Node) -> i64 {
+    pack((*n).petname.clone().into_bytes())
+}
+
+/// Set the petname this node announces (§4).
+///
+/// The field has always been `pub` on `Node`, so every native surface could set
+/// it; the browser could not, and every web node therefore announced itself as
+/// the literal string "web". A fourth gap of the same shape as
+/// `spore_node_peers`, `spore_node_files` and `spore_node_topics`: the
+/// capability was in the portable core and only the export was missing.
+///
+/// Bounded here, on the *sending* side, to what `absorb_announce` will keep on
+/// the receiving side — 32 characters, no control characters. A node that
+/// announced more would simply be announcing something every peer silently
+/// truncates, which is a worse failure than refusing the extra characters,
+/// because the name it thinks it has and the name it has would differ.
+///
+/// # Safety
+/// `n` is valid; `name`/`len` describe UTF-8 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_set_petname(n: *mut Node, name: *const u8, len: usize) {
+    let s = String::from_utf8_lossy(std::slice::from_raw_parts(name, len));
+    (*n).petname = s.chars().filter(|c| !c.is_control()).take(32).collect();
+}
+
 /// Stop following a topic. Returns `1` if it was followed, `0` if not.
 ///
 /// # Safety

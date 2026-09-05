@@ -379,6 +379,25 @@ class SporeNode {
     this.s.ex.spore_free(p, t.length);
   }
 
+  /** The petname this node announces. */
+  petname() {
+    const packed = this.s._unpack(this.s.ex.spore_node_petname(this.ptr));
+    return new TextDecoder().decode(packed);
+  }
+
+  /**
+   * Set the announced petname. The core bounds it to 32 characters with no
+   * control characters — the same rule it applies to names it *receives* — so
+   * read it back rather than assuming what was set is what stuck.
+   */
+  setPetname(name) {
+    const nb = new TextEncoder().encode(name);
+    const p = this.s._put(nb);
+    this.s.ex.spore_node_set_petname(this.ptr, p, nb.length);
+    this.s.ex.spore_free(p, nb.length);
+    return this.petname();
+  }
+
   /** Stop following a topic. True if it was followed. */
   unsubscribe(topic) {
     const tb = new TextEncoder().encode(topic);

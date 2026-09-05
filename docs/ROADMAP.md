@@ -108,11 +108,10 @@ groups) · **Feed** (personal microblog + subscribed feeds) · **Files** ·
 **Bridges** · **Seed**. The old Mail / Topics / Sealed-Topics panels are merged
 into Chats; the old shared `spore/feed` topic is replaced by per-address feeds.
 
-> The IA is intact but the **names moved** when M10-D rebuilt the web node on
-> HARDBRUT/3: Feed shipped as **Blogs**, and Bridges and Seed are both inside
-> **Settings**, alongside **Contacts** which this list never named. The surfaces
-> below map to what exists; the labels do not. Reconciling the two is M10-B's
-> job, since that is where the six domain stores get named once for every shim.
+> Superseded by the Claude Design comp (`Spore Web App.dc.html`), which is the
+> normative IA: **Contacts · Chat · Blogs · Fileshare · Identity · Settings**,
+> with **Bridges** a screen reached from Settings. Feed is Blogs, Seed is inside
+> Identity, and Contacts — never named in the list above — is a destination.
 
 > **Guardrail:** this stays a *reference* client, not "the" SPORE app. No feature
 > here requires the standalone HTML specifically; a bridge, a Python script, or
@@ -460,7 +459,7 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 |---|---|---|
 | M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
-| M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
+| M10-H Web node: the rest of the design comp | ⬜ | The IA and shell now match `Spore Web App.dc.html`; the screens behind it do not yet. Carried, in rough order of how much kernel work each needs: **groups** in Chat (members, invite armor, open vs keyed topic badge — `spore_topic_seal`/`spore_group_invite_encode` already exist, so this is mostly UI); **Blogs** channels with handles, reactions, comments and share (an app-layer convention over feed posts, no wire change); **Fileshare** peer counts, share sheet and per-contact public folders (the folder half is M4's W6 `spore://` resolver); **Contacts** avatars with fetch states (an avatar is a small published file, so the file layer already carries it) and QR meetup; **multiple identities**, which is the one that is genuinely blocked — a node is its seed and every store here is keyed by app rather than by identity, so it belongs with M10-B |\n| M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 | M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
 | M10-G SDK packaging/release plan for the app-level ABI, once M10-C lands | ⬜ not started | [Prns](https://github.com/KenAKAFrosty/Prns) already ships "one core, many language bindings" at wider scope — Rust/TS/Python/.NET/Go/Swift/JVM/Julia/C via `prns-host/bindings/*`, with a staged qualify→promote pipeline per SDK. A concrete reference for how each UI shim's release process could work; M10 doesn't currently address packaging at all, only that the ABI exists |
 
