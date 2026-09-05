@@ -79,7 +79,7 @@ claim the code actually honours.
 | Store horizon clamp to 30 d at the single choke point (`store_put`) | ✅ shipped (#113) | Matching clamp on dedup retain |
 | Field-verify the offline window end-to-end on a device | ⬜ deferred to hardware QA | Unit tests prove deadline/clamping; needs a real clock/delivery run (M4) |
 | Backup exclusion + migration tested on hardware | ⬜ deferred to hardware QA | No device in CI; tracked in `android/TESTING.md` |
-| Benchmark suite: throughput/memory, reproducible, tracked per platform | ⬜ todo | No performance baseline exists today. [Prns](https://github.com/KenAKAFrosty/Prns) publishes per-platform `benchmarks/RESULTS-*.md` against a reference implementation; SPORE has nothing analogous to catch a regression before a user does |
+| Benchmark suite: throughput/memory, reproducible, tracked per platform | ⬜ todo | Folded into **M11's simulator** rather than built separately: a throughput number from a microbenchmark says less than delivery probability and bytes-per-delivered-byte under loss, and two harnesses would drift. Keep the per-platform regression-threshold idea — that is the part `spore-sim` owes CI |
 | `unsafe`-code snapshot tracked and diffed in CI | ⬜ todo | No inventory of `unsafe` blocks exists today. Prns keeps `audits/unsafe-snapshot.json`, diffed so new unsafe code is a visible, reviewable event rather than something that can land unnoticed |
 | §5.6 said "no echo/**ACK** → resend"; the code only ever checked the ACK | ✅ resolved (#227) | Closed by choosing, rather than by leaving the choice as the work. `Node::resend_unacked` (`src/node/send.rs`) drops a pending entry only when a signed receipt arrives, so the "echo" half described behaviour the tree never had. **"echo/" is deleted from §5.6**, and the rule now adds that overhearing your own rebroadcast MUST NOT clear a resend: a receipt means delivered-to-destination, while an echo means only that the mesh took it, and letting the second flip a delivery state is the same dishonesty M9's three-state UX exists to avoid. Meshtastic does treat a rebroadcast as an implicit ack for broadcasts, so the mechanism is proven — it is the *meaning* that is wrong here. Still open as a separate, optional item: echo suppression as **airtime-only** local congestion policy in §5.4 (`Csma` already tracks `overheard` per id, but per-bridge, not on the originator's `pending`), which would cancel wasted flood retries without touching `acked` |
 
@@ -744,6 +744,90 @@ unread and delivery state, consumed by web, Android and CLI through a single
 app-level ABI; `NodeController.kt` and the JS app blob reduced to UI shims; the
 standalone still makes zero external requests (Inter 900 inlined base64, not
 fetched); no screen renders a control whose backend is missing.
+
+---
+
+## Milestone 11 — One way to move a large object, and a way to measure it
+
+**Goal:** collapse the two large-object mechanisms into one, and stop guessing
+about the trade-off by building the harness that can measure it.
+
+SPORE has **two** ways to move something bigger than an MTU, and they are
+different mechanisms rather than two spellings of one:
+
+| | Generic fragmentation (§3) | File chunks (§6, Part III) |
+|---|---|---|
+| Sits | **below** the signature — splits the wire of an already-signed envelope | **above** — chunks are objects, the manifest is signed |
+| Fragment authenticity | `src: None, sig: None`, unsigned; authenticity comes from verifying the reassembled whole | each chunk content-addressed and verified on its own |
+| Discovery | none — any K of N decode | the manifest enumerates ids |
+| Flow control | **open loop**: the sender floods symbols, nobody asked | **closed loop**: `fetch_n` → WANT(ids) → `on_want` answers only those |
+| Ceiling | `assert!(count <= 255)` — about 333 KB at a 1400-byte MTU | manifest tree, no practical limit |
+
+Files already work the second way and **do not use the fountain code at all**
+(`src/node/files.rs` and `src/file.rs` reference it nowhere). So the fountain is
+load-bearing for exactly one thing: splitting an over-MTU envelope.
+
+**The unification (locked).** One mechanism: a large object becomes a signed
+manifest naming content-addressed chunks, and a receiver pulls what it is
+missing with bounded WANTs — the same path files already take. Fountain coding
+leaves v1.
+
+**Push stays, as an optimisation and never a requirement.** A sender MAY push up
+to a small number of chunks alongside the manifest. The receiver's behaviour is
+identical either way: it ignores what it already holds and WANTs the rest.
+Because nothing has to agree on the threshold, **it is local policy, not a wire
+constant** — and it is counted in *chunks*, not bytes, so it scales with the MTU
+(8 chunks is ~10 KB on a 1400-byte link and ~1.1 KB on a 200-byte LoRa one; a
+byte threshold would push 8 KB over LoRa and call it small). Default 8; `0`
+(pure pull) and `1` (never fragment to push) are both legal settings. Pushed
+chunks are charged to the same per-interface budget as everything else, so a
+node under pressure degrades to pull with no special case.
+
+**8 is reasoned, not measured** — from message sizes and round-trip cost. It is
+exactly the kind of number the simulator should settle, which is why the two
+halves of this milestone belong together.
+
+**What this wins beyond simplicity.** Open-loop reassembly is one of the few
+paths where a remote party allocates memory on your node without you asking, and
+it needed its own machinery to stay bounded — `frags`, `partial_objects`,
+`partial_bytes`, `PARTIAL_TIMEOUT_SECS`, and a sweep that runs *after* fragment
+ingest specifically, because as the code says, "a sender who opens a set and
+never finishes it is otherwise a permanent allocation". Pull-based chunks need
+none of it: the request is the authorisation. It also lifts the 255-chunk
+ceiling.
+
+**What this costs.** A one-way link can no longer carry a large object at all,
+because a pull needs a return path. That is already true of files today, so the
+change makes an existing limitation uniform rather than introducing one — and
+§3's "works on simplex radio, CW, paper tape" is a claim about the *coding* that
+the transfer layer has never honoured. Narrow the claim rather than build a
+bounded open-loop mode for it; if simplex delivery is ever wanted, it returns as
+an explicit extension with its own redundancy budget.
+
+**Tasks** (each a PR):
+
+| Task | Status | Notes |
+|---|---|---|
+| M11-A Name the resource invariant, and test it | ⬜ | "No remote node can cause another to transmit, store, or process an unbounded amount without continuing evidence of demand, or an explicit bounded local allowance." Every mechanism already exists — bounded WANTs, `MAX_IDS_PER_GOSSIP`, per-interface token buckets, store budget, table caps, `MAX_ADOPT_BYTES`, expiry — but the invariant is named nowhere, so they read as unrelated defences. Write it into Part II and add a test per resource-consuming path. Do this first: it is what the rest is argued against |
+| M11-B `spore-sim`: deterministic simulator over the real implementation | ⬜ | Seeded, declarative scenarios, machine-readable metrics. First milestone 100 nodes with loss and partitions; then 1k/10k, mobility, malicious nodes, asymmetric links, tiny stores. Metrics: delivery probability, median/p95/p99 delivery time, **bytes transmitted per delivered byte**, duplicate ratio, flood amplification, storage pressure, energy as TX/RX/CPU/wakeups rather than a fake battery percentage. Must exercise the real crate, or it validates the simulator instead of SPORE. Fast smoke suite on PRs, larger runs nightly, with regression thresholds |
+| M11-C Measure push-vs-pull and fountain-vs-chunk across loss rates | ⬜ | Needs B. Settles the push threshold and the one real argument for keeping the fountain: whether chunk retransmission is actually worse on lossy links. Decide on the numbers, not on the intuition |
+| M11-D Unify fragmentation onto manifest + content-addressed chunks | ⬜ | Large objects — messages as well as files — become a signed manifest plus chunks. Delete `src/fountain.rs`, the `Fountain` reassembler and its partial-set machinery. Wire change, which is now cheap: the project is not public and nothing external depends on the format |
+| M11-E Narrow the simplex claim | ⬜ | §3 and Part III both say the coding works on simplex radio, CW and paper tape. True of the coding, never true of the transfer layer. Say what is actually supported |
+| M11-F Forwarding budget as local policy, not a wire rule | ⬜ | The 10% airtime figure is still normative in §5.4a and in the "what stops what" table. Part II should state the *mechanism* (token bucket, backpressure byte) with defaults as SHOULD, and the number becomes per-transport policy over measured capacity, queue depth, loss, battery and custody. A node relaying 50% is impolite, not non-compliant — except on ISM, where it is law, which is an operator note |
+
+**Considered and rejected: `created_at` + `lifetime` instead of absolute expiry.**
+The stated motivation is that a relay might extend a message's lifetime. It
+cannot: `expiry` is inside the signed bytes and the ID is their hash, so
+changing it invalidates the signature and the id together. Stores already clamp
+the horizon to 30 days and a clockless node already ages by dwell. The wire cost
+is no longer the objection — the change simply buys clarity of expression and no
+property the protocol lacks. Revisit only if something else needs `created_at`.
+
+**Definition of done:** one mechanism moves every object larger than an MTU;
+`src/fountain.rs` is gone; the resource invariant is stated in the spec and has a
+test per path; `spore-sim` runs on every PR and publishes metrics; and the push
+threshold and the forwarding budget are numbers someone measured rather than
+numbers someone chose.
 
 ---
 
