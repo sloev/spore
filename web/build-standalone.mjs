@@ -105,11 +105,13 @@ const MODULES = [
   'app/ui/shell.mjs',
   'app/stores/threads.mjs',
   'app/stores/contacts.mjs',
+  'app/stores/topics.mjs',
   'app/screens/onboarding.mjs',
   'app/screens/chat.mjs',
   'app/screens/contacts.mjs',
   'app/screens/settings.mjs',
   'app/screens/files.mjs',
+  'app/screens/blogs.mjs',
   'app/transports.mjs',
   'app/spore-client.mjs',
   // boots on load — must be last

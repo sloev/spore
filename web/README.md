@@ -187,14 +187,15 @@ add a bridge**. It boots one live node with an identity of its own,
 remembered in the browser's local storage (the 32-byte signing seed via
 `node.seed()` / `newNode(seed)`), so it returns as the same node.
 
-**Milestone 10-D is mid-flight, and the app is being rebuilt screen by screen.**
-Today it has onboarding, the app shell, Chats and Contacts. Onboarding can attach a
-WebSocket relay; the screen for adding the other transports at runtime has not been
-rebuilt yet, and Blogs, Files and Settings render an explicit "not built yet" panel
-rather than a plausible-looking empty one. Every transport listed under
-[Transports](#transports) still ships in the bundle and is reachable from
-`SporeClient`; what is missing is the UI in front of them. It's the smallest
-"a whole node in one file" seed; see [`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
+**Milestone 10-D is complete.** The app has onboarding, the app shell, and all
+five screens: Chats, Contacts, Blogs, Files and Settings. Settings attaches any
+transport the host can actually open, which is answered by feature-detecting the
+registry rather than by sniffing a user agent — so the eleven bridges that need a
+daemon never appear in a browser while a desktop host that can genuinely open
+them is still offered them. WebRTC is the one exception and says so: it needs an
+offer and an answer exchanged out of band, so it cannot be opened from a form.
+It's the smallest "a whole node in one file" seed; see
+[`docs/CONTINUITY.md`](../docs/CONTINUITY.md).
 
 This same file *is* the **web node** (the site's `/demo/` page): the Pages workflow
 builds it once and serves it at `/demo/` — one URL, not the same ~720 KB payload

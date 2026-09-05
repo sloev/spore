@@ -12,6 +12,7 @@
 import { SporeClient, localStorageAdapter } from './spore-client.mjs';
 import { ThreadStore, groupThread } from './stores/threads.mjs';
 import { ContactStore, contactRows } from './stores/contacts.mjs';
+import { TopicStore } from './stores/topics.mjs';
 import { el, mount } from './ui/dom.mjs';
 import { appShell, appBar, defaultPaneFor, canGoBack, DESTINATIONS } from './ui/shell.mjs';
 import { renderOnboarding } from './screens/onboarding.mjs';
@@ -19,6 +20,7 @@ import { renderChatList, renderChatThread } from './screens/chat.mjs';
 import { renderContacts } from './screens/contacts.mjs';
 import { renderSettings } from './screens/settings.mjs';
 import { renderFiles } from './screens/files.mjs';
+import { renderBlogs } from './screens/blogs.mjs';
 import { formatAddr, dayLabel } from './ui/format.mjs';
 
 const K_ONBOARDED = 'spore.onboarded';
@@ -60,6 +62,13 @@ const state = {
   addingContact: false,
   addContactError: null,
 
+  topicList: [],
+  openTopic: null,
+  followValue: '',
+  followError: null,
+  postDraft: '',
+  posting: false,
+
   transfers: [],
   fetchValue: '',
   fetchError: null,
@@ -70,6 +79,7 @@ const state = {
 let client = null;
 let threads = null;
 let contacts = null;
+let topics = null;
 let root = null;
 
 // ------------------------------------------------------------------- helpers
@@ -96,6 +106,7 @@ const onboardingActions = {
     const identity = await client.init(wasmSource());
     await threads.load();
     await contacts.load();
+    await topics.load();
     setState({ identity, seedHex: client.exportSeed() });
   }),
   next: () => setState({ step: state.step + 1, error: null }),
@@ -291,6 +302,106 @@ function applyAppearance() {
   else root.setAttribute('data-theme', state.theme);
 }
 
+const blogsActions = {
+  setFollowValue: (v) => setState({ followValue: v, followError: null }),
+
+  follow: (name) => {
+    try {
+      client.subscribe(name);
+      // The kernel owns membership; this store owns the name, because a topic
+      // address is a hash and the name is not recoverable from it.
+      topics.remember(client.topicHexOf(name), name);
+      topics.save();
+      setState({ followValue: '', followError: null, topicList: topicRows() });
+    } catch (err) {
+      setState({ followError: String((err && err.message) || err) });
+    }
+  },
+
+  unfollow: (topicHex) => {
+    const name = topics.nameFor(topicHex);
+    // Without a name we cannot ask the kernel to unsubscribe: it takes the
+    // name, hashes it, and removes that address. Say so rather than appearing
+    // to unfollow and leaving the node still announcing the topic.
+    if (!name) {
+      setState({ followError: 'This feed was followed under a name this device does not have, so it cannot be unfollowed here.' });
+      return;
+    }
+    client.unsubscribe(name);
+    topics.forget(topicHex);
+    topics.save();
+    setState({ openTopic: null, topicList: topicRows() });
+  },
+
+  open: (topicHex) => setState({ openTopic: topicHex, postDraft: '' }),
+  close: () => setState({ openTopic: null }),
+  setDraft: (v) => { state.postDraft = v; },
+
+  post: (topicHex, body) => {
+    const name = topics.nameFor(topicHex);
+    if (!name) {
+      setState({ followError: 'This feed has no name on this device, so there is nothing to publish to.' });
+      return;
+    }
+    setState({ posting: true });
+    try {
+      client.publish(name, new TextEncoder().encode(body));
+      // Our own post is not echoed back to us by the core, so file it here or
+      // it would vanish until someone else relayed it back.
+      topics.receive({ topicHex, from: state.identity ? state.identity.addrHex : null, body, at: Math.floor(Date.now() / 1000) });
+      topics.save();
+      setState({ posting: false, postDraft: '', topicList: topicRows() });
+    } catch (err) {
+      setState({ posting: false, followError: String((err && err.message) || err) });
+    }
+  },
+};
+
+/**
+ * Membership from the kernel, names and posts from the store.
+ *
+ * The kernel is asked rather than a local list kept in step with it, because
+ * the topic set is what goes out in every ANNOUNCE — a drifted list would have
+ * the UI claiming this node reads something it does not.
+ */
+/**
+ * Re-follow every topic the store remembers.
+ *
+ * The seed persists; the topic set does not. A wasm node is rebuilt from its
+ * seed on every load and comes back following nothing, so without this a feed
+ * followed yesterday is silently unfollowed today — the screen would show it
+ * (the name is on disk) while the node neither received its posts nor announced
+ * it. The store is the durable record of intent and the kernel is re-primed
+ * from it at boot, exactly as the seed is.
+ */
+function resubscribe() {
+  for (const name of topics.names.values()) {
+    try { client.subscribe(name); } catch { /* one bad name must not stop the rest */ }
+  }
+}
+
+/** A feed post is arbitrary bytes; show text when it is text, and say so when
+ *  it is not, rather than rendering replacement characters as though they were
+ *  the message. */
+function decodeBody(bytes) {
+  if (typeof bytes === 'string') return bytes;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return '[' + (bytes ? bytes.length : 0) + ' bytes, not text]';
+  }
+}
+
+function topicRows() {
+  if (!client || !client.node) return [];
+  return client.subscriptions().map((topicHex) => ({
+    topicHex,
+    name: topics.nameFor(topicHex),
+    posts: topics.postsOn(topicHex).length,
+    latest: topics.latestOn(topicHex),
+  }));
+}
+
 const filesActions = {
   setFetchValue: (v) => setState({ fetchValue: v, fetchError: null }),
 
@@ -410,12 +521,19 @@ const settingsActions = {
 
 // ---------------------------------------------------------------- rendering
 
-function notBuiltYet(name) {
+/**
+ * Every destination in DESTINATIONS now has a screen, so this is unreachable —
+ * `applyHash` refuses anything outside SEGMENTS and all five are handled above.
+ * It stays as the honest failure for a sixth destination added without a branch:
+ * that is a bug in this file, and saying so beats rendering an empty pane or a
+ * "coming soon" panel for something that is never coming.
+ */
+function noScreenFor(name) {
   return el('div', { class: 'pane-body scroll-y' },
     el('div', { class: 'empty' },
-      el('div', { class: 'empty-mark' }, '·'),
+      el('div', { class: 'empty-mark' }, '!'),
       el('h3', {}, name),
-      el('p', {}, 'This screen is not built yet. The kernel, the client contract and the shell are in place; the screen itself lands later in Milestone 10-D.'),
+      el('p', {}, 'No screen is wired for this destination. That is a bug in the app shell, not something to wait for.'),
     ),
   );
 }
@@ -517,6 +635,20 @@ function renderApp() {
         actions: settingsActions,
       }),
     );
+  } else if (state.screen === 'blogs') {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({ title: 'Blogs', subtitle: null, onBack: null, actions: [] }),
+      renderBlogs({
+        topics: state.topicList,
+        openTopic: state.openTopic,
+        posts: state.openTopic ? topics.postsOn(state.openTopic) : [],
+        followValue: state.followValue,
+        followError: state.followError,
+        draft: state.postDraft,
+        posting: state.posting,
+        actions: blogsActions,
+      }),
+    );
   } else if (state.screen === 'files') {
     main = el('div', { style: { display: 'contents' } },
       appBar({ title: 'Files', subtitle: null, onBack: null, actions: [] }),
@@ -553,7 +685,7 @@ function renderApp() {
         onBack: canGoBack(state.screen) && state.pane === 'detail' ? goBack : null,
         actions: [],
       }),
-      notBuiltYet(screenTitle()),
+      noScreenFor(screenTitle()),
     );
   }
 
@@ -611,6 +743,7 @@ export async function boot(container) {
   client = new SporeClient({ storage });
   threads = new ThreadStore({ storage });
   contacts = new ContactStore({ storage });
+  topics = new TopicStore({ storage });
 
   client.on((e) => {
     switch (e.type) {
@@ -636,6 +769,14 @@ export async function boot(container) {
         break;
       case 'AnnounceSent':
         setState({ lastAnnounceAt: Date.now() });
+        break;
+      case 'FeedEvent':
+        // `body` arrives as bytes off the wire. Decode once here rather than
+        // letting a Uint8Array reach a store that serialises itself to JSON,
+        // where it would persist as {"0":104,"1":105,...} and reload as junk.
+        topics.receive({ ...e, body: decodeBody(e.body) });
+        topics.save();
+        setState({ topicList: topicRows() });
         break;
       case 'TransferProgress':
         // The client only emits this when a chunk count actually moved, so
@@ -669,12 +810,15 @@ export async function boot(container) {
     const identity = await client.init(wasmSource());
     await threads.load();
     await contacts.load();
+    await topics.load();
     state.booted = true;
     state.identity = identity;
     // Adopted custody can include manifests, so the list is not necessarily
     // empty on a cold start; the first TransferProgress would otherwise be the
     // only thing that ever filled it.
     state.transfers = client.transfers();
+    resubscribe();
+    state.topicList = topicRows();
     state.onboarding = !onboarded;
     if (state.onboarding) render();
     else applyHash(); // restores the open thread from the URL on a reload

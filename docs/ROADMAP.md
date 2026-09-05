@@ -704,7 +704,7 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 | M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ✅ shipped | The trait and the native impl already existed; only the wasm backend was missing, and `Node::set_spill_backend` already existed "for a runtime whose storage nutrient is browser IndexedDB, MCU flash, or anything else". Four `spore_store_*` imports, same pattern as `spore_fill_random`. Synchronous by necessity — a wasm import cannot await, which rules IndexedDB out and makes `localStorage` (quota-bounded) the browser backing |
 | M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
-| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | 🟡 in progress — **the old app is deleted and the standalone now ships this one**. Onboarding, shell, Chats, Contacts and Settings done; Blogs and Files remain | Shell, nav, onboarding and the dev harness shipped; the five destination screens are the remaining work. Verified in a real browser against the real wasm: identity generated, seed shown matches the persisted one byte-for-byte, no console exceptions |
+| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | ✅ shipped | All five screens: onboarding, chats, contacts, settings, files, blogs. Six domain stores less the two M10-B owns. Three kernel gaps closed on the way, each the same shape — the capability was already in the portable core and only the wasm export was missing: `spore_node_peers`, `spore_node_files`, and `spore_node_unsubscribe`/`spore_node_topics`. Two core bugs fixed: delivery receipts could never reach the sender on a two-node link, and file fetch never worked in the shipped node |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 | M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
 | M10-G SDK packaging/release plan for the app-level ABI, once M10-C lands | ⬜ not started | [Prns](https://github.com/KenAKAFrosty/Prns) already ships "one core, many language bindings" at wider scope — Rust/TS/Python/.NET/Go/Swift/JVM/Julia/C via `prns-host/bindings/*`, with a staged qualify→promote pipeline per SDK. A concrete reference for how each UI shim's release process could work; M10 doesn't currently address packaging at all, only that the ABI exists |
@@ -833,10 +833,25 @@ correction — which is what the fountain is good at, and rateless open-loop is 
 more defensible *per hop*, where the buffer is per-neighbour and short-lived,
 than end to end. **The fountain may well survive, relocated.** Measure it.
 
-**Honest wrinkle.** On broadcast-only media (`U = ()`: raw LoRa P2P, audio) there
-is no underlay address, so reassembly cannot be keyed by neighbour. Those media
-need a set id in the fragment header and a per-medium bound instead. The
-per-neighbour argument does not cover them.
+**Broadcast-only media — settled, and already shipped.** On a transport with no
+underlay address (`U = ()`: raw LoRa P2P, audio) a receiver cannot tell two
+senders apart, so reassembly cannot be keyed by neighbour and the per-neighbour
+argument does not reach it. The resolution is that **the interface is the finest
+unit of accounting a medium without addresses can offer**, and that is enough:
+anyone able to flood a shared radio with fragment sets can also simply jam it,
+which is cheaper and denies everything, so the reassembly budget adds no
+exposure the medium did not already have.
+
+What did *not* survive scrutiny is letting that damage escape the radio. The
+partial budget was one global pool evicted oldest-first, so a loud link could
+empty it and take every other link's reassembly with it — a node's Ethernet
+transfers could be killed by its LoRa radio. `enforce_partial_budget` now charges
+each set to the interface it arrived on and evicts from the heaviest interface
+first, so a link can only ever spend its own share.
+
+Done ahead of M11-D rather than inside it: the rule holds for today's end-to-end
+fragments and keeps holding when reassembly moves to the link, and it was a live
+weakness in the meantime. See `Node::partial_sets_on`.
 
 **Tasks** (each a PR):
 

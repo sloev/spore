@@ -173,25 +173,72 @@ impl Node {
     /// Bounded twice on purpose. A set holds up to `count` rows of `chunk`
     /// bytes and both come off the wire, so `MAX_PARTIAL_OBJECTS` alone bounds
     /// cardinality while permitting gigabytes on a desktop and several times the
-    /// whole heap on an MCU (audit F-3, #189). Oldest goes first either way: it
-    /// is the set least likely to still have chunks coming.
+    /// whole heap on an MCU (audit F-3, #189).
+    ///
+    /// **Evicted fairly between interfaces, not globally oldest.** The budget is
+    /// one pool shared by every link, and the previous rule — drop the oldest set
+    /// anywhere — let the loudest link empty it. That matters most on the media
+    /// where it can least be defended: on a broadcast-only transport (`U = ()`:
+    /// raw LoRa P2P, audio) frames carry no underlay address, so a receiver
+    /// cannot tell two senders apart and cannot bound them separately. One
+    /// transmitter on a shared radio could therefore open sets until every
+    /// partial set on the node's *Ethernet* link had been evicted.
+    ///
+    /// Charging each set to the interface it arrived on confines that: the
+    /// heaviest interface gives up its oldest set first, so a link can only ever
+    /// spend its own share. Within one broadcast interface senders still cannot
+    /// be separated — that is inherent to a medium with no addresses, and it is
+    /// the weaker of two exposures, because anyone able to flood that radio with
+    /// fragments can also simply jam it, which is cheaper and stops everything.
+    ///
+    /// This is the per-hop reassembly bound M11-D needs, arrived at early: it
+    /// holds for today's end-to-end fragments and keeps holding when reassembly
+    /// moves to the link.
     pub(crate) fn enforce_partial_budget(&mut self) {
         let held: usize = self.frags.values().map(|f| f.held_bytes()).sum();
         if self.frags.len() <= self.limits.partial_objects && held <= self.limits.partial_bytes {
             return;
         }
-        let mut by_age: Vec<(Id, u32, usize)> =
-            self.frags.iter().map(|(k, f)| (*k, f.started, f.held_bytes())).collect();
-        by_age.sort_unstable_by_key(|(_, started, _)| *started);
+
+        // Oldest-first within each interface: the set least likely to still have
+        // chunks coming. Ordering is by (iface, started), so each interface's
+        // queue is a contiguous run and the next victim is its head.
+        let mut sets: Vec<(Iface, u32, Id, usize)> =
+            self.frags.iter().map(|(k, f)| (f.iface, f.started, *k, f.held_bytes())).collect();
+        sets.sort_unstable_by_key(|(iface, started, id, _)| (*iface, *started, *id));
+
+        let mut per_iface: HashMap<Iface, usize> = HashMap::new();
+        for (iface, _, _, sz) in &sets {
+            *per_iface.entry(*iface).or_insert(0) += sz;
+        }
+        let mut next: HashMap<Iface, usize> = HashMap::new();
+        for (i, (iface, _, _, _)) in sets.iter().enumerate() {
+            next.entry(*iface).or_insert(i);
+        }
 
         let (mut n, mut bytes) = (self.frags.len(), held);
-        for (id, _, sz) in by_age {
-            if n <= self.limits.partial_objects && bytes <= self.limits.partial_bytes {
+        while n > self.limits.partial_objects || bytes > self.limits.partial_bytes {
+            // Take from whoever is holding the most. Ties break on the lower
+            // interface id so eviction is deterministic — a test that cannot
+            // predict which set went cannot assert the rule.
+            let Some((&victim, _)) = per_iface
+                .iter()
+                .filter(|(_, held)| **held > 0)
+                .min_by_key(|(iface, held)| (std::cmp::Reverse(**held), **iface))
+            else {
                 break;
-            }
+            };
+            let Some(i) = next.get(&victim).copied() else { break };
+            let Some((_, _, id, sz)) = sets.get(i).copied() else { break };
             self.frags.remove(&id);
             n -= 1;
             bytes = bytes.saturating_sub(sz);
+            *per_iface.entry(victim).or_insert(0) -= sz.min(per_iface[&victim]);
+            next.insert(victim, i + 1);
+            // That interface is spent; stop considering it.
+            if sets.get(i + 1).map(|(f, _, _, _)| *f) != Some(victim) {
+                per_iface.insert(victim, 0);
+            }
         }
     }
 
@@ -426,7 +473,7 @@ impl Node {
             if let Some(orig) = self
                 .frags
                 .entry(oid)
-                .or_insert_with(|| Fountain::started_at(now))
+                .or_insert_with(|| Fountain::started_on(now, iface))
                 .add(&oid, idx, count, chunk)
             {
                 if let Ok((oe, _)) = Envelope::decode(&orig) {

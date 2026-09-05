@@ -304,6 +304,36 @@ pub unsafe extern "C" fn spore_node_subscribe(n: *mut Node, topic: *const u8, le
     (*n).subscribe(&s);
 }
 
+/// Stop following a topic. Returns `1` if it was followed, `0` if not.
+///
+/// # Safety
+/// `n` is valid; `topic`/`len` describe a UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_unsubscribe(n: *mut Node, topic: *const u8, len: usize) -> u8 {
+    let s = String::from_utf8_lossy(std::slice::from_raw_parts(topic, len));
+    u8::from((*n).unsubscribe(&s))
+}
+
+/// Topics this node follows: packed `[n:4 BE] [topic:8]...`.
+///
+/// `topic_of` is a hash, so a name cannot be recovered from an address — a UI
+/// showing names has to remember its own. What this answers is the ground truth
+/// of what the node is actually announcing, which is the part that must not be
+/// guessed from a local list that could have drifted.
+///
+/// # Safety
+/// `n` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_topics(n: *mut Node) -> i64 {
+    let topics = (*n).subscriptions();
+    let mut out = Vec::with_capacity(4 + topics.len() * 8);
+    out.extend_from_slice(&(topics.len() as u32).to_be_bytes());
+    for t in &topics {
+        out.extend_from_slice(t);
+    }
+    pack(out)
+}
+
 /// Publish an event to a feed topic (any subscriber can read it).
 ///
 /// # Safety

@@ -358,8 +358,33 @@ impl Node {
     // ---- L5 feeds (pub/sub) ---------------------------------------------
 
     /// Follow a feed topic so its events are delivered to us.
+    ///
+    /// Following is **public**: §4's ANNOUNCE carries the whole topic set, so
+    /// every node that hears this one learns what it reads. That is what lets a
+    /// neighbour know the traffic is worth relaying here, and it is not
+    /// something a caller can opt out of while still receiving the feed.
     pub fn subscribe(&mut self, topic: &str) {
         self.topics.insert(topic_of(topic));
+    }
+
+    /// Stop following a topic. `true` if it was followed.
+    ///
+    /// The counterpart `subscribe` never had. Without it a node could only ever
+    /// accumulate topics — the set is announced, so an unwanted subscription was
+    /// not merely noise in the feed but a permanent public claim about what this
+    /// node reads. It takes effect on the next ANNOUNCE; anyone who already
+    /// heard the old set keeps that belief until then.
+    pub fn unsubscribe(&mut self, topic: &str) -> bool {
+        self.topics.remove(&topic_of(topic))
+    }
+
+    /// Every topic this node follows, as the 8-byte addresses that go on the
+    /// wire. `topic_of` is a hash, so the names are not recoverable from these —
+    /// a caller that wants to show names must remember its own.
+    pub fn subscriptions(&self) -> Vec<Addr> {
+        let mut out: Vec<Addr> = self.topics.iter().copied().collect();
+        out.sort_unstable(); // a HashSet has no order; a UI needs a stable one
+        out
     }
 
     /// Publish an event to a feed topic (floods to all subscribers).
