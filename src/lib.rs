@@ -700,6 +700,10 @@ pub mod armor;
 /// Malformed-input robustness: every parser reachable from a stranger, fed
 /// arbitrary and near-miss bytes. Test-only, and in `src/` rather than `tests/`
 /// because the freeze guard treats all of `tests/` as frozen contract.
+/// Link fragmentation (M11-D): how one envelope crosses one narrow hop, below
+/// the node and below the signature. Not the fountain, not the file layer.
+pub mod linkfrag;
+
 #[cfg(test)]
 mod robustness;
 
