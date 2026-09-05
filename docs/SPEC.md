@@ -106,7 +106,14 @@ same dest/expiry).
 Receiver decodes when any received set reaches rank *count* (Gaussian elimination
 over GF(2)); typically *count*+2 arrivals suffice at any loss rate, in any order,
 even one-way. Verify the reassembled signature; commit only what verifies.
-Rateless: works on simplex radio, CW, paper tape.
+
+**Rateless — which is a property of the coding, not a promise about transfer.**
+Nothing here needs a back-channel: a set can be received over a one-way link, off
+a torn sheet of paper, out of a CW transcript. What that buys is that an *object
+whose symbols reach you* decodes. It does not follow that a *transfer* completes
+one-way, and for the file layer it plainly does not: fetching is receiver-driven
+(§6), so a WANT needs a return path, and the sender never learns which symbols
+landed. Claim the coding, not the transfer.
 
 
 ---
@@ -148,14 +155,25 @@ analysis, not a parser change.
    flags).
 3. Store until expiry. Evict: expired → lowest stamp → largest → oldest. TX
    order: local origin, then stamp, then FIFO.
-4. **Congestion control**, four rules: **(a)** token bucket — relayed traffic
-   ≤ 10% of each interface's capacity (law on ISM bands, courtesy elsewhere;
-   dedup makes dropped relays harmless); **(b)** Trickle timers —
+4. **Congestion control**, four rules: **(a)** token bucket — a node MUST rate
+   limit what it relays per interface, and SHOULD default to ≈10% of that
+   interface's capacity (dedup makes dropped relays harmless); **(b)** Trickle timers —
    HELLO/ANNOUNCE interval doubles 5→80 min while nothing new is heard, resets to
    5 on any novelty; **(c)** backpressure — HELLO carries one `busy` byte (queue
    fill); neighbors scale sending by (255−busy)/255 and defer unstamped relays to
    busy peers; **(d)** exponential backoff — FLOOD retries at 30 s ×2, cap 1 h,
    max 5.
+
+> **The bucket is the rule; 10% is a default.** What a relay owes its neighbours
+> is a *bound* it can state and honour, not one particular fraction. The right
+> figure depends on measured capacity, queue depth, loss, battery and how much
+> custody the node has taken on — a node relaying half of a fast idle link is
+> impolite, not non-compliant, and one relaying 10% of a duty-cycle-limited radio
+> may already be over. The exception is regulatory: on ISM bands a duty cycle is
+> **law**, and there the number comes from the regulator rather than from this
+> document. Implementations should expose the budget as per-transport policy and
+> keep the mechanism — bucket, backpressure byte, bulk budget — as the part that
+> is not negotiable.
 5. hops = 0 → stop. Else decrement, then: **topic/0/FLOOD** → damped flood on all
    interfaces (on shared media wait random 1–5× airtime, cancel if the ID is
    overheard ≥ 2×; ≥ 1× for directed) · **unicast + fresh path** → that
@@ -453,7 +471,8 @@ get.
 
 hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · path fresh
 3 h · seen-set ≥ 30 d received · prekey mint 24 h, offline window 7 d · relay
-airtime ≤ 10% · payload UTF-8. T0 ≈ 60 lines; full T2 ≈ 400 with libsodium.
+airtime rate-limited, ≈10% default · payload UTF-8. T0 ≈ 60 lines; full T2 ≈ 400
+with libsodium.
 
 **Known limits, on purpose:** no stream semantics; one envelope fountain-fragments
 to ≈50 KB and larger objects ride the file layer (§6), bounded by storage and by
@@ -475,7 +494,7 @@ analysis, with a residual-risk line on every row, is
 | Forge a path or neighbour binding | verify the signature *before* binding trust state | §4, Part II |
 | Forge "delivered" | receipt must be signed by the destination | §8 |
 | Flood cheaply | stamp PoW, per-source quotas | §10 |
-| Crowd out a link | relayed traffic ≤ 10% airtime; backpressure byte | §5.4a, §5.4c |
+| Crowd out a link | per-interface relay budget (≈10% by default); backpressure byte | §5.4a, §5.4c |
 | Amplify via WANT | per-interface service budget | §6 |
 | Conscript a slow link into hauling files | per-interface bulk budget (chunks only) | §6, Part II |
 | Exhaust memory | every table bounded, eviction order stated | §5.3 |
@@ -539,10 +558,19 @@ knowing.
 `send(dest, data)` takes any size. Under the MTU it is one envelope; over it,
 fountain-fragmented (§3) and reassembled by the destination, signature-checked
 before the app sees it. The sender can mint endless repair chunks, so the object
-decodes from *any* sufficient subset — simplex radio, CW and paper tape work with
-no back-channel. Relays stay dumb: each fragment is an ordinary flooded envelope
-with its own ID, and only the destination reassembles. One fountain set is
-≤ `mtu`×255 (≈50 KB at defaults); larger data is the file layer's job.
+decodes from *any* sufficient subset. Relays stay dumb: each fragment is an
+ordinary flooded envelope with its own ID, and only the destination reassembles.
+One fountain set is ≤ `mtu`×255 (≈50 KB at defaults); larger data is the file
+layer's job.
+
+**What survives a one-way link.** A fountain set does, because enough symbols
+arriving is the whole condition. A *file* does not: its chunks are pulled with
+WANT, so every hop needs a return path at some point — though not at the same
+moment, since a request may be held and served at a later meeting. So a magnet
+and a handful of chunks can travel one-way on paper; a swarm cannot. Carrying a
+whole store one-way does move a file, because that is a push and needs no
+request — but it is not the same claim, and the difference is exactly a
+back-channel.
 
 ## Files — magnets, trees, swarming
 
