@@ -666,6 +666,29 @@ that WANT can stay 1-hop. The last one conscripts every LoRa radio into someone
 else's CDN, which is what the bulk budget exists to prevent — and see M11-J,
 because it is what the code does today.
 
+**The lease is wall-clock, not connection — which is what keeps this
+delay-tolerant.** Carrying bytes already moves a file with no link at all:
+publishing a 20 kB file leaves 16 envelopes in the store, and a node that copies
+them reassembles the file byte-for-byte having never met the publisher, over as
+many offline legs as you like. What sneakernet cannot do today is *pull* — "I
+want file X, go find it" needs a live neighbour to WANT from.
+
+Recursive pull fixes that too, but only if a pending-interest entry is allowed to
+outlive the meeting that created it. B adopts A's interest, and B and A part; B
+meets C a day later, fetches, caches; B meets A a week later and serves. The
+request itself has travelled by sneakernet. If the lease is scoped to a live
+connection instead of to time, recursion becomes an online-only feature and
+throws away the one property the rest of the protocol is built on. So the PIT
+entry is stored, ages by dwell like everything else, and dies with the object's
+expiry.
+
+**The magnet is the index, and chunks alone are not a file.** A node handed only
+the chunks holds every byte and cannot name them — `has_file` is false, because
+the manifest is what says which content ids are this file and in what order. That
+is why the root floods and the chunks do not, and it is what makes the
+parent-manifest authorization rule cheap: a node that can legitimately recurse is
+by construction a node that already holds the index.
+
 **Sealed files do not recurse.** A sealed file's chunks are ciphertext, so
 confidentiality holds, but recursing one would copy it across the mesh and
 advertise that it exists. Recurse public magnets; sealed unicast files
@@ -686,7 +709,7 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | M11-B `spore-sim`: deterministic simulator over the real implementation | ⬜ | Seeded, declarative scenarios, machine-readable metrics. First 100 nodes with loss and partitions; then 1k/10k, mobility, malicious nodes, asymmetric links, tiny stores. Metrics: delivery probability, median/p95/p99 delivery time, **bytes transmitted per delivered byte**, duplicate ratio, flood amplification, storage pressure, energy as TX/RX/CPU/wakeups. Must include **mixed-MTU topologies** — a Wi-Fi island bridged to LoRa is the case broken today and nothing would have caught it. Must exercise the real crate, or it validates the simulator instead of SPORE |
 | M11-C Measure: fragment loss recovery, and the file push threshold | ⬜ | Needs B. Settles whether hop-local retry or a relocated fountain recovers a lost fragment better across loss rates, and settles how many chunks to push with a manifest. Decide on numbers |
 
-| M11-D Link fragmentation at the bridge | ⬜ | The milestone. Split below the node and below the signature, reassemble at the far end, per-link MTU, per-neighbour bound (set id where the medium has no addresses). Header becomes link framing, not wire; widen `count` past 255 while it is being written. Then delete every `n.mtu.min(...)` and the end-to-end fragment path in `Node::send` |
+| M11-D Link fragmentation at the bridge | ⬜ | The milestone. Split below the node and below the signature, reassemble at the far end, per-link MTU, per-neighbour bound (set id where the medium has no addresses). Header becomes link framing, not wire; widen `count` past 255 while it is being written. Then delete every `n.mtu.min(...)` and the end-to-end fragment path in `Node::send`. **No interop window**: this is alpha, there is no deployed population to stay compatible with, so old and new fragmenting do not have to coexist. Cut over and delete the old path in the same PR rather than carrying both |
 | M11-E Files: push a few chunks with the manifest | ⬜ | The pull half already exists (`fetch_n` → WANT → `on_want`). Add pushing the first N chunks alongside the manifest so a small file needs no round trip. **Local policy, not a wire constant** — sender and receiver never need to agree, since the receiver ignores what it holds and WANTs the rest either way. Counted in *chunks*, not bytes, so it scales with the MTU; charged to the same per-interface budget; `0` and `1` both legal. N from M11-C |
 | M11-I Recursive pull: adopt a neighbour's WANT, never forward it | ⬜ | Needs M11-J first. The file layer gains a pending-interest table and may WANT ids it does not hold, **only** when it holds the manifest naming them. Depth, lease, fanout, bulk budget and cache-don't-pin as above. Pipeline: WANT the next batch upstream while still serving the current one downstream, or the transfer costs n round trips |
 | M11-J Chunks stop travelling on their own | ⬜ | **Measured, and it undermines M11-I.** A chunk is built `fl::FLOOD` with `hops: 16`, and although the publisher never sends one, *every node that receives one re-floods it*: publish emits 1 forward (the root), a served WANT yields 6 chunk envelopes, and the fetcher re-emits all 6 — as does an **uninterested bystander**. `files.rs` says "chunks ride a per-file topic so only interested nodes carry them"; that is false, because the topic scopes **delivery**, not forwarding. So one answered WANT sprays a chunk mesh-wide today, and layering recursive pull on top would multiply it. Decide deliberately: serve chunks with hops zeroed so they stop at the requester and recursion becomes the *only* way a file crosses n hops, or keep the spread and bound it. Fix the comment either way |
