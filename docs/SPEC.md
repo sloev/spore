@@ -303,6 +303,47 @@ mail are dropped before any crypto. On an ESP32 relaying LoRa that is a real
 per-envelope cost, accepted knowingly — a relay that can be told a false address is
 worse than a relay that is slower.
 
+## The resource invariant
+
+Every bound in this part is one idea, applied in as many places as a stranger can
+push on:
+
+> **No remote node can cause another to transmit, store, or process an unbounded
+> amount without continuing evidence of demand, or an explicit bounded local
+> allowance.**
+
+Both escape clauses are load-bearing. *Continuing evidence of demand* is why a
+WANT names ids and is answered once rather than subscribing a peer to a stream:
+the asking is the authorization, and it has to be repeated. *Explicit bounded
+local allowance* is why a node may hold custody for strangers at all — the
+operator set a budget, and a peer may fill it but never exceed it.
+
+| Path a stranger can push on | What bounds it |
+|---|---|
+| Dedup table | `MAX_SEEN`, evicting nearest-expiry first |
+| Custody store | `max_store_bytes`; adoption additionally by `MAX_ADOPT_BYTES` |
+| Peer prekeys, busy bytes, names, sessions | `MAX_PEERS` on each |
+| Learned paths | `MAX_PEERS`, plus a time purge |
+| File manifests | `MAX_MANIFESTS` |
+| Receipt ids | `MAX_ACKED` |
+| Undrained RPC and feed inboxes | `MAX_INBOX`, oldest dropped first |
+| Fragment reassembly | set count, byte budget, a timeout, and a per-interface share |
+| Answering INV/WANT | `MAX_IDS_PER_GOSSIP` per request and a token bucket per link |
+| Relaying | per-source quota, per-interface budget, hop count, expiry |
+
+Three of these are the general form, and an implementation should be able to
+point at all three: an object's **lifetime** (the signed `expiry`, which a store
+may clamp down but never extend), a **transfer allowance** (a bounded request, or
+a lease), and a **transport budget** (the token bucket and backpressure of §5.4).
+Transmit only while all three still hold.
+
+Two rules that are easy to get wrong, and were:
+
+- **Enforce after the write, not only before it.** A ceiling checked at the start
+  of handling a frame leaves every table one entry over until the *next* frame
+  arrives — which, on a link the attacker controls, is indefinitely.
+- **Charge a shared budget to the interface that caused the growth**, never to a
+  global pool, or the loudest link evicts the quietest one's work.
 
 ---
 

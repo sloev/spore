@@ -703,6 +703,11 @@ pub mod armor;
 #[cfg(test)]
 mod robustness;
 
+/// The resource invariant, with one test per path a stranger can push on.
+/// Test-only, and in `src/` for the same reason `robustness` is.
+#[cfg(test)]
+mod invariant;
+
 // ---------------------------------------------------------------------------
 // L4 Request/response — RPC as a convention (tags 0x02 request, 0x03 response).
 // A request is a signed DATA to a service (address or topic); the reply is a

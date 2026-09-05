@@ -147,7 +147,20 @@ impl Node {
             ty::WANT => return self.on_want(&e, iface, nbr, now),
             _ => {}
         }
-        self.ingest(&e, iface, nbr, now, true)
+        let rx = self.ingest(&e, iface, nbr, now, true);
+        // Again, *after* ingest. The call inside `ingest` runs before the peer
+        // tables, the manifest table and the inboxes are written, so each of
+        // them sat one entry over its stated ceiling until the next frame
+        // happened to arrive — which on a link an attacker controls is
+        // indefinitely. That is the same hazard `enforce_partial_budget`
+        // documents for fragment sets, and the fix had only ever been applied to
+        // fragments; the reasoning was always general.
+        //
+        // Cheap: the sweep inside is gated on `last_sweep`, so the second call
+        // does trimming only, and trimming only sorts when something is actually
+        // over its cap.
+        self.enforce_bounds(now);
+        rx
     }
 
     /// Keep every table a peer can grow inside its bound.
