@@ -8,6 +8,21 @@ name: android
 #                        carry the same major.minor or the build fails.
 #   * pull_request     -> just build a debug APK artifact.
 # A new workflow file (not frozen); does not touch ci.yml / pr-guard.yml.
+# Only one release run at a time per ref. Every push to master publishes to the
+# *same* rolling release with `overwrite_files: true`, which deletes an asset and
+# re-uploads it under the same name. Three merges landing within a minute of each
+# other therefore raced: one run deleted an asset another was mid-update on, and
+# that run failed with `Not Found` from update-a-release-asset after four of its
+# five uploads had already succeeded — a red master caused by timing rather than
+# by anything in the commit.
+#
+# Queued rather than cancelled (`cancel-in-progress: false`): a tag build must
+# never be dropped because a later push arrived, and a rolling build that is
+# skipped leaves the release advertising an older APK than the tree it names.
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [master]
