@@ -747,87 +747,101 @@ fetched); no screen renders a control whose backend is missing.
 
 ---
 
-## Milestone 11 — One way to move a large object, and a way to measure it
+## Milestone 11 — Fragmentation where it belongs, and a way to measure it
 
-**Goal:** collapse the two large-object mechanisms into one, and stop guessing
-about the trade-off by building the harness that can measure it.
+**Goal:** put fragmentation at the hop, where every other network puts it, and
+stop guessing about the rest by building the harness that can measure it.
 
-SPORE has **two** ways to move something bigger than an MTU, and they are
-different mechanisms rather than two spellings of one:
+Moving something bigger than a frame needs **three** layers, and SPORE currently
+has one of them in the wrong place:
 
-| | Generic fragmentation (§3) | File chunks (§6, Part III) |
-|---|---|---|
-| Sits | **below** the signature — splits the wire of an already-signed envelope | **above** — chunks are objects, the manifest is signed |
-| Fragment authenticity | `src: None, sig: None`, unsigned; authenticity comes from verifying the reassembled whole | each chunk content-addressed and verified on its own |
-| Discovery | none — any K of N decode | the manifest enumerates ids |
-| Flow control | **open loop**: the sender floods symbols, nobody asked | **closed loop**: `fetch_n` → WANT(ids) → `on_want` answers only those |
-| Ceiling | `assert!(count <= 255)` — about 333 KB at a 1400-byte MTU | manifest tree, no practical limit |
+| Layer | Scope | Job | Today |
+|---|---|---|---|
+| **L1 link fragmentation** | one hop | get an envelope across *this* link | **missing** |
+| **L2 envelope** | end to end | one signed, content-addressed unit | fine |
+| **L3 object chunking** | end to end | resume, dedupe, pull, partial verification | files only (§6) |
 
-Files already work the second way and **do not use the fountain code at all**
-(`src/node/files.rs` and `src/file.rs` reference it nowhere). So the fountain is
-load-bearing for exactly one thing: splitting an over-MTU envelope.
+The fountain does L1's *job* at L3's *scope*. `Node::send` fragments once, at
+origination, at the **sender's own** `self.mtu` (`src/node/send.rs:137`), and the
+fragments are ordinary envelopes that flood the whole mesh — a relay "just
+forwards the fragments" (`src/node/ingest.rs:417`) and only the destination
+reassembles.
 
-**The unification (locked).** One mechanism: a large object becomes a signed
-manifest naming content-addressed chunks, and a receiver pulls what it is
-missing with bounded WANTs — the same path files already take. Fountain coding
-leaves v1.
+**The defect this causes.** A fragment cannot be fragmented again: its header is
+`orig_id ‖ idx ‖ count`, one level, no nesting. So a Wi-Fi node that splits a
+4 KB message into 1336-byte fragments has produced frames that **cannot cross a
+LoRa hop anywhere on the path**, and no node on that path can fix it. The
+bridges' `n.mtu = n.mtu.min(m)` (`driver.rs:64`, and the same line in `i2p`,
+`icmp` and `reticulum`) is not a bug — it is the workaround: a node with its own
+narrow bridge drags its *entire* node MTU down so it fragments small enough for
+its worst link. That only helps a node that holds the narrow link itself.
+Nothing helps a node three hops upstream whose fragments must cross **someone
+else's** LoRa link. The clamp is also `min` and never restored, so removing the
+bridge does not raise it back.
 
-**Push stays, as an optimisation and never a requirement.** A sender MAY push up
-to a small number of chunks alongside the manifest. The receiver's behaviour is
-identical either way: it ignores what it already holds and WANTs the rest.
-Because nothing has to agree on the threshold, **it is local policy, not a wire
-constant** — and it is counted in *chunks*, not bytes, so it scales with the MTU
-(8 chunks is ~10 KB on a 1400-byte link and ~1.1 KB on a 200-byte LoRa one; a
-byte threshold would push 8 KB over LoRa and call it small). Default 8; `0`
-(pure pull) and `1` (never fragment to push) are both legal settings. Pushed
-chunks are charged to the same per-interface budget as everything else, so a
-node under pressure degrades to pull with no special case.
+**With L1 in place** each link uses its own MTU, a bridge splits what does not
+fit and the far end reassembles before the node ever sees it, and the global
+clamp is deleted outright — **deleting all five `n.mtu.min(...)` lines is the
+acceptance test for this milestone.** Reassembly also stops being keyed by remote
+origin and becomes per-neighbour, which is a far easier bound: what one attacker
+can make you hold is limited by their being someone you can actually hear, rather
+than by anyone in the mesh (this is what made S-013 awkward to bound).
 
-**8 is reasoned, not measured** — from message sizes and round-trip cost. It is
-exactly the kind of number the simulator should settle, which is why the two
-halves of this milestone belong together.
+**There is no MTU floor to pick.** Once L1 exists, "the smallest link we support"
+stops being a protocol constant: link fragmentation carries an envelope over an
+arbitrarily narrow hop, so LoRa, Zigbee at ~54 bytes and JANUS at ~32 differ in
+cost, not in capability. Chunk size stays a **performance** choice — a chunk much
+larger than a link on the path just means more L1 splitting — rather than the
+correctness choice it would be if chunking were the only mechanism.
 
-**What this wins beyond simplicity.** Open-loop reassembly is one of the few
-paths where a remote party allocates memory on your node without you asking, and
-it needed its own machinery to stay bounded — `frags`, `partial_objects`,
-`partial_bytes`, `PARTIAL_TIMEOUT_SECS`, and a sweep that runs *after* fragment
-ingest specifically, because as the code says, "a sender who opens a set and
-never finishes it is otherwise a permanent allocation". Pull-based chunks need
-none of it: the request is the authorisation. It also lifts the 255-chunk
-ceiling.
+**Open question for M11-C, not to be decided by argument.** L1 must handle loss:
+one lost fragment costs the whole envelope for that hop. Either hop-local
+NACK/retry, which needs a return path, or forward error correction — which is
+exactly what the fountain is good at, and rateless open-loop is far more
+defensible per hop, where the buffer is per-neighbour and short-lived, than it is
+end to end. So the fountain may well **survive, relocated**. Measure it.
 
-**What this costs.** A one-way link can no longer carry a large object at all,
-because a pull needs a return path. That is already true of files today, so the
-change makes an existing limitation uniform rather than introducing one — and
-§3's "works on simplex radio, CW, paper tape" is a claim about the *coding* that
-the transfer layer has never honoured. Narrow the claim rather than build a
-bounded open-loop mode for it; if simplex delivery is ever wanted, it returns as
-an explicit extension with its own redundancy budget.
+**Honest wrinkle.** On broadcast-only media (`U = ()`: raw LoRa P2P, audio) there
+is no underlay address, so reassembly cannot be keyed by neighbour. Those media
+need a set id in the fragment header and a per-medium bound instead. Do not
+pretend the per-neighbour argument covers them.
+
+**What L3 still owes.** Generic large objects — not just files — should become a
+signed manifest naming content-addressed chunks, pulled with bounded WANTs. A
+sender MAY push a few chunks alongside the manifest; the receiver ignores what it
+holds and WANTs the rest either way. Nothing has to agree on the threshold, so it
+is **local policy, not a wire constant** — counted in *chunks* so it scales with
+the MTU (8 chunks is ~10 KB on a 1400-byte link and ~1.1 KB over LoRa; a byte
+threshold would push 8 KB over LoRa and call it small). Default 8, charged to the
+same per-interface budget; `0` and `1` are both legal.
 
 **Tasks** (each a PR):
 
 | Task | Status | Notes |
 |---|---|---|
-| M11-A Name the resource invariant, and test it | ⬜ | "No remote node can cause another to transmit, store, or process an unbounded amount without continuing evidence of demand, or an explicit bounded local allowance." Every mechanism already exists — bounded WANTs, `MAX_IDS_PER_GOSSIP`, per-interface token buckets, store budget, table caps, `MAX_ADOPT_BYTES`, expiry — but the invariant is named nowhere, so they read as unrelated defences. Write it into Part II and add a test per resource-consuming path. Do this first: it is what the rest is argued against |
-| M11-B `spore-sim`: deterministic simulator over the real implementation | ⬜ | Seeded, declarative scenarios, machine-readable metrics. First milestone 100 nodes with loss and partitions; then 1k/10k, mobility, malicious nodes, asymmetric links, tiny stores. Metrics: delivery probability, median/p95/p99 delivery time, **bytes transmitted per delivered byte**, duplicate ratio, flood amplification, storage pressure, energy as TX/RX/CPU/wakeups rather than a fake battery percentage. Must exercise the real crate, or it validates the simulator instead of SPORE. Fast smoke suite on PRs, larger runs nightly, with regression thresholds |
-| M11-C Measure push-vs-pull and fountain-vs-chunk across loss rates | ⬜ | Needs B. Settles the push threshold and the one real argument for keeping the fountain: whether chunk retransmission is actually worse on lossy links. Decide on the numbers, not on the intuition |
-| M11-D Unify fragmentation onto manifest + content-addressed chunks | ⬜ | Large objects — messages as well as files — become a signed manifest plus chunks. Delete `src/fountain.rs`, the `Fountain` reassembler and its partial-set machinery. Wire change, which is now cheap: the project is not public and nothing external depends on the format |
-| M11-E Narrow the simplex claim | ⬜ | §3 and Part III both say the coding works on simplex radio, CW and paper tape. True of the coding, never true of the transfer layer. Say what is actually supported |
-| M11-F Forwarding budget as local policy, not a wire rule | ⬜ | The 10% airtime figure is still normative in §5.4a and in the "what stops what" table. Part II should state the *mechanism* (token bucket, backpressure byte) with defaults as SHOULD, and the number becomes per-transport policy over measured capacity, queue depth, loss, battery and custody. A node relaying 50% is impolite, not non-compliant — except on ISM, where it is law, which is an operator note |
+| M11-A Name the resource invariant, and test it | ⬜ | "No remote node can cause another to transmit, store, or process an unbounded amount without continuing evidence of demand, or an explicit bounded local allowance." Every mechanism already exists — bounded WANTs, `MAX_IDS_PER_GOSSIP`, per-interface token buckets, store budget, table caps, `MAX_ADOPT_BYTES`, expiry — but the invariant is named nowhere, so they read as unrelated defences. Write it into Part II and add a test per resource-consuming path. First: it is what the rest is argued against |
+| M11-B `spore-sim`: deterministic simulator over the real implementation | ⬜ | Seeded, declarative scenarios, machine-readable metrics. First 100 nodes with loss and partitions; then 1k/10k, mobility, malicious nodes, asymmetric links, tiny stores. Metrics: delivery probability, median/p95/p99 delivery time, **bytes transmitted per delivered byte**, duplicate ratio, flood amplification, storage pressure, energy as TX/RX/CPU/wakeups. Must include **mixed-MTU topologies** — a Wi-Fi island bridged to LoRa is the case that is broken today and nothing would have caught it. Must exercise the real crate, or it validates the simulator instead of SPORE |
+| M11-C Measure: L1 loss recovery, and push-vs-pull | ⬜ | Needs B. Settles whether hop-local retry or a relocated fountain recovers a lost fragment better across loss rates, and settles the push threshold. Decide on numbers |
+| M11-D Link fragmentation at the bridge | ⬜ | The milestone. Split below the node, reassemble at the far end, per-link MTU, per-neighbour bound (set id where the medium has no addresses). Then delete every `n.mtu.min(...)` and the end-to-end fragment path in `Node::send` |
+| M11-E Generic objects onto manifest + chunks | ⬜ | Large non-file objects get the manifest/chunk treatment with push-then-pull. Wire change, now cheap: the project is not public |
+| M11-F Sealed manifests do not fit a small link | ⬜ | `publish_file_sealed` needs **MTU ≥ 256** for even one id, and ≥ 264 with an 8-char name — measured. Raw LoRa P2P tops out at ~255, so it misses by a byte; Meshtastic's 237 misses by 19. It fails cleanly (returns `None`) but the effect is that a narrow-link node can never publish a sealed file. The ~82-byte sealed header sits *inside* the signed root, on top of the root's own 114 bytes of key and signature; it belongs in its own object the root names. L1 does not fix this — the root must fit as a unit for a stranger to verify it |
+| M11-G Narrow the simplex claim | ⬜ | §3 and Part III say the coding works on simplex radio, CW and paper tape. True of the coding; the transfer layer has never honoured it, and a pull needs a return path. Say what is actually supported |
+| M11-H Forwarding budget as local policy, not a wire rule | ⬜ | The 10% airtime figure is still normative in §5.4a and the "what stops what" table. Part II should state the *mechanism* (token bucket, backpressure byte) with defaults as SHOULD; the number becomes per-transport policy over measured capacity, queue depth, loss, battery and custody. Relaying 50% is impolite, not non-compliant — except on ISM, where it is law, which is an operator note |
 
 **Considered and rejected: `created_at` + `lifetime` instead of absolute expiry.**
 The stated motivation is that a relay might extend a message's lifetime. It
-cannot: `expiry` is inside the signed bytes and the ID is their hash, so
-changing it invalidates the signature and the id together. Stores already clamp
-the horizon to 30 days and a clockless node already ages by dwell. The wire cost
-is no longer the objection — the change simply buys clarity of expression and no
-property the protocol lacks. Revisit only if something else needs `created_at`.
+cannot: `expiry` is inside the signed bytes and the ID is their hash, so changing
+it invalidates the signature and the id together. Stores already clamp the
+horizon to 30 days and a clockless node ages by dwell. The change buys clarity of
+expression and no property the protocol lacks. Revisit only if something else
+needs `created_at`.
 
-**Definition of done:** one mechanism moves every object larger than an MTU;
-`src/fountain.rs` is gone; the resource invariant is stated in the spec and has a
-test per path; `spore-sim` runs on every PR and publishes metrics; and the push
-threshold and the forwarding budget are numbers someone measured rather than
-numbers someone chose.
+**Definition of done:** a bridge splits what its link cannot carry and the far
+end reassembles; no `n.mtu.min(...)` remains anywhere; a Wi-Fi node and a LoRa
+node three hops apart exchange an object larger than either link's frame, with a
+`spore-sim` scenario proving it; the resource invariant is stated and has a test
+per path; and the push threshold and forwarding budget are numbers someone
+measured rather than numbers someone chose.
 
 ---
 
