@@ -12,16 +12,36 @@ import { el, icon } from './dom.mjs';
 import { ICONS } from './icons.mjs';
 
 /**
- * The five destinations, in nav order. This list is the whole top-level IA —
- * a screen that is not here is not reachable from the nav by design.
+ * The six destinations, in nav order — the design's own list and its own labels
+ * ("Chat", not "Chats"; "Fileshare", not "Files"). This is the whole top-level
+ * IA; a screen not here is not reachable from the nav by design.
+ *
+ * **Identity is a nav item that is not a navigation.** Selecting it opens the
+ * identity sheet in place rather than replacing the screen you are on, which is
+ * why `onNavigate` may leave `screen` untouched. `bridges` is the mirror case: a
+ * real screen with no nav item, reached from Settings, and it keeps Settings lit
+ * while you are in it — see `navValueFor`.
  */
 export const DESTINATIONS = [
   { id: 'contacts', label: 'Contacts', icon: ICONS.users },
-  { id: 'chat', label: 'Chats', icon: ICONS.messageCircle },
+  { id: 'chat', label: 'Chat', icon: ICONS.messageCircle },
   { id: 'blogs', label: 'Blogs', icon: ICONS.article },
-  { id: 'files', label: 'Files', icon: ICONS.folder },
+  { id: 'files', label: 'Fileshare', icon: ICONS.folder },
+  { id: 'identity', label: 'Identity', icon: ICONS.user },
   { id: 'settings', label: 'Settings', icon: ICONS.settings },
 ];
+
+/**
+ * Which destination reads as current. Bridges is a sub-screen of Settings, so
+ * Settings stays lit rather than the nav going blank in a place the user
+ * reached from it; and while the identity sheet is open, Identity is what is
+ * current, because that is the thing in front of them.
+ */
+export function navValueFor(screen, identitySheetOpen = false) {
+  if (identitySheetOpen) return 'identity';
+  if (screen === 'bridges') return 'settings';
+  return screen;
+}
 
 /**
  * Chats and blogs are two-pane (a list beside a thread); the rest render only
@@ -32,9 +52,39 @@ export function defaultPaneFor(screen) {
   return screen === 'chat' || screen === 'blogs' ? 'list' : 'detail';
 }
 
-/** Whether the app bar shows a back affordance for this screen on mobile. */
+/**
+ * Whether the app bar shows a back affordance for this screen.
+ *
+ * `bridges` is here and `files` is not: bridges is entered *from* Settings and
+ * has somewhere to go back to on every width, while Fileshare is a top-level
+ * destination whose only back was the mobile list/detail flip it does not have.
+ */
 export function canGoBack(screen) {
-  return ['chat', 'blogs', 'files'].includes(screen);
+  return ['bridges', 'chat', 'blogs'].includes(screen);
+}
+
+/**
+ * A bottom sheet with its scrim. Used for the identity switcher and bridge
+ * diagnostics — both are "look at this without leaving where you are", which is
+ * what a sheet is for and a screen is not.
+ *
+ * The scrim closes on click and Escape closes from anywhere, because a sheet
+ * that can only be dismissed by a button is a trap on a phone.
+ */
+export function sheet({ open, label, onClose, children }) {
+  if (!open) return null;
+  const panel = el('div', {
+    class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': label,
+    onkeydown: (e) => { if (e.key === 'Escape') onClose(); },
+    tabindex: '-1',
+  }, el('div', { class: 'sheet-grip' }), children);
+  // Focus the panel so Escape reaches it and so a screen reader lands inside
+  // the thing that just opened rather than back at the top of the page.
+  queueMicrotask(() => panel.focus());
+  return el('div', {},
+    el('div', { class: 'scrim', onclick: onClose }),
+    panel,
+  );
 }
 
 /**
@@ -61,12 +111,13 @@ export function appBar({ title, subtitle, onBack = null, actions = [] }) {
  * but visually hidden — the icon carries it at this size, and every item still
  * has an accessible name.
  */
-export function bottomNav({ screen, onNavigate }) {
+export function bottomNav({ screen, onNavigate, identitySheetOpen = false }) {
+  const current = navValueFor(screen, identitySheetOpen);
   return el('nav', { class: 'bottom-nav', 'aria-label': 'Primary' },
     DESTINATIONS.map((d) => el('button', {
       class: 'bottom-nav-item',
       type: 'button',
-      'aria-current': d.id === screen ? 'page' : null,
+      'aria-current': d.id === current ? 'page' : null,
       onclick: () => onNavigate(d.id),
     },
       icon(d.icon, { size: 'var(--icon-lg)' }),
@@ -76,7 +127,8 @@ export function bottomNav({ screen, onNavigate }) {
 }
 
 /** Desktop vertical rail. Hidden below 1180px, where these move to bottom nav. */
-export function navRail({ screen, onNavigate }) {
+export function navRail({ screen, onNavigate, identitySheetOpen = false }) {
+  const current = navValueFor(screen, identitySheetOpen);
   return el('nav', { class: 'nav-rail', 'aria-label': 'Primary' },
     // The wordmark, not a monogram. HARDBRUT/3 suggests a single letter in the
     // 88px rail, but SPORE's own rule is absolute: the brand is the word SPORE
@@ -86,7 +138,7 @@ export function navRail({ screen, onNavigate }) {
     DESTINATIONS.map((d) => el('button', {
       class: 'nav-rail-item',
       type: 'button',
-      'aria-current': d.id === screen ? 'page' : null,
+      'aria-current': d.id === current ? 'page' : null,
       onclick: () => onNavigate(d.id),
     },
       icon(d.icon, { size: 'var(--icon-lg)' }),
@@ -100,13 +152,16 @@ export function navRail({ screen, onNavigate }) {
  * Assemble the shell. `side` is optional — screens without a list pane pass
  * null, and the app-level CSS collapses the grid to rail + main.
  */
-export function appShell({ screen, pane, side, main, onNavigate }) {
+export function appShell({ screen, pane, side, main, onNavigate, sheets = null, identitySheetOpen = false }) {
   return el('div', { style: { display: 'flex', flexDirection: 'column', height: '100dvh' } },
     el('div', { class: 'app-shell', 'data-pane': pane, style: { flex: '1 1 auto', minHeight: '0' } },
-      el('div', { class: 'app-shell-rail' }, navRail({ screen, onNavigate })),
+      el('div', { class: 'app-shell-rail' }, navRail({ screen, onNavigate, identitySheetOpen })),
       side ? el('div', { class: 'app-shell-side' }, side) : null,
       el('div', { class: 'app-shell-main' }, main),
     ),
-    bottomNav({ screen, onNavigate }),
+    bottomNav({ screen, onNavigate, identitySheetOpen }),
+    // Sheets sit outside the shell grid so they overlay the whole viewport
+    // including the bottom nav, which is what `--z-sheet` is scaled against.
+    sheets,
   );
 }

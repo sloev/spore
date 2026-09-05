@@ -5,7 +5,7 @@
 
 import assert from 'node:assert';
 import { formatAddr, truncate, formatBytes, clock, dayLabel, shortWhen, fileKind } from './format.mjs';
-import { defaultPaneFor, canGoBack, DESTINATIONS } from './shell.mjs';
+import { defaultPaneFor, canGoBack, navValueFor, DESTINATIONS } from './shell.mjs';
 
 let failures = 0;
 function test(name, fn) {
@@ -80,11 +80,14 @@ test('a file kind is the extension, upper-case, never longer than four', () => {
 
 // ------------------------------------------------------------- shell routing
 
-test('there are exactly five destinations and they are unique', () => {
+test('the six destinations match the design, in its order', () => {
   const ids = DESTINATIONS.map((d) => d.id);
-  assert.strictEqual(ids.length, 5);
-  assert.deepStrictEqual(ids, ['contacts', 'chat', 'blogs', 'files', 'settings']);
-  assert.strictEqual(new Set(ids).size, 5);
+  assert.deepStrictEqual(ids, ['contacts', 'chat', 'blogs', 'files', 'identity', 'settings']);
+  assert.strictEqual(new Set(ids).size, 6);
+  // The design's own labels, which are not the screen ids: a rename here is a
+  // change to the product's vocabulary, not a tidy-up.
+  assert.deepStrictEqual(DESTINATIONS.map((d) => d.label),
+    ['Contacts', 'Chat', 'Blogs', 'Fileshare', 'Identity', 'Settings']);
 });
 
 test('every destination has a label and an icon', () => {
@@ -94,19 +97,37 @@ test('every destination has a label and an icon', () => {
   }
 });
 
+test('bridges keeps Settings lit, because that is where you came from', () => {
+  // Bridges is a screen with no nav item. Without this the nav goes blank in a
+  // place the user reached from Settings, which reads as "you have left the app".
+  assert.strictEqual(navValueFor('bridges'), 'settings');
+  assert.strictEqual(navValueFor('files'), 'files');
+});
+
+test('the identity sheet is what is current while it is open', () => {
+  // Identity is a nav item that opens a sheet instead of navigating, so the
+  // screen underneath is unchanged and cannot be what reads as current.
+  assert.strictEqual(navValueFor('chat', true), 'identity');
+  assert.strictEqual(navValueFor('chat', false), 'chat');
+});
+
 test('two-pane screens open to the list, one-pane screens to the detail', () => {
   // On a phone the main pane is hidden while pane is 'list', so a screen with
   // no sidebar must open to 'detail' or it renders nothing at all.
   assert.strictEqual(defaultPaneFor('chat'), 'list');
   assert.strictEqual(defaultPaneFor('blogs'), 'list');
-  for (const one of ['contacts', 'files', 'settings']) {
+  for (const one of ['contacts', 'files', 'settings', 'bridges', 'identity']) {
     assert.strictEqual(defaultPaneFor(one), 'detail', one + ' would be blank on a phone otherwise');
   }
 });
 
 test('back is offered only where there is somewhere to go back to', () => {
   assert.ok(canGoBack('chat'));
+  // Bridges is entered from Settings, so it has a destination on every width —
+  // not only where the mobile list/detail flip exists.
+  assert.ok(canGoBack('bridges'));
   assert.ok(!canGoBack('settings'), 'settings has no list pane to return to');
+  assert.ok(!canGoBack('files'), 'a top-level screen with no list pane has no back');
 });
 
 console.log(failures ? '\n' + failures + ' failing' : '\nall passing');
