@@ -598,6 +598,86 @@ holds for today's end-to-end fragments (`enforce_partial_budget`,
 `Node::partial_sets_on`) and M11-D must preserve it when reassembly moves to the
 link.
 
+### Files across n hops — recursive pull, not a relayed WANT
+
+A magnet three hops away is currently "I know it exists" and nothing more. The
+root floods, so every node learns the file is real; but WANT is `hops = 0`, never
+relayed, and custody push is unicast mail to a person rather than "anyone who
+wants this id". If the seeder does not walk toward you, the file does not move.
+
+**Do not fix that by routing WANT back to the publisher.** That is client/server:
+if the origin is offline and ten caches already hold the pieces, the fetch should
+still succeed. The property worth having is that **any node holding a named chunk
+can serve it, and demand can walk the mesh until it reaches one.**
+
+**The mechanism: adopt, do not forward.** T0 does not change — WANT stays 1-hop,
+unsigned, consumed, never stored, never forwarded. That bound is what killed the
+measured 32× S-012 amplifier and it does not reopen. Instead the *file layer* on
+a node asked for ids it does not hold may **become a requester itself**:
+
+    A --WANT--> B --WANT--> C --WANT--> … seeder
+    A <-chunks- B <-chunks- C <-chunks-
+                ^ caches    ^ caches
+
+B is not forwarding A's packet. B has local interest: a neighbour asked, so B
+fetches in order to serve. Every hop is the 1-hop protocol that already exists,
+n times, pipelined. This is Bitswap's want-list plus NDN's pending-interest
+table, mapped onto SPORE's INV/WANT — and it is the only shape that works with
+content-addressed chunks, because `dest` is inside the envelope hash and a chunk
+therefore **cannot be re-addressed toward A** without minting a different object.
+
+**The authorization rule that makes it safe.** A node may recurse **only for ids
+named by a manifest or interior node already in its store**. A random want-id must
+never start a hunt. The flooded root is the capability: the mesh has already
+agreed the file exists, and the Merkle tree names every legal child. No manifest
+in store → serve from the local store or say nothing. That is M11-A's "continuing
+evidence of demand" applied to multi-hop fetch.
+
+**Bounds — without these it is S-012 at depth n.** All in the file layer, carried
+in the WANT payload, so a relay that does not understand them still just serves
+or ignores:
+
+| Bound | Rule |
+|---|---|
+| Depth | `remaining_depth` in the WANT payload, decremented per recurse; at 0, local store only. Default ~8, never more than envelope hops |
+| Lease | Each hop's WANT is a transmission lease — at most N chunks or T seconds, then stop until asked again. If A vanishes, B's PIT entry dies and B **cancels** toward C when nobody else is waiting |
+| Fanout | Recurse to at most 2–3 neighbours, preferring ones that INV'd the id or announced the magnet. Never a damped flood of WANTs |
+| Bulk budget | Chunks count against the per-interface bulk budget; interest is tiny and always may pass. A LoRa hop in the middle paces the transfer, it does not black-hole the magnet |
+| Companion | Bulk budget 0 → may WANT for itself, must not recurse on behalf of others |
+| Store | A helper relay **caches**, it does not pin. Pin in-assembly trees only where someone actually wants the file, or one popular magnet pins the mesh |
+| Existence | Interest dies with the object's expiry. Hunting an id that will never exist must not run until the heat death of the store |
+
+Serve a chunk only while
+`object_not_expired ∧ lease_valid ∧ neighbour_still_wants ∧ bulk_budget_allows`.
+No decoder rank is needed: for content-addressed chunks, "I WANT these ids" *is*
+the progress signal. Fountain rank stays a link-fragmentation question (M11-C).
+
+**Finding a seeder n hops away.** INV on meeting is the tracker for a direct
+neighbour; nothing tells you a node three hops further holds the file. Two
+layers, cheapest first: **blind recurse** is enough for v1 — the root is in
+everyone's store, so A asks B, B asks C, until a store hits, with depth, fanout
+and the parent-manifest rule keeping it from going epidemic. Slow on a cold file,
+and fine. **Seed advertisement** comes later and is still not T0: a small signed
+"I hold magnet X" in ANNOUNCE, or a `have::<magnet>` topic, so recursion aims
+instead of spreading sideways. That is a torrent peer list, not a DHT.
+
+**Explicitly not:** a DHT, source-routing to the publisher, or flooding chunks so
+that WANT can stay 1-hop. The last one conscripts every LoRa radio into someone
+else's CDN, which is what the bulk budget exists to prevent — and see M11-J,
+because it is what the code does today.
+
+**Sealed files do not recurse.** A sealed file's chunks are ciphertext, so
+confidentiality holds, but recursing one would copy it across the mesh and
+advertise that it exists. Recurse public magnets; sealed unicast files
+custody-push like mail. A chunk does not carry its own sealed-ness — only the
+parent manifest does — which is exactly why the parent-manifest rule is the right
+gate: the node deciding whether to recurse is by definition holding the manifest
+that says `sealed_hdr` is non-empty.
+
+**This is a sibling of M11-E, not of M11-D.** Per-hop *fragmentation* is how an
+envelope crosses a small link. Recursive *WANT* is how a file crosses n stores.
+Conflating them is how the fountain-versus-torrent confusion started.
+
 **Tasks** (each a PR):
 
 | Task | Status | Notes |
@@ -605,11 +685,25 @@ link.
 | M11-A Name the resource invariant, and test it | ⬜ | "No remote node can cause another to transmit, store, or process an unbounded amount without continuing evidence of demand, or an explicit bounded local allowance." Every mechanism already exists — bounded WANTs, `MAX_IDS_PER_GOSSIP`, per-interface token buckets, store budget, table caps, `MAX_ADOPT_BYTES`, expiry — but the invariant is named nowhere, so they read as unrelated defences. Write it into Part II and add a test per resource-consuming path. First: it is what the rest is argued against |
 | M11-B `spore-sim`: deterministic simulator over the real implementation | ⬜ | Seeded, declarative scenarios, machine-readable metrics. First 100 nodes with loss and partitions; then 1k/10k, mobility, malicious nodes, asymmetric links, tiny stores. Metrics: delivery probability, median/p95/p99 delivery time, **bytes transmitted per delivered byte**, duplicate ratio, flood amplification, storage pressure, energy as TX/RX/CPU/wakeups. Must include **mixed-MTU topologies** — a Wi-Fi island bridged to LoRa is the case broken today and nothing would have caught it. Must exercise the real crate, or it validates the simulator instead of SPORE |
 | M11-C Measure: fragment loss recovery, and the file push threshold | ⬜ | Needs B. Settles whether hop-local retry or a relocated fountain recovers a lost fragment better across loss rates, and settles how many chunks to push with a manifest. Decide on numbers |
+
 | M11-D Link fragmentation at the bridge | ⬜ | The milestone. Split below the node and below the signature, reassemble at the far end, per-link MTU, per-neighbour bound (set id where the medium has no addresses). Header becomes link framing, not wire; widen `count` past 255 while it is being written. Then delete every `n.mtu.min(...)` and the end-to-end fragment path in `Node::send` |
 | M11-E Files: push a few chunks with the manifest | ⬜ | The pull half already exists (`fetch_n` → WANT → `on_want`). Add pushing the first N chunks alongside the manifest so a small file needs no round trip. **Local policy, not a wire constant** — sender and receiver never need to agree, since the receiver ignores what it holds and WANTs the rest either way. Counted in *chunks*, not bytes, so it scales with the MTU; charged to the same per-interface budget; `0` and `1` both legal. N from M11-C |
+| M11-I Recursive pull: adopt a neighbour's WANT, never forward it | ⬜ | Needs M11-J first. The file layer gains a pending-interest table and may WANT ids it does not hold, **only** when it holds the manifest naming them. Depth, lease, fanout, bulk budget and cache-don't-pin as above. Pipeline: WANT the next batch upstream while still serving the current one downstream, or the transfer costs n round trips |
+| M11-J Chunks stop travelling on their own | ⬜ | **Measured, and it undermines M11-I.** A chunk is built `fl::FLOOD` with `hops: 16`, and although the publisher never sends one, *every node that receives one re-floods it*: publish emits 1 forward (the root), a served WANT yields 6 chunk envelopes, and the fetcher re-emits all 6 — as does an **uninterested bystander**. `files.rs` says "chunks ride a per-file topic so only interested nodes carry them"; that is false, because the topic scopes **delivery**, not forwarding. So one answered WANT sprays a chunk mesh-wide today, and layering recursive pull on top would multiply it. Decide deliberately: serve chunks with hops zeroed so they stop at the requester and recursion becomes the *only* way a file crosses n hops, or keep the spread and bound it. Fix the comment either way |
 | M11-F Sealed manifests do not fit a small link | ⬜ | `publish_file_sealed` needs **MTU ≥ 256** for even one id, ≥ 264 with an 8-char name — measured. Raw LoRa P2P tops out at ~255, so it misses by a byte; Meshtastic's 237 by 19. It fails cleanly (returns `None`) but a narrow-link node can never publish a sealed file. The ~82-byte sealed header sits *inside* the signed root, on top of the root's own 114 bytes of key and signature; it belongs in its own object the root names. Per-hop fragmentation does not fix this — the root must fit as a unit for a stranger to verify it |
 | M11-G Narrow the simplex claim | ⬜ | §3 and Part III say the coding works on simplex radio, CW and paper tape. True of the coding; the file layer has never honoured it, since a WANT needs a return path. Say what is actually supported |
 | M11-H Forwarding budget as local policy, not a wire rule | ⬜ | The 10% airtime figure is still normative in §5.4a and the "what stops what" table. Part II should state the *mechanism* (token bucket, backpressure byte) with defaults as SHOULD; the number becomes per-transport policy over measured capacity, queue depth, loss, battery and custody. Relaying 50% is impolite, not non-compliant — except on ISM, where it is law, which is an operator note |
+
+**`spore-sim` must show all six of these before n-hop fetch is believed** — until
+the last one is green, recursive pull is how the mesh becomes a reflector again:
+
+1. seeder and fetcher **3+ hops apart**, no chunk in any store between them
+2. the root already flooded
+3. the fetcher ends up with the whole file
+4. middle nodes cached some chunks, and a second fetcher on that path is faster
+5. the first fetcher vanishing mid-transfer **stops** the middle nodes pulling
+   within one lease
+6. a WANT for ids named by no held manifest generates **no** recursive WANT
 
 **Considered and rejected: `created_at` + `lifetime` instead of absolute expiry.**
 The stated motivation is that a relay might extend a message's lifetime. It
