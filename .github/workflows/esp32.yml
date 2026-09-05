@@ -22,11 +22,11 @@ jobs:
     name: ESP32-S3 cross-compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ESP-IDF itself is compiled from source on a cold cache (~10 min);
       # .embuild is where esp-idf-sys unpacks and builds it.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             esp32/.embuild
