@@ -109,6 +109,7 @@ const MODULES = [
   'app/screens/chat.mjs',
   'app/screens/contacts.mjs',
   'app/screens/settings.mjs',
+  'app/screens/files.mjs',
   'app/transports.mjs',
   'app/spore-client.mjs',
   // boots on load — must be last

@@ -82,3 +82,14 @@ body { overflow: hidden; } /* the shell owns scrolling, pane by pane */
 /* Icons inherit colour and scale with the text they sit in. */
 .icon { display: inline-flex; align-items: center; justify-content: center; }
 .icon > svg { width: 100%; height: 100%; }
+
+/* The design system's file row knows two in-progress states, "uploading" and
+   "failed". A SPORE transfer is neither: the node is *pulling* chunks, and the
+   kernel does not distinguish a file we are publishing from one we are
+   fetching. Rather than label a download "uploading" in the DOM — where a test
+   or a screen reader would read it — the row says what is true, and borrows the
+   upstream styling for it. */
+.file-row[data-state="incomplete"] .file-kind {
+  background: var(--sunken);
+  color: var(--muted);
+}

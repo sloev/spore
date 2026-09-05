@@ -18,6 +18,7 @@ import { renderOnboarding } from './screens/onboarding.mjs';
 import { renderChatList, renderChatThread } from './screens/chat.mjs';
 import { renderContacts } from './screens/contacts.mjs';
 import { renderSettings } from './screens/settings.mjs';
+import { renderFiles } from './screens/files.mjs';
 import { formatAddr, dayLabel } from './ui/format.mjs';
 
 const K_ONBOARDED = 'spore.onboarded';
@@ -58,6 +59,12 @@ const state = {
   contactDraft: null,
   addingContact: false,
   addContactError: null,
+
+  transfers: [],
+  fetchValue: '',
+  fetchError: null,
+  publishing: false,
+  publishError: null,
 };
 
 let client = null;
@@ -284,6 +291,50 @@ function applyAppearance() {
   else root.setAttribute('data-theme', state.theme);
 }
 
+const filesActions = {
+  setFetchValue: (v) => setState({ fetchValue: v, fetchError: null }),
+
+  fetch: (magnetHex) => {
+    try {
+      client.fetchFile(magnetHex);
+      // No transfer appears until a peer answers with the manifest, so say what
+      // was asked rather than pretending the file is already on its way.
+      setState({ fetchValue: '', fetchError: null });
+    } catch (err) {
+      setState({ fetchError: String((err && err.message) || err) });
+    }
+  },
+
+  publish: async (file) => {
+    setState({ publishing: true, publishError: null });
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      client.publishFile(file.name, bytes);
+      setState({ publishing: false, transfers: client.transfers() });
+    } catch (err) {
+      // A file past what the node can chunk or store fails here, and the core's
+      // message says which — pass it through rather than replacing it.
+      setState({ publishing: false, publishError: String((err && err.message) || err) });
+    }
+  },
+
+  copyMagnet: (magnet) => { if (navigator.clipboard) navigator.clipboard.writeText(magnet); },
+
+  save: (magnet, name) => {
+    const bytes = client.fileBytes(magnet);
+    if (!bytes) {
+      setState({ publishError: 'That file is not complete yet.' });
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([bytes]));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+};
+
 const settingsActions = {
   setAccent: (a) => {
     state.accent = a;
@@ -466,6 +517,18 @@ function renderApp() {
         actions: settingsActions,
       }),
     );
+  } else if (state.screen === 'files') {
+    main = el('div', { style: { display: 'contents' } },
+      appBar({ title: 'Files', subtitle: null, onBack: null, actions: [] }),
+      renderFiles({
+        transfers: state.transfers,
+        fetchValue: state.fetchValue,
+        fetchError: state.fetchError,
+        publishing: state.publishing,
+        publishError: state.publishError,
+        actions: filesActions,
+      }),
+    );
   } else if (state.screen === 'contacts') {
     main = el('div', { style: { display: 'contents' } },
       appBar({ title: 'Contacts', subtitle: null, onBack: null, actions: [] }),
@@ -574,6 +637,12 @@ export async function boot(container) {
       case 'AnnounceSent':
         setState({ lastAnnounceAt: Date.now() });
         break;
+      case 'TransferProgress':
+        // The client only emits this when a chunk count actually moved, so
+        // re-reading the whole list here costs one tree walk per real change,
+        // not one per tick.
+        setState({ transfers: client.transfers() });
+        break;
       case 'ClientFault':
         setState({ error: e.message });
         break;
@@ -602,6 +671,10 @@ export async function boot(container) {
     await contacts.load();
     state.booted = true;
     state.identity = identity;
+    // Adopted custody can include manifests, so the list is not necessarily
+    // empty on a cold start; the first TransferProgress would otherwise be the
+    // only thing that ever filled it.
+    state.transfers = client.transfers();
     state.onboarding = !onboarded;
     if (state.onboarding) render();
     else applyHash(); // restores the open thread from the URL on a reload
