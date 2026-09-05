@@ -602,7 +602,6 @@ link.
 
 | Task | Status | Notes |
 |---|---|---|
-| M11-A Name the resource invariant, and test it | ⬜ | "No remote node can cause another to transmit, store, or process an unbounded amount without continuing evidence of demand, or an explicit bounded local allowance." Every mechanism already exists — bounded WANTs, `MAX_IDS_PER_GOSSIP`, per-interface token buckets, store budget, table caps, `MAX_ADOPT_BYTES`, expiry — but the invariant is named nowhere, so they read as unrelated defences. Write it into Part II and add a test per resource-consuming path. First: it is what the rest is argued against |
 | M11-B `spore-sim`: deterministic simulator over the real implementation | ⬜ | Seeded, declarative scenarios, machine-readable metrics. First 100 nodes with loss and partitions; then 1k/10k, mobility, malicious nodes, asymmetric links, tiny stores. Metrics: delivery probability, median/p95/p99 delivery time, **bytes transmitted per delivered byte**, duplicate ratio, flood amplification, storage pressure, energy as TX/RX/CPU/wakeups. Must include **mixed-MTU topologies** — a Wi-Fi island bridged to LoRa is the case broken today and nothing would have caught it. Must exercise the real crate, or it validates the simulator instead of SPORE |
 | M11-C Measure: fragment loss recovery, and the file push threshold | ⬜ | Needs B. Settles whether hop-local retry or a relocated fountain recovers a lost fragment better across loss rates, and settles how many chunks to push with a manifest. Decide on numbers |
 | M11-D Link fragmentation at the bridge | ⬜ | The milestone. Split below the node and below the signature, reassemble at the far end, per-link MTU, per-neighbour bound (set id where the medium has no addresses). Header becomes link framing, not wire; widen `count` past 255 while it is being written. Then delete every `n.mtu.min(...)` and the end-to-end fragment path in `Node::send` |
@@ -680,8 +679,9 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
    shape: the capability present in the portable core, only the export missing
    (`spore_node_peers`, `spore_node_files`, `spore_node_unsubscribe`). M10-C is
    the answer to that pattern
-7. **M11 — Fragmentation where it belongs** — M11-A first, since it is what the
-   rest is argued against; M11-D fixes a live cross-MTU delivery failure
+7. **M11 — Fragmentation where it belongs** — M11-G and M11-H next, since both
+   are one paragraph each and both remove a spec claim the code does not honour;
+   then M11-B, because M11-D and M11-C should not pick numbers by argument
 
 The gaps in the numbering are milestones that finished. They are not summarised
 here — see `git log`.
