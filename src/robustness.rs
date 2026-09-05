@@ -308,6 +308,62 @@ fn an_oversized_object_is_an_error_not_a_panic() {
 }
 
 #[test]
+fn a_loud_interface_cannot_evict_a_quiet_one_from_the_partial_budget() {
+    // The bound that a broadcast-only medium has to inherit.
+    //
+    // On a transport with no underlay addresses (`U = ()`: raw LoRa P2P, audio)
+    // a receiver cannot tell two senders apart, so it cannot bound them
+    // separately — the interface is the finest unit of accounting available.
+    // That is survivable on its own, because anyone who can flood a shared radio
+    // with fragments can also just jam it. What is *not* survivable is the
+    // damage leaving that radio: the partial budget was one global pool evicted
+    // oldest-first, so a noisy link could empty it and take every other link's
+    // reassembly with it.
+    //
+    // Here iface 1 is the loud radio and iface 7 the quiet wired link. Iface 7's
+    // set arrives first, so under the old oldest-first rule it was the first
+    // thing evicted — by traffic it had nothing to do with.
+    let now = 1_700_000_000;
+    let mut n = Node::new("victim", &[]);
+    n.set_partial_budget(1024);
+
+    const QUIET: Iface = 7;
+    const LOUD: Iface = 1;
+
+    // One partial set on the quiet link: a single chunk of a set that claims
+    // more, so it stays open and never completes.
+    let open_set = |tag: u8, idx: u8| {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[tag; 16]); // orig_id — distinct per set
+        payload.push(idx);
+        payload.push(8); // count: 8 chunks promised, one delivered
+        payload.extend_from_slice(&[0xAB; 64]);
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
+        e.flags |= fl::FRAGMENT | fl::FLOOD;
+        e.wire()
+    };
+
+    n.on_rx(&open_set(0x01, 0), QUIET, None, now);
+    assert_eq!(n.partial_sets(), 1, "the quiet link opened one set");
+
+    // Now the loud radio opens many, blowing well past the budget.
+    for tag in 2..=40u8 {
+        n.on_rx(&open_set(tag, 0), LOUD, None, now + 1);
+    }
+
+    assert!(n.partial_sets() <= 40, "the budget is still enforced");
+    assert!(
+        n.partial_sets_on(QUIET) == 1,
+        "the quiet link keeps its share: it held 1 set of {} and lost it to another link's flood",
+        n.partial_sets(),
+    );
+    assert!(
+        n.partial_sets_on(LOUD) < 39,
+        "and the link that caused the pressure is the one that paid for it",
+    );
+}
+
+#[test]
 fn radio_codecs_survive_corrupted_real_frames() {
     // Random bytes rarely get past a length or magic check, so the states worth
     // reaching live just off a *valid* frame. Both of these codecs are fed by

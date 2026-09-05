@@ -833,10 +833,25 @@ correction — which is what the fountain is good at, and rateless open-loop is 
 more defensible *per hop*, where the buffer is per-neighbour and short-lived,
 than end to end. **The fountain may well survive, relocated.** Measure it.
 
-**Honest wrinkle.** On broadcast-only media (`U = ()`: raw LoRa P2P, audio) there
-is no underlay address, so reassembly cannot be keyed by neighbour. Those media
-need a set id in the fragment header and a per-medium bound instead. The
-per-neighbour argument does not cover them.
+**Broadcast-only media — settled, and already shipped.** On a transport with no
+underlay address (`U = ()`: raw LoRa P2P, audio) a receiver cannot tell two
+senders apart, so reassembly cannot be keyed by neighbour and the per-neighbour
+argument does not reach it. The resolution is that **the interface is the finest
+unit of accounting a medium without addresses can offer**, and that is enough:
+anyone able to flood a shared radio with fragment sets can also simply jam it,
+which is cheaper and denies everything, so the reassembly budget adds no
+exposure the medium did not already have.
+
+What did *not* survive scrutiny is letting that damage escape the radio. The
+partial budget was one global pool evicted oldest-first, so a loud link could
+empty it and take every other link's reassembly with it — a node's Ethernet
+transfers could be killed by its LoRa radio. `enforce_partial_budget` now charges
+each set to the interface it arrived on and evicts from the heaviest interface
+first, so a link can only ever spend its own share.
+
+Done ahead of M11-D rather than inside it: the rule holds for today's end-to-end
+fragments and keeps holding when reassembly moves to the link, and it was a live
+weakness in the meantime. See `Node::partial_sets_on`.
 
 **Tasks** (each a PR):
 

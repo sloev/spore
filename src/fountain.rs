@@ -127,6 +127,13 @@ pub struct Fountain {
     /// none of these appear in `spore`'s surface — but it is worth naming the one
     /// coupling the move exposed rather than leaving it implicit.
     pub(crate) started: u32,
+    /// The interface this set was first heard on, so the partial budget can be
+    /// shared fairly between links instead of first-come-first-served.
+    ///
+    /// First arrival, not last: fragments flood, so the same set legitimately
+    /// arrives on several interfaces. Attribution has to pick one, and the link
+    /// that opened the allocation is the one that caused it.
+    pub(crate) iface: Iface,
     pub(crate) count: usize,
     chunk: usize,
     pub(crate) rows: Vec<Row>, // kept in reduced row-echelon form
@@ -149,7 +156,7 @@ impl Fountain {
     }
 
     pub fn new() -> Self {
-        Fountain { started: 0, count: 0, chunk: 0, rows: Vec::new(), done: None }
+        Fountain { started: 0, iface: NO_IFACE, count: 0, chunk: 0, rows: Vec::new(), done: None }
     }
     /// Feed one fragment's `(orig_id, idx, count, chunk_bytes)`.
     /// Returns the reassembled original envelope bytes once solvable.
@@ -226,7 +233,13 @@ impl Fountain {
     /// A reassembler that records when it opened, so [`PARTIAL_TIMEOUT_SECS`] can
     /// collect it if the sender never finishes the set.
     pub fn started_at(now: u32) -> Self {
-        Fountain { started: now, ..Self::new() }
+        Self::started_on(now, NO_IFACE)
+    }
+
+    /// As [`Fountain::started_at`], recording which interface opened the set so
+    /// the partial budget can be shared between links.
+    pub fn started_on(now: u32, iface: Iface) -> Self {
+        Fountain { started: now, iface, ..Self::new() }
     }
 }
 impl Default for Fountain {

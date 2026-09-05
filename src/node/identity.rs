@@ -181,6 +181,24 @@ impl Node {
         self.limits.partial_bytes = bytes.max(1024);
     }
 
+    /// Incomplete fragment sets held right now, across every interface.
+    ///
+    /// Reassembly is the one place a remote party allocates memory on this node
+    /// without being asked for anything, so it is worth being able to look at.
+    pub fn partial_sets(&self) -> usize {
+        self.frags.len()
+    }
+
+    /// Incomplete fragment sets charged to one interface.
+    ///
+    /// The budget is shared between links rather than first-come-first-served,
+    /// which is what stops a loud link — in particular a broadcast-only radio,
+    /// where senders cannot be told apart at all — from evicting a quiet link's
+    /// reassembly along with its own.
+    pub fn partial_sets_on(&self, iface: Iface) -> usize {
+        self.frags.values().filter(|f| f.iface == iface).count()
+    }
+
     /// Replace every table ceiling at once.
     ///
     /// The general form of [`Node::set_partial_budget`], and the answer to audit
