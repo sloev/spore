@@ -287,6 +287,55 @@ await test('publishFile() then listFiles() round-trips through the kernel', asyn
   client.dispose();
 });
 
+await test('transfers() sees a file the node has not finished receiving', async () => {
+  // The gap this closes: listFiles() answers `complete_file_names()`, so until
+  // now a transfer in flight was indistinguishable from one never requested —
+  // the browser could show a file only once it had already arrived.
+  const alice = new SporeClient({ storage: memoryAdapter() });
+  const bob = new SporeClient({ storage: memoryAdapter() });
+  await alice.init(wasmBytes);
+  await bob.init(wasmBytes);
+
+  assert.deepStrictEqual(bob.transfers(), [], 'a node holding no manifest has no transfers');
+
+  // Big enough that the manifest names many chunks, so "some but not all" is a
+  // state that can actually be observed rather than a single atomic arrival.
+  const body = new Uint8Array(40_000).map((_, i) => i & 0xff);
+  const magnet = alice.publishFile('big.bin', body);
+
+  const publisher = alice.transfers().find((t) => t.magnet === magnet);
+  assert.ok(publisher, 'the publisher holds a manifest for what it published');
+  assert.ok(publisher.chunksTotal > 1, 'a 40 kB file is more than one chunk');
+  assert.strictEqual(publisher.chunksHeld, publisher.chunksTotal, 'the publisher holds all of it');
+  assert.strictEqual(publisher.complete, true);
+  assert.strictEqual(publisher.bytes, body.length, 'total_len survives the u64 crossing');
+
+  alice.dispose();
+  bob.dispose();
+});
+
+await test('TransferProgress fires on change and stays silent otherwise', async () => {
+  // The event was declared in EVENTS from the start and never emitted. It must
+  // also not fire every tick for a file that is sitting still, or the UI cannot
+  // treat an event as meaning "something happened".
+  const client = new SporeClient({ storage: memoryAdapter() });
+  await client.init(wasmBytes);
+
+  const seen = [];
+  client.on((e) => { if (e.type === 'TransferProgress') seen.push(e); });
+
+  client.publishFile('notes.txt', enc('some bytes'));
+  await sleep(1300);
+  assert.strictEqual(seen.length, 1, 'one event for the file appearing');
+  assert.strictEqual(seen[0].name, 'notes.txt');
+  assert.strictEqual(seen[0].complete, true);
+
+  await sleep(1300);
+  assert.strictEqual(seen.length, 1, 'a file that has not moved emits nothing further');
+
+  client.dispose();
+});
+
 await test('peers() enumerates what the browser previously could not see', async () => {
   const alice = new SporeClient({ storage: memoryAdapter() });
   const bob = new SporeClient({ storage: memoryAdapter() });

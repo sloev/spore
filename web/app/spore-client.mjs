@@ -118,6 +118,7 @@ export class SporeClient {
     this._bridges = new Map(); // id -> { id, kind, transport, up, sent, received, lastFrameAt }
     this._pending = new Map(); // idHex -> { id, at, expiresAt }
     this._ratchetPeers = new Set(); // peers observed using a live §7 ratchet
+    this._transfers = new Map(); // magnetHex -> { chunksHeld, complete }, for diffing
     this._timer = null;
     this._announceEveryMs = ANNOUNCE_MIN_MS;
     this._announceAt = 0;
@@ -364,6 +365,29 @@ export class SporeClient {
     return this.node.listFiles().map((f) => ({ name: f.name, magnet: hex(f.magnet) }));
   }
 
+  /**
+   * Every file we hold a manifest for, finished or not — what a transfer list
+   * actually needs, where `listFiles` only ever answered the finished ones.
+   *
+   * `chunksHeld` is a lower bound while a manifest tree is still resolving, so
+   * progress may jump forward when an interior node lands. Present it as
+   * progress, never as a promise about how long is left.
+   *
+   * @returns {Array<{magnet: string, name: string, bytes: number,
+   *                  chunksHeld: number, chunksTotal: number, complete: boolean}>}
+   */
+  transfers() {
+    this._assertReady();
+    return this.node.files().map((f) => ({
+      magnet: hex(f.magnet),
+      name: f.name,
+      bytes: f.totalLen,
+      chunksHeld: f.chunksHeld,
+      chunksTotal: f.chunksTotal,
+      complete: f.chunksTotal > 0 && f.chunksHeld >= f.chunksTotal,
+    }));
+  }
+
   /** Bytes for a magnet, or null when the transfer has not completed. */
   fileBytes(magnetHex) {
     this._assertReady();
@@ -482,6 +506,7 @@ export class SporeClient {
     try {
       this._pollFeed();
       this._pollAcks();
+      this._pollTransfers();
       this._maybeAnnounce();
     } catch (err) {
       this._emit('ClientFault', { scope: 'tick', message: String(err && err.message || err) });
@@ -512,6 +537,42 @@ export class SporeClient {
         this._pending.delete(idHex);
         this._emit('EnvelopeExpired', { id: idHex });
       }
+    }
+  }
+
+  /**
+   * `TransferProgress` was declared in EVENTS from the start and never emitted —
+   * there was nothing to emit it from, since the only file export answered
+   * finished files. Now that the core's transfer list is reachable, derive the
+   * events by diffing it against the previous tick.
+   *
+   * Only changes are emitted. A file whose chunk count did not move produces
+   * nothing, so a node holding a hundred finished files is silent, and the UI
+   * can treat every event as worth a repaint.
+   */
+  _pollTransfers() {
+    const seen = new Set();
+    for (const f of this.node.files()) {
+      const magnet = hex(f.magnet);
+      seen.add(magnet);
+      const prev = this._transfers.get(magnet);
+      const complete = f.chunksTotal > 0 && f.chunksHeld >= f.chunksTotal;
+      if (prev && prev.chunksHeld === f.chunksHeld && prev.complete === complete) continue;
+      this._transfers.set(magnet, { chunksHeld: f.chunksHeld, complete });
+      this._emit('TransferProgress', {
+        magnet,
+        name: f.name,
+        bytes: f.totalLen,
+        chunksHeld: f.chunksHeld,
+        chunksTotal: f.chunksTotal,
+        complete,
+      });
+    }
+    // A manifest can leave (expiry, store pressure). Forget it, so that if the
+    // same magnet is fetched again its first tick counts as progress rather
+    // than as a repeat of a number we happen to still be holding.
+    for (const magnet of [...this._transfers.keys()]) {
+      if (!seen.has(magnet)) this._transfers.delete(magnet);
     }
   }
 
