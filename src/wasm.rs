@@ -522,6 +522,42 @@ pub unsafe extern "C" fn spore_node_list_files(n: *mut Node) -> i64 {
     pack(out)
 }
 
+/// Every file we hold a manifest for, finished or not — the transfer list.
+/// Packed `[n:4 BE] ([name_len:4 BE] [name] [magnet:16] [total_len:8 BE]
+/// [chunks_held:4 BE] [chunks_total:4 BE])...`
+///
+/// `spore_node_list_files` above answers `complete_file_names()`, so a browser
+/// could see a file only once it had already arrived: a transfer in flight was
+/// indistinguishable from one that was never requested. The core has had the
+/// progress data since manifests grew into trees (`Node::files`) — this export
+/// was simply missing, which is the same shape of gap as `spore_node_peers`.
+///
+/// `chunks_held` is a **lower bound** while a tree is still resolving: chunks
+/// under an interior node we do not hold yet cannot be named, so they cannot be
+/// counted. A progress bar built on this may therefore jump forward when an
+/// interior node lands. That is honest — the alternative is inventing a
+/// denominator we do not know.
+///
+/// Costs one tree walk per file, so call it at UI rates, not per packet.
+///
+/// # Safety
+/// `n` is valid.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_files(n: *mut Node) -> i64 {
+    let files = (*n).files();
+    let mut out = Vec::new();
+    out.extend_from_slice(&(files.len() as u32).to_be_bytes());
+    for (magnet, name, total_len, held, total) in &files {
+        out.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(magnet);
+        out.extend_from_slice(&total_len.to_be_bytes());
+        out.extend_from_slice(&held.to_be_bytes());
+        out.extend_from_slice(&total.to_be_bytes());
+    }
+    pack(out)
+}
+
 // -- encrypted DM (W1) -------------------------------------------------------
 //
 // `spore_node_send` is the raw unsealed, unsigned path — the call a protocol

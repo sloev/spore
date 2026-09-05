@@ -580,6 +580,35 @@ class SporeNode {
     }
     return out;
   }
+
+  /**
+   * Every file we hold a manifest for, finished or not — the transfer list.
+   * Returns `[{ name, magnet, totalLen, chunksHeld, chunksTotal }]`.
+   *
+   * `listFiles` above answers only *complete* files, so a transfer in flight
+   * looked exactly like one that was never asked for. `chunksHeld` is a lower
+   * bound while a manifest tree is still resolving — see `spore_node_files`.
+   */
+  files() {
+    const packed = this.s._unpack(this.s.ex.spore_node_files(this.ptr));
+    if (!packed.length) return [];
+    const dv = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    let o = 0;
+    const n = dv.getUint32(o, false); o += 4;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const nlen = dv.getUint32(o, false); o += 4;
+      const name = new TextDecoder().decode(packed.slice(o, o + nlen)); o += nlen;
+      const magnet = packed.slice(o, o + 16); o += 16;
+      // total_len is u64: JS numbers hold it exactly up to 2^53, and a file that
+      // large is not crossing this mesh.
+      const totalLen = Number(dv.getBigUint64(o, false)); o += 8;
+      const chunksHeld = dv.getUint32(o, false); o += 4;
+      const chunksTotal = dv.getUint32(o, false); o += 4;
+      out.push({ name, magnet, totalLen, chunksHeld, chunksTotal });
+    }
+    return out;
+  }
 }
 
 /**
