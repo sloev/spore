@@ -330,10 +330,37 @@ export class SporeClient {
     this._maybeAnnounce();
   }
 
-  /** Follow a topic so `pollFeed` starts yielding its events. */
+  /**
+   * Follow a topic so `pollFeed` starts yielding its events.
+   *
+   * **Following is public.** §4's ANNOUNCE carries the whole topic set, so every
+   * node that hears this one learns what it reads. Not an implementation detail
+   * a UI may omit: it is how a neighbour knows the traffic is worth relaying
+   * here, and it cannot be opted out of while still receiving the feed.
+   */
   subscribe(topicName) {
     this._assertReady();
     this.node.subscribe(topicName);
+  }
+
+  /** Stop following a topic. True if it was followed. */
+  unsubscribe(topicName) {
+    this._assertReady();
+    return this.node.unsubscribe(topicName);
+  }
+
+  /**
+   * The topics this node actually follows, as 16-hex addresses.
+   *
+   * Asked of the kernel, not remembered beside it — this set is what goes out in
+   * every ANNOUNCE, and a local list that had drifted would have the UI claiming
+   * this node reads something it does not. Names are not recoverable from an
+   * address (`topic_of` is a hash), so a caller showing names keeps its own map
+   * and treats this as the truth about membership.
+   */
+  subscriptions() {
+    this._assertReady();
+    return this.node.topics().map(hex);
   }
 
   /** The 8-byte topic address for a name, as 16-hex — the domain key for feeds. */

@@ -108,6 +108,7 @@ jobs:
           node web/app/spore-client.test.mjs
           node web/app/stores/threads.test.mjs
           node web/app/stores/contacts.test.mjs
+          node web/app/stores/topics.test.mjs
           node web/app/ui/format.test.mjs
           node web/store-test.mjs
 

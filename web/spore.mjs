@@ -378,6 +378,32 @@ class SporeNode {
     this.s.ex.spore_node_subscribe(this.ptr, p, t.length);
     this.s.ex.spore_free(p, t.length);
   }
+
+  /** Stop following a topic. True if it was followed. */
+  unsubscribe(topic) {
+    const tb = new TextEncoder().encode(topic);
+    const p = this.s._put(tb);
+    const was = this.s.ex.spore_node_unsubscribe(this.ptr, p, tb.length);
+    this.s.ex.spore_free(p, tb.length);
+    return was === 1;
+  }
+
+  /**
+   * The topics this node actually follows, as 16-hex addresses.
+   *
+   * Asked of the kernel rather than kept alongside it: the topic set is what
+   * goes out in every ANNOUNCE, so a local list that had drifted would be a UI
+   * claiming this node reads something it does not.
+   */
+  topics() {
+    const packed = this.s._unpack(this.s.ex.spore_node_topics(this.ptr));
+    if (!packed.length) return [];
+    const dv = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    const n = dv.getUint32(0, false);
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(packed.slice(4 + i * 8, 4 + i * 8 + 8));
+    return out;
+  }
   send(dest, payload) {
     const dp = this.s._put(dest);
     const pp = this.s._put(payload);
