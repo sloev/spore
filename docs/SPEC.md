@@ -573,6 +573,24 @@ level, capped at `MAX_DEPTH = 4`:
 A file that fits one manifest encodes exactly as it did before trees existed, so
 nothing that already works changes.
 
+**Fetching across more than one hop (endpoint profile, not a wire rule).** A node
+MAY adopt a neighbour's WANT as its own for ids named by a manifest it holds,
+subject to depth, lease, fanout and bulk budget. It MUST NOT forward the WANT
+envelope. Chunks return by the same one-hop serve path and MAY be cached.
+
+That sentence is the whole of multi-hop file transfer, and every clause in it is
+load-bearing. *Adopt, not forward* keeps §6's bound intact — WANT stays hops=0,
+unsigned, consumed, never relayed — while still letting demand walk: the relay is
+not carrying someone else's request, it has acquired an interest of its own.
+*Named by a manifest it holds* is the authorization: the flooded root is what
+made the file legitimate to ask about, and the tree names every legal child, so a
+want-id nobody has a manifest for starts no hunt. *Cached, not pinned* keeps a
+popular magnet from filling the mesh's stores.
+
+This is a Part III profile because it changes what an endpoint chooses to ask
+for, not what any envelope looks like. T0 is unchanged: receive → dedup → store →
+deliver → forward.
+
 - **Integrity is free.** The root is signed, and every ID below it — chunk or
   sub-manifest — *is* the hash of the bytes it names, so a forged or corrupt part
   simply never matches. **Only the root is signed**: the hash chain covers the
