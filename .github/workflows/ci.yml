@@ -68,15 +68,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build wasm node
         run: cargo build --release --lib --target wasm32-unknown-unknown
-      - name: Check the wasm has exactly one import
+      # The wasm may import only the host nutrients SPEC Part IV names, and
+      # nothing else. This used to assert "exactly one import", which was the
+      # same rule when randomness was the only nutrient the browser needed —
+      # until M10-A gave the browser a custody store and added four. A count is
+      # not the invariant; the *allowlist* is. Anything outside it means the
+      # kernel has grown a dependency on its host, which is what would break
+      # ESP32 and every other target.
+      - name: Check the wasm imports only the allowed host nutrients
         run: |
           node -e '
             const fs = require("fs");
+            const ALLOWED = new Set([
+              "spore_fill_random",   // CSPRNG
+              "spore_store_put",     // custody store
+              "spore_store_get",
+              "spore_store_remove",
+              "spore_store_ids",
+            ]);
             const b = fs.readFileSync("target/wasm32-unknown-unknown/release/spore.wasm");
             const imports = WebAssembly.Module.imports(new WebAssembly.Module(b));
             console.log(JSON.stringify(imports));
-            if (imports.length !== 1 || imports[0].name !== "spore_fill_random") {
-              throw new Error("expected exactly one import env.spore_fill_random");
+            const bad = imports.filter((i) => i.module !== "env" || !ALLOWED.has(i.name));
+            if (bad.length) {
+              throw new Error("wasm imports outside the allowlist: " + JSON.stringify(bad));
             }
           '
       - name: Web loopback end-to-end test
@@ -84,6 +99,17 @@ jobs:
 
       - name: Transport codec tests (kiss, meshtastic, audio wire formats)
         run: node web/codec-test.mjs
+
+      # Every M10 suite was written and none was ever run here, which makes them
+      # documentation rather than tests. `spore-client` and `store-test` both
+      # drive the real wasm kernel; the rest are pure and fast.
+      - name: Web node app tests (client contract, stores, formatting, custody)
+        run: |
+          node web/app/spore-client.test.mjs
+          node web/app/stores/threads.test.mjs
+          node web/app/stores/contacts.test.mjs
+          node web/app/ui/format.test.mjs
+          node web/store-test.mjs
 
       - name: Real WebSocket relay end-to-end test
         working-directory: web
