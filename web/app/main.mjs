@@ -521,12 +521,19 @@ const settingsActions = {
 
 // ---------------------------------------------------------------- rendering
 
-function notBuiltYet(name) {
+/**
+ * Every destination in DESTINATIONS now has a screen, so this is unreachable —
+ * `applyHash` refuses anything outside SEGMENTS and all five are handled above.
+ * It stays as the honest failure for a sixth destination added without a branch:
+ * that is a bug in this file, and saying so beats rendering an empty pane or a
+ * "coming soon" panel for something that is never coming.
+ */
+function noScreenFor(name) {
   return el('div', { class: 'pane-body scroll-y' },
     el('div', { class: 'empty' },
-      el('div', { class: 'empty-mark' }, '·'),
+      el('div', { class: 'empty-mark' }, '!'),
       el('h3', {}, name),
-      el('p', {}, 'This screen is not built yet. The kernel, the client contract and the shell are in place; the screen itself lands later in Milestone 10-D.'),
+      el('p', {}, 'No screen is wired for this destination. That is a bug in the app shell, not something to wait for.'),
     ),
   );
 }
@@ -678,7 +685,7 @@ function renderApp() {
         onBack: canGoBack(state.screen) && state.pane === 'detail' ? goBack : null,
         actions: [],
       }),
-      notBuiltYet(screenTitle()),
+      noScreenFor(screenTitle()),
     );
   }
 
