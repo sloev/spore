@@ -60,8 +60,20 @@ impl Trickle {
     }
 }
 
-/// (a) Token bucket capping relayed bytes to a sustained rate (law on ISM
-/// bands: ≤ 10 % airtime). Time is in seconds; `allow` refills then spends.
+/// (a) Token bucket capping relayed bytes to a sustained rate.
+///
+/// **The bucket is the rule; the rate is policy.** §5.4a requires a relay to
+/// bound what it forwards per interface and *defaults* to about a tenth of the
+/// link, which is a courtesy figure rather than a protocol constant: the right
+/// number depends on measured capacity, queue depth, loss, battery and how much
+/// custody the node has taken on. Use [`TokenBucket::new`] with whatever the
+/// transport actually knows about itself, and [`TokenBucket::ten_percent`] when
+/// it knows nothing better.
+///
+/// The one place the number is not a choice is regulatory: on ISM bands a duty
+/// cycle is law, and there it comes from the regulator, not from here.
+///
+/// Time is in seconds; `allow` refills then spends.
 pub struct TokenBucket {
     rate: u32, // bytes/sec sustained
     burst: u32,
@@ -73,7 +85,8 @@ impl TokenBucket {
         let burst = rate.max(2048); // hold at least one full frame
         TokenBucket { rate, burst, tokens: rate, last: 0 }
     }
-    /// Size the bucket at 10 % of a link's raw capacity (bytes/sec).
+    /// The default: a tenth of a link's raw capacity (bytes/sec). A transport
+    /// that has measured itself should call [`TokenBucket::new`] instead.
     pub fn ten_percent(link_bytes_per_sec: u32) -> Self {
         Self::new((link_bytes_per_sec / 10).max(1))
     }
