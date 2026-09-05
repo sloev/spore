@@ -33,6 +33,12 @@ jobs:
         run: cargo test --all-targets
       - name: Worked examples (reimplementation guide reference values)
         run: cargo run --example worked
+      # The simulator is the only thing here that exercises SPORE as a *network*
+      # rather than as a node. Its thresholds are the regression guard; the JSON
+      # is the record. Release mode because a debug 100-node run is minutes.
+      - name: spore-sim — network behaviour, with thresholds
+        if: runner.os == 'Linux'
+        run: cargo run --release --example spore_sim
       - name: T0 reference decoder — vectors in sync + pure-Python conformance
         if: runner.os == 'Linux'
         run: |
