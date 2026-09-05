@@ -6,9 +6,19 @@ This is the single forward-looking plan, organised as **milestones** rather than
 a flat PR map. Each milestone is a coherent body of work with a clear definition
 of done; PRs are the merge units inside a milestone, not the plan itself.
 
-"What shipped" lives in git history and in the **Status** column of each
-milestone — so no second progress table can drift. Shipped work loses its spec
-here and keeps its commit; the code is the truth.
+**Only what is ahead lives here.** A task is deleted from this file when it
+ships, and a milestone is deleted when its last task does — which is why the
+numbering has gaps. There is no changelog and no shipped column to maintain,
+because both are records of the past and both can drift from it:
+
+| Question | Where it is answered |
+|---|---|
+| What is planned? | this file |
+| What shipped, when, and why? | `git log` — the commit message carries the reasoning |
+| What stops it breaking again? | the test that came with the fix |
+
+A regression is caught by a test, not by a line in a document. If a fix ships
+without one, that is the thing to fix — not an entry to write.
 
 **Read order for agents:** [Mission](MISSION.md) → this file →
 [Spec](SPEC.md) as needed, plus `git log` for what shipped. See
@@ -46,24 +56,6 @@ here and keeps its commit; the code is the truth.
 
 ---
 
-## Milestone 0 — Repo & docs hygiene ✅
-
-**Goal:** a clean root and a docs/ folder that holds every doc except `README.md`.
-
-| Task | Status |
-|---|---|
-| Move `MISSION.md`, `SECURITY.md`, `CHANGELOG.md`, `CONTRIBUTING.md` into `docs/` | ✅ shipped |
-| Update all internal links, CI workflows (release, android, pages), site generator, CODEOWNERS | ✅ shipped |
-| Root holds only `README.md`, source, build files, licenses, config | ✅ shipped |
-| Rewrite `VISUALDESIGN.md` for the new design language | ✅ shipped |
-| Rewrite this ROADMAP into milestone form | ✅ shipped |
-
-**Definition of done:** `ls` at repo root shows only `README.md`, source dirs,
-build files (`Cargo.*`, `deny.toml`, `rustfmt.toml`), `LICENSE`, `spore.example.yaml`,
-and essential config (`.github/`, `.gitignore`). Site build + token generation green.
-
----
-
 ## Milestone 1 — Security & correctness
 
 **Goal:** close the last forward-secrecy and store-bounds gaps; make every spec
@@ -71,17 +63,10 @@ claim the code actually honours.
 
 | Task | Status | Notes |
 |---|---|---|
-| Ratchet skipped-key cache age-bounded (7 d) + zeroized on drop | ✅ shipped (#40) | S-024a |
-| Offline crypto lifetime knobs (prekey + ratchet skip TTL) + Android UI + decrypt-failure messaging | ✅ shipped (#71) | FS/DTN honesty; default 7 d, configurable to 14/30/custom with warning |
-| Ratchet wired into real DM traffic (`send_direct`/`open_dm`) | ✅ shipped (#70) | Bootstrap from ANNOUNCE; deterministic initiator |
-| Store spilled-id verify (content-addressed integrity on spill) | ✅ shipped (#47) | C-ST4 |
-| Paths `purge 7 d` + `Paths::trim(MAX_PEERS)` backstop | ✅ shipped (#113) | The one peer-keyed map `enforce_bounds` missed |
-| Store horizon clamp to 30 d at the single choke point (`store_put`) | ✅ shipped (#113) | Matching clamp on dedup retain |
 | Field-verify the offline window end-to-end on a device | ⬜ deferred to hardware QA | Unit tests prove deadline/clamping; needs a real clock/delivery run (M4) |
 | Backup exclusion + migration tested on hardware | ⬜ deferred to hardware QA | No device in CI; tracked in `android/TESTING.md` |
 | Benchmark suite: throughput/memory, reproducible, tracked per platform | ⬜ todo | Folded into **M11's simulator** rather than built separately: a throughput number from a microbenchmark says less than delivery probability and bytes-per-delivered-byte under loss, and two harnesses would drift. Keep the per-platform regression-threshold idea — that is the part `spore-sim` owes CI |
 | `unsafe`-code snapshot tracked and diffed in CI | ⬜ todo | No inventory of `unsafe` blocks exists today. Prns keeps `audits/unsafe-snapshot.json`, diffed so new unsafe code is a visible, reviewable event rather than something that can land unnoticed |
-| §5.6 said "no echo/**ACK** → resend"; the code only ever checked the ACK | ✅ resolved (#227) | Closed by choosing, rather than by leaving the choice as the work. `Node::resend_unacked` (`src/node/send.rs`) drops a pending entry only when a signed receipt arrives, so the "echo" half described behaviour the tree never had. **"echo/" is deleted from §5.6**, and the rule now adds that overhearing your own rebroadcast MUST NOT clear a resend: a receipt means delivered-to-destination, while an echo means only that the mesh took it, and letting the second flip a delivery state is the same dishonesty M9's three-state UX exists to avoid. Meshtastic does treat a rebroadcast as an implicit ack for broadcasts, so the mechanism is proven — it is the *meaning* that is wrong here. Still open as a separate, optional item: echo suppression as **airtime-only** local congestion policy in §5.4 (`Csma` already tracks `overheard` per id, but per-bridge, not on the originator's `pending`), which would cancel wasted flood retries without touching `acked` |
 
 **Definition of done:** every SPEC claim about forward secrecy and store bounds is
 backed by a test; the `## Unreleased` SECURITY_FINDINGS Still-open list has no P0
@@ -96,40 +81,11 @@ that are verified, with honest limits on the ones that aren't.
 
 | Task | Status | Notes |
 |---|---|---|
-| Hub `unregister` + bridge stop/remove (all bridge kinds) | ✅ shipped (#42, #74, #75) | Audio, BLE (Meshtastic/RNode), Wi-Fi Direct, Web, core-owned UDP/TCP |
-| Bridge enable/disable toggle distinct from Remove | ✅ shipped (#74) | Audio + BLE radios; Wi-Fi Direct/Web deliberately Remove-only (documented) |
-| Service / Audio / BLE lifecycle | ✅ shipped (#44) | A-S1, A-A2, A-B1/B2/B6, A-W1 |
-| Chat attachments: stage → one bubble → preview → FileProvider Open | 🟡 partial (#41) | Core shipped; carried: multi-file, ExoPlayer, edit-after-send, public-file single bubble |
-| Name others see + local avatar + mesh profile pull | ✅ shipped (#45, #46) | 4a local, 4b mesh pull |
-| Bridge status enum + permission recovery | ✅ shipped (#68) | B6 |
-| Send/error feedback (no silent no-op) | ✅ shipped (#61) | B2 |
-| Empty states + PUBLIC/broadcast confirm | ✅ shipped (#62) | B3 |
-| Notifications + transfers overflow | ✅ shipped (#66) | B4 |
-| Ring health + cautious export | ✅ shipped (#67) | B5 |
-| Accessibility + density pass | ✅ shipped (#69) | B7 |
-| Feed polish | ✅ shipped (#72) | B8 |
-| SPORE Direct: negotiated E2E pipe (core + UDP/TCP adapters) | ✅ shipped (#50–#52) | SPDR codec, key schedule, AEAD record; LAN-scoped |
-| Direct NAT traversal: reflexive (STUN) + punch + iroh relay + global IPv6 | ✅ shipped (#114) | Punch proven on loopback only; two-real-NATs procedure in `HARDWARE.md` row 19 |
-| Direct wired into daemon + Android (signalling glue PR8c) | ✅ shipped | LAN-scoped until NAT step 2 |
-| Iroh bridge (QUIC p2p + relay fallback) | ✅ shipped (#53) | MSRV→1.85, feature-gated, own CI job |
-| Runtime storage nutrient (`SpillBackend` trait) | ✅ shipped (#87) | Unblocks browser/ESP spill |
-| Runtime scheduling nutrient | ✅ shipped (#90) | Tick contract |
-| demod_out cap (unbounded audio-output queue) | ✅ shipped | Bounded at 64, drops oldest |
+| Chat attachments: ExoPlayer preview, edit-after-send, public-file single bubble | 🟡 partial | The staging → bubble → FileProvider path exists; these are what remain — the same list as the carried-forward gaps below |
 | Conformance: browser↔native over QUIC/WebTransport | ⬜ open — **spike validated** | Spike `spikes/001-webtransport-native` confirms feasible: a feature-gated `wtransport`+`quinn` native server plus the browser shim, both mapping onto `DatagramPort` like `IrohPort`. **Constraint:** iroh's QUIC is not HTTP/3 WebTransport, so the native side is a *new* listener, not a reuse of iroh's endpoint — only `DatagramPort` and Direct signalling are reused. `quinn` is a second QUIC stack; feature-gate it like `bridge-iroh` |
 
 **Carried-forward functional gaps (still real, not regressions):**
 
-- [x] Multiple files per send — shipped on both surfaces. `Markdown.parseAttach`
-  (Android) and `mdWithAttachments` (web) both moved from `.find` (one match) to
-  `.findAll`/global-replace (every match); `Msg.attachments`/`Attach` list
-  replaces the singular `magnet`/`mime` fields. Android stages via
-  `GetMultipleContents()` into a `List<StagedAttachment>`; the web node needed
-  its own staged-chip model too, not just a bigger join — its composer is a
-  plain `<input type="text">`, and Chrome silently strips any `\n` assigned to
-  `.value`, so N marker lines can never be built by inserting text into the
-  box the way one marker could. Every publish is size-checked before any file
-  in the batch is published, so a refusal never leaves orphaned manifests
-  behind. See the attachments appendix in SPEC.md for the wire-level convention.
 - [ ] ExoPlayer audio/video inline preview + playback
 - [ ] Edit / remove an attachment after send
 - [ ] Merge the bubble for public/unsealed files (needs `nativeEnvId` at `route()` time)
@@ -138,47 +94,6 @@ that are verified, with honest limits on the ones that aren't.
 **Definition of done:** a minimum-credible phone node — M1 + attachments usable
 end-to-end + bridges stoppable/removable + one device-matrix pass (backup
 exclusion + migration). Direct connects on a LAN and degrades honestly on a WAN.
-
----
-
-## Milestone 3 — Design language implementation
-
-**Goal:** every surface adopts the three control sizes, the density
-rules, and the screen structures the design language called for at the time.
-Superseded by **Milestone 6** (HARDBRUT); kept here as a historical record — the
-old SPORE-authored design document this milestone shipped is retired.
-
-This is a **first-class milestone**, not scattered "nice-to-have" items. The
-tokens already exist and are generated (C3/C5-token half shipped #118/#119); the
-work below is the code half that changes what is on screen.
-
-| Task | Status | Notes |
-|---|---|---|
-| Design tokens single-sourced + generated into all surfaces (C3) | ✅ shipped | `design/tokens.json` → `generate.py`; CI drift job |
-| Control metrics generated (CONTROL 48 / CHIP 32 / ROW 56) (C5 token half) | ✅ shipped (#118) | Heights/paddings/radii/spacing guarded by drift job |
-| Usage matrix — what each control is *for* (C5 matrix) | ✅ shipped (#119) | Generator enforces the count and the touch-floor rule |
-| Android `Chip` + `ListRow` primitives; route ad-hoc sizes through them (C5 Kotlin half) | ✅ shipped (#133) | Chip (32dp preset) + ListRow (56dp row) |
-| Density & type hierarchy pass (C4) — ≤1 instructional sentence, progressive disclosure | ✅ shipped (#134) | Compact status, details disclosure, Mail h2 removed |
-| Bridges & Advanced information architecture (C6) — uniform rows, grouped sections | ✅ shipped (#136) | ListRow-based BridgeRow, Chip toggles |
-| Persistent identity + status header on web node (WV0) | ✅ shipped (#130) | Tokens, identity header |
-| Web node IA — distinct surfaces Mail / Feed / Bridges / Seed (WV1) | ✅ shipped (#132) | Tabbed navigation with 5 panels |
-| Site design-language execution (Site-2) — usage matrix + density everywhere | ✅ shipped (#138) | Hard edges everywhere (2px radius) |
-| Site navigation chrome + human/builder paths (Site-3) | ✅ shipped (#137) | 5 nav items: Try it, How it works, Get a node, Spec, Web node |
-
-**Acceptance (across the milestone):**
-
-- [ ] Only three interactive control heights exist, in the tokens and in the code.
-- [ ] Bridges uses uniform list rows; no heterogeneous full-width button stack.
-- [ ] Advanced is sectioned rows, not a tall card stack.
-- [ ] No working screen opens with more than one short instructional sentence.
-- [ ] Status chrome is compact — `0 peers · 65 stored`.
-- [ ] The site has persistent, clear navigation.
-- [ ] The web node has a persistent identity + status header.
-- [ ] Reduced motion is fully static; the standalone still makes zero external requests.
-
-**Definition of done:** every surface passes visual review. (Historical: at the time this milestone shipped,
-the checklist lived in the now-retired `docs/VISUALDESIGN.md` §8; superseded by M6/M7,
-which hold HARDBRUT upstream normative instead.)
 
 ---
 
@@ -192,6 +107,12 @@ seam and the communicator-as-façade pattern.
 groups) · **Feed** (personal microblog + subscribed feeds) · **Files** ·
 **Bridges** · **Seed**. The old Mail / Topics / Sealed-Topics panels are merged
 into Chats; the old shared `spore/feed` topic is replaced by per-address feeds.
+
+> The IA is intact but the **names moved** when M10-D rebuilt the web node on
+> HARDBRUT/3: Feed shipped as **Blogs**, and Bridges and Seed are both inside
+> **Settings**, alongside **Contacts** which this list never named. The surfaces
+> below map to what exists; the labels do not. Reconciling the two is M10-B's
+> job, since that is where the six domain stores get named once for every shim.
 
 > **Guardrail:** this stays a *reference* client, not "the" SPORE app. No feature
 > here requires the standalone HTML specifically; a bridge, a Python script, or
@@ -224,19 +145,8 @@ blob safely; this and the documented revoke limit are W7.
 
 | Task | Status | Notes |
 |---|---|---|
-| Encrypted DM — wasm exports (announce, send_direct, send_direct_sealed, open_dm, env_flags, env_src) | ✅ shipped (#116) | ABI half; sealed on the wire, sender authenticated |
-| Encrypted DM — thread list, compose, delivery honesty (no read receipts) | ✅ shipped (#131) | UI half; thread list, DM compose, honest decrypt |
-| Open group chat: join/create + public shout, clearly labeled public (W2) | ✅ shipped (#139) | Topic list, per-topic log, PUBLIC badge |
-| Private group (the authorized channel): shared-key/invite-blob room, "anyone with the key can post" banner (W3) | ✅ shipped (#141) | spore_topic_seal/open in wasm; resides in the Chats list, not a separate surface |
-| Microblog: publish to `feed::<addr>`, follow = subscribe (W4) | ✅ shipped (#142) | spore_node_publish/poll_feed, Feed tab with live poll |
-| Files: publish → magnet, fetch by magnet, progress UI, local search (W5) | ✅ shipped | spore_node_publish_file/fetch_file/list_files, Files tab |
-| Chat IA — unified conversation list: 1:1 + open groups + private groups in one list, type badges (1:1 / OPEN / PRIVATE), new-conversation picker, merge Mail + Topics + Sealed panels (W9) | ✅ shipped | Web node: 6 tabs → 5 (Chats, Feed, Files, Bridges, Seed). No protocol change |
-| Microblog IA — personal feed (`feed::<your_addr>`), subscribe by address (not shared `spore/feed` topic), merged subscribed-feeds timeline (W10) | ✅ shipped | Per-address feed naming; poll_feed now returns the authenticated `from`; groups + feeds demux on the topic hash |
-| Formatting + attachments — markdown (bold/italic/code/link) + file embed (magnet reference) in both chats and microblog (W11) | ✅ shipped | Client-side markdown (web/ui/markdown.mjs), XSS-safe (escape-before-markup); magnet:<> renders a download link |
-| WYSIWYG everywhere — a formatting toolbar over every writer: 1:1, open group, private group, microblog (W12) | ✅ shipped | Web already had it: one `wireFormatting(toolbar, input, preview)` helper serves both composers. Android was the gap — its chat composer gains B / i / `</>` / 🔗, and (the half that makes a toolbar honest rather than a syntax generator) bubbles now render those marks via `Markdown.render` instead of printing them literally. Composer state moved `String` → `TextFieldValue` because a formatting button needs the caret. Android's private-group *rows* remain W9–W11 |
 | W9–W11 Android parity — Chats list adds private groups; Feed adds per-address subscribe; formatting in chats | ⬜ todo | Android Chats already mixes DMs + PUBLIC; add private-group rows + per-address feed |
 | Public folder + `spore://` resolver (W6) | ⬜ todo | Sandbox foreign HTML (XSS) |
-| Private-group invite flow + documented revoke-by-rotation limit (W7) | ✅ shipped | `spore-group:<key hex>?n=…&k=…` — a prefix deliberately distinct from `spore:` so the two invite kinds cannot be pasted for one another. `invite::encode_group`/`decode_group` live in core and are exported to wasm, so browser and core cannot drift on the format. The checksum covers key *and* name: a mistyped key would otherwise open a room that is cryptographically fine and socially empty. The invite string **is** the key, so the UI reveals it only on request and states plainly that it cannot be recalled. Revoke limits in [Spec](SPEC.md) |
 | Continuity polish: export seed from new UI, docs updates (W8) | ⬜ todo | |
 | Zero-config bridge discovery: web node auto-probes a well-known local port/hostname + fetches a small catalog, instead of the user typing a bridge address | ⬜ todo | [Prns](https://github.com/KenAKAFrosty/Prns)'s browser SDK does this ("Auto Wi-Fi"): probes `ws://localhost:<port>` and `ws://<name>.local:<port>` plus a `GET /.well-known/…` catalog, with per-candidate exponential backoff and a seeded deterministic pick so concurrent tabs don't pile onto one gateway. SPORE's `bag` API already listens on a fixed port (7373) to localhost and the LAN — this is a client-side convention over what exists, not a new server surface |
 
@@ -256,115 +166,20 @@ same envelopes). Chats is one unified list; Feed is personal + subscribed.
 ## Milestone 5 — Polish & hardening
 
 **Goal:** the sweep-up after the above. **The milestone as a whole waits on M1–M4**,
-though small opportunistic fixes may land early when they're cheap and isolated —
-two already have (Android bridge sync check, `with_node` reentrancy guard). Nothing
-here is load-bearing for a credible node.
+though small opportunistic fixes may land early when they're cheap and isolated.
+Nothing here is load-bearing for a credible node.
 
 | Task | Status | Notes |
 |---|---|---|
-| Ring health UI + Export with FS warning | 🟡 ring health shipped (#67); export polish open | |
+| Export polish, with the filesystem warning | 🟡 partial | Ring health exists; the export side is what is left |
 | Private group `key_id` divergence badge | ⬜ todo | Warn on mismatch in a sealed group chat; never claim roster consensus |
 | Boot receiver (optional, default off) | ⬜ todo | |
 | Sound + particles behind a setting, default off | ⬜ todo | Gated by the hard rule above: motion static under reduced motion, sound and particle bursts off until the user enables them |
-| Android bridge list ⊆ BRIDGES.md sync check | ✅ shipped | In `check_docs_sync.py`. Fails if the app offers a bridge with no BRIDGES.md entry, or one still marked ⚪ planned — a control with no backend. Found the **TCP** bridge shipping in the app undocumented; entry added |
-| `with_node` reentrancy guard | ✅ shipped | Was a silent permanent deadlock — no panic, no log, a thread parked on a lock it held itself. Now panics naming the bug. Per-hub and per-thread, so contention between bridge threads and nesting across two hubs both stay legal |
 | SNR-weighted contention window on shared media | ⬜ todo | Today `Csma::schedule` waits a **random** 1–5× airtime before a flood and cancels if the id is overheard (§5.5); there is no signal-quality input anywhere in `src/`. [Meshtastic](https://meshtastic.org/docs/overview/mesh-algo/) instead gives the node that heard a frame *weakest* the **shortest** delay, so the most distant node rebroadcasts first and each hop covers the most ground, with nearer nodes then cancelling. That is a strict improvement to a mechanism SPORE already has: `schedule()` already takes the delay as a parameter, so only the delay computation and one signal-quality argument change — no wire change, pure local policy. The input is already in hand where it matters first: `esp32/src/radio.rs` reads `pkt.rx_ctrl` for `sig_len()`, and RSSI is a sibling field in that same struct (M8/E2) |
 | A node that carries its own traffic but relays nothing (a "companion" profile) | ⬜ todo | `set_bulk_budget`/`register_limited` cap *other people's file chunks* only; messages, announces, receipts and manifests always pass, so there is no way to say "do not relay for others" — the case for a phone on battery, or a node on a metered link. [MeshCore](https://github.com/meshcore-dev/MeshCore) ships this as a fixed `Companion` role that never repeats, which it argues also keeps bad paths out of the routing table. For SPORE it must be **local policy, not a protocol role** — a relay budget of zero, chosen by the operator and invisible on the wire — because M8's locked rule is that gateway behaviour is emergent and "if a gateway role ever needs writing, something has gone wrong." Needs an honest UI: a node that relays nothing is a worse citizen, and should say so rather than look identical to one that does |
 | Beacon duty-cycle measurement | ⬜ todo | HARDWARE.md procedure |
 | Two-real-NATs Direct punch verification | ⬜ todo | `HARDWARE.md` row 19; loopback-only today |
 | Hardware matrix pass (backup exclusion + migration + 7-day FS) | ⬜ todo | Needs a device; `android/TESTING.md` checklist exists |
-
----
-
-## Milestone 6 — HARDBRUT visual language
-
-**Goal:** replace the Neo-Tokyo Tactical Wasteland design language with
-**HARDBRUT** (`supernihil/hardbrut`, v0.6) across all three surfaces — the web
-node, the Pages site, and the Android app. HARDBRUT is a light-first
-neubrutalist system: cream paper `#fdfaf2`, black ink, yellow `#ffd23f` actions,
-**zero border-radius** (except true circles), and hard offset shadows
-(`5px 5px 0 #000`, no blur) that stay on every element and vanish only during a
-press. Two button kinds — default (yellow) and cancel (white). Auto dark mode.
-
-**Locked decisions (so the three surfaces cannot drift):**
-
-| Question | Decision |
-|---|---|
-| Does HARDBRUT replace the Neo-Tokyo palette? | **Yes, entirely.** `--void`/`--phosphor`/`--pink-on-olive` and the CRT look are retired. `design/tokens.json` is rewritten to HARDBRUT tokens and regenerated into all three surfaces. |
-| Zero external requests / reduced motion | **Unchanged — CI-enforced hard rules.** HARDBRUT already gates motion on `prefers-reduced-motion`; the standalone must stay self-contained (no webfonts, no CDN). |
-| Impact display face | HARDBRUT's `--font-display` is `Impact, "Arial Narrow Bold", Haettenschweiler` — a system stack, no webfont, which satisfies constraint 1 exactly as the old stack did. |
-| The `--prose` long-read token | **Dropped.** HARDBRUT body copy is full ink on paper — already the most readable pairing, no desaturation needed. |
-| "Never pink on olive", the old contrast table | **Retired with the palette.** Replaced by HARDBRUT's own measured pairs (black on `#fdfaf2` ≈ 18.64:1; yellow `#ffd23f` on black ≈ 12.74:1). The generator is updated to assert *these*. |
-
-**Tasks** (each a PR; tokens first, then surfaces, then the spec):
-
-| Task | Status | Notes |
-|---|---|---|
-| Rewrite `design/tokens.json` to HARDBRUT values + regenerate `site/style.css`, `web/build-standalone.mjs`, Android `Chrome.kt`, and VISUALDESIGN's contrast table | ✅ shipped | `design/generate.py` inverted to light-first; `--ink #000`, `--paper #fff`, `--bg #fdfaf2`, `--yellow #ffd23f`, `--muted #666`, radius 0, border 3px, throw 5px, plus an `--onyellow` dark-mode token. CI drift job keeps them in sync |
-| Web node → HARDBRUT (css tokens + components: two buttons, zero radius, hard shadows) | ✅ shipped | Inline `<style>` in `build-standalone.mjs`; zero external requests + reduced-motion kept |
-| Site (`site/style.css` + `build.mjs` + `home.md`) → HARDBRUT | ✅ shipped | Solid paper header + 4px ink bottom border; zero radius; hard `var(--shadow)`; CRT VFX removed; SVG illustrations recoloured |
-| Android (`Chrome.kt` + all Compose screens) → HARDBRUT | ✅ shipped | Flat two-theme Palette (suffixless light + `Dark`-suffixed dark); scanslines/bloom removed; crate = zero-radius paper + hard shadow; two button kinds via `CrateButton` face |
-| Rewrite `docs/VISUALDESIGN.md` to the HARDBRUT language (new tokens, components, contrast, screen structures) | ✅ shipped | Intro, §1 heading, §3 components and §4 VFX rewritten; the old Neo-Tokyo §1/§3/§4 content superseded |
-| Android adaptation guide committed into the repo | ✅ shipped | Now the "Android → HARDBRUT token mapping" section of `docs/DEV_GUIDE.md` (token mapping, hard-shadow workaround, two button kinds, typography) — folded in from the standalone `HARDBRUT-ANDROID.md`, which wasn't a site page and had no other referrer |
-
-**Definition of done:** all three surfaces render HARDBRUT (cream paper, black
-ink, yellow primary / white cancel, zero radius, hard no-blur shadows held on
-every element); the standalone still makes zero external requests and is fully
-static under reduced motion; the drift job regenerates HARDBRUT tokens into all
-three surfaces and passes.
-
----
-
-## Milestone 7 — HARDBRUT as the framework (build-time import), not a copy ✅
-
-**Goal:** stop maintaining a *forked copy* of HARDBRUT inside SPORE's own CSS.
-Today `design/tokens.json` + `generate.py` re-emit a subset of HARDBRUT tokens
-into `site/style.css`, the standalone's inline `<style>`, and Android's
-`Chrome.kt` — a hand-maintained clone that forks the moment `supernihil/hardbrut`
-moves. M7 replaces all of it with the **real `hardbrut.css` vendored at build
-time**, and rebuilds both web surfaces' markup around HARDBRUT's actual classes
-(`.navbar`, `.hero`, `section`, `button`, markdown, `data-accent`, `data-theme`).
-
-**Build-time import (locked).** The web build pulls `hardbrut.css` from
-`supernihil/hardbrut` *during the build* and inlines it into the Pages site
-(`site/build.mjs`) and the standalone (`build-standalone.mjs`) — there is no
-`site/style.css` anymore. A change to the HARDBRUT repo is reflected on the next
-rebuild — no runtime `@import`, so the standalone keeps its **zero-external-
-request** CI guarantee. The vendoring dir and the remote/ref are pinned and
-documented so the import is reproducible, not a silent network dependency of
-every CI run.
-
-**Android (locked).** Compose has no CSS to `@import`, so Android gets its own
-vendored source instead: `android/app/src/main/kotlin/org/spore/node/vendor/
-Hardbrut.kt`, `supernihil/hardbrut`'s official Compose port, pulled live by
-`android/hardbrut-sync.py` — same "always latest, pinned ref, no runtime fetch"
-contract as the CSS side. `Chrome.kt`'s tokens alias that file's `HardbrutTokens`
-directly; only dark mode (which that file doesn't define) still comes from the
-vendored CSS. `Chrome.kt` keeps the Compose primitives that XML cannot express
-and that the drop-in file doesn't provide — press-feedback shadows, touch
-targets, `Chip`/`ListRow`/`ToughbookField`/`CrateSwitch`/`SegmentedLed` — but
-now builds their static shadow-drawing on the vendored `hardShadow()` rather
-than a third hand-rolled copy of the same offset-rect math.
-
-**Tasks** (each a PR):
-
-| Task | Status | Notes |
-|---|---|---|
-| Vendor `hardbrut.css` into the repo at build time (pinned remote + ref, inlined by `build-standalone.mjs` and `site/build.mjs`) | ✅ shipped (#146) | `ref: 'main'` — upstream is always the source of truth. `node web/hardbrut-sync.mjs` re-pulls the committed copy on demand; the build never fetches live, so CI stays deterministic and the standalone zero-request |
-| Scrape the standalone HTML down to barebones markup and rebuild it on HARDBRUT classes (`section`, `navbar`, `button`, `.card`, markdown) | ✅ shipped (#146) | Inline `<style>` is HARDBRUT plus a minimal app-shell adapter (tab bar, log, toolbar — no HARDBRUT equivalent). Presentation only; app logic unchanged |
-| Rebuild the Pages site on HARDBRUT classes; remove `gen_site_css` hand CSS | ✅ shipped (#147) | `site/style.css` deleted outright, not kept as an `@import` shell. `site/build.mjs` inlines the vendored CSS plus a thin adapter (reading width, code-copy, print); markup rebuilt on HARDBRUT classes, nav made responsive via `.navbar-toggle`. Hand-drawn story-card SVGs removed |
-| Android regenerates its palette from the vendored source; drop the copied token table in `design/generate.py` | ✅ shipped | Android vendors HARDBRUT's official Compose port (`vendor/Hardbrut.kt`, pulled by `android/hardbrut-sync.py`) rather than reparsing CSS; `Chrome.kt` aliases its `HardbrutTokens` instead of copying colours and draws shadows via its `hardShadow()`. **The one gap between the two vendored sources:** that port has no dark mode, so `design/generate.py` still parses the vendored CSS's `[data-theme="dark"]` block for four hexes. `Chrome.kt` keeps only what the port lacks — press feedback, touch targets, `Chip`/`ListRow`/`ToughbookField`/`CrateSwitch`/`SegmentedLed`/`ConfirmDialog`. Upstream compile bugs are patched narrowly via `android/hardbrut-sync.py`'s `COMPILE_FIXES`, which is empty again — the mechanism stays for next time |
-| Remove the now-redundant `design/tokens.json` + `gen_site_css` token emission; the drift job becomes "vendored css is in sync with the pinned ref" | ✅ shipped | `gen_site_css`, `gen_standalone_css`, `gen_visualdesign_md` and the WCAG contrast machinery are gone — no SPORE-authored contrast claim left to protect. `tokens.json` keeps only the Android control-size table, which has no HARDBRUT source to regenerate from. The drift job now verifies both vendored copies against their pinned refs (the one job allowed to touch the network), then that Android's `Palette` matches |
-
-**Definition of done:** `site/build.mjs` and the standalone's CSS are the vendored
-`hardbrut.css` (plus a thin SPORE-asset layer), not a fork; editing
-`supernihil/hardbrut` and rebuilding SPORE changes all three surfaces — the two
-web surfaces on the next `hardbrut-sync.mjs` + rebuild, Android on the next
-`hardbrut-sync.py` + `design/generate.py`; the standalone still makes zero
-external requests; Android's `Chrome.kt` aliases the vendored `Hardbrut.kt`'s
-tokens and shadow primitive rather than maintaining its own copy, keeping only
-the product-specific primitives (touch targets, press feedback,
-`Chip`/`ListRow`/etc.) that file doesn't provide.
 
 ---
 
@@ -454,19 +269,11 @@ design task; what is missing is the firmware side of each.
 
 | Task | Status | Notes |
 |---|---|---|
-| esp-idf-sys toolchain scaffold: core builds and links for ESP32-S3, with a CI cross-compile job (E1) | ✅ shipped | `esp32/`, its own workspace root like `android/jni`. The core cross-compiles **unmodified** — no ESP `cfg` branches, no feature gates, a plain path dependency. CI builds it in Espressif's Docker image (Xtensa is not an upstream Rust target) and reports the footprint |
-| Randomness nutrient: confirm `OsRng` resolves to ESP-IDF's hardware TRNG (E1) | ✅ shipped — **no shim needed** | The `cfg(target_arch = "wasm32")` getrandom block in `Cargo.toml` had no ESP counterpart to write: getrandom 0.2 supports `target_os = "espidf"` natively and routes to `esp_fill_random`. Verified by compiling; that it returns real entropy is a device-run claim |
-| Time nutrient: a `now: u32` source, shipping [Spec](SPEC.md) §Time's no-trusted-clock behaviour first (E1) | ✅ **run on hardware** | A cold-booted board with no RTC battery *is* the "no trusted clock" node the spec already covers: relay regardless, age by dwell, drop after 7 local days. NTP-over-Wi-Fi is a stretch goal, not a blocker |
-| Scheduling nutrient: a FreeRTOS periodic task calling `Node::tick` (E1) | ✅ **run on hardware** | Absent from the previous version of this table. Without it the runtime silently regresses to maintaining itself only when traffic happens to arrive ([Spec](SPEC.md), runtime contract) — worst on exactly this kind of solo, often-offline node |
-| Solo bring-up smoke test: boot, fresh identity, one self-signed envelope logged over UART, a tick observed firing (E1) | ✅ **verified on hardware** | LOLIN S2 Mini (ESP32-S2FNR2 rev v1.0), 2026-08-25. Boots, generates an identity (`addr=8a82bcbd735aed52`), and **a signature it makes verifies on the board** (`sig=ok`) — ed25519 works on this silicon, not merely compiles for it. Tick loop on schedule; **live heap 226,368 bytes free**, the runtime figure section sizes cannot give. Checked by `esp32/diagnose.py`, not by reading a log |
-| Promiscuous RX filter: SPORE v1 header match, instant-discard on miss (E2) | ✅ shipped (#171) | `Envelope::probe` — walks the header, returns the wire length or `None`, allocates nothing. Structural only: a hit means "worth decoding", never "authentic". Agreement with `decode` is asserted as a fuzz invariant, since it is a second front door for hostile bytes |
 | `esp_wifi_80211_tx` injection wired as `DatagramTransport::send`, RX as `::recv`, driven through `run_datagram` (E2) | 🧪 written, not run | `esp32/src/radio.rs` (ESP-IDF glue) over `bridge::ieee80211` (the codec, portable and CI-tested, shared with E2d). Promiscuous RX filtered to management frames in hardware, then `ieee80211::parse` → bounded queue → `recv`. Builds clean; **nothing has been transmitted or received on air** |
 | Solo TX-shape test: an external monitor-mode sniffer confirms the injected frame's shape (E2) | ⬜ todo | Proves the injection path without needing a second SPORE node |
 | Device-pair relay: two boards exchange a real envelope over the air (E2) | ⬜ todo | 🧪 until this run happens |
 | Linux daemon raw-802.11 bridge: monitor mode + injection over `nl80211`, same frame format as the board (E2d) | ⬜ todo | The other end of the same air interface, so a laptop relays with the boards rather than only talking to them over a tether. Shares the frame layout and `Envelope::probe` filter with the ESP path — one wire format, two implementations. Needs a card whose driver supports monitor + injection (`iw list` → "monitor" and "AP/VLAN"), which is a hardware constraint, not a code one |
-| Frame-format note in [Bridges](BRIDGES.md): the exact 802.11 header, vendor tag and payload layout both sides implement (E2d) | ✅ shipped | Vendor-specific Action frame, category 127, on the same mechanism ESP-NOW uses — the one shape an ESP32 is known to inject without association. Fixed BSSID `02:53:50:4F:52:45` (`02` + "SPORE") and a locally-administered OUI, so two boards agree with no configuration. MTU stays 🧪: the 2304 MSDU is the standard's ceiling, not what a driver will inject |
 | Flash partition setup (custom `partitions.csv`, mount/format-on-first-boot) (E3) | 🧪 written, not run | **SPIFFS, not `littlefs`** — see the note below. `esp32/src/storage.rs`. The table is applied at *flash* time, not build time: esp-idf-sys's generated CMake project lives under `target/` and cannot see a CSV in the crate root, so `CONFIG_PARTITION_TABLE_*` silently does nothing. 1500K app / 2400K store |
-| ~~A flash-backed `SpillBackend`~~ — **not needed** (E3) | ✅ shipped, no new code | ESP-IDF exposes filesystems through VFS, so `std::fs` works once a partition is mounted and the core's existing `FsSpill` runs unmodified. E3 was written as "implement the existing contract, not a new one"; mounting a filesystem satisfies that literally |
 | Adopt the last run's spill at boot (E3) | 🧪 written, not run | `Node::set_spill_dir` builds the backend and adopts in one call, re-verifying every id against its bytes — a file SPIFFS damaged is discarded rather than trusted, because an id *is* the hash of its content |
 | Power-cycle test: spill past the memory budget, cut power, confirm the adopted set matches (E3) | ⬜ todo | 🧪 until logged in [Hardware verification](HARDWARE.md). A genuinely new row — real flash and real power loss, not merely "not CI-testable" |
 | Wired tether: KISS over a byte stream, registered as an ordinary bridge (E4) | 🧪 written, not run | `esp32/src/tether.rs`. No new framing and no new transport — `bridge::kiss_stream` and `stream_link::run_split`, the same loop the desktop serial bridge runs. **UART on the S2, USB-CDC on the S3**, per board: the S2 has one USB peripheral and the console already owns it, so KISS frames would interleave with log text. The S3 has USB-Serial-JTAG *as well*, which is what makes a USB tether possible there |
@@ -526,56 +333,6 @@ envelopes over raw 802.11 to at least one other node, bridges to a phone or
 laptop over USB (KISS) with BLE as the low-bandwidth fallback, and its store
 survives a power cycle via flash — with `HARDWARE.md` recording a real
 device-pair run, not just green CI. 🧪 until then.
-
----
-
-## Milestone 9 — Threat-model legibility & anti-abuse guardrails ✅
-
-**Goal:** close the gap between what SPORE's protocol already does (stamp
-anti-spam, congestion control, mix-mode anonymity, custody re-verification —
-all real, all in `SPEC.md`) and what a competent outside reader can find out
-without reading the wire format. Triggered by an external architecture
-comparison (Meshtastic/Reticulum/SPORE) that raised real questions — Sybil
-resistance, replay, metadata leakage, delivery semantics, "who pays the
-storage cost" — nearly all of which `SPEC.md` §5/§7/§9/§10 and
-`SECURITY_FINDINGS.md` already answer. The reviewer couldn't find those
-answers from the public site, which is itself the finding: this milestone is
-documentation and UX legibility, not new protocol.
-
-| Task | Status | Notes |
-|---|---|---|
-| `docs/THREAT_MODEL.md` — six chapters, each threat carrying *capability → attack → asset → mitigation → **residual risk** → out of scope*, cross-referenced to the SPEC section and `SECURITY_FINDINGS.md` ID that defends it | ✅ shipped | Also registered on the site (`threat-model.html`, off the Developer hub) rather than left repo-only — discoverability was the whole point |
-| **S-032 — delivery-receipt forgery (§8)** | ✅ shipped (#196) | Found while auditing the catalogue's "ACK and receipt spoofing" item against the code. Receipts were accepted on payload *shape* alone — unsigned, or signed by any stranger — because the id they reference is public (it rides in every `INV`). `Pending` now records the destination and the receipt must be signed by it. Local state only; no wire/ABI change |
-| Audit pass for the catalogue items with no obvious SPEC answer: wormhole/eclipse against "first copy wins" path learning, identity-key revocation while disconnected, crypto agility under a frozen wire | ✅ shipped | All three in `THREAT_MODEL.md` ch. 3/5/6. **Wormhole/eclipse:** bounded and non-transitive — `absorb_announce` never parses a peer's third-party paths and the reference build always sends `np=0`, so an attacker can dominate only its own neighbours' front-of-list entry. **Identity-key revocation:** a real, stated gap; social/out-of-band only. **Crypto agility:** deliberate — `ver` is exact-match, so a v2 wire is a hard fork by construction |
-| Honest-relay retention statement: what an *honest* carrier's storage reveals if seized | ✅ shipped | A table in `THREAT_MODEL.md` with real per-table numbers. The honest conclusion: content stays exactly as protected as §7 makes it, whoever seizes the device — but `paths` is a real, if partial, social graph, built from ordinary operation with no malice required |
-| Locked design guardrail: **no popularity/frequency-weighted replication** without a documented Sybil analysis first | ✅ shipped | In `THREAT_MODEL.md` ch. 3 as a blockquoted guardrail. Nothing in the codebase needs it today — stamp and quotas are both identity-agnostic — it exists so a future reputation/social-routing feature cannot skip the analysis |
-| Public docs/site pass making the already-shipped anti-abuse and privacy mechanisms discoverable: stamp PoW, congestion control, custody re-verify-on-read, mix mode, and the "an underlay with its own routing is just one interface" framing | ✅ shipped | Two new cards on `how-it-works.html`, each linking into `threat-model.html`/`spec.html` at the exact section rather than the page top; `home.md`'s "Being straight with you" card now links to the threat model instead of ending on an unsupported claim. Anchors are verified by the build, which fails on any broken internal link |
-| Delivery-status UX language pass (Android/webnode): surface the ACKREQ receipt and store/expiry state as plain states rather than raw TTL/hop-count internals | ✅ shipped | Three states on both surfaces: **delivered** (a receipt came back), **expired — undelivered** (the envelope's lifetime passed with no receipt), **still travelling** for everything between — collapsed on purpose, because the core has no event distinguishing "still resending" from "relying on passive custody", and a status line should not invent precision the protocol lacks. `DEFAULT_MESSAGE_EXPIRY_SECS` replaces a `7 * 86400` literal at seven call sites and is read by both UIs, so "expired" cannot drift from the envelope's own `expiry`. Web gained delivery tracking it never had (`spore_node_acked`, polled every 10 s), as a real rule with its own boundary tests rather than an inline function reachable only through a browser. That rule first shipped as `web/ui/delivery-status.mjs`; M10-D retired the module (`chat.mjs` renders the state, `spore-client.mjs` decides it) and moved its coverage into `web/app/spore-client.test.mjs`, which pins the exact edge — past its own expiry with no receipt — because that is the difference between telling someone a message is still travelling and telling them it never arrived |
-
-**Explicitly not doing here** (already solved, would duplicate shipped work):
-replication/copy-count limits (§5.4 congestion control + dedup + store
-eviction), spam/"postage" (§10 stamp + quotas), forward secrecy (§7 ratchet +
-prekey ring + healing topic-key rotation), transport abstraction (Part II's bindings —
-already the core design). Named "delivery policy" presets (Urgent/Efficient/
-Private/Carry/Emergency) were considered and deferred: the underlying knobs
-(stamp, hops, FLOOD, mix toggle) already exist, and packaging them as named
-UX presets is a candidate for M5 polish, not core protocol — revisit only if
-it survives the MISSION.md decision test against "bloats the mental model
-past two pages."
-
-**Definition of done:** a reader can go from `README.md` to a real answer for
-"what stops someone from flooding my device with junk" and "what can a
-carrier who relays my envelope learn" without reading `SPEC.md` cover to
-cover; `docs/THREAT_MODEL.md` exists, covers the six chapters, and every claim
-in it links to either a SPEC section or a `SECURITY_FINDINGS.md` ID — with a
-residual-risk line wherever the honest answer is "partially" or "not at all".
-
-**Why this milestone earns its place** (it is otherwise just documentation):
-auditing an external threat catalogue against the code found **S-032**, a
-receipt-forgery bug that had been shipping. The catalogue's value was not its
-recommendations — most were already implemented — but that it named a class
-("authentic ≠ fresh ≠ from the right party") precise enough to test. That is
-the argument for doing the remaining audit rows rather than only the prose.
 
 ---
 
@@ -701,19 +458,11 @@ G5 is the true blocker — it gates G1–G4, and it is the smallest piece.
 
 | Task | Status | Notes |
 |---|---|---|
-| M10-A `Storage` port: trait + native fs impl + wasm impl calling a JS import | ✅ shipped | The trait and the native impl already existed; only the wasm backend was missing, and `Node::set_spill_backend` already existed "for a runtime whose storage nutrient is browser IndexedDB, MCU flash, or anything else". Four `spore_store_*` imports, same pattern as `spore_fill_random`. Synchronous by necessity — a wasm import cannot await, which rules IndexedDB out and makes `localStorage` (quota-bounded) the browser backing |
 | M10-B `communicator` module in `src/`: Identity, Thread, Topic, Bridge, Transfer, Contact stores | ⬜ not started | The six stores from the Phase-2 architecture definition, in Rust |
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | ⬜ not started | **`bindings/spore.h` is frozen** — needs `allow-frozen-change`, or an additive app-level ABI beside it |
-| M10-D Web node rebuilt on HARDBRUT/3 as a thin shim over `SporeClient` | ✅ shipped | All five screens: onboarding, chats, contacts, settings, files, blogs. Six domain stores less the two M10-B owns. Three kernel gaps closed on the way, each the same shape — the capability was already in the portable core and only the wasm export was missing: `spore_node_peers`, `spore_node_files`, and `spore_node_unsubscribe`/`spore_node_topics`. Two core bugs fixed: delivery receipts could never reach the sender on a two-node link, and file fetch never worked in the shipped node |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
 | M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
 | M10-G SDK packaging/release plan for the app-level ABI, once M10-C lands | ⬜ not started | [Prns](https://github.com/KenAKAFrosty/Prns) already ships "one core, many language bindings" at wider scope — Rust/TS/Python/.NET/Go/Swift/JVM/Julia/C via `prns-host/bindings/*`, with a staged qualify→promote pipeline per SDK. A concrete reference for how each UI shim's release process could work; M10 doesn't currently address packaging at all, only that the ABI exists |
-
-**Fixed during M10-D:** delivery receipts could never reach the sender on a
-two-node link — a pre-existing bug on every platform, so M9's "delivered" had
-never been reachable point-to-point. Receipts were emitted with the *arrival*
-interface as `except`, which is precisely the route home. Fixed in the core and
-in the wasm forward encoding; wire unchanged.
 
 **Scope: the web node is not the landing site.** Two different products live in
 this repo and M10 touches exactly one of them.
@@ -727,7 +476,7 @@ Separate builds, separate artefacts; the only coupling is that `site/build.mjs`
 imports the vendoring helper and renders `web/README.md`. **M10 rebuilds the web
 node only** — moving the site onto HARDBRUT/3 would be its own milestone, since a
 docs site and a mesh client share almost no components, and conflating them is how
-the design language forked the first time (M6/M7).
+the design language forked the first time.
 
 **Design system.** M10-D consumes **HARDBRUT/3**, a three-layer rebuild
 (primitive tokens → semantic roles → patterns) of `supernihil/hardbrut`, vendored
@@ -833,25 +582,21 @@ correction — which is what the fountain is good at, and rateless open-loop is 
 more defensible *per hop*, where the buffer is per-neighbour and short-lived,
 than end to end. **The fountain may well survive, relocated.** Measure it.
 
-**Broadcast-only media — settled, and already shipped.** On a transport with no
-underlay address (`U = ()`: raw LoRa P2P, audio) a receiver cannot tell two
-senders apart, so reassembly cannot be keyed by neighbour and the per-neighbour
-argument does not reach it. The resolution is that **the interface is the finest
-unit of accounting a medium without addresses can offer**, and that is enough:
-anyone able to flood a shared radio with fragment sets can also simply jam it,
-which is cheaper and denies everything, so the reassembly budget adds no
-exposure the medium did not already have.
+**Broadcast-only media — the accounting unit M11-D must keep.** On a transport
+with no underlay address (`U = ()`: raw LoRa P2P, audio) a receiver cannot tell
+two senders apart, so reassembly cannot be keyed by neighbour and the
+per-neighbour argument does not reach it. **The interface is the finest unit of
+accounting such a medium can offer, and it is enough:** anyone able to flood a
+shared radio with fragment sets can also simply jam it, which is cheaper and
+denies everything, so a reassembly budget adds no exposure the medium did not
+already have.
 
-What did *not* survive scrutiny is letting that damage escape the radio. The
-partial budget was one global pool evicted oldest-first, so a loud link could
-empty it and take every other link's reassembly with it — a node's Ethernet
-transfers could be killed by its LoRa radio. `enforce_partial_budget` now charges
-each set to the interface it arrived on and evicts from the heaviest interface
-first, so a link can only ever spend its own share.
-
-Done ahead of M11-D rather than inside it: the rule holds for today's end-to-end
-fragments and keeps holding when reassembly moves to the link, and it was a live
-weakness in the meantime. See `Node::partial_sets_on`.
+What that budget must *not* do is let the damage escape the radio — one pool
+evicted globally lets the loudest link empty it and take every other link's
+reassembly with it. Charge each set to the interface it arrived on. This already
+holds for today's end-to-end fragments (`enforce_partial_budget`,
+`Node::partial_sets_on`) and M11-D must preserve it when reassembly moves to the
+link.
 
 **Tasks** (each a PR):
 
@@ -927,16 +672,19 @@ cleverer punch. Claim exactly what the ladder covers, never "arbitrary NAT trave
 
 1. **M1 — Security & correctness** (no P0 stays open)
 2. **M2 — Core functionality** (credible phone + daemon node)
-3. **M3 — Design language** (three sizes, density, screen structures)
-4. **M4 — Webnode as daily driver** (first runtime on the storage seam)
-5. **M5 — Polish & hardening** (only after the above)
-6. **M6 — HARDBRUT visual language** (replaces M3's language across all surfaces; tokens first, then surfaces, then the spec)
-7. **M7 — HARDBRUT as the framework** (vendored at build time, not a copy; all three surfaces done)
-8. **M8 — Embedded ESP32 runtime** (raw-802.11 relay; first real MCU target) — after the still-open carried-forward items in M2/M4/M5, not ahead of them, unless deliberately reprioritized
-9. **M9 — Threat-model legibility & anti-abuse guardrails** ✅ complete
-10. **M10 — One application layer, three UI shims** — already underway in parallel
-    with M8's remaining items (M10-D shipped shell, nav and onboarding); not
-    strictly queued behind M8/M9
+3. **M4 — Webnode as daily driver** (first runtime on the storage seam)
+4. **M5 — Polish & hardening** (only after the above)
+5. **M8 — Embedded ESP32 runtime** (raw-802.11 relay; first real MCU target) — after the still-open carried-forward items in M2/M4/M5, not ahead of them, unless deliberately reprioritized
+6. **M10 — One application layer, three UI shims** — the three ABIs have already
+   diverged, and every capability gap hit while building the web node had the same
+   shape: the capability present in the portable core, only the export missing
+   (`spore_node_peers`, `spore_node_files`, `spore_node_unsubscribe`). M10-C is
+   the answer to that pattern
+7. **M11 — Fragmentation where it belongs** — M11-A first, since it is what the
+   rest is argued against; M11-D fixes a live cross-MTU delivery failure
+
+The gaps in the numbering are milestones that finished. They are not summarised
+here — see `git log`.
 
 Hardware/community work (the former "Track H" — lived-in prototype, solar cyberdeck,
 wear language, community harvest, maintainer culture) is deliberately **not** a
@@ -950,32 +698,3 @@ promise; no replacement doc is planned — HARDBRUT upstream has no opinion on
 hardware/community concepts, so there is nothing for it to be normative about.
 
 ---
-
-## Tasks removed or heavily changed from the old PR-map
-
-| Old item | What happened | Reason |
-|---|---|---|
-| PR0 (ratchet TTL + zeroize + offline knobs) | Folded into **M1**, marked ✅ | Already shipped; spec deleted, code is the truth |
-| PR1–PR9 detailed specs | Consolidated into **M2** status rows | Shipped PRs lose their specs (code = truth); open items are carried-forward gaps |
-| Docs-1/2/3, D1 editorial review | Removed | Already shipped (#55–#57, #111/#112); this rewrite is the last of that work |
-| C1/C3 token parity + generation | Removed (shipped) | Superseded by M3's token/usage-matrix rows |
-| C4/C5/C6/B11 as separate PRs | Consolidated into **M3** | One design-language milestone, not four overlapping tracks |
-| Site-2/Site-3/WV0/WV1 as separate tracks | Consolidated into **M3** | All are design-language implementation work |
-| W0 (wasm API audit) | Removed (shipped) | W1 ABI half shipped (#116); the audit is done |
-| W1–W8 phased PRs | Consolidated into **M4** | One webnode milestone with status rows |
-| P-Runtime-1/2 | Folded into **M2**, marked ✅ | Shipped (#87, #90) |
-| P-Direct-NAT | Folded into **M2**, marked ✅ | Shipped (#114); punch 🧪 until two-real-NATs test |
-| P-Mix-Runner | Kept, moved to **M5** | Anonymity toggle + example operator; not load-bearing for a credible node |
-| P-Group-Roster | Out of scope (locked) | Sealed topic + honest UX is the shippable answer; real roster is a future protocol project |
-| Track H (H1–H7 hardware/community) | Removed from the plan | `⬜ concept` with no software dependency; was written up in the now-retired `VISUALDESIGN.md` §6b as inspiration |
-| Suggested calendar / branch-naming sections | Removed | A milestone plan does not carry a week-by-week calendar that is immediately stale |
-| PR write-up template | Removed | Shipped PRs don't need it; open PRs inherit the milestone's acceptance criteria |
-| Conformance gaps section | Folded into **M2** | One row (browser↔native over QUIC/WebTransport) remains open and is now in M2 |
-| Carried-forward (detailed per-PR) | Folded into **M2** carried-forward list | One list, not three per-PR subsections |
-| Plan health check / audit ID index | Removed | Process artefacts of the old PR-map; the milestone structure is the health check |
-| "North star" narrative | Removed | The priority compass + milestone definitions of done say the same thing in less prose |
-
----
-
-*Actionable plan derived from the 0.6.0 tree, the audit tour, and the new design
-language. Update when work lands or hardware results arrive.*

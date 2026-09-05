@@ -37,7 +37,7 @@ company.
 2. **A live plane (Direct)** — multi-transport datagrams; signaling in
    envelopes; NAT traversal solved **once** (reflexive candidates, hole-punch,
    explicit relay). See [`docs/DIRECT.md`](DIRECT.md) and
-   [`docs/ROADMAP.md`](ROADMAP.md)'s P-Direct-NAT track.
+   [`docs/ROADMAP.md`](ROADMAP.md)'s "Direct NAT traversal — settled" decision.
 3. **Façades** — localhost bridges so browsers, mail clients, softphones,
    XMPP, folders, and `spore://` keep working on top of SPORE.
 4. **Nodes people can run** — Android, desktop, browser/wasm, daemon,

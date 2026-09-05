@@ -244,7 +244,7 @@ avoided even on TCP.
 | Android (JNI + Kotlin) | 🧪 compile-checked only — no device has run it |
 | BLE / ESP-NOW adapters, `CLOSE`/`REKEY` | ⬜ not built |
 
-Reachability, by candidate — see [Roadmap](ROADMAP.md)'s P-Direct-NAT track:
+Reachability, by candidate — see [Roadmap](ROADMAP.md)'s "Direct NAT traversal — settled" decision:
 
 | Path | State |
 |---|---|
