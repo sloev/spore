@@ -31,14 +31,17 @@ A SPORE message is a **signed postcard**: to, from, expiry, payload, signature.
 Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't
 seen, hands copies to anyone it meets who wants them, and drops duplicates and
 expired mail. That alone is a working planetary network. Of the four hard
-features — forward secrecy, fountain fragmentation, congestion control,
-anonymity — only congestion control touches the router; the rest live inside
-payloads.
+features — forward secrecy, fragmentation, congestion control, anonymity — only
+congestion control touches the router. Forward secrecy and anonymity live inside
+payloads; fragmentation lives *below* the router, in the bridge, where a hop that
+cannot carry a frame splits it and the far end puts it back.
 
 **Tiers** (all interoperate): **T0 carry** ≈60 lines: parse, dedup, store,
 deliver, damped flood · **T1 sync** +≈80: ANNOUNCE/INV/WANT, watermarks ·
 **T2 route** +≈100: paths, directed unicast, custody. Endpoint extras (ratchet,
-fountain, mix) never change relays.
+mix) never change relays. Link fragmentation sits under all three: it is a
+property of a *link*, not of the router, and a node that never meets a narrow
+link never runs it.
 
 **Threat model, stated once:** every link is hostile — logged, spoofed, jammed,
 MITM'd. Links are trusted with *nothing*; authenticity and secrecy live only in
@@ -92,7 +95,19 @@ provably hold your key; relays never verify — endpoints do (see "Verify before
 binding trust state", Part II). **No priority field: priority is bought, not
 claimed** (§10 stamp).
 
-## 3. Fragmentation — fountain coded
+## 3. Fragmentation — fountain coded, end to end
+
+**This is not how an envelope crosses a narrow hop.** That is link
+fragmentation (Part II), which splits below the node and below the signature,
+reassembles at the far end of the same link, and never puts a fragment on the
+mesh. This section describes the *end-to-end* form: the sender splits once, at
+its own MTU, and only the destination reassembles.
+
+Keeping both is redundant, and the end-to-end form is the one that goes. It
+cannot repair the case it exists for — a fragment carries no nesting, so frames
+cut for a 1400-byte link die at the first 237-byte hop they meet and no node on
+the path can fix it. It is described here because it is still on the wire, not
+because a new implementation should emit it.
 
 payload = `[orig_id:16][index:2][count:2][chunk]`; all chunks equal size (pad the
 original; the envelope self-delimits). Fragments are ordinary envelopes (own IDs,
@@ -216,6 +231,12 @@ by peer's topics + carriable unicast + per-neighbor watermark), peer replies
 **WANT**, send those. INV/WANT: hops=0, unsigned, consumed, never stored or
 relayed. Serving WANT is budgeted per interface, or it is a reflection amplifier.
 
+A WANT payload is concatenated 16-byte ids, optionally followed by **one trailing
+byte of remaining depth**. Ids are 16 bytes, so an odd byte on the end is
+unambiguous; a WANT without one is a plain request and gets the default. That
+byte is what bounds recursive pull (Part III) — the envelope itself is still
+never forwarded.
+
 **Custody:** push stored unicast to any peer that *is* the destination or
 announces a fresher path. A file or sheet of paper is concatenated envelopes;
 import = receive. Every boat, cyclist, or HF skywave contact merges two regions.
@@ -227,9 +248,54 @@ the shareable **magnet**. A manifest that outgrows one envelope nests — interi
 nodes `[0x08][depth:1]…` name manifests a level down, so the root stays one frame
 and one signature at any file size, and only the root is signed (an ID is the
 hash of its bytes, so the tree authenticates itself). Sealed to one recipient:
-`[0x09][depth:1][hdr_len:2][hdr]…`, `hdr` = the file key + real name sealed to
-their prekey, each chunk then encrypted under that key with the chunk index as
-nonce. See Part III for the layer built on this.
+`[0x09][depth:1][hdr_id:16]…`, where `hdr_id` names a separate object holding the
+file key and real name sealed to their prekey; each chunk is then encrypted under
+that key with the chunk index as nonce. The header is *named* rather than carried
+so a sealed root fits a small frame — inside the root it pushed the floor past
+256 bytes, which no LoRa profile clears. See Part III for the layer built on this.
+
+## Link fragmentation — crossing a hop that cannot carry the frame
+
+A bridge whose link has a smaller frame than the envelope splits it, and the far
+end of that same link puts it back. **Below the node and below the signature**: a
+fragment lives for one hop, is never relayed, and the router is never shown one.
+
+    [0xF6][set:2][idx:2][count:2][chunk …]        7 bytes
+
+**This is link framing, not wire.** A fragment never leaves the link, so its
+shape is a bridge's business the way KISS is, and it is not part of Part I. That
+is what makes it cheap: seven bytes against the thirty-six §3's end-to-end header
+costs, which on a 54-byte Zigbee frame is 47 usable bytes per fragment instead of
+18. `0xF6` is the discriminator because an envelope's first byte is `VER` = 0x01,
+so a receiver tells the two apart without being told and a peer that never
+fragments is unaffected.
+
+**Repair symbols.** An envelope cut into n pieces arrives only if all n do, so a
+link dropping 10% of frames loses about 46% of fragmented envelopes. A sender MAY
+therefore send `index ≥ count` repair symbols — the same erasure code as §3, so
+any n of the n+r sent reconstruct. Measured over 200 trials of a 900-byte
+envelope on a 237-byte frame: one repair symbol takes 10% loss from 54% delivered
+to 90%, and two take it to 96%. Repetition instead of a code manages 70% for the
+same redundancy, because a duplicate only helps if it lands on a gap.
+
+How many is **local policy** — the sender picks, the receiver decodes whatever
+arrives, and the two never agree on a number. The default is a quarter of the
+set, which costs nothing on a link wide enough never to fragment. Repair needs no
+return path, which is what makes it usable on a one-way radio or a shared channel
+where a NACK would collide with the traffic it complains about.
+
+**Bounds.** Reassembly is a place a neighbour allocates memory unasked, so it
+obeys the resource invariant like everything else: a cap on open sets, a cap on
+bytes, a timeout, and accounting **per key** so one loud peer cannot evict
+another's half-finished frame. The key is the neighbour where the medium has
+addresses and the interface where it does not — on a broadcast medium two senders
+can collide on a set id, so a set that reassembles into something that is not an
+envelope is dropped rather than parsed.
+
+**Interaction with the node's own MTU: none.** A node keeps its MTU whatever its
+links are. Clamping it to the narrowest attached link — which this implementation
+did — only ever helps a node that *owns* the narrow link, and never a node
+upstream of one.
 
 ## Bindings — SPORE on everything
 
@@ -518,16 +584,26 @@ get.
 
 ## 11. Defaults
 
-hops 16 · expiry 7 d · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h · path fresh
-3 h · seen-set ≥ 30 d received · prekey mint 24 h, offline window 7 d · relay
-airtime rate-limited, ≈10% default · payload UTF-8. T0 ≈ 60 lines; full T2 ≈ 400
-with libsodium.
+hops 16 · expiry 7 d · MTU 1400 · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h ·
+path fresh 3 h · seen-set ≥ 30 d received · prekey mint 24 h, offline window 7 d ·
+relay airtime rate-limited, ≈10% default · payload UTF-8. T0 ≈ 60 lines; full T2
+≈ 400 with libsodium.
 
-**Known limits, on purpose:** no stream semantics; one envelope fountain-fragments
-to ≈50 KB and larger objects ride the file layer (§6), bounded by storage and by
-what each link agrees to carry, not by the format; no permanence (expiry is a
-feature); mix-mode anonymity needs flowing decoys to beat a *global* observer;
-ratchet state is per-device — give each device its own key.
+**Link and file defaults, all local policy:** link fragment repair ¼ of the set
+(min 1) · half-finished link set dropped after 30 s · chunks pushed with a
+manifest 8 · adopted-interest lease 15 min · WANT recursion depth 8.
+
+**Known limits, on purpose:** no stream semantics; **an envelope is at most
+65 535 payload bytes**, because `plen` is a `u16` — larger objects ride the file
+layer (§6), bounded by storage and by what each link agrees to carry rather than
+by a fragment count; no permanence (expiry is a feature); mix-mode anonymity
+needs flowing decoys to beat a *global* observer; ratchet state is per-device —
+give each device its own key.
+
+That envelope ceiling used to be ≈50 KB, set by a one-byte fragment count. Both
+fragment counts are `u16` now, so the payload length is what binds — and it binds
+at the same place for every link, rather than at a different place for every
+frame size.
 
 ## What stops what
 
@@ -546,6 +622,9 @@ analysis, with a residual-risk line on every row, is
 | Crowd out a link | per-interface relay budget (≈10% by default); backpressure byte | §5.4a, §5.4c |
 | Amplify via WANT | per-interface service budget | §6 |
 | Conscript a slow link into hauling files | per-interface bulk budget (chunks only) | §6, Part II |
+| Make the mesh hunt for an id nobody published | a node adopts a neighbour's WANT only for ids a manifest it holds names | Part III |
+| Spread a file across links nobody asked | chunks are link-local: served to the asker, never relayed | Part III |
+| Exhaust a bridge's reassembly buffer | set cap, byte cap, timeout, and per-key accounting so one peer cannot evict another | Part II |
 | Exhaust memory | every table bounded, eviction order stated | §5.3 |
 | Serve tampered bytes from custody | re-verify each entry against its ID on read | §6 |
 | Flatten a battery by beaconing | Trickle 5→80 min | §5.4b |
@@ -604,13 +683,16 @@ knowing.
 
 ## Objects — send anything, any size
 
-`send(dest, data)` takes any size. Under the MTU it is one envelope; over it,
-fountain-fragmented (§3) and reassembled by the destination, signature-checked
-before the app sees it. The sender can mint endless repair chunks, so the object
-decodes from *any* sufficient subset. Relays stay dumb: each fragment is an
-ordinary flooded envelope with its own ID, and only the destination reassembles.
-One fountain set is ≤ `mtu`×255 (≈50 KB at defaults); larger data is the file
-layer's job.
+`send(dest, data)` takes any size, up to the 65 535 bytes `plen` can describe;
+larger data is the file layer's job. Under the sender's MTU it is one envelope.
+
+Over it, two things could happen and only one should. **What crosses a narrow hop
+is link fragmentation** (Part II): the bridge splits for its own link, the far end
+reassembles, and the router never sees a piece — so a frame reaches a 237-byte
+radio three hops away without the sender knowing that radio exists. The
+end-to-end form in §3 also still triggers here, splitting once at the sender's
+MTU, and it is redundant: its fragments cannot be re-split, so on their own they
+die at the first narrower hop. Retiring it is outstanding work.
 
 **What survives a one-way link.** A fountain set does, because enough symbols
 arriving is the whole condition. A *file* does not: its chunks are pulled with
