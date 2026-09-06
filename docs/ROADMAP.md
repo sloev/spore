@@ -777,18 +777,38 @@ What is missing is the framing and three real pieces of work:
   most careful with: SPORE has no roster and no trust, so "member" can only ever
   mean "holds a key", exactly as it does for private groups (§7.1).
 
-Three things to decide before building, none of them technical:
+**Scope it to a public folder, and the shape falls out.** The first instinct is
+that a searchable catalogue is a new metadata surface. Checking the code says
+otherwise: a public manifest already floods and **the filename is inside it**, so
+publishing a file publicly already broadcasts its name to everyone the flood
+reaches. A catalogue does not create that exposure, it makes an existing one
+usable — which is a smaller change than it looks, and a worse default than it
+sounds, because today *publishing publicly and being listed are the same act
+whether the publisher meant it or not.*
 
-1. **A searchable catalogue is a metadata surface.** It tells anyone who asks what
-   everyone is sharing. Sealed files are excluded already — they name nothing —
-   but the open ones become a public index of interests, and that is a change in
-   kind from "files exist and you can fetch them if you know a magnet".
-2. **Nothing stops an attractive name.** Anyone may publish a manifest called
+Separating them is the actual feature, and there is already precedent for how: a
+sealed root advertises the name `"sealed"` and keeps the real one in an object
+only the recipient can open. The same move gives three states instead of two:
+
+| | manifest name | fetchable by magnet | findable by search |
+|---|---|---|---|
+| **listed** — in the public folder | the real one | yes | yes |
+| **unlisted** — public, not listed | says nothing, as sealed roots do | yes | no |
+| **sealed** — to one recipient | says nothing | yes (ciphertext) | no |
+
+So "anyone can carry it forward" survives for all three — the bytes still flood
+and still relay — while *discoverability* becomes something the publisher chose.
+It also folds neatly into M4's already-planned **public folder + `spore://`
+resolver (W6)**, which is where a person would say what is in it.
+
+Two things that stay true regardless, and are not technical:
+
+1. **Nothing stops an attractive name.** Anyone may publish a manifest called
    anything; there is no trust to lean on. A catalogue makes the name the primary
-   surface, which is exactly the wrong thing to make prominent without saying so.
-3. **How global is global?** A catalogue is as wide as the flood reaches and as
-   deep as `MAX_MANIFESTS`. On an MCU that is small. It should be honest about
-   being a local view of a neighbourhood rather than an index of everything.
+   surface, which is the wrong thing to make prominent without saying so.
+2. **How global is global?** A catalogue is as wide as the flood reached and as
+   deep as `MAX_MANIFESTS`. On an MCU that is small. It should present itself as
+   a view of a neighbourhood, not an index of everything.
 
 ## Explicitly out of scope / non-goals (locked)
 
