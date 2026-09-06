@@ -166,6 +166,11 @@ struct Sim {
     /// world before it, where an oversized frame simply does not arrive.
     link_frag: Option<Vec<Reassembler>>,
     next_set_id: u16,
+    /// Extra copies sent per fragmented set — the cheapest recovery that needs
+    /// no return path, no timer and no sender buffer, so it works on broadcast
+    /// and simplex media too. Repetition is a weak code; measuring it gives a
+    /// *floor* on what any real erasure code would buy.
+    repair: usize,
 }
 
 impl Sim {
@@ -183,6 +188,7 @@ impl Sim {
             measure_from_ms: 0,
             link_frag: None,
             next_set_id: 1,
+            repair: 0,
         }
     }
 
@@ -191,6 +197,12 @@ impl Sim {
     fn with_link_fragmentation(mut self) -> Self {
         let n = self.world.nodes.len();
         self.link_frag = Some((0..n).map(|_| Reassembler::default()).collect());
+        self
+    }
+
+    /// Send `r` extra copies of randomly chosen pieces alongside each split set.
+    fn with_repair(mut self, r: usize) -> Self {
+        self.repair = r;
         self
     }
 
@@ -224,7 +236,18 @@ impl Sim {
                 // splits for this link and the far end puts it back.
                 let pieces: Vec<Vec<u8>> = if self.link_frag.is_some() {
                     self.next_set_id = self.next_set_id.wrapping_add(1).max(1);
-                    linkfrag::split(&wire, link.mtu, self.next_set_id)
+                    let mut ps = linkfrag::split(&wire, link.mtu, self.next_set_id);
+                    // Repetition redundancy: extra copies of pieces chosen at
+                    // random. A duplicate that arrives where the original was
+                    // lost fills the gap; one that arrives twice is wasted.
+                    if ps.len() > 1 && self.repair > 0 {
+                        let n = ps.len();
+                        for _ in 0..self.repair {
+                            let pick = self.rng.below(n);
+                            ps.push(ps[pick].clone());
+                        }
+                    }
+                    ps
                 } else {
                     if wire.len() > link.mtu {
                         self.m.dropped_mtu += 1;
@@ -238,23 +261,23 @@ impl Sim {
                     self.m.frames_tx += pieces.len() as u64 - 1;
                     self.m.bytes_tx += (pieces.len() as u64 - 1) * linkfrag::LINK_FRAG_OVERHEAD as u64;
                 }
-                let mut dropped = false;
-                for _ in 0..pieces.len() {
-                    if self.rng.chance(link.loss_pct) {
-                        dropped = true;
-                    }
-                }
-                if dropped {
-                    self.m.dropped_loss += 1;
-                    continue;
-                }
                 // Which iface the *peer* sees this arrive on.
                 let peer_iface = self.world.ifaces[peer]
                     .iter()
                     .find(|(l, _, _)| *l == li)
                     .map(|(_, i, _)| *i)
                     .unwrap_or(0);
+                // Loss is per *piece*, not per envelope. A radio drops frames,
+                // not messages, and the difference is the whole question: an
+                // envelope split into n pieces survives only if all n arrive, so
+                // a link that loses 10% of frames loses far more than 10% of
+                // fragmented envelopes. Dropping the set as a unit would give
+                // the right answer today and make recovery unmeasurable.
                 for piece in pieces {
+                    if self.rng.chance(link.loss_pct) {
+                        self.m.dropped_loss += 1;
+                        continue;
+                    }
                     self.seq += 1;
                     self.queue.push(Reverse(Job {
                         at_ms: self.now_ms + link.latency_ms,
@@ -480,6 +503,83 @@ fn mixed_mtu_linkfrag() -> Report {
     }
 }
 
+/// **What splitting costs on a lossy link (M11-C).**
+///
+/// An envelope cut into n pieces survives only if all n arrive, so a link that
+/// drops `loss_pct` of *frames* drops far more than that of *fragmented
+/// envelopes* — `(1 - p)^n`, which falls off a cliff. There is no recovery at
+/// the link layer yet: a lost piece silently costs the whole envelope for that
+/// hop, and the sender never learns.
+///
+/// Run over many attempts, because one trial of a coin flip measures nothing.
+fn linkfrag_loss(loss_pct: u32, attempts: usize) -> Report {
+    let mut arrived = 0usize;
+    let mut m = Metrics::default();
+    for trial in 0..attempts {
+        let links = vec![Link { a: 0, b: 1, mtu: 237, loss_pct, latency_ms: 20 }];
+        let mut sim = Sim::new(World::new(2, links), 0x10551 ^ trial as u64).with_link_fragmentation();
+        sim.converge();
+        sim.start_measuring();
+        let dest = sim.world.nodes[1].addr;
+        let now = sim.now_secs();
+        // 900 B stays under the node's own MTU, so `Node::send` does *not*
+        // fountain-fragment it end to end and this measures the link layer
+        // alone. A larger payload measures both codes at once and the numbers
+        // stop matching any single theory.
+        let f = sim.world.nodes[0].send(dest, vec![0x33; 900], now).expect("fits");
+        sim.emit(0, f);
+        sim.run(sim.now_ms + 60_000, Some(1));
+        if !sim.seen_delivered[1].is_empty() {
+            arrived += 1;
+        }
+        m.frames_tx += sim.m.frames_tx;
+        m.bytes_tx += sim.m.bytes_tx;
+        m.dropped_loss += sim.m.dropped_loss;
+    }
+    let note: &'static str = match loss_pct {
+        0 => "900 B over a 237-byte link, no loss",
+        5 => "900 B over a 237-byte link, 5% frame loss",
+        10 => "900 B over a 237-byte link, 10% frame loss",
+        _ => "900 B over a 237-byte link, 20% frame loss",
+    };
+    Report { name: format!("linkfrag-loss-{loss_pct}pct"), note, reached: arrived, of: attempts, m }
+}
+
+/// The same measurement with `r` extra copies per set. Repetition is deliberately
+/// the weakest useful code — no feedback, no timer, no sender buffer, and it
+/// works on a one-way link — so whatever it buys is a floor under any real
+/// erasure code, not a ceiling.
+fn linkfrag_repair(loss_pct: u32, repair: usize, attempts: usize) -> Report {
+    let mut arrived = 0usize;
+    let mut m = Metrics::default();
+    for trial in 0..attempts {
+        let links = vec![Link { a: 0, b: 1, mtu: 237, loss_pct, latency_ms: 20 }];
+        let mut sim = Sim::new(World::new(2, links), 0x10551 ^ trial as u64)
+            .with_link_fragmentation()
+            .with_repair(repair);
+        sim.converge();
+        sim.start_measuring();
+        let dest = sim.world.nodes[1].addr;
+        let now = sim.now_secs();
+        let f = sim.world.nodes[0].send(dest, vec![0x33; 900], now).expect("fits");
+        sim.emit(0, f);
+        sim.run(sim.now_ms + 60_000, Some(1));
+        if !sim.seen_delivered[1].is_empty() {
+            arrived += 1;
+        }
+        m.frames_tx += sim.m.frames_tx;
+        m.bytes_tx += sim.m.bytes_tx;
+        m.dropped_loss += sim.m.dropped_loss;
+    }
+    Report {
+        name: format!("linkfrag-{loss_pct}pct-repair{repair}"),
+        note: "900 B over a 237-byte link, repetition redundancy",
+        reached: arrived,
+        of: attempts,
+        m,
+    }
+}
+
 /// A hundred nodes, a random connected graph, lossy links: delivery probability
 /// and flood amplification for a public post.
 fn lossy_mesh(loss_pct: u32) -> Report {
@@ -643,6 +743,17 @@ fn main() {
         "line" => vec![line()],
         "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped(), mixed_mtu_linkfrag()],
         "lossy" => vec![lossy_mesh(0), lossy_mesh(10), lossy_mesh(50)],
+        "linkfrag-loss" => vec![
+            linkfrag_loss(0, 200),
+            linkfrag_loss(5, 200),
+            linkfrag_loss(10, 200),
+            linkfrag_loss(20, 200),
+            linkfrag_repair(10, 2, 200),
+            linkfrag_repair(10, 4, 200),
+            linkfrag_repair(10, 7, 200),
+            linkfrag_repair(20, 7, 200),
+            linkfrag_repair(20, 14, 200),
+        ],
         "partition" => vec![partition()],
         "files" => vec![file_multihop()],
         "hop-limit" => vec![hop_limit(8), hop_limit(17), hop_limit(19)],
@@ -655,6 +766,12 @@ fn main() {
             lossy_mesh(10),
             partition(),
             file_multihop(),
+            // The fragment-loss cliff, kept in the smoke suite as a standing
+            // record: only the clean case is asserted, because the rest are
+            // probabilities and a threshold on a coin flip is a flaky build.
+            linkfrag_loss(0, 200),
+            linkfrag_loss(10, 200),
+            linkfrag_repair(10, 2, 200),
             hop_limit(17),
             hop_limit(19),
         ],
@@ -677,7 +794,8 @@ fn main() {
             // The M11-D acceptance test: with link fragmentation the narrow hop
             // is no longer fatal, and if that ever stops being true it is a
             // regression rather than a known bug.
-            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" | "file-multihop" => {
+            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" | "file-multihop"
+            | "linkfrag-loss-0pct" => {
                 if r.reached != r.of {
                     bad.push(format!("{}: reached {} of {}", r.name, r.reached, r.of));
                 }
