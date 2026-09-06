@@ -32,10 +32,10 @@ pub const ROOT_ENV_OVERHEAD: usize = 114;
 const FIXED: usize = 16 + 4 + 4 + 8 + 2;
 
 /// Payload bytes a manifest spends before its id list.
-const fn header_len(depth: u8, name_len: usize, hdr_len: usize) -> usize {
-    if hdr_len > 0 {
-        // Sealed root: tag, depth, the 2-byte header length, and the header.
-        1 + 1 + 2 + hdr_len + FIXED + name_len
+const fn header_len(depth: u8, name_len: usize, sealed: bool) -> usize {
+    if sealed {
+        // Sealed root: tag, depth, and the 16-byte id of the header object.
+        1 + 1 + 16 + FIXED + name_len
     } else if depth == 0 {
         // Leaf manifests carry only the tag; interior ones also a depth byte.
         1 + FIXED + name_len
@@ -48,14 +48,14 @@ const fn header_len(depth: u8, name_len: usize, hdr_len: usize) -> usize {
 /// unnamed and are never sealed — they carry only hashes — so this is the same
 /// at every level of every tree.
 pub fn interior_fanout(mtu: usize) -> usize {
-    mtu.saturating_sub(INTERIOR_ENV_OVERHEAD + header_len(1, 0, 0)) / 16
+    mtu.saturating_sub(INTERIOR_ENV_OVERHEAD + header_len(1, 0, false)) / 16
 }
 
 /// How many ids fit in the signed root at `mtu`, for a file whose name is
 /// `name_len` bytes, whose tree is `depth` levels deep, and whose sealed header
-/// (if any) is `hdr_len` bytes.
-pub fn root_fanout(mtu: usize, name_len: usize, depth: u8, hdr_len: usize) -> usize {
-    mtu.saturating_sub(ROOT_ENV_OVERHEAD + header_len(depth, name_len, hdr_len)) / 16
+/// is sealed or not.
+pub fn root_fanout(mtu: usize, name_len: usize, depth: u8, sealed: bool) -> usize {
+    mtu.saturating_sub(ROOT_ENV_OVERHEAD + header_len(depth, name_len, sealed)) / 16
 }
 
 /// A published file, or one interior level of one.
@@ -77,22 +77,37 @@ pub struct Manifest {
     /// Sealed to one recipient: the file key and the real file name. Empty for
     /// a manifest in the clear. When set, `total_len` is the *plaintext* length
     /// and every chunk below carries ciphertext.
-    pub sealed_hdr: Vec<u8>,
+    /// For a **sealed** root: the content id of the envelope carrying the
+    /// sealed header, rather than the header itself. All-zero when not sealed.
+    ///
+    /// The header — an ephemeral key, an AEAD tag, the file key and the real
+    /// name — is ~82 bytes, and it used to sit *inside* the signed root on top
+    /// of the root's own 114 bytes of source key and signature. That put a
+    /// sealed root past 256 bytes before it could name a single chunk, so
+    /// `publish_file_sealed` was impossible on every LoRa profile: it misses raw
+    /// LoRa's ~255-byte frame by one byte and Meshtastic's 237 by nineteen.
+    /// Naming the header instead of carrying it costs 16 bytes and brings the
+    /// floor to ~188, which every LoRa profile clears.
+    pub hdr_id: Id,
 }
 
 impl Manifest {
+    /// Is this a sealed root — one whose chunks are each encrypted and whose
+    /// real name lives in a header object the root names?
+    pub fn sealed(&self) -> bool {
+        self.hdr_id != [0u8; 16]
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let name = self.name.as_bytes();
-        let mut p = Vec::with_capacity(
-            header_len(self.depth, name.len(), self.sealed_hdr.len()) + 16 * self.chunk_ids.len(),
-        );
+        let mut p =
+            Vec::with_capacity(header_len(self.depth, name.len(), self.sealed()) + 16 * self.chunk_ids.len());
         // A depth-0 manifest in the clear encodes exactly as it did before trees
         // existed, so every file that fits one envelope stays byte-identical.
-        if !self.sealed_hdr.is_empty() {
+        if self.sealed() {
             p.push(SEALED_TAG);
             p.push(self.depth);
-            p.extend_from_slice(&(self.sealed_hdr.len() as u16).to_be_bytes());
-            p.extend_from_slice(&self.sealed_hdr);
+            p.extend_from_slice(&self.hdr_id);
         } else if self.depth == 0 {
             p.push(MANIFEST_TAG);
         } else {
@@ -114,7 +129,7 @@ impl Manifest {
     pub fn decode(p: &[u8]) -> Option<Manifest> {
         let end = p.len();
         let mut o = 1usize;
-        let mut sealed_hdr = Vec::new();
+        let mut hdr_id: Id = [0u8; 16];
         let depth = match p.first() {
             Some(&MANIFEST_TAG) => 0,
             Some(&TREE_TAG) => {
@@ -138,13 +153,11 @@ impl Manifest {
                 if o + 2 > end {
                     return None;
                 }
-                let hlen = u16::from_be_bytes([p[o], p[o + 1]]) as usize;
-                o += 2;
-                if o + hlen > end {
+                if o + 16 > end {
                     return None;
                 }
-                sealed_hdr = p[o..o + hlen].to_vec();
-                o += hlen;
+                hdr_id.copy_from_slice(&p[o..o + 16]);
+                o += 16;
                 d
             }
             _ => return None,
@@ -193,6 +206,6 @@ impl Manifest {
             o += 16;
             chunk_ids.push(c);
         }
-        Some(Manifest { file_id, chunk_size, count, total_len, name, chunk_ids, depth, sealed_hdr })
+        Some(Manifest { file_id, chunk_size, count, total_len, name, chunk_ids, depth, hdr_id })
     }
 }

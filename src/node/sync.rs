@@ -116,7 +116,7 @@ impl Node {
         }
         let Some(root) = self.named_by(id) else { return false };
         match self.manifests.get(&root) {
-            Some(m) => m.sealed_hdr.is_empty(),
+            Some(m) => !m.sealed(),
             // The root is named but not held as a manifest — we know of the id
             // only through a tree we are still resolving, which is legitimate.
             None => true,

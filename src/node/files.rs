@@ -37,6 +37,10 @@ impl Node {
         key: Option<&[u8; 32]>,
         sealed_hdr: Vec<u8>,
     ) -> (Id, Vec<Forward>) {
+        // A sealed file's header travels as its own object, named by the root
+        // rather than carried inside it — see `file::Manifest::hdr_id`. Stored
+        // and pushed like a chunk, so the recipient fetches it the same way.
+        let mut hdr_id: Id = [0u8; 16];
         let chunk_size = self.mtu.saturating_sub(64).max(1);
         let count = bytes.len().div_ceil(chunk_size).max(1);
         let expiry = now + 7 * 86400;
@@ -90,6 +94,18 @@ impl Node {
             self.store_put(&ce, now);
         }
 
+        // The sealed header, as its own object on the same per-file topic. It is
+        // ciphertext already — only the recipient's prekey opens it — so it is
+        // no more exposed here than it was inside the root.
+        if !sealed_hdr.is_empty() {
+            let mut he = Envelope::new(ty::DATA, ft, expiry, sealed_hdr.clone());
+            he.flags |= fl::FLOOD;
+            he.hops = 0; // link-local, like a chunk
+            hdr_id = he.id();
+            self.mark_seen(&he);
+            self.store_put(&he, now);
+        }
+
         // Grow interior levels until the remaining ids fit the signed root.
         // Interior nodes are unsigned and unnamed: the parent names them by
         // content id, which is hash enough, and dropping the signature buys back
@@ -100,7 +116,7 @@ impl Node {
         // buries the level one deeper.
         let mut depth = 0u8;
         while depth < file::MAX_DEPTH
-            && level.len() > file::root_fanout(self.mtu, name.len(), depth, sealed_hdr.len())
+            && level.len() > file::root_fanout(self.mtu, name.len(), depth, !sealed_hdr.is_empty())
         {
             let mut next = Vec::with_capacity(level.len().div_ceil(fanout));
             for group in level.chunks(fanout) {
@@ -113,7 +129,7 @@ impl Node {
                     name: String::new(),
                     chunk_ids: group.iter().map(|(id, _)| *id).collect(),
                     depth,
-                    sealed_hdr: Vec::new(),
+                    hdr_id: [0u8; 16],
                 };
                 let mut ne = Envelope::new(ty::DATA, ft, expiry, node.encode());
                 ne.flags |= fl::FLOOD;
@@ -133,7 +149,7 @@ impl Node {
             name: name.to_string(),
             chunk_ids: level.iter().map(|(id, _)| *id).collect(),
             depth,
-            sealed_hdr,
+            hdr_id,
         };
         let mut me = Envelope::new(ty::DATA, dest, expiry, manifest.encode());
         if dest == ZERO_DEST || self.topics.contains(&dest) {
@@ -165,6 +181,17 @@ impl Node {
         // Only for a public file. A sealed one is addressed to a single
         // recipient, and pushing its chunks at everyone is the opposite of what
         // sealing asked for; that path already custody-pushes like mail.
+        // The sealed header always rides with its root. It is one small
+        // object, the recipient cannot use anything without it, and a round trip
+        // to fetch it would be a round trip for every sealed file ever sent.
+        if hdr_id != [0u8; 16] {
+            if let Some(wire) = self.store.wire(&hdr_id) {
+                if let Ok((he, _)) = Envelope::decode(&wire) {
+                    forwards.append(&mut self.forward_intents(&he, NO_IFACE, now));
+                }
+            }
+        }
+
         if key.is_none() && self.push_chunks > 0 {
             for (id, _) in level.iter().take(self.push_chunks) {
                 if depth > 0 {
@@ -292,6 +319,19 @@ impl Node {
         let mut out = Vec::new();
         if limit == 0 {
             return out;
+        }
+        // A sealed root's header is part of the object — without it the chunks
+        // are ciphertext with no key — so it is fetched like anything else, and
+        // first, because nothing else is any use until it arrives.
+        //
+        // Asked for here rather than inside `walk_tree`, because that walk also
+        // drives *assembly*: a header reported as a chunk gets written into the
+        // file. The two callers want different lists and this is the difference.
+        if root.sealed() && !self.store.contains(&root.hdr_id) {
+            out.push(root.hdr_id);
+            if out.len() >= limit {
+                return out;
+            }
         }
         self.walk_tree(root, &mut |id, _, held| {
             if !held {
@@ -439,7 +479,7 @@ impl Node {
         // leaving no room for even one id. Say so, rather than minting a root
         // no link could carry — the caller can fall back to publishing in the
         // clear, which is a choice only they can make.
-        if file::root_fanout(self.mtu, SEALED_FILE_NAME.len(), 0, sealed_hdr.len()) == 0 {
+        if file::root_fanout(self.mtu, SEALED_FILE_NAME.len(), 0, true) == 0 {
             return None;
         }
 
@@ -450,7 +490,12 @@ impl Node {
     /// `None` when it was sealed to someone else — which is most of what a relay
     /// carries, and it never learns more than that.
     pub(crate) fn open_sealed_header(&self, m: &file::Manifest) -> Option<([u8; 32], String)> {
-        let opened = self.open(&m.sealed_hdr)?;
+        // The header is an object the root names, so fetch it before opening.
+        // A recipient that has the root but not yet the header simply cannot
+        // read the file yet — the same state as missing a chunk.
+        let wire = self.store.wire(&m.hdr_id)?;
+        let (he, _) = Envelope::decode(&wire).ok()?;
+        let opened = self.open(&he.payload)?;
         if opened.len() < 34 {
             return None;
         }
@@ -482,7 +527,7 @@ impl Node {
     /// never touches the chunks.
     pub fn file_name(&self, magnet: &Id) -> Option<String> {
         let m = self.manifests.get(magnet)?;
-        if !m.sealed_hdr.is_empty() {
+        if m.sealed() {
             return self.open_sealed_header(m).map(|(_, name)| name);
         }
         if m.name == SEALED_FILE_NAME {
@@ -502,7 +547,7 @@ impl Node {
         let m = self.manifests.get(magnet)?;
 
         // Sealed per chunk: decrypt on the way out.
-        if !m.sealed_hdr.is_empty() {
+        if m.sealed() {
             let (key, name) = self.open_sealed_header(m)?;
             let n = self.assemble(magnet, w, Some(&key))?;
             return Some((name, n));
@@ -546,7 +591,7 @@ impl Node {
     pub fn max_file_bytes(&self) -> usize {
         let chunk = self.mtu.saturating_sub(64).max(1);
         // Allow for a long file name in the signed root.
-        let mut ids = file::root_fanout(self.mtu, 96, file::MAX_DEPTH, 0);
+        let mut ids = file::root_fanout(self.mtu, 96, file::MAX_DEPTH, false);
         let fanout = file::interior_fanout(self.mtu);
         for _ in 0..file::MAX_DEPTH {
             ids = ids.saturating_mul(fanout);
@@ -560,7 +605,7 @@ impl Node {
     /// existed, and one round trip is enough to learn every chunk id.
     pub fn max_flat_file_bytes(&self) -> usize {
         let chunk = self.mtu.saturating_sub(64).max(1);
-        file::root_fanout(self.mtu, 96, 0, 0) * chunk
+        file::root_fanout(self.mtu, 96, 0, false) * chunk
     }
 
     /// The ceiling on everything this node holds at once, files included.
@@ -630,7 +675,7 @@ impl Node {
     /// This is the form to prefer for anything large: only one chunk is in
     /// memory at a time, so a file bounded by disk is not also bounded by RAM.
     pub fn write_file_to<W: std::io::Write>(&self, magnet: &Id, w: &mut W) -> Option<u64> {
-        if !self.manifests.get(magnet)?.sealed_hdr.is_empty() {
+        if self.manifests.get(magnet)?.sealed() {
             return None;
         }
         self.assemble(magnet, w, None)

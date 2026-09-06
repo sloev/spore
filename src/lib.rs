@@ -2247,7 +2247,7 @@ mod tests {
             name: String::new(),
             chunk_ids: vec![],
             depth: 1,
-            sealed_hdr: Vec::new(),
+            hdr_id: [0u8; 16],
         };
         let mut enc = m.encode();
         assert_eq!(enc[0], file::TREE_TAG);
@@ -2396,7 +2396,7 @@ mod tests {
         let root = a.manifests.get(&magnet).unwrap();
         assert_eq!(root.total_len, body.len() as u64, "sealing does not change the length");
         assert_eq!(root.name, SEALED_FILE_NAME, "the advertised name says nothing");
-        assert!(!root.sealed_hdr.is_empty(), "the key travels sealed in the root");
+        assert!(root.sealed(), "the root names a sealed header object");
         assert!(root.depth > 0, "big enough to be a tree as well as sealed");
 
         // Sample the plaintext rather than cross-product every window against

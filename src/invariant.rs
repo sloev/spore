@@ -473,9 +473,94 @@ fn a_sealed_file_is_not_pushed_at_everyone() {
         };
         publisher.on_rx(wire, 0, None, NOW);
     }
-    let Some((_, fwds)) = publisher.publish_file_sealed("secret.txt", &vec![0xEE; 2000], recipient.addr, NOW)
+    let Some((magnet, fwds)) =
+        publisher.publish_file_sealed("secret.txt", &vec![0xEE; 2000], recipient.addr, NOW)
     else {
         return; // no prekey on this build
     };
-    assert_eq!(fwds.len(), 1, "the sealed root travels alone");
+    // The root and its header, and nothing else. The header is one small object
+    // the recipient cannot use the file without, so it rides along (M11-F); the
+    // *chunks* do not, because a sealed file is addressed to one person and
+    // spraying ciphertext at every neighbour still advertises that it exists.
+    assert_eq!(fwds.len(), 2, "the root and its header, and no chunks");
+    let root = publisher.manifests.get(&magnet).expect("we just published it");
+    assert!(root.sealed(), "and the root names the header rather than carrying it");
+}
+
+// ------------------------------------------- M11-F: the sealed-file floor
+
+#[test]
+fn a_sealed_file_can_be_published_on_a_lora_link() {
+    // **The measurement M11-F exists for.** The sealed header — ephemeral key,
+    // AEAD tag, file key, real name, ~82 bytes — used to sit *inside* the signed
+    // root, on top of the root's own 114 bytes of source key and signature. That
+    // put a sealed root past 256 bytes before it could name a single chunk, so
+    // `publish_file_sealed` was impossible on every LoRa profile: it missed raw
+    // LoRa's ~255-byte frame by one byte and Meshtastic's 237 by nineteen.
+    //
+    // Naming the header instead of carrying it costs 16 bytes and drops the
+    // floor to 188.
+    let floor = (16..600).find(|m| file::root_fanout(*m, 6, 0, true) >= 1);
+    assert_eq!(floor, Some(188), "the sealed root must fit a small link");
+
+    for (name, mtu) in [("LoRaWAN DR5", 222usize), ("Meshtastic", 237), ("raw LoRa P2P", 255)] {
+        assert!(
+            file::root_fanout(mtu, 6, 0, true) >= 1,
+            "{name} at mtu {mtu} must be able to carry a sealed root"
+        );
+    }
+}
+
+#[test]
+fn a_sealed_file_reaches_its_recipient_over_the_wire() {
+    // End to end, without copying a store: the recipient gets what was actually
+    // broadcast, asks for the rest, and opens the file.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut recipient = Node::new("recipient", &[]);
+    for f in &recipient.build_announce(NOW) {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        publisher.on_rx(wire, 0, None, NOW);
+    }
+
+    let body: Vec<u8> = (0..30_000u32).map(|i| (i.wrapping_mul(7)) as u8).collect();
+    let Some((magnet, fwds)) = publisher.publish_file_sealed("plans.pdf", &body, recipient.addr, NOW) else {
+        return; // no prekey on this build
+    };
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        recipient.on_rx(wire, 0, None, NOW);
+    }
+
+    // Pull the rest. A tree resolves top-down, so this takes several rounds.
+    for _ in 0..24 {
+        let want = recipient.fetch_n(&magnet, 4);
+        if want.is_empty() {
+            break;
+        }
+        for w in &want {
+            let wire = match w {
+                Forward::Flood { bytes, .. } => bytes,
+                Forward::Directed { bytes, .. } => bytes,
+            };
+            for cf in publisher.on_rx(wire, 0, None, NOW).forwards {
+                let cw = match &cf {
+                    Forward::Flood { bytes, .. } => bytes,
+                    Forward::Directed { bytes, .. } => bytes,
+                };
+                recipient.on_rx(cw, 0, None, NOW);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    let (name, n) = recipient.open_file_to(&magnet, &mut out).expect("the recipient can open it");
+    assert_eq!(name, "plans.pdf", "the real name comes out of the header object");
+    assert_eq!(n, body.len() as u64);
+    assert_eq!(out, body);
 }
