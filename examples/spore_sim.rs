@@ -31,6 +31,7 @@
 //! monotonic sequence number — so a run is reproducible from its seed, and a
 //! metric that moves means the protocol moved.
 
+use spore::linkfrag::{self, Reassembler};
 use spore::*;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -161,6 +162,10 @@ struct Sim {
     /// Wall time when the measured phase began, so latency is reported relative
     /// to the send rather than to the start of the universe.
     measure_from_ms: u64,
+    /// Per-node link reassembly — the receiving half of M11-D. `None` models the
+    /// world before it, where an oversized frame simply does not arrive.
+    link_frag: Option<Vec<Reassembler>>,
+    next_set_id: u16,
 }
 
 impl Sim {
@@ -176,7 +181,17 @@ impl Sim {
             m: Metrics::default(),
             seen_delivered: vec![HashMap::new(); n],
             measure_from_ms: 0,
+            link_frag: None,
+            next_set_id: 1,
         }
+    }
+
+    /// Turn on link fragmentation: bridges split what their link cannot carry
+    /// and the far end reassembles before the node sees anything.
+    fn with_link_fragmentation(mut self) -> Self {
+        let n = self.world.nodes.len();
+        self.link_frag = Some((0..n).map(|_| Reassembler::default()).collect());
+        self
     }
 
     fn now_secs(&self) -> u32 {
@@ -204,13 +219,32 @@ impl Sim {
                 self.m.frames_tx += 1;
                 self.m.bytes_tx += wire.len() as u64;
 
-                // The whole point of the simulator: an oversized frame does not
-                // get split by magic, it does not arrive.
-                if wire.len() > link.mtu {
-                    self.m.dropped_mtu += 1;
-                    continue;
+                // Without link fragmentation an oversized frame does not get
+                // split by magic — it does not arrive. With it, the bridge
+                // splits for this link and the far end puts it back.
+                let pieces: Vec<Vec<u8>> = if self.link_frag.is_some() {
+                    self.next_set_id = self.next_set_id.wrapping_add(1).max(1);
+                    linkfrag::split(&wire, link.mtu, self.next_set_id)
+                } else {
+                    if wire.len() > link.mtu {
+                        self.m.dropped_mtu += 1;
+                        continue;
+                    }
+                    vec![wire.clone()]
+                };
+                if pieces.len() > 1 {
+                    // Charge the extra frames: splitting is not free, and the
+                    // point of measuring is to see what it costs.
+                    self.m.frames_tx += pieces.len() as u64 - 1;
+                    self.m.bytes_tx += (pieces.len() as u64 - 1) * linkfrag::LINK_FRAG_OVERHEAD as u64;
                 }
-                if self.rng.chance(link.loss_pct) {
+                let mut dropped = false;
+                for _ in 0..pieces.len() {
+                    if self.rng.chance(link.loss_pct) {
+                        dropped = true;
+                    }
+                }
+                if dropped {
                     self.m.dropped_loss += 1;
                     continue;
                 }
@@ -220,14 +254,16 @@ impl Sim {
                     .find(|(l, _, _)| *l == li)
                     .map(|(_, i, _)| *i)
                     .unwrap_or(0);
-                self.seq += 1;
-                self.queue.push(Reverse(Job {
-                    at_ms: self.now_ms + link.latency_ms,
-                    seq: self.seq,
-                    node: peer,
-                    iface: peer_iface,
-                    wire: wire.clone(),
-                }));
+                for piece in pieces {
+                    self.seq += 1;
+                    self.queue.push(Reverse(Job {
+                        at_ms: self.now_ms + link.latency_ms,
+                        seq: self.seq,
+                        node: peer,
+                        iface: peer_iface,
+                        wire: piece,
+                    }));
+                }
             }
         }
     }
@@ -240,7 +276,16 @@ impl Sim {
             }
             self.now_ms = job.at_ms;
             let now = self.now_secs();
-            let rx = self.world.nodes[job.node].on_rx(&job.wire, job.iface, None, now);
+            // The link layer, below the node: a fragment is not an envelope and
+            // the node is never shown one.
+            let whole = match &mut self.link_frag {
+                Some(r) => match r[job.node].accept(job.iface as u32, &job.wire, now) {
+                    Some(w) => w,
+                    None => continue,
+                },
+                None => job.wire.clone(),
+            };
+            let rx = self.world.nodes[job.node].on_rx(&whole, job.iface, None, now);
 
             for env in &rx.delivered {
                 let id = env.id();
@@ -402,6 +447,39 @@ fn mixed_mtu_clamped() -> Report {
     }
 }
 
+/// **The M11-D fix, measured.** Identical topology and identical message to
+/// `mixed-mtu`, with link fragmentation on: bridges split what their link cannot
+/// carry, the far end reassembles, and the node never sees a piece.
+///
+/// Note what is *not* changed to make this work. The sender still fragments
+/// end-to-end at its own MTU, exactly as it does today — those fragments are now
+/// simply split again for the narrow hop and put back together on the other
+/// side. That is the point: per-hop splitting repairs the path without the
+/// sender knowing anything about a link three hops away.
+fn mixed_mtu_linkfrag() -> Report {
+    let links = vec![
+        Link { a: 0, b: 1, mtu: 1400, loss_pct: 0, latency_ms: 5 },
+        Link { a: 1, b: 2, mtu: 1400, loss_pct: 0, latency_ms: 5 },
+        Link { a: 2, b: 3, mtu: 237, loss_pct: 0, latency_ms: 120 },
+    ];
+    let mut sim = Sim::new(World::new(4, links), 0xA11CE).with_link_fragmentation();
+    sim.converge();
+    sim.start_measuring();
+    let dest = sim.world.nodes[3].addr;
+    let now = sim.now_secs();
+    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("fits one set");
+    sim.emit(0, f);
+    sim.run(sim.now_ms + 120_000, Some(3));
+    let reached = usize::from(!sim.seen_delivered[3].is_empty());
+    Report {
+        name: "mixed-mtu-linkfrag".into(),
+        note: "same topology and message, link fragmentation on",
+        reached,
+        of: 1,
+        m: sim.m,
+    }
+}
+
 /// A hundred nodes, a random connected graph, lossy links: delivery probability
 /// and flood amplification for a public post.
 fn lossy_mesh(loss_pct: u32) -> Report {
@@ -508,7 +586,7 @@ fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "smoke".into());
     let reports: Vec<Report> = match which.as_str() {
         "line" => vec![line()],
-        "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped()],
+        "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped(), mixed_mtu_linkfrag()],
         "lossy" => vec![lossy_mesh(0), lossy_mesh(10), lossy_mesh(50)],
         "partition" => vec![partition()],
         "hop-limit" => vec![hop_limit(8), hop_limit(17), hop_limit(19)],
@@ -516,6 +594,7 @@ fn main() {
             line(),
             mixed_mtu(),
             mixed_mtu_clamped(),
+            mixed_mtu_linkfrag(),
             lossy_mesh(0),
             lossy_mesh(10),
             partition(),
@@ -538,7 +617,10 @@ fn main() {
         match r.name.as_str() {
             // 17 nodes is 16 relays, exactly the hop budget: it must arrive, and
             // if a forwarding change ever costs one more hop this is where it shows.
-            "line" | "partition" | "hop-limit-17" => {
+            // The M11-D acceptance test: with link fragmentation the narrow hop
+            // is no longer fatal, and if that ever stops being true it is a
+            // regression rather than a known bug.
+            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" => {
                 if r.reached != r.of {
                     bad.push(format!("{}: reached {} of {}", r.name, r.reached, r.of));
                 }
