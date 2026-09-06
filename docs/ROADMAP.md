@@ -756,59 +756,102 @@ pull the rest; the resource invariant is stated and has a test per path.
 
 ---
 
-## Idea — a gossiped file catalogue, and sneakernet quotas
+## A public library people opt into — pools, not a global catalogue
 
-**Most of this already exists and is not named.** A manifest floods; a node keeps
-every one it hears, bounded by `MAX_MANIFESTS`; `Node::files()` lists them with
-their names and sizes. So every node already carries a partial catalogue of files
-it has heard of and mostly cannot be bothered to fetch — and since recursive pull
-landed, it can now *get* any of them without the publisher being reachable.
-Catalogue plus n-hop fetch is a working distributed index, assembled by accident.
+**Almost all of this exists.** A pool is a topic. Membership is `subscribe`, which
+puts the topic in ANNOUNCE, and `unsubscribe` takes it out again. `foldersync`
+already publishes a directory's files as manifests **addressed to a topic**, and
+already resolves newest-manifest-per-name and strips directory components so
+`../../etc/passwd` lands as `passwd` inside the output directory. Roots flood;
+chunks are link-local and move only because someone WANTed them. Recursive pull
+fetches from whoever has it. The catalogue *is* the roots a node has heard, and
+search is a local query over them.
 
-What is missing is the framing and three real pieces of work:
+So this is a Part III profile — a topic convention, three quotas, and a UI. Not a
+new envelope type, not a new index format, and emphatically not a DHT or a
+"search the mesh" RPC: queries do not return in a store-and-forward network.
 
-- **Search.** Names are already in the manifests; this is a local query and a
-  screen, not a protocol change.
-- **A carry quota distinct from the store budget.** "Hold 2 GB of other people's
-  files because I opted in" is a different intent from "hold what I am relaying",
-  and today they share one budget. This is the resource invariant's *bounded local
-  allowance* clause applied to a new appetite.
-- **A membership notion for copyparty-style exchange.** Which is the part to be
-  most careful with: SPORE has no roster and no trust, so "member" can only ever
-  mean "holds a key", exactly as it does for private groups (§7.1).
+**One correction to the obvious mental model.** Addressing a manifest to a pool
+topic does **not** limit which nodes carry it. Forwarding does not consult
+subscriptions — that is exactly why chunks used to spray until they were made
+link-local, where an uninterested bystander was measured re-flooding all six
+chunks of a file it had never asked for. The topic scopes **who files it into a
+catalogue**, not who relays it. Non-members still carry pool manifests as
+ordinary flooded envelopes under their store budget; they simply do not index
+them. Any "the pool is contained" reasoning that assumes otherwise is wrong.
 
-**Scope it to a public folder, and the shape falls out.** The first instinct is
-that a searchable catalogue is a new metadata surface. Checking the code says
-otherwise: a public manifest already floods and **the filename is inside it**, so
-publishing a file publicly already broadcasts its name to everyone the flood
-reaches. A catalogue does not create that exposure, it makes an existing one
-usable — which is a smaller change than it looks, and a worse default than it
-sounds, because today *publishing publicly and being listed are the same act
-whether the publisher meant it or not.*
+**Three objects, three budgets, and they must not collapse into one number.**
 
-Separating them is the actual feature, and there is already precedent for how: a
-sealed root advertises the name `"sealed"` and keeps the real one in an object
-only the recipient can open. The same move gives three states instead of two:
+| | Size | Moves how | The operator's question |
+|---|---|---|---|
+| **Catalogue** — roots heard on the pool | ~one envelope each | gossip with the topic | "how much of *what exists* will I remember?" |
+| **Cache** — chunks of files being seeded or filled | the actual bytes | WANT only, `hops=0` | "how much disk do I donate?" |
+| **Meeting** — one encounter's transfer | session cap | INV/WANT while in contact | "how much for *this* pass?" |
+
+The last one is what makes sneakernet feel right: a radio meeting is 20 MB, a USB
+or copyparty meeting is 2 GB, and it is the same protocol with a different
+allowance. Collapse these into one setting and the disk fills with names that
+cannot be fetched.
+
+**Order of business on meeting, with fill off by default:**
+
+1. Exchange catalogue ids — INV/WANT, cheap, always.
+2. Serve chunks someone actually WANTed.
+3. *Only* if the operator enabled **fill**, spend what is left of the session
+   quota on complete small files or things already cached — never a random tree.
+
+Step 3 as a default is how "members exchange files" becomes the chunk flood that
+was just deleted, with a search box on it. Membership is permission to carry an
+index and donate cache, not a licence to push bytes. The resource invariant's
+second clause — an explicit bounded local allowance — is what an opt-in quota
+*is*; it does not suspend the first clause, evidence of demand.
+
+**Spam is the threat, not bandwidth.** A public topic plus a gossiped catalogue
+means anyone can insert ten thousand plausible roots, and nothing stops an
+attractive name because there is no trust to lean on. All local, all the same
+shape as every other bound here: a catalogue byte budget and entry cap, a
+per-publisher cap *within* your catalogue, expiry, and eviction by expired →
+lowest stamp → least recently wanted. Optionally, only catalogue publishers you
+have met, or those above a stamp threshold. Without these the search box is a
+spam folder.
+
+**Say "pool", never "global".** There is no global view and there cannot be one:
+catalogues are regional, delayed and partitioned, and a node that spent a week in
+another city has a different index. The UI must say **heard of**, not **exists**.
+Named pools — `sneakernet/maps`, `sneakernet/36c3` — are libraries; one planetary
+topic is a graffiti wall.
+
+**Listed, unlisted, sealed.** Publishing publicly and being listed are the same
+act today, whether the publisher meant it or not — a public manifest floods with
+the filename inside it. A sealed root already shows the precedent for separating
+them: it advertises `"sealed"` and keeps the true name in an object only the
+recipient opens. Applied to the pool that gives three states, with "anyone can
+carry it forward" surviving all of them:
 
 | | manifest name | fetchable by magnet | findable by search |
 |---|---|---|---|
-| **listed** — in the public folder | the real one | yes | yes |
-| **unlisted** — public, not listed | says nothing, as sealed roots do | yes | no |
+| **listed** — in the pool folder | the real one | yes | yes |
+| **unlisted** — public, not listed | says nothing | yes | no |
 | **sealed** — to one recipient | says nothing | yes (ciphertext) | no |
 
-So "anyone can carry it forward" survives for all three — the bytes still flood
-and still relay — while *discoverability* becomes something the publisher chose.
-It also folds neatly into M4's already-planned **public folder + `spore://`
-resolver (W6)**, which is where a person would say what is in it.
+**Copyparty is the face, not the transport.** Browse on-disk versus heard-of,
+search the local catalogue, set the three quotas, point at the seed volume and
+the received volume. The syncing is `foldersync` plus INV/WANT, which exists; the
+existing copyparty bridge stays what it is, a bag of envelopes. Two copyparty
+nodes meeting over HTTP is simply a fat sneakernet hop — merge catalogue, then
+WANT within the session quota. The radio path is the same algorithm with a small
+number.
 
-Two things that stay true regardless, and are not technical:
+**Minimum version that is still the idea:** a pool topic joined by subscribe; a
+seed folder published to it; catalogue INV/WANT on meeting; local search; fetch
+by recursive pull; three quotas with fill off. Then `spore-sim` earns it: two
+members and a USB-sized meeting converge their catalogues, chunks move only for
+wanted or seeded files, a non-member does not absorb the pool, and a spammer
+cannot push the catalogue past its cap.
 
-1. **Nothing stops an attractive name.** Anyone may publish a manifest called
-   anything; there is no trust to lean on. A catalogue makes the name the primary
-   surface, which is the wrong thing to make prominent without saying so.
-2. **How global is global?** A catalogue is as wide as the flood reached and as
-   deep as `MAX_MANIFESTS`. On an MCU that is small. It should present itself as
-   a view of a neighbourhood, not an index of everything.
+**Do not:** replicate by popularity (want-counts are a traffic graph), carry
+manifests and a derived catalogue and the files under one budget, or put any of
+it in T0.
 
 ## Explicitly out of scope / non-goals (locked)
 
