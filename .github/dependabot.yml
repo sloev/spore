@@ -4,9 +4,22 @@
 # Two things here are specific to this project. Updates are grouped, because a
 # dependency-light tree produces few enough PRs that one batch is easier to reason
 # about than six. And the MSRV job (msrv.yml) plus cargo-deny run on every
-# Dependabot PR, so an update that breaks the Rust 1.75 floor or introduces a new
+# Dependabot PR, so an update that breaks the Rust 1.85 floor or introduces a new
 # licence fails before it can be merged — which is the actual protection, since
 # S-014 was exactly a transitive dependency quietly outgrowing that floor.
+#
+# **The crypto stack is its own group, and that is the important part.** With one
+# `*` group, every routine bump was welded to whatever the RustCrypto crates were
+# doing — and those move together across breaking majors: `rand` 0.9 moves
+# `OsRng` and `RngCore`, `blake2` 0.11 restructures `Blake2bVar`, and `rand` 0.9
+# pulls `getrandom` 0.3, which **removes `register_custom_getrandom!`** — the
+# macro `src/wasm.rs` uses to supply the browser's randomness, and the mechanism
+# SPEC Part IV calls a host nutrient.
+#
+# So a single grouped PR could only ever pass by carrying that migration, and one
+# sat red for months (#187) while a `libc` patch bump waited behind it. Splitting
+# them lets the routine updates flow and leaves the crypto move as one PR that is
+# honestly about what it is.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -15,8 +28,45 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # Moves together, breaks together, and needs code changes when it does.
+      crypto:
+        patterns:
+          - "rand"
+          - "rand_core"
+          - "getrandom"
+          - "sha2"
+          - "blake2"
+          - "digest"
+          - "aead"
+          - "cipher"
+          - "chacha20"
+          - "chacha20poly1305"
+          - "crypto_box"
+          - "curve25519-dalek"
+          - "x25519-dalek"
+          - "ed25519*"
+          - "signature"
+          - "zeroize*"
+      # Everything else: the bumps that should just land.
       cargo:
         patterns: ["*"]
+        exclude-patterns:
+          - "rand"
+          - "rand_core"
+          - "getrandom"
+          - "sha2"
+          - "blake2"
+          - "digest"
+          - "aead"
+          - "cipher"
+          - "chacha20"
+          - "chacha20poly1305"
+          - "crypto_box"
+          - "curve25519-dalek"
+          - "x25519-dalek"
+          - "ed25519*"
+          - "signature"
+          - "zeroize*"
     # The fuzz crate is its own workspace and nightly-only; it does not gate
     # anything, so it does not need its own PR stream.
     ignore:
