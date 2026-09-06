@@ -289,7 +289,7 @@ fn fountain_demo() {
 
     let cs = 200usize;
     let count = wire.len().div_ceil(cs);
-    let indices: Vec<u8> = (0..(count as u8 + 60)).collect(); // data + repair chunks
+    let indices: Vec<u16> = (0..(count as u16 + 60)).collect(); // data + repair chunks
     let frags = fragment(&wire, cs, 16, NOW + 7 * 86400, ZERO_DEST, id, &indices);
 
     let mut fo = Fountain::new();
@@ -303,8 +303,9 @@ fn fountain_demo() {
             continue; // 40% packet loss, no retransmit possible
         }
         fed += 1;
-        let (idx, cnt) = (fr.payload[16], fr.payload[17]);
-        let chunk = fr.payload[18..].to_vec();
+        let idx = u16::from_be_bytes([fr.payload[16], fr.payload[17]]);
+        let cnt = u16::from_be_bytes([fr.payload[18], fr.payload[19]]);
+        let chunk = fr.payload[20..].to_vec();
         if let Some(w) = fo.add(&id, idx, cnt, chunk) {
             recovered = Some(w);
             break;

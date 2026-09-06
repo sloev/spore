@@ -59,14 +59,16 @@ pub const MAX_LINK_FRAGMENTS: usize = u16::MAX as usize;
 /// How long a half-finished set is held before it is dropped.
 pub const LINK_PARTIAL_TIMEOUT_SECS: u32 = 30;
 
-/// Largest set that can carry repair symbols.
+/// Largest set that can carry repair symbols — the `u16` index field's range,
+/// so in practice every set a link will ever see.
 ///
-/// The erasure code picks each repair symbol's inputs from a 256-bit selection
-/// derived from one SHA-256, so it can address at most 256 chunks. Sets larger
-/// than this — 58 kB at a 237-byte LoRa frame, near the biggest envelope there
-/// is — are carried without repair and must arrive whole. Rare, and the
-/// alternative is a second erasure code to maintain.
-pub const MAX_REPAIRABLE_PIECES: usize = 255;
+/// It used to be 255, because the code derived each repair symbol's inputs from
+/// a single SHA-256 and one digest addresses 256 chunks. That ceiling bit hardest
+/// exactly where loss does: 255 pieces is under 12 kB on a 54-byte Zigbee frame,
+/// and past it a set had no repair at all and needed every piece. A 20 kB
+/// envelope is 426 pieces, which at 1% frame loss delivers 1.4% of the time.
+/// `selection` now hashes in numbered blocks, so the ceiling is the field.
+pub const MAX_REPAIRABLE_PIECES: usize = u16::MAX as usize;
 
 /// How many repair symbols to send with a set of `count` pieces.
 ///
@@ -142,13 +144,13 @@ pub fn split_with_repair(wire: &[u8], mtu: usize, set_id: u16, repair: usize) ->
     // Indices at or past `count` are repair symbols; the sender can mint as many
     // distinct ones as it likes, which is what rateless means.
     let repair = repair.min(MAX_REPAIRABLE_PIECES - count);
-    let indices: Vec<u8> = (count..count + repair).map(|i| i as u8).collect();
+    let indices: Vec<u16> = (count..count + repair).map(|i| i as u16).collect();
     for e in crate::fragment(wire, chunk, 0, 0, crate::ZERO_DEST, seed, &indices) {
         // `fragment` hands back envelopes; only the chunk body matters here,
         // re-framed as a link fragment. The envelope header it built is the
         // end-to-end form this layer exists to replace.
-        let idx = e.payload[16] as u16;
-        let body = &e.payload[18..];
+        let idx = u16::from_be_bytes([e.payload[16], e.payload[17]]);
+        let body = &e.payload[20..];
         let mut f = Vec::with_capacity(LINK_FRAG_OVERHEAD + body.len());
         f.push(LINK_FRAG_MAGIC);
         f.extend_from_slice(&set_id.to_be_bytes());
@@ -229,7 +231,7 @@ fn decode_coded(set: u16, count: usize, symbols: &HashMap<u16, Vec<u8>>) -> Opti
     for (idx, body) in symbols {
         let mut padded = body.clone();
         padded.resize(chunk, 0);
-        out = f.add(&seed, *idx as u8, count as u8, padded);
+        out = f.add(&seed, *idx, count as u16, padded);
         if out.is_some() {
             break;
         }
@@ -539,14 +541,17 @@ mod tests {
         assert_eq!(r.accept(1, &repair, NOW), None, "not enough symbols yet");
         assert_eq!(r.open_sets(), 1, "but index 9 of a 2-set is a repair symbol, not junk");
 
-        // Past the size the code can address, a high index is nonsense again:
-        // there is no selection to interpret it against.
-        let mut wild = vec![LINK_FRAG_MAGIC, 0, 2];
-        wild.extend_from_slice(&700u16.to_be_bytes());
-        wild.extend_from_slice(&300u16.to_be_bytes());
-        wild.extend_from_slice(b"body");
-        assert_eq!(r.accept(2, &wild, NOW), None);
-        assert_eq!(r.open_sets_for(2), 0, "no code at this size, so no repair symbols");
+        // There is no longer a size past which a high index is nonsense: the
+        // code addresses as many chunks as the `u16` can name, so a 300-piece
+        // set takes repair symbols exactly like a 2-piece one. That was not true
+        // before `selection` hashed in blocks, and the sets it excluded — under
+        // 12 kB on a Zigbee frame — were the ones least able to lose a piece.
+        let mut big = vec![LINK_FRAG_MAGIC, 0, 2];
+        big.extend_from_slice(&700u16.to_be_bytes());
+        big.extend_from_slice(&300u16.to_be_bytes());
+        big.extend_from_slice(b"body");
+        assert_eq!(r.accept(2, &big, NOW), None, "not enough symbols yet");
+        assert_eq!(r.open_sets_for(2), 1, "a 300-piece set takes repair too");
     }
 
     #[test]

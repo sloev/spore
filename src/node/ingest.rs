@@ -485,12 +485,14 @@ impl Node {
         // Reassemble only objects bound for us; a pure relay just forwards the
         // fragments (each is an ordinary envelope) without hoarding chunks. A
         // source over its quota can't make us hoard its chunks either.
-        if within_quota && deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 18 {
+        // `idx` and `count` are two bytes each now, not one: a single byte
+        // capped a set at 255 pieces, which is under 12 kB on a Zigbee frame.
+        if within_quota && deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 20 {
             let mut oid = [0u8; 16];
             oid.copy_from_slice(&e.payload[..16]);
-            let idx = e.payload[16];
-            let count = e.payload[17];
-            let chunk = e.payload[18..].to_vec();
+            let idx = u16::from_be_bytes([e.payload[16], e.payload[17]]);
+            let count = u16::from_be_bytes([e.payload[18], e.payload[19]]);
+            let chunk = e.payload[20..].to_vec();
             if let Some(orig) = self
                 .frags
                 .entry(oid)

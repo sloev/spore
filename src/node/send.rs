@@ -143,7 +143,7 @@ impl Node {
         let orig_id = e.id();
         // Data chunks 0..count, then a few repair chunks for loss resilience.
         let repair = (count / 8 + 2).min(MAX_FOUNTAIN_CHUNKS - count);
-        let indices: Vec<u8> = (0..(count + repair)).map(|i| i as u8).collect();
+        let indices: Vec<u16> = (0..(count + repair)).map(|i| i as u16).collect();
         let frags = fragment(&wire, chunk, e.hops, e.expiry, dest, orig_id, &indices);
 
         let mut forwards = Vec::new();
