@@ -622,6 +622,7 @@ Chunks are fetched from whoever has them and each verifies itself on arrival.
 ```
 manifest = SIGNED [0x01][file_id:16][chunk_size:4][count:4][total_len:8][name][chunk_id:16 × count]
 interior = UNSIGNED [0x08][depth:1][file_id:16][chunk_size:4][count:4][total_len:8][name_len:2][id:16 × count]
+sealed   = SIGNED [0x09][depth:1][hdr_id:16][file_id:16][chunk_size:4][count:4][total_len:8][name][id:16 × count]
 ```
 
 **Manifest trees.** One manifest is one envelope, so it can only name so many
@@ -641,6 +642,19 @@ level, capped at `MAX_DEPTH = 4`:
 
 A file that fits one manifest encodes exactly as it did before trees existed, so
 nothing that already works changes.
+
+**A sealed root names its header rather than carrying it.** The header — an
+ephemeral key, an AEAD tag, the file key and the real name — is about 82 bytes,
+and inside the root it sat on top of the root's own 114 bytes of source key and
+signature. That put a sealed root past 256 bytes before it could name a single
+chunk, which made sealed publishing impossible on every LoRa profile: one byte
+over raw LoRa's ~255-byte frame, nineteen over Meshtastic's 237. Naming it costs
+16 bytes and brings the floor to **188**, which every LoRa profile clears.
+
+The header is an ordinary object on the file's topic, link-local like a chunk,
+and it travels with the root — it is small, and nothing else in the file is any
+use without it. A recipient that holds the root but not the header is in the same
+state as one missing a chunk, and asks for it the same way.
 
 **Pushing the first chunks (local policy).** A publisher MAY send a few chunks
 alongside the manifest, so a file small enough to fit that budget arrives
