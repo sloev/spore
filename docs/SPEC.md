@@ -53,6 +53,24 @@ both.
 
 # Part I — Wire (frozen v1)
 
+**What "frozen" covers, exactly.** `reference/vectors.json` is the compatibility
+surface, and CI refuses to change it. It pins the seed → public key → address
+derivation, topic derivation, the envelope's encoding, the ID that is the hash of
+that encoding with hops zeroed, the signature over it, armor, and that a tampered
+wire is detected. **That is §1 and §2.**
+
+It does **not** pin §3's fragment payload, the INV/WANT payload shapes, the file
+layer's tags, or link framing — none of which have ever appeared in the vectors.
+Those are wire in the sense that bytes cross a link, and they have changed:
+§3's index and count went from one byte to two, and a sealed root now names its
+header rather than carrying it. Both were deliberate and neither needed a
+major-version label, because the guard correctly did not consider them frozen.
+
+Saying so matters more than it looks. A third-party T0 built against "Part I is
+frozen" would have assumed the fragment header was stable. It is not, and §3 in
+particular is on its way out (Part II's link fragmentation replaces it). Build
+against the vectors; treat the rest of Part I as current, not permanent.
+
 ## 1. Identity & addressing
 
 Identity = one Ed25519 keypair. **Address** = first 8 B of SHA-256(pubkey).

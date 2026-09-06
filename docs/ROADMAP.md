@@ -722,6 +722,8 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | M11-C The push threshold | ⬜ | The fountain half is done: repair symbols ship in `src/linkfrag.rs`, every bridge sends them, and `default_repair` is a quarter of the set (min 1). Measured over 200 trials of a 900-byte envelope on a 237-byte link — 5% loss 79%→97%, 10% 54%→90%, 20% 36%→67% with one repair symbol, and 96% at 10% with two, against the 70% repetition managed for the same redundancy. What remains is the **push-N threshold**, which needs M11-E to exist before anything can be pushed, and **adapting repair to observed loss** rather than sending a flat fraction |
 
 | M11-D Retire the end-to-end fountain path | ⬜ | The bridge half shipped: `src/linkfrag.rs`, both shared paths (`driver::run_datagram`, `stream_link`), the three custom loops (meshtastic serial, icmp, and the reticulum/i2p stream variants), and **every** `n.mtu.min(...)` clamp deleted. `spore-sim`'s `mixed-mtu-linkfrag` is the acceptance test. What remains is the other side of the same change: with per-hop splitting in place, `Node::send`'s end-to-end fountain fragmentation is redundant work that also floods unsigned fragments across the mesh. Delete it, with `MAX_FOUNTAIN_CHUNKS`, the `u8` count, and the `TooLarge` error that existed only to report the 255-chunk cap. Needs M11-C first, since whether the fountain relocates to the link or gives way to hop-local retry is the measurement that decides what replaces it |
+| M11-K Cancel an adopted interest | ⬜ | The lease is wall-clock so an interest survives a meeting — right for sneakernet, and too slow on its own. A relay whose last waiter has gone keeps pulling until the lease runs out, so a popular magnet plus a flaky requester is a standing pull against every seeder in range. Cancel when you can tell, expire when you cannot. `spore-sim` acceptance test 5 stays red until this exists |
+| M11-L A malicious-WANT scenario in `spore-sim` | ⬜ | Recursive pull's amplification story is *reasoned*, and one unit test covers the gate (`a_want_for_an_id_no_manifest_names_starts_no_hunt`). Nothing measures what a node that adopts interest in everything, or lies about depth, costs a mesh. Until that exists the bound is argued rather than known — which is the thing `spore-sim` was built to stop |
 | M11-I Recursive pull: the refinements | ⬜ | The mechanism ships — adopt-don't-forward, the parent-manifest gate, a wall-clock lease, depth on the WANT payload, sealed files excluded, and helper relays caching what they carry. `spore-sim`'s `file-multihop` is the acceptance test: a file crosses three hops where it previously could not. Owed: **fanout by neighbour** rather than by interface (today a node asks on every interface but the asker's, bounded by interest-table dedupe rather than by a 2–3 cap, so a node with many links is noisier than it should be); **preferring neighbours that INV'd the id or announced the magnet**, which needs per-neighbour INV memory; **cancel**, so a relay stops pulling when its last waiter goes rather than waiting out the lease; and seed advertisement (`have::<magnet>`) so recursion aims instead of spreading sideways |
 
 **`spore-sim` must show all six of these before n-hop fetch is believed** — until
@@ -753,6 +755,40 @@ a `spore-sim` scenario proving it; files push a measured number of chunks and
 pull the rest; the resource invariant is stated and has a test per path.
 
 ---
+
+## Idea — a gossiped file catalogue, and sneakernet quotas
+
+**Most of this already exists and is not named.** A manifest floods; a node keeps
+every one it hears, bounded by `MAX_MANIFESTS`; `Node::files()` lists them with
+their names and sizes. So every node already carries a partial catalogue of files
+it has heard of and mostly cannot be bothered to fetch — and since recursive pull
+landed, it can now *get* any of them without the publisher being reachable.
+Catalogue plus n-hop fetch is a working distributed index, assembled by accident.
+
+What is missing is the framing and three real pieces of work:
+
+- **Search.** Names are already in the manifests; this is a local query and a
+  screen, not a protocol change.
+- **A carry quota distinct from the store budget.** "Hold 2 GB of other people's
+  files because I opted in" is a different intent from "hold what I am relaying",
+  and today they share one budget. This is the resource invariant's *bounded local
+  allowance* clause applied to a new appetite.
+- **A membership notion for copyparty-style exchange.** Which is the part to be
+  most careful with: SPORE has no roster and no trust, so "member" can only ever
+  mean "holds a key", exactly as it does for private groups (§7.1).
+
+Three things to decide before building, none of them technical:
+
+1. **A searchable catalogue is a metadata surface.** It tells anyone who asks what
+   everyone is sharing. Sealed files are excluded already — they name nothing —
+   but the open ones become a public index of interests, and that is a change in
+   kind from "files exist and you can fetch them if you know a magnet".
+2. **Nothing stops an attractive name.** Anyone may publish a manifest called
+   anything; there is no trust to lean on. A catalogue makes the name the primary
+   surface, which is exactly the wrong thing to make prominent without saying so.
+3. **How global is global?** A catalogue is as wide as the flood reaches and as
+   deep as `MAX_MANIFESTS`. On an MCU that is small. It should be honest about
+   being a local view of a neighbourhood rather than an index of everything.
 
 ## Explicitly out of scope / non-goals (locked)
 

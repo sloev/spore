@@ -50,6 +50,21 @@ format is v1 — regardless of what the crate's own version number says:
 | `tests/api_freeze.rs` | the public API shape + golden wire/crypto values | no change |
 | `bindings/spore.h` | the C ABI symbols | **symbols may be added; none may be removed or renamed** |
 
+**Which protocol surface that actually is**, because the file list alone does not
+say. The vectors encode seed → public key → address, topic derivation, the
+envelope's encoding, the ID that is the hash of it with hops zeroed, the
+signature, armor, and tamper detection — **§1 and §2, and nothing else**.
+
+The fragment payload of §3, the INV/WANT payload shapes, the file layer's tags
+and link framing have never been in the vectors, and are therefore not frozen. In
+this cycle §3's index and count widened from one byte to two and a sealed root
+began naming its header instead of carrying it; both are wire changes, neither
+needed the label, and the guard was right not to ask for one.
+
+That is the intended behaviour, but it is worth being explicit about, because
+"Part I — Wire (frozen v1)" reads like a promise about all of Part I and is only
+a promise about the part the vectors cover.
+
 **Everything else is not frozen**, including `tests/**` other than
 `api_freeze.rs`, `web/test.mjs`, `web/ws-test.mjs`, `site/seed/*.test.mjs`,
 `examples/worked.rs`, `reference/test_t0.py`, and the workflow files.
