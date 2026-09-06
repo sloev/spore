@@ -74,11 +74,11 @@ fn fountain_decode(wire: &[u8], mtu: usize) -> (usize, f64) {
     // this measurement concluded the fountain was free.
     let lost = (count / 5).max(1);
     let margin = 8;
-    let indices: Vec<u8> = (0..(count + lost + margin) as u8).collect();
+    let indices: Vec<u16> = (0..(count + lost + margin) as u16).collect();
     let frags = fragment(wire, chunk, 0, 0, ZERO_DEST, orig, &indices);
-    let bodies: Vec<(u8, Vec<u8>)> = frags
+    let bodies: Vec<(u16, Vec<u8>)> = frags
         .iter()
-        .map(|f| (f.payload[16], f.payload[18..].to_vec()))
+        .map(|f| (u16::from_be_bytes([f.payload[16], f.payload[17]]), f.payload[20..].to_vec()))
         .filter(|(idx, _)| (*idx as usize) >= lost) // the first `lost` never arrived
         .collect();
 
@@ -89,7 +89,7 @@ fn fountain_decode(wire: &[u8], mtu: usize) -> (usize, f64) {
         let mut f = Fountain::new();
         let mut out = None;
         for (idx, body) in &bodies {
-            out = f.add(&orig, *idx, count as u8, body.clone());
+            out = f.add(&orig, *idx, count as u16, body.clone());
         }
         let got = out.expect("the fountain must recover the wire from the symbols that arrived");
         // The fountain pads to `count * chunk` on the way out and trims on the
@@ -102,7 +102,7 @@ fn fountain_decode(wire: &[u8], mtu: usize) -> (usize, f64) {
         let mut f = Fountain::new();
         let mut out = None;
         for (idx, body) in &bodies {
-            out = f.add(&orig, *idx, count as u8, body.clone());
+            out = f.add(&orig, *idx, count as u16, body.clone());
         }
         std::hint::black_box(&out);
     }

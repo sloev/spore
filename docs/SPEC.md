@@ -94,14 +94,22 @@ claimed** (§10 stamp).
 
 ## 3. Fragmentation — fountain coded
 
-payload = `[orig_id:16][index:1][count:1][chunk]`; all chunks equal size (pad the
+payload = `[orig_id:16][index:2][count:2][chunk]`; all chunks equal size (pad the
 original; the envelope self-delimits). Fragments are ordinary envelopes (own IDs,
 same dest/expiry).
 
 - **index < count**: plain chunk *index* of the original envelope's bytes.
 - **index ≥ count**: **repair chunk** = XOR of the data chunks selected by the
-  first *count* bits of SHA-256(orig_id ‖ index); empty selection → chunk
-  (index mod count). The sender can mint endless distinct repair chunks.
+  first *count* bits of SHA-256(orig_id ‖ index ‖ block), taken in 256-bit
+  blocks numbered from zero; empty selection → chunk (index mod count). The
+  sender can mint endless distinct repair chunks.
+
+Both fields were one byte, which capped a set at 255 chunks. That bound the
+*carrying* size — 51 kB at a 237-byte frame — but it bound **repair** harder:
+one SHA-256 addresses 256 chunks, so a larger set had no repair at all and needed
+every piece. 255 pieces is under 12 kB on a 54-byte Zigbee frame, which is
+exactly where a lost piece is most likely. Hashing in numbered blocks lifts the
+ceiling to what the field can name.
 
 Receiver decodes when any received set reaches rank *count* (Gaussian elimination
 over GF(2)); typically *count*+2 arrivals suffice at any loss rate, in any order,

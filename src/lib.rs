@@ -1170,7 +1170,7 @@ mod tests {
             let count = wire.len().div_ceil(cs);
 
             // Emit data + plenty of repair, drop ~40% with a deterministic LCG.
-            let indices: Vec<u8> = (0..(count as u8).saturating_add(60)).collect();
+            let indices: Vec<u16> = (0..(count as u16).saturating_add(60)).collect();
             let frags = fragment(&wire, cs, 16, e.expiry, ZERO_DEST, id, &indices);
 
             let mut f = Fountain::new();
@@ -1183,9 +1183,9 @@ mod tests {
                     continue; // 40% loss
                 }
                 fed += 1;
-                let idx = fr.payload[16];
-                let cnt = fr.payload[17];
-                let chunk = fr.payload[18..].to_vec();
+                let idx = u16::from_be_bytes([fr.payload[16], fr.payload[17]]);
+                let cnt = u16::from_be_bytes([fr.payload[18], fr.payload[19]]);
+                let chunk = fr.payload[20..].to_vec();
                 if let Some(w) = f.add(&id, idx, cnt, chunk) {
                     recovered = Some(w);
                     break;

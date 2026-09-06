@@ -564,14 +564,25 @@ the bridge does not raise it back. **Deleting all five is the acceptance test.**
   constant; LoRa, Zigbee at ~54 B and JANUS at ~32 B differ in cost, not
   capability.
 
-### A gap to close while doing it
+### The gap that was closed on the way
 
-`count` is one wire byte, so a set is at most 255 fragments — and the largest
-envelope is 65 649 B. One set therefore carries only 51 255 B at a 237-byte LoRa
-frame, 4 590 B at Zigbee's ~54, 3 825 B at LoRaWAN SF12. **Envelopes between
-those figures and 64 KB are legal but uncarriable.** Invisible today because the
-sender clamps itself; per-hop it becomes a hole a relay walks into. Widening the
-count is nearly free once the header is link framing rather than frozen wire.
+`count` was one wire byte, so a set held at most 255 fragments against a
+65 649-byte largest envelope — 51 255 B carried at a 237-byte LoRa frame, 4 590 B
+at Zigbee's ~54. Envelopes between those figures and 64 KB were legal but
+uncarriable.
+
+Widening it turned out to matter more than the carrying limit, because repair
+symbols shared the ceiling: the erasure code derived each symbol's inputs from a
+single SHA-256, and one digest addresses 256 chunks. So past 255 pieces a set had
+**no repair at all** and needed every single piece — and 255 pieces is under
+12 kB on a Zigbee frame, which is where loss hurts most. A 20 kB envelope is 426
+pieces; at 1% frame loss that delivers 1.4% of the time.
+
+`count` and `idx` are `u16` on both paths now, and `selection` hashes in numbered
+blocks so the code addresses as many chunks as the field can name. One
+consequence worth recording: the `TooLarge` error `send` returns is now
+unreachable for any legal envelope, because `plen` is also a `u16` and the
+payload runs out first.
 
 ### Open, and for the simulator to answer
 

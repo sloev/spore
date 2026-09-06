@@ -17,16 +17,16 @@
 use crate::*;
 
 /// Bytes a fragment envelope adds around its chunk: 16 header + 2 plen +
-/// 16 orig_id + 1 index + 1 count. `chunk = mtu - FRAG_OVERHEAD`.
-pub(crate) const FRAG_OVERHEAD: usize = 36;
+/// 16 orig_id + 2 index + 2 count. `chunk = mtu - FRAG_OVERHEAD`.
+pub(crate) const FRAG_OVERHEAD: usize = 38;
 
 /// Most chunks one fountain set can hold.
 ///
-/// Structural, not policy: the fragment header carries `count` as a single wire
-/// byte (§1), so a set addresses at most 255 chunks of `mtu - FRAG_OVERHEAD`. An
-/// object past that needs the file/manifest layer, which is what that layer is
-/// for.
-pub const MAX_FOUNTAIN_CHUNKS: usize = 255;
+/// Structural, not policy: `count` is a `u16` in the fragment header, so a set
+/// addresses at most 65 535 chunks of `mtu - FRAG_OVERHEAD`. It was one byte, and
+/// 255 chunks is under 12 kB on a Zigbee frame — small enough that ordinary
+/// objects fell past it on exactly the links least able to lose a piece.
+pub const MAX_FOUNTAIN_CHUNKS: usize = u16::MAX as usize;
 
 /// Selection bitmap for repair chunk `idx`: first `count` bits (MSB-first) of
 /// SHA-256(orig_id ‖ idx). Empty selection maps to data chunk (idx mod count).
@@ -37,18 +37,30 @@ pub const MAX_FOUNTAIN_CHUNKS: usize = 255;
 /// 32 bytes, so `count` must also stay within the 256 bits it can index — the
 /// sender asserts `count <= 255` and the wire field is a `u8`, but the bound is
 /// checked rather than assumed, because both of those are facts about *callers*.
-fn selection(orig_id: &Id, idx: u8, count: usize) -> BitVec {
-    if count == 0 || count > 256 {
-        return BitVec::zeros(count.min(256));
+fn selection(orig_id: &Id, idx: u16, count: usize) -> BitVec {
+    if count == 0 {
+        return BitVec::zeros(0);
     }
-    let mut h = Sha256::new();
-    Digest::update(&mut h, orig_id);
-    Digest::update(&mut h, [idx]);
-    let d = h.finalize();
+    // One SHA-256 gives 256 bits, so a single digest could only ever address 256
+    // chunks — which is where the old 255-piece ceiling came from. Hashing in
+    // numbered blocks lifts it: block `k` covers chunks `256k..256(k+1)`.
+    //
+    // That ceiling was not cosmetic on a narrow link. A 54-byte Zigbee frame
+    // carries 47 usable bytes, so 255 pieces is under 12 kB; past that a set had
+    // no repair at all and every single piece had to arrive. A 20 kB envelope is
+    // 426 pieces, and at 1% frame loss that is a 1.4% chance of delivery.
     let mut b = BitVec::zeros(count);
-    for i in 0..count {
-        if (d[i / 8] >> (7 - (i % 8))) & 1 == 1 {
-            b.set(i);
+    for blk in 0..count.div_ceil(256) {
+        let mut h = Sha256::new();
+        Digest::update(&mut h, orig_id);
+        Digest::update(&mut h, idx.to_be_bytes());
+        Digest::update(&mut h, (blk as u16).to_be_bytes());
+        let d = h.finalize();
+        let base = blk * 256;
+        for i in 0..256.min(count - base) {
+            if (d[i / 8] >> (7 - (i % 8))) & 1 == 1 {
+                b.set(base + i);
+            }
         }
     }
     if b.is_zero() {
@@ -73,10 +85,10 @@ pub fn fragment(
     expiry: u32,
     dest: Addr,
     orig_id: Id,
-    indices: &[u8],
+    indices: &[u16],
 ) -> Vec<Envelope> {
     let count = env_wire.len().div_ceil(chunk);
-    assert!(count <= 255, "envelope too large for one fragment set");
+    assert!(count <= MAX_FOUNTAIN_CHUNKS, "envelope too large for one fragment set");
     let mut padded = env_wire.to_vec();
     padded.resize(count * chunk, 0);
     let data = |i: usize| padded[i * chunk..(i + 1) * chunk].to_vec();
@@ -95,10 +107,10 @@ pub fn fragment(
             }
             acc
         };
-        let mut payload = Vec::with_capacity(18 + chunk);
+        let mut payload = Vec::with_capacity(20 + chunk);
         payload.extend_from_slice(&orig_id);
-        payload.push(idx);
-        payload.push(count as u8);
+        payload.extend_from_slice(&idx.to_be_bytes());
+        payload.extend_from_slice(&(count as u16).to_be_bytes());
         payload.extend_from_slice(&cbytes);
         out.push(Envelope {
             typ: ty::DATA,
@@ -160,7 +172,7 @@ impl Fountain {
     }
     /// Feed one fragment's `(orig_id, idx, count, chunk_bytes)`.
     /// Returns the reassembled original envelope bytes once solvable.
-    pub fn add(&mut self, orig_id: &Id, idx: u8, count: u8, chunk_bytes: Vec<u8>) -> Option<Vec<u8>> {
+    pub fn add(&mut self, orig_id: &Id, idx: u16, count: u16, chunk_bytes: Vec<u8>) -> Option<Vec<u8>> {
         if self.done.is_some() {
             return self.done.clone();
         }

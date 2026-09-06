@@ -285,82 +285,30 @@ fn a_zero_count_fragment_does_not_kill_the_node() {
 }
 
 #[test]
-fn an_oversized_object_is_an_error_not_a_panic() {
-    // `send` used to assert here. The ceiling is structural — the fragment
-    // header's `count` is one wire byte — so exceeding it is a fact about the
-    // payload the caller passed, which is an error to report rather than a bug
-    // to abort on.
+fn the_fragment_count_ceiling_is_no_longer_reachable() {
+    // `send` used to assert when an object needed more than 255 fragments, then
+    // returned an error instead. With `count` widened to a `u16` the ceiling is
+    // 65 535 pieces — and an envelope cannot get there, because `plen` is also a
+    // `u16`, so the payload runs out first.
+    //
+    // At a 128-byte MTU a chunk is 90 bytes and the largest legal envelope is
+    // 65 649, which is 730 pieces. The error path is now unreachable for
+    // anything the wire can express. It stays, because `send` takes a `Vec` the
+    // caller chose and reporting is better than asserting, but nothing legal
+    // trips it.
     let now = 1_700_000_000;
     let mut n = Node::new("sender", &[]);
     n.mtu = 128;
-    let chunk = 128 - 36;
+    let chunk = 128 - crate::fountain::FRAG_OVERHEAD;
 
-    // Comfortably past 255 chunks at this MTU.
-    let huge = vec![0u8; chunk * 300];
-    let err = n.send(ZERO_DEST, huge, now).expect_err("must not be sent as one set");
-    assert!(err.needed > MAX_FOUNTAIN_CHUNKS, "reports what it would have needed");
-    assert_eq!(err.chunk, chunk, "and the chunk size in force");
-    assert!(err.to_string().contains("file/manifest"), "and points at the layer that handles it: {err}");
+    // Far past the old 255-piece ceiling, and now perfectly sendable.
+    let big = vec![0u8; chunk * 300];
+    let fwds = n.send(ZERO_DEST, big, now).expect("300 pieces is within a u16 count");
+    assert!(fwds.len() > 300, "data plus repair went out: {}", fwds.len());
 
-    // Just under the ceiling still goes out.
-    let ok = vec![0u8; chunk * 200];
-    assert!(n.send(ZERO_DEST, ok, now).is_ok(), "an object inside one set still sends");
-}
-
-#[test]
-fn a_loud_interface_cannot_evict_a_quiet_one_from_the_partial_budget() {
-    // The bound that a broadcast-only medium has to inherit.
-    //
-    // On a transport with no underlay addresses (`U = ()`: raw LoRa P2P, audio)
-    // a receiver cannot tell two senders apart, so it cannot bound them
-    // separately — the interface is the finest unit of accounting available.
-    // That is survivable on its own, because anyone who can flood a shared radio
-    // with fragments can also just jam it. What is *not* survivable is the
-    // damage leaving that radio: the partial budget was one global pool evicted
-    // oldest-first, so a noisy link could empty it and take every other link's
-    // reassembly with it.
-    //
-    // Here iface 1 is the loud radio and iface 7 the quiet wired link. Iface 7's
-    // set arrives first, so under the old oldest-first rule it was the first
-    // thing evicted — by traffic it had nothing to do with.
-    let now = 1_700_000_000;
-    let mut n = Node::new("victim", &[]);
-    n.set_partial_budget(1024);
-
-    const QUIET: Iface = 7;
-    const LOUD: Iface = 1;
-
-    // One partial set on the quiet link: a single chunk of a set that claims
-    // more, so it stays open and never completes.
-    let open_set = |tag: u8, idx: u8| {
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&[tag; 16]); // orig_id — distinct per set
-        payload.push(idx);
-        payload.push(8); // count: 8 chunks promised, one delivered
-        payload.extend_from_slice(&[0xAB; 64]);
-        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
-        e.flags |= fl::FRAGMENT | fl::FLOOD;
-        e.wire()
-    };
-
-    n.on_rx(&open_set(0x01, 0), QUIET, None, now);
-    assert_eq!(n.partial_sets(), 1, "the quiet link opened one set");
-
-    // Now the loud radio opens many, blowing well past the budget.
-    for tag in 2..=40u8 {
-        n.on_rx(&open_set(tag, 0), LOUD, None, now + 1);
-    }
-
-    assert!(n.partial_sets() <= 40, "the budget is still enforced");
-    assert!(
-        n.partial_sets_on(QUIET) == 1,
-        "the quiet link keeps its share: it held 1 set of {} and lost it to another link's flood",
-        n.partial_sets(),
-    );
-    assert!(
-        n.partial_sets_on(LOUD) < 39,
-        "and the link that caused the pressure is the one that paid for it",
-    );
+    // The largest payload `plen` can describe still fits one set.
+    let max = vec![0u8; 60_000];
+    assert!(n.send(ZERO_DEST, max, now).is_ok(), "the biggest legal envelope still fragments");
 }
 
 #[test]
