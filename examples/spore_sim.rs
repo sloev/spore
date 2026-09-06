@@ -515,6 +515,49 @@ fn lossy_mesh(loss_pct: u32) -> Report {
     Report { name: format!("lossy-mesh-{loss_pct}pct"), note, reached, of: N - 1, m: sim.m }
 }
 
+/// **The M11-I case.** A file three hops away: the root has flooded, so every
+/// node knows the magnet, and the fetcher asks for the chunks.
+///
+/// It does not arrive, and the reason is structural rather than lossy. WANT is
+/// consumed at the neighbour and never relayed, so the request reaches a node
+/// that holds no chunks and dies there. Custody push is unicast mail to a
+/// person, not "anyone who wants this id". If the seeder does not walk toward
+/// you, the file does not move.
+///
+/// Reported, not asserted: M11-I flipping this to 1 is the result to look for.
+fn file_multihop() -> Report {
+    let links = (0..3).map(|i| Link { a: i, b: i + 1, mtu: 1400, loss_pct: 0, latency_ms: 10 }).collect();
+    let mut sim = Sim::new(World::new(4, links), 0xF11E);
+    let now = sim.now_secs();
+    let bytes = vec![0xAB; 6000];
+    let (magnet, fwds) = sim.world.nodes[0].publish_file("far.bin", &bytes, ZERO_DEST, now);
+    sim.emit(0, fwds);
+    sim.run(sim.now_ms + 60_000, None);
+
+    // Everyone knows it exists — the flooded root doing its job — which is what
+    // makes the failure specific: this is not "the mesh never heard of it".
+    let knows = (0..4).filter(|i| sim.world.nodes[*i].file_name(&magnet).is_some()).count();
+    assert_eq!(knows, 4, "the root should reach every node; the scenario is meaningless otherwise");
+
+    sim.start_measuring();
+    let want = sim.world.nodes[3].fetch(&magnet);
+    sim.emit(3, want);
+    sim.run(sim.now_ms + 120_000, None);
+
+    let reached = usize::from(sim.world.nodes[3].has_file(&magnet));
+    Report {
+        name: "file-multihop".into(),
+        note: if reached == 1 {
+            "a file crossed three hops"
+        } else {
+            "all four know the magnet; the fetcher three hops away gets nothing — M11-I"
+        },
+        reached,
+        of: 1,
+        m: sim.m,
+    }
+}
+
 /// Two clusters joined by a single node: does a partition heal through one
 /// bridge, and what does it cost?
 ///
@@ -589,6 +632,7 @@ fn main() {
         "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped(), mixed_mtu_linkfrag()],
         "lossy" => vec![lossy_mesh(0), lossy_mesh(10), lossy_mesh(50)],
         "partition" => vec![partition()],
+        "files" => vec![file_multihop()],
         "hop-limit" => vec![hop_limit(8), hop_limit(17), hop_limit(19)],
         _ => vec![
             line(),
@@ -598,6 +642,7 @@ fn main() {
             lossy_mesh(0),
             lossy_mesh(10),
             partition(),
+            file_multihop(),
             hop_limit(17),
             hop_limit(19),
         ],
