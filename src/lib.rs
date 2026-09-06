@@ -199,6 +199,29 @@ pub const DEFAULT_PARTIAL_BUDGET: usize = 4 * 1024 * 1024;
 /// of a live object keep arriving; a set that has heard nothing for this long is
 /// either abandoned or was never real.
 pub const PARTIAL_TIMEOUT_SECS: u32 = 300;
+/// Ids that a manifest we hold names, remembered so a neighbour's WANT for one
+/// of them can be answered by fetching it (M11-I).
+///
+/// This is the *authorization* index: a node may adopt a neighbour's interest
+/// only in ids some manifest it holds names, because the flooded root is what
+/// made the file legitimate to ask about and the tree names every legal child.
+/// Without it, any id at all could start a hunt across the mesh — S-012 at depth
+/// n. Sized so a node can be useful about a working set of files rather than
+/// about every file it has ever heard of.
+pub const MAX_NAMED_IDS: usize = 8192;
+/// Neighbour interests held at once. Each is a promise to pass something back,
+/// so this bounds what a crowd of neighbours can make this node remember.
+pub const MAX_INTERESTS: usize = 256;
+/// How long an adopted interest lives without being renewed.
+///
+/// Wall clock, not connection: B may adopt A's interest, part from A, meet a
+/// holder later and serve A at the next meeting. Scoping this to a live link
+/// would make recursive pull an online-only feature and throw away the
+/// store-and-forward property the rest of the protocol is built on.
+pub const INTEREST_LEASE_SECS: u32 = 900;
+/// How far a WANT may be re-asked. Decremented at each adopting hop.
+pub const DEFAULT_WANT_DEPTH: u8 = 8;
+
 /// Peers we retain prekeys, names and busy bytes for.
 pub const MAX_PEERS: usize = 4096;
 /// File manifests retained.
@@ -242,6 +265,12 @@ pub struct Limits {
     pub acked: usize,
     /// Undrained RPC / feed inbox items (`MAX_INBOX`).
     pub inbox: usize,
+    /// Ids a held manifest names (`MAX_NAMED_IDS`) — the authorization index for
+    /// recursive pull. Bounds how much of other people's trees this node is
+    /// willing to remember in order to be useful about them.
+    pub named: usize,
+    /// Neighbour interests adopted at once (`MAX_INTERESTS`).
+    pub interests: usize,
 }
 
 impl Default for Limits {
@@ -250,6 +279,8 @@ impl Default for Limits {
             seen: MAX_SEEN,
             partial_objects: MAX_PARTIAL_OBJECTS,
             partial_bytes: DEFAULT_PARTIAL_BUDGET,
+            named: MAX_NAMED_IDS,
+            interests: MAX_INTERESTS,
             peers: MAX_PEERS,
             manifests: MAX_MANIFESTS,
             acked: MAX_ACKED,
@@ -325,7 +356,7 @@ impl Limits {
         // The fountain share pays for both halves of what a partial set costs:
         // the chunk bytes it holds *and* its own bookkeeping. Charging only the
         // bytes is how a budget quietly overruns itself.
-        let partial_total = share(40).max(16 * 1024);
+        let partial_total = share(34).max(16 * 1024);
         // One set per 4 KB of payload budget: enough sets to reassemble several
         // objects at once without letting cardinality outrun the bytes those
         // sets are allowed to hold. Never above the desktop cap — this function
@@ -334,14 +365,31 @@ impl Limits {
         let partial_bytes =
             partial_total.saturating_sub(partial_objects * Self::cost_partial_set()).max(16 * 1024);
         Self {
-            seen: div(share(25), Self::cost_seen()).max(256),
+            seen: div(share(22), Self::cost_seen()).max(256),
             partial_objects,
             partial_bytes,
-            peers: div(share(20), Self::cost_peer()).max(8),
+            peers: div(share(18), Self::cost_peer()).max(8),
             manifests: div(share(5), Self::cost_manifest()).max(8),
             acked: div(share(5), Self::cost_acked()).max(16),
-            inbox: div(share(5), Self::COST_INBOX).max(8),
+            inbox: div(share(4), Self::COST_INBOX).max(8),
+            // A tenth, taken from the shares above rather than added on top —
+            // the percentages have to sum to one, and adding two tables without
+            // paying for them is how a budget stops being one. Both of these are
+            // what makes a node *useful to other people* rather than what makes
+            // it work, so they are the right place to be stingy: a node that
+            // cannot afford to relay interest still fetches its own files.
+            named: div(share(8), Self::cost_named()).max(64),
+            interests: div(share(2), Self::cost_interest()).max(8),
         }
+    }
+
+    /// A named id: the child id, the root it belongs to, and the map slot.
+    const fn cost_named() -> usize {
+        16 + 16 + 16
+    }
+    /// An adopted interest: the id, one waiting neighbour, and the map slot.
+    const fn cost_interest() -> usize {
+        16 + 8 + 2 + 4 + 24
     }
 
     /// Roughly what these ceilings let the tables weigh, for logging a budget
@@ -351,6 +399,8 @@ impl Limits {
             + self.partial_bytes
             + self.partial_objects * Self::cost_partial_set()
             + self.peers * Self::cost_peer()
+            + self.named * Self::cost_named()
+            + self.interests * Self::cost_interest()
             + self.manifests * Self::cost_manifest()
             + self.acked * Self::cost_acked()
             + self.inbox * Self::COST_INBOX
@@ -512,6 +562,22 @@ pub enum Forward {
     Directed { iface: Iface, nbr: Option<Addr>, bytes: Vec<u8> },
 }
 
+/// One adopted interest: who is waiting for an id, and until when.
+#[derive(Clone)]
+pub(crate) struct Interest {
+    /// Neighbours that asked, as (interface, their address if the medium told
+    /// us). More than one node may want the same chunk, and the second should
+    /// not have to wait for a second fetch.
+    pub(crate) waiters: Vec<(Iface, Option<Addr>)>,
+    /// Wall-clock expiry. Not tied to a live link: B may adopt A's interest,
+    /// part from A, meet a holder tomorrow and serve A next week.
+    ///
+    /// No depth is stored alongside it. Depth bounds *asking*, and the asking
+    /// happens once when the interest is adopted — a renewal path that re-asked
+    /// on a stale interest would need to remember it, and does not exist yet.
+    pub(crate) until: u32,
+}
+
 #[derive(Default)]
 pub struct Rx {
     pub delivered: Vec<Envelope>, // to the local app
@@ -562,6 +628,21 @@ pub struct Node {
     limits: Limits,
     pub mtu: usize,
     manifests: HashMap<Id, file::Manifest>,
+    /// **The authorization index for recursive pull (M11-I).** Every id a
+    /// manifest we hold names, mapped to the root magnet it belongs to.
+    ///
+    /// This is what makes "may I go and fetch this for my neighbour?" an O(1)
+    /// question. The alternative — walking every held manifest on every WANT —
+    /// is ~86k comparisons per request at default limits, which is not a thing
+    /// to do per packet.
+    named: HashMap<Id, Id>,
+    /// **Interests adopted from neighbours (M11-I).** id -> who is waiting.
+    ///
+    /// A pending-interest table, in NDN's sense: the WANT envelope is never
+    /// forwarded, but the *interest* is adopted, so this node becomes a
+    /// requester in its own right and passes the answer back down. Entries carry
+    /// a wall-clock lease, so an interest survives the meeting that created it.
+    interests: HashMap<Id, Interest>,
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
     acked: HashSet<Id>,            // orig ids we've received receipts for
     rpc_pending: HashSet<u64>,     // request ids awaiting a response (L4)

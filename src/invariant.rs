@@ -37,6 +37,8 @@ fn tight() -> Limits {
         manifests: 4,
         acked: 8,
         inbox: 8,
+        named: 32,
+        interests: 4,
     }
 }
 
@@ -218,4 +220,188 @@ fn a_served_chunk_stops_at_the_node_that_asked_for_it() {
         relayed += bystander.on_rx(w, 0, None, NOW).forwards.len();
     }
     assert_eq!(relayed, 0, "and a node that never asked carries nothing");
+}
+
+// ------------------------------------------------- M11-I: recursive pull
+
+/// Wire two nodes together by hand: everything `from` emits, `to` receives.
+fn pump(from: &mut Node, to: &mut Node, forwards: Vec<Forward>, now: u32) -> Vec<Forward> {
+    let _ = from;
+    let mut out = Vec::new();
+    for f in forwards {
+        let wire = match &f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        out.extend(to.on_rx(wire, 0, None, now).forwards);
+    }
+    out
+}
+
+#[test]
+fn a_want_for_an_id_no_manifest_names_starts_no_hunt() {
+    // **The rule that keeps recursive pull from being S-012 at depth n.**
+    //
+    // Adopting a neighbour's interest means spending someone else's radio, so
+    // the flooded root is the capability: the mesh has agreed the file exists
+    // and the Merkle tree names every legal child. An id nobody has a manifest
+    // for is not a fetch, it is a request to search the mesh.
+    let mut relay = Node::new("relay", &[]);
+
+    let unknown = [0x77u8; 16];
+    let want = Envelope::new(ty::WANT, ZERO_DEST, 0, unknown.to_vec()).wire();
+    let rx = relay.on_rx(&want, 0, None, NOW);
+
+    assert!(rx.forwards.is_empty(), "an unnamed id must produce silence, not a search");
+}
+
+#[test]
+fn a_neighbours_want_is_adopted_never_forwarded() {
+    // The WANT envelope stays where it landed. What travels is a *new* request
+    // this node made because it acquired an interest of its own — which is what
+    // keeps §6's bound intact: WANT is hops=0, unsigned, consumed, never relayed.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut relay = Node::new("relay", &[]);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 6000], ZERO_DEST, NOW);
+
+    // The relay hears the root, so it knows the file exists and what it names.
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, 0, None, NOW);
+    }
+
+    // A neighbour asks the relay for a chunk the relay does not hold.
+    let mut fetcher = Node::new("fetcher", &[]);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        fetcher.on_rx(wire, 0, None, NOW);
+    }
+    let want = fetcher.fetch(&magnet);
+    let onward = pump(&mut fetcher, &mut relay, want.clone(), NOW);
+
+    assert!(!onward.is_empty(), "the relay asks onward on the neighbour's behalf");
+    let asked = match &onward[0] {
+        Forward::Flood { bytes, .. } => bytes.clone(),
+        Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    let original = match &want[0] {
+        Forward::Flood { bytes, .. } => bytes.clone(),
+        Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    assert_ne!(asked, original, "it must be a new request, not the same envelope relayed");
+
+    let (e, _) = Envelope::decode(&asked).expect("a WANT");
+    assert_eq!(e.typ, ty::WANT);
+    assert_eq!(
+        e.payload.len() % 16,
+        1,
+        "and it carries the remaining depth, so the asking cannot go on forever"
+    );
+    assert!(e.payload[e.payload.len() - 1] < DEFAULT_WANT_DEPTH, "depth decremented");
+}
+
+#[test]
+fn the_depth_budget_runs_out() {
+    // Depth is what bounds how far one neighbour's curiosity can travel. At
+    // zero a node answers from its own store or says nothing.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut relay = Node::new("relay", &[]);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 6000], ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, 0, None, NOW);
+    }
+    let missing = relay.missing(&magnet, 1);
+    assert!(!missing.is_empty(), "the relay knows what it is missing");
+
+    let mut payload: Vec<u8> = missing[0].to_vec();
+    payload.push(0); // spent
+    let want = Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire();
+    let rx = relay.on_rx(&want, 0, None, NOW);
+    assert!(rx.forwards.is_empty(), "a spent budget stops the asking");
+}
+
+#[test]
+fn an_adopted_interest_is_bounded_and_expires() {
+    // An interest is a promise to pass something back, so a crowd of neighbours
+    // must not be able to make this node remember without limit — and an
+    // interest nobody renewed must not outlive its usefulness.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut relay = Node::new("relay", &[]);
+    relay.set_limits(tight());
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, 0, None, NOW);
+    }
+
+    let missing = relay.missing(&magnet, 64);
+    for id in &missing {
+        let want = Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire();
+        relay.on_rx(&want, 0, None, NOW);
+    }
+    assert!(
+        relay.open_interests() <= relay.limits().interests,
+        "interests {} over cap {}",
+        relay.open_interests(),
+        relay.limits().interests
+    );
+
+    // Long past the lease, with any traffic at all to drive the sweep.
+    let later = NOW + INTEREST_LEASE_SECS + 1;
+    relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, later);
+    assert_eq!(relay.open_interests(), 0, "an interest nobody renewed is forgotten");
+}
+
+#[test]
+fn a_sealed_file_is_never_fetched_on_someone_elses_behalf() {
+    // Sealed chunks are ciphertext, so confidentiality holds either way — but
+    // copying one across the mesh and advertising that it exists is not what
+    // sealing to one recipient meant. The gate is checkable precisely because a
+    // node entitled to recurse is the one holding the manifest that knows.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut recipient = Node::new("recipient", &[]);
+    let mut relay = Node::new("relay", &[]);
+
+    // The publisher must know the recipient's prekey to seal to them.
+    let ann = recipient.build_announce(NOW);
+    for f in &ann {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        publisher.on_rx(wire, 0, None, NOW);
+    }
+    let Some((magnet, fwds)) =
+        publisher.publish_file_sealed("secret.txt", &vec![0xEE; 6000], recipient.addr, NOW)
+    else {
+        return; // no prekey yet on this build; the open-file gate is tested above
+    };
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, 0, None, NOW);
+    }
+
+    let missing = relay.missing(&magnet, 1);
+    if missing.is_empty() {
+        return; // nothing nameable yet
+    }
+    let want = Envelope::new(ty::WANT, ZERO_DEST, 0, missing[0].to_vec()).wire();
+    let rx = relay.on_rx(&want, 0, None, NOW);
+    assert!(rx.forwards.is_empty(), "a sealed file must not be hunted for a third party");
 }

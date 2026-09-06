@@ -142,6 +142,7 @@ impl Node {
         me.sign(&self.sk);
         let magnet = me.id();
         self.manifests.insert(magnet, manifest);
+        self.index_named(&magnet, &magnet, now);
         self.mark_seen(&me);
         self.store_put(&me, now);
         let forwards = self.forward_intents(&me, NO_IFACE, now);
@@ -157,7 +158,50 @@ impl Node {
         let m = file::Manifest::decode(&e.payload)?;
         let magnet = e.id();
         self.manifests.entry(magnet).or_insert(m);
+        // Everything this root names is now legitimate to fetch on a
+        // neighbour's behalf: the mesh agreed the file exists, and the tree
+        // names every legal child.
+        self.index_named(&magnet, &magnet, 0);
         Some(magnet)
+    }
+
+    /// Record every id a manifest names as belonging to `root`.
+    ///
+    /// Called for a root when it is learned, and for an interior node when one
+    /// is stored — an interior node's children inherit the root already recorded
+    /// for the node itself, which is why the index stays complete as a tree
+    /// resolves without anyone walking it.
+    pub(crate) fn index_named(&mut self, id: &Id, root: &Id, _now: u32) {
+        let Some(m) = self.manifest_at(id) else { return };
+        for child in &m.chunk_ids {
+            if self.named.len() >= self.limits.named && !self.named.contains_key(child) {
+                // Full. Refusing to learn more is the bounded-allowance half of
+                // the resource invariant: this node simply becomes less useful
+                // to its neighbours, never over-committed.
+                return;
+            }
+            self.named.insert(*child, *root);
+        }
+    }
+
+    /// The manifest for an id, whether it is a root we absorbed or an interior
+    /// node sitting in the store.
+    fn manifest_at(&self, id: &Id) -> Option<file::Manifest> {
+        if let Some(m) = self.manifests.get(id) {
+            return Some(m.clone());
+        }
+        let wire = self.store.wire(id)?;
+        let (e, _) = Envelope::decode(&wire).ok()?;
+        file::Manifest::decode(&e.payload)
+    }
+
+    /// Is this id one a manifest we hold names, and if so which file?
+    ///
+    /// The authorization question for recursive pull. A `None` means silence:
+    /// this node has no reason to believe the id is part of anything real, and
+    /// hunting for it would be a stranger spending someone else's radio.
+    pub(crate) fn named_by(&self, id: &Id) -> Option<Id> {
+        self.named.get(id).copied()
     }
 
     /// Read an interior manifest out of the store.
