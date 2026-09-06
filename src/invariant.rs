@@ -184,7 +184,9 @@ fn a_served_chunk_stops_at_the_node_that_asked_for_it() {
     let mut fetcher = Node::new("fetcher", &[]);
     let mut bystander = Node::new("bystander", &[]);
 
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xAB; 8000], ZERO_DEST, NOW);
+    // Bigger than the push budget (M11-E), or the file arrives complete with
+    // its manifest and there is no serve path left to observe.
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xAB; 40_000], ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -262,7 +264,8 @@ fn a_neighbours_want_is_adopted_never_forwarded() {
     // keeps §6's bound intact: WANT is hops=0, unsigned, consumed, never relayed.
     let mut publisher = Node::new("publisher", &[]);
     let mut relay = Node::new("relay", &[]);
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 6000], ZERO_DEST, NOW);
+    // Bigger than the push budget, so chunks are genuinely missing to ask for.
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
 
     // The relay hears the root, so it knows the file exists and what it names.
     for f in &fwds {
@@ -312,7 +315,7 @@ fn the_depth_budget_runs_out() {
     // zero a node answers from its own store or says nothing.
     let mut publisher = Node::new("publisher", &[]);
     let mut relay = Node::new("relay", &[]);
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 6000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -404,4 +407,75 @@ fn a_sealed_file_is_never_fetched_on_someone_elses_behalf() {
     let want = Envelope::new(ty::WANT, ZERO_DEST, 0, missing[0].to_vec()).wire();
     let rx = relay.on_rx(&want, 0, None, NOW);
     assert!(rx.forwards.is_empty(), "a sealed file must not be hunted for a third party");
+}
+
+// -------------------------------------------------- M11-E: pushing chunks
+
+#[test]
+fn a_small_file_arrives_without_a_round_trip() {
+    // Publishing floods the root and pushes the first few chunks with it, so a
+    // file that fits inside the push threshold is *complete* on arrival — no
+    // WANT, no answer, no third leg.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut peer = Node::new("peer", &[]);
+
+    // Small enough that every chunk fits the push budget.
+    let body = vec![0x42; 2000];
+    let (magnet, fwds) = publisher.publish_file("note.txt", &body, ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        peer.on_rx(wire, 0, None, NOW);
+    }
+
+    assert!(peer.has_file(&magnet), "the whole file rode along with its manifest");
+    assert_eq!(peer.file_bytes(&magnet).as_deref(), Some(&body[..]), "and it is the same bytes");
+    assert!(peer.fetch(&magnet).is_empty(), "with nothing left to ask for");
+}
+
+#[test]
+fn pushing_is_local_policy_and_zero_is_legal() {
+    // The receiver's behaviour does not depend on the sender's choice: it takes
+    // what it was given and asks for the rest. So a node that would rather not
+    // spend the airtime can push nothing, and the file still transfers.
+    let mut publisher = Node::new("publisher", &[]);
+    publisher.set_push_chunks(0);
+    let mut peer = Node::new("peer", &[]);
+
+    let body = vec![0x42; 2000];
+    let (magnet, fwds) = publisher.publish_file("note.txt", &body, ZERO_DEST, NOW);
+    assert_eq!(fwds.len(), 1, "pure pull: only the manifest goes out");
+
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        peer.on_rx(wire, 0, None, NOW);
+    }
+    assert!(!peer.has_file(&magnet), "nothing but the index arrived");
+    assert!(!peer.fetch(&magnet).is_empty(), "so the peer asks, exactly as before");
+}
+
+#[test]
+fn a_sealed_file_is_not_pushed_at_everyone() {
+    // A sealed file is addressed to one recipient. Spraying its chunks at every
+    // neighbour is the opposite of what sealing asked for, even though they are
+    // ciphertext — it advertises the file exists and makes the mesh carry it.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut recipient = Node::new("recipient", &[]);
+    for f in &recipient.build_announce(NOW) {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        publisher.on_rx(wire, 0, None, NOW);
+    }
+    let Some((_, fwds)) = publisher.publish_file_sealed("secret.txt", &vec![0xEE; 2000], recipient.addr, NOW)
+    else {
+        return; // no prekey on this build
+    };
+    assert_eq!(fwds.len(), 1, "the sealed root travels alone");
 }

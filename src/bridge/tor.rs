@@ -125,6 +125,7 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
     super::stream_link::run_reconnecting(
         hub,
         iface,
+        None,
         rx,
         move || {
             let s = socks5_connect(&proxy, &host, port)?;

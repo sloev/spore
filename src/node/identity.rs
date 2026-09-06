@@ -73,6 +73,7 @@ impl Node {
             limits: Limits::default(),
             mtu: DEFAULT_MTU,
             manifests: HashMap::new(),
+            push_chunks: DEFAULT_PUSH_CHUNKS,
             named: HashMap::new(),
             interests: HashMap::new(),
             pending: HashMap::new(),
@@ -181,6 +182,12 @@ impl Node {
     /// both or neither (audit F-3, #189).
     pub fn set_partial_budget(&mut self, bytes: usize) {
         self.limits.partial_bytes = bytes.max(1024);
+    }
+
+    /// How many chunks ride along with a published manifest (M11-E). `0` is
+    /// pure pull, and legal: the receiver WANTs whatever it lacks regardless.
+    pub fn set_push_chunks(&mut self, n: usize) {
+        self.push_chunks = n;
     }
 
     /// Interests adopted from neighbours right now (M11-I). Each is a promise

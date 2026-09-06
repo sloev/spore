@@ -122,7 +122,7 @@ pub fn run_datagram<T: DatagramTransport>(
                 // wide link pays nothing for this being here.
                 Some(m) if bytes.len() > m => {
                     set_id = set_id.wrapping_add(1);
-                    for piece in linkfrag::split(&bytes, m, set_id) {
+                    for piece in linkfrag::split_for_link(&bytes, m, set_id) {
                         t.send(to.as_ref(), &piece)?;
                     }
                 }

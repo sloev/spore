@@ -42,7 +42,7 @@
 //! interface is the finest unit available, and that is enough, because anyone
 //! who can flood a shared radio with fragments can also just jam it.
 
-use crate::VER;
+use crate::{Fountain, Id};
 use std::collections::HashMap;
 
 /// First byte of a link fragment. Not [`VER`], so a whole envelope and a
@@ -59,15 +59,119 @@ pub const MAX_LINK_FRAGMENTS: usize = u16::MAX as usize;
 /// How long a half-finished set is held before it is dropped.
 pub const LINK_PARTIAL_TIMEOUT_SECS: u32 = 30;
 
+/// Largest set that can carry repair symbols.
+///
+/// The erasure code picks each repair symbol's inputs from a 256-bit selection
+/// derived from one SHA-256, so it can address at most 256 chunks. Sets larger
+/// than this — 58 kB at a 237-byte LoRa frame, near the biggest envelope there
+/// is — are carried without repair and must arrive whole. Rare, and the
+/// alternative is a second erasure code to maintain.
+pub const MAX_REPAIRABLE_PIECES: usize = 255;
+
+/// How many repair symbols to send with a set of `count` pieces.
+///
+/// A quarter, at least one — about 25% extra on a fragmented set. Measured over
+/// 200 trials of a 900-byte envelope on a 237-byte link (five pieces):
+///
+/// | frame loss | no repair | one repair symbol |
+/// |---|---|---|
+/// | 5%  | 79% | 97% |
+/// | 10% | 54% | 90% |
+/// | 20% | 36% | 67% |
+///
+/// The cost lands where the loss is, which is what makes a flat fraction
+/// defensible: a link wide enough to carry the frame never fragments and never
+/// pays, and the links that *do* fragment — a 237-byte radio, a 54-byte Zigbee
+/// frame — are the lossy ones. A wired MTU-1400 hop is untouched.
+///
+/// Local policy, not a wire rule: the sender picks, the receiver decodes from
+/// whatever arrives, and the two never need to agree. A transport that has
+/// measured its own loss should override it, and one on a clean link may set 0.
+/// Adapting it to observed loss is the obvious refinement and is not done.
+pub fn default_repair(count: usize) -> usize {
+    if count < 2 {
+        0
+    } else {
+        (count / 4).max(1)
+    }
+}
+
+/// The seed a set's repair symbols are selected from.
+///
+/// Both ends derive it from what the frame already carries, so nothing extra
+/// goes on the wire. It only has to agree between the two ends of one link for
+/// the length of one set.
+fn set_seed(set_id: u16, count: usize) -> Id {
+    let mut id = [0u8; 16];
+    id[..2].copy_from_slice(&set_id.to_be_bytes());
+    id[2..4].copy_from_slice(&(count as u16).to_be_bytes());
+    id
+}
+
 /// Is this frame a link fragment rather than a whole envelope?
 pub fn is_fragment(frame: &[u8]) -> bool {
     frame.len() >= LINK_FRAG_OVERHEAD && frame[0] == LINK_FRAG_MAGIC
 }
 
-/// Split `wire` for a link whose frame is `mtu`, tagging the set `set_id`.
+/// Split `wire` for a link whose frame is `mtu`, with `repair` extra symbols.
+///
+/// **Why repair symbols and not retries.** An envelope split into n pieces
+/// arrives only if all n do, so a link dropping 10% of frames loses ~46% of
+/// fragmented messages — measured, and it tracks `(1-p)^n` exactly as it should.
+/// Repetition was measured as the cheapest alternative and recovers 70% for 40%
+/// extra traffic where this code gives 97% for the same, because a duplicate
+/// only helps if it lands on a gap and duplicates collide. Decoding costs
+/// 1.4–2.4× plain reassembly, which is single-digit parts per million of the
+/// airtime needed to receive the pieces — so the radio, not the arithmetic, is
+/// what this costs.
+///
+/// Repair needs no return path, which is what makes it usable on the media that
+/// need it most: a one-way radio, a shared channel where a NACK would collide
+/// with the traffic it is complaining about.
 ///
 /// Returns the wire unchanged, in one piece, when it already fits — a link that
-/// can carry the frame pays nothing for this existing.
+/// can carry the frame pays nothing for any of this.
+pub fn split_with_repair(wire: &[u8], mtu: usize, set_id: u16, repair: usize) -> Vec<Vec<u8>> {
+    let mut out = split(wire, mtu, set_id);
+    let count = out.len();
+    if count < 2 || repair == 0 || count > MAX_REPAIRABLE_PIECES {
+        return out;
+    }
+    let chunk = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
+    let seed = set_seed(set_id, count);
+    // Indices at or past `count` are repair symbols; the sender can mint as many
+    // distinct ones as it likes, which is what rateless means.
+    let repair = repair.min(MAX_REPAIRABLE_PIECES - count);
+    let indices: Vec<u8> = (count..count + repair).map(|i| i as u8).collect();
+    for e in crate::fragment(wire, chunk, 0, 0, crate::ZERO_DEST, seed, &indices) {
+        // `fragment` hands back envelopes; only the chunk body matters here,
+        // re-framed as a link fragment. The envelope header it built is the
+        // end-to-end form this layer exists to replace.
+        let idx = e.payload[16] as u16;
+        let body = &e.payload[18..];
+        let mut f = Vec::with_capacity(LINK_FRAG_OVERHEAD + body.len());
+        f.push(LINK_FRAG_MAGIC);
+        f.extend_from_slice(&set_id.to_be_bytes());
+        f.extend_from_slice(&idx.to_be_bytes());
+        f.extend_from_slice(&(count as u16).to_be_bytes());
+        f.extend_from_slice(body);
+        out.push(f);
+    }
+    out
+}
+
+/// Split for this link with the default amount of repair — what a bridge wants
+/// unless it knows something specific about its own loss.
+pub fn split_for_link(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
+    if wire.len() <= mtu {
+        return vec![wire.to_vec()];
+    }
+    let chunk = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
+    let count = wire.len().div_ceil(chunk);
+    split_with_repair(wire, mtu, set_id, default_repair(count))
+}
+
+/// Split with no repair symbols.
 pub fn split(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
     if wire.len() <= mtu {
         return vec![wire.to_vec()];
@@ -96,8 +200,41 @@ pub fn split(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
 struct Partial {
     started: u32,
     count: usize,
-    parts: HashMap<u16, Vec<u8>>,
     bytes: usize,
+    /// Symbols as they arrived, by index. Held rather than decoded incrementally
+    /// because the decoder needs every symbol to be the same length, and the
+    /// *last* data piece of a set is short — so the full chunk size is only
+    /// known once a full-length piece has been seen. Padding on the wire instead
+    /// would waste up to a whole frame on every fragmented set, which on a
+    /// 237-byte LoRa link is most of a packet.
+    symbols: HashMap<u16, Vec<u8>>,
+}
+
+/// Feed a set's symbols to the erasure decoder.
+///
+/// Every symbol must be the same length, and the last data piece of a set is
+/// short — so pad up to the longest symbol seen. That length *is* the chunk
+/// size: every piece but the last fills the frame, and a set that has reached
+/// `count` symbols has at least one of those.
+///
+/// The decoder finishes by parsing the result as an envelope, which is how it
+/// strips the padding, and is also why nothing but an envelope can come out of
+/// here — on a medium without addresses two senders can collide on a set id, and
+/// the bytes that produces must not reach the router.
+fn decode_coded(set: u16, count: usize, symbols: &HashMap<u16, Vec<u8>>) -> Option<Vec<u8>> {
+    let chunk = symbols.values().map(Vec::len).max()?;
+    let seed = set_seed(set, count);
+    let mut f = Fountain::new();
+    let mut out = None;
+    for (idx, body) in symbols {
+        let mut padded = body.clone();
+        padded.resize(chunk, 0);
+        out = f.add(&seed, *idx as u8, count as u8, padded);
+        if out.is_some() {
+            break;
+        }
+    }
+    out
 }
 
 /// Per-link reassembly, bounded in every direction a neighbour could push.
@@ -148,10 +285,16 @@ impl Reassembler {
         let set = u16::from_be_bytes([frame[1], frame[2]]);
         let idx = u16::from_be_bytes([frame[3], frame[4]]);
         let count = u16::from_be_bytes([frame[5], frame[6]]) as usize;
-        // A set of zero fragments cannot complete, and an index outside the set
-        // is either a bug or an attempt to make one — both come off a link a
-        // stranger can write to.
-        if count == 0 || idx as usize >= count {
+        // A set of zero fragments cannot complete. Both fields come off a link a
+        // stranger can write to, so neither is believed.
+        if count == 0 {
+            return None;
+        }
+        // A repair symbol is one whose index is at or past the count. Only a set
+        // small enough for the code can have them; on a larger set such an index
+        // is nonsense and refused.
+        let repairable = count <= MAX_REPAIRABLE_PIECES;
+        if !repairable && idx as usize >= count {
             return None;
         }
         let body = frame[LINK_FRAG_OVERHEAD..].to_vec();
@@ -160,32 +303,49 @@ impl Reassembler {
         let entry = self.open.entry((key, set)).or_insert_with(|| Partial {
             started: now,
             count,
-            parts: HashMap::new(),
             bytes: 0,
+            symbols: HashMap::new(),
         });
         // A set's size is fixed by its first fragment. A later frame claiming a
         // different count is a different object wearing the same id.
         if entry.count != count {
             return None;
         }
-        if entry.parts.insert(idx, body.clone()).is_none() {
-            entry.bytes += body.len();
+        if entry.symbols.insert(idx, body).is_none() {
+            entry.bytes = entry.symbols.values().map(Vec::len).sum();
         }
 
-        let complete = entry.parts.len() == entry.count;
-        if complete {
-            let mut whole = Vec::with_capacity(entry.bytes);
-            for i in 0..entry.count as u16 {
-                whole.extend_from_slice(entry.parts.get(&i)?);
-            }
-            self.open.remove(&(key, set));
-            // Only hand up something that could be an envelope. A reassembled
-            // set that is not one wasted a buffer; passing it on would waste a
-            // parse and put attacker-chosen bytes one layer deeper.
-            return if whole.first() == Some(&VER) { Some(whole) } else { None };
+        // Not enough to try yet. `count` distinct symbols is the *minimum* for
+        // the code, and exactly what the plain path needs too.
+        if entry.symbols.len() < count {
+            self.enforce(now);
+            return None;
         }
-        self.enforce(now);
-        None
+
+        let whole = if repairable {
+            decode_coded(set, count, &entry.symbols)
+        } else {
+            // No code available at this size: the pieces must all be data, in
+            // order, and every one of them must have arrived.
+            let mut w = Vec::with_capacity(entry.bytes);
+            for i in 0..count as u16 {
+                w.extend_from_slice(entry.symbols.get(&i)?);
+            }
+            crate::Envelope::decode(&w).ok().map(|(_, n)| w[..n].to_vec())
+        };
+        match whole {
+            Some(w) => {
+                self.open.remove(&(key, set));
+                Some(w)
+            }
+            None => {
+                // Rank-deficient, or the bytes are not an envelope. Either way
+                // more symbols may still help, so the set stays open until its
+                // timeout — bounded like everything else.
+                self.enforce(now);
+                None
+            }
+        }
     }
 
     fn sweep(&mut self, now: u32) {
@@ -229,13 +389,21 @@ impl Reassembler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{fl, ty, Envelope, ZERO_DEST};
 
     const NOW: u32 = 1_700_000_000;
 
+    /// A **real** envelope of roughly `n` bytes.
+    ///
+    /// It has to be real. The decoder finishes by parsing what it reassembled —
+    /// that is how it strips the padding — so a fixture of plausible-looking
+    /// bytes never completes, and a test built on one measures the timeout
+    /// rather than the code.
     fn envelope_like(n: usize) -> Vec<u8> {
-        let mut v = vec![VER];
-        v.extend((0..n - 1).map(|i| (i % 251) as u8));
-        v
+        let payload = n.saturating_sub(18).max(1);
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, 1_700_003_600, vec![0x5A; payload]);
+        e.flags |= fl::FLOOD;
+        e.wire()
     }
 
     #[test]
@@ -354,15 +522,61 @@ mod tests {
     }
 
     #[test]
-    fn a_fragment_claiming_an_impossible_index_is_refused() {
-        // count and idx come off a link a stranger can write to.
+    fn a_zero_count_set_is_refused_but_a_high_index_is_a_repair_symbol() {
+        // `count` and `idx` come off a link a stranger can write to, so neither
+        // is believed — but the rule changed when the code arrived, and it is
+        // worth being explicit about which way. A set of zero can never
+        // complete. An index at or past the count used to be nonsense and is now
+        // how a repair symbol identifies itself.
         let mut r = Reassembler::default();
-        let mut f = vec![LINK_FRAG_MAGIC, 0, 1, 0, 9, 0, 2];
-        f.extend_from_slice(b"body");
-        assert_eq!(r.accept(1, &f, NOW), None, "idx 9 of a 2-set");
+
         let zero = vec![LINK_FRAG_MAGIC, 0, 1, 0, 0, 0, 0, b'x'];
         assert_eq!(r.accept(1, &zero, NOW), None, "a zero-count set");
-        assert_eq!(r.open_sets(), 0, "neither opened a set");
+        assert_eq!(r.open_sets(), 0, "and it opened nothing");
+
+        let mut repair = vec![LINK_FRAG_MAGIC, 0, 1, 0, 9, 0, 2];
+        repair.extend_from_slice(b"body");
+        assert_eq!(r.accept(1, &repair, NOW), None, "not enough symbols yet");
+        assert_eq!(r.open_sets(), 1, "but index 9 of a 2-set is a repair symbol, not junk");
+
+        // Past the size the code can address, a high index is nonsense again:
+        // there is no selection to interpret it against.
+        let mut wild = vec![LINK_FRAG_MAGIC, 0, 2];
+        wild.extend_from_slice(&700u16.to_be_bytes());
+        wild.extend_from_slice(&300u16.to_be_bytes());
+        wild.extend_from_slice(b"body");
+        assert_eq!(r.accept(2, &wild, NOW), None);
+        assert_eq!(r.open_sets_for(2), 0, "no code at this size, so no repair symbols");
+    }
+
+    #[test]
+    fn a_set_with_repair_survives_losing_a_piece() {
+        // The point of the whole exercise. Without repair an envelope split into
+        // n pieces needs all n; with it, any n of the n+r that were sent.
+        let w = envelope_like(2000);
+        let sent = split_with_repair(&w, 237, 5, 4);
+        let plain = split(&w, 237, 5).len();
+        assert_eq!(sent.len(), plain + 4, "four repair symbols went out");
+
+        // Drop two data pieces — the ones a lossy link is most likely to eat.
+        let arrived: Vec<&Vec<u8>> =
+            sent.iter().enumerate().filter(|(i, _)| *i != 1 && *i != 3).map(|(_, f)| f).collect();
+        let mut r = Reassembler::default();
+        let mut out = None;
+        for f in arrived {
+            if let Some(w) = r.accept(1, f, NOW) {
+                out = Some(w);
+            }
+        }
+        assert_eq!(out.as_deref(), Some(&w[..]), "recovered from the repair symbols");
+    }
+
+    #[test]
+    fn repair_symbols_cost_nothing_on_a_frame_that_fits() {
+        // A link wide enough for the frame never fragments, so it never pays for
+        // the code being available.
+        let w = envelope_like(100);
+        assert_eq!(split_with_repair(&w, 1400, 1, 8).len(), 1);
     }
 
     #[test]

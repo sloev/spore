@@ -388,9 +388,11 @@ where
     R: std::io::Read + Send + 'static,
     W: std::io::Write,
 {
-    // A LoRa packet is 237 bytes; anything bigger has to be fountain-fragmented
-    // by the core rather than discovered at the radio.
-    hub.with_node(|n| n.mtu = n.mtu.min(237));
+    // A LoRa packet is 237 bytes. No node-wide clamp (M11-D): the link splits
+    // what it cannot carry, so a peer upstream of this radio is not punished for
+    // a narrow hop it does not own.
+    const MESHTASTIC_MDU: usize = 237;
+    let mut set_id: u16 = 0;
 
     let a = hub.addr();
     let my_node = u32::from_be_bytes([a[0], a[1], a[2], a[3]]);
@@ -400,6 +402,10 @@ where
     std::thread::spawn(move || {
         let mut framer = StreamFramer::new();
         let mut buf = [0u8; 4096];
+        // Reassemble before the node sees anything. The key is the sending node
+        // id: this radio is a shared medium, so two senders fragmenting at once
+        // must not be mixed.
+        let mut frag = crate::linkfrag::Reassembler::default();
         loop {
             match r.read(&mut buf) {
                 Ok(0) | Err(_) => break, // device unplugged or pipe closed
@@ -409,7 +415,9 @@ where
                         // Only our port, and never our own packet echoed back.
                         if let Some((from, port, payload)) = decode(&pkt) {
                             if port == PORT_PRIVATE_APP && from != my_node && !payload.is_empty() {
-                                rhub.on_rx(iface, &payload, None);
+                                if let Some(whole) = frag.accept(from, &payload, crate::bridge::hub::now()) {
+                                    rhub.on_rx(iface, &whole, None);
+                                }
                             }
                         }
                     }
@@ -424,9 +432,14 @@ where
     loop {
         let Ok(f) = rx.recv() else { return Ok(()) }; // hub gone
         let (crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. }) = f;
-        rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
-        let pkt = encode(&bytes, my_node, BROADCAST, rng);
-        w.write_all(&stream_encode(&pkt))?;
+        // Split before the Meshtastic framing, not after: 237 bytes is the
+        // payload budget this radio carries, and the framing rides on top.
+        set_id = set_id.wrapping_add(1);
+        for piece in crate::linkfrag::split_for_link(&bytes, MESHTASTIC_MDU, set_id) {
+            rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+            let pkt = encode(&piece, my_node, BROADCAST, rng);
+            w.write_all(&stream_encode(&pkt))?;
+        }
         w.flush()?;
     }
 }

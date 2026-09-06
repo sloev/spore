@@ -62,7 +62,6 @@ pub fn run_pipe(
 ) -> std::io::Result<()> {
     use std::io::{Read, Write};
 
-    hub.with_node(|n| n.mtu = n.mtu.min(RNS_SINGLE_PACKET_MDU));
     eprintln!(
         "  [reticulum] iface {iface} — KISS envelopes on stdin/stdout; \
          pipe to tools/reticulum_companion.py"
@@ -119,12 +118,12 @@ pub fn run_tcp(
     target: &str,
 ) -> std::io::Result<()> {
     use std::time::Duration;
-    hub.with_node(|n| n.mtu = n.mtu.min(RNS_SINGLE_PACKET_MDU));
     println!("  [reticulum] iface {iface} — KISS to companion at {target} (TCP)");
     let target = target.to_string();
     super::stream_link::run_reconnecting(
         hub,
         iface,
+        Some(RNS_SINGLE_PACKET_MDU),
         rx,
         move || {
             let s = std::net::TcpStream::connect(&target)?;
@@ -159,7 +158,6 @@ pub fn run_udp(
         peer.parse().map_err(|_| std::io::Error::other(format!("reticulum: bad peer {peer:?}")))?;
     let sock = UdpSocket::bind(bind)?;
     sock.set_read_timeout(Some(Duration::from_millis(200)))?;
-    hub.with_node(|n| n.mtu = n.mtu.min(RNS_SINGLE_PACKET_MDU));
     println!("  [reticulum] iface {iface} — KISS to companion at {peer} (UDP, bound {bind})");
 
     struct Rns {
