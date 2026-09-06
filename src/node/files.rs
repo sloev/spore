@@ -42,7 +42,11 @@ impl Node {
         let expiry = now + 7 * 86400;
         let mut file_id = [0u8; 16];
         OsRng.fill_bytes(&mut file_id);
-        // Chunks ride a per-file topic so only interested nodes carry them.
+        // Chunks ride a per-file topic. That scopes *delivery* — only a node
+        // following the topic hands one to its app — and it was long claimed
+        // here to scope carriage too. It does not: forwarding does not consult
+        // subscriptions, so before chunks were made link-local a node with no
+        // interest in a file relayed its chunks anyway. See `ce.hops` below.
         let mut ft = [0u8; 8];
         ft.copy_from_slice(&Sha256::digest(file_id)[..8]);
 
@@ -64,6 +68,23 @@ impl Node {
             payload.extend_from_slice(&body);
             let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
             ce.flags |= fl::FLOOD;
+            // **Link-local (M11-J).** A chunk travels one hop, to whoever asked
+            // for it, and stops there.
+            //
+            // It used to start at the default 16 like anything else, and the
+            // publisher never sent one — but every node that *received* one
+            // re-flooded it. Measured: answering a single WANT for an 8 kB file
+            // produced six chunk envelopes, the fetcher re-emitted all six, and
+            // so did an uninterested bystander. One answered request sprayed the
+            // file across the mesh, which is the "conscript every LoRa radio
+            // into someone else's CDN" that the bulk budget exists to prevent.
+            //
+            // Nothing is lost by stopping it: a fetch more than one hop from a
+            // holder never worked anyway, because WANT is consumed at the
+            // neighbour and an intermediate node holding no chunks has nothing
+            // to answer with. The spray only ever reached nodes that had not
+            // asked. Making a file cross n hops on purpose is M11-I.
+            ce.hops = 0;
             level.push((ce.id(), (end - start) as u64));
             self.mark_seen(&ce);
             self.store_put(&ce, now);

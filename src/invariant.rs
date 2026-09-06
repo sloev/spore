@@ -169,3 +169,53 @@ fn every_ceiling_is_reachable_from_one_call_so_a_small_runtime_can_set_them_all(
     // And it must not silently grow a node past the desktop defaults.
     assert!(lim.partial_objects <= MAX_PARTIAL_OBJECTS);
 }
+
+#[test]
+fn a_served_chunk_stops_at_the_node_that_asked_for_it() {
+    // M11-J. One answered WANT used to put a chunk on every link in the mesh:
+    // chunks carried the default 16 hops with FLOOD set, so although the
+    // publisher never sent one, every node that received one re-flooded it —
+    // including nodes that had never asked for the file. That is the shape of
+    // the invariant's first clause: traffic without continuing evidence of
+    // demand.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut fetcher = Node::new("fetcher", &[]);
+    let mut bystander = Node::new("bystander", &[]);
+
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xAB; 8000], ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        fetcher.on_rx(wire, 0, None, NOW);
+    }
+
+    // The fetcher asks its neighbour, which happens to be the publisher.
+    let mut served = Vec::new();
+    for w in fetcher.fetch(&magnet) {
+        let wire = match &w {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        for f in publisher.on_rx(wire, 0, None, NOW).forwards {
+            served.push(match f {
+                Forward::Flood { bytes, .. } => bytes,
+                Forward::Directed { bytes, .. } => bytes,
+            });
+        }
+    }
+    assert!(!served.is_empty(), "the publisher answered with chunks");
+
+    let mut onward = 0;
+    for w in &served {
+        onward += fetcher.on_rx(w, 0, None, NOW).forwards.len();
+    }
+    assert_eq!(onward, 0, "the node that asked does not re-broadcast what it received");
+
+    let mut relayed = 0;
+    for w in &served {
+        relayed += bystander.on_rx(w, 0, None, NOW).forwards.len();
+    }
+    assert_eq!(relayed, 0, "and a node that never asked carries nothing");
+}

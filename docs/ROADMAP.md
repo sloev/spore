@@ -662,8 +662,10 @@ instead of spreading sideways. That is a torrent peer list, not a DHT.
 
 **Explicitly not:** a DHT, source-routing to the publisher, or flooding chunks so
 that WANT can stay 1-hop. The last one conscripts every LoRa radio into someone
-else's CDN, which is what the bulk budget exists to prevent — and see M11-J,
-because it is what the code does today.
+else's CDN, which is what the bulk budget exists to prevent — and it is what the
+code did until chunks were made link-local, where answering one WANT for an 8 kB
+file put six chunk envelopes on every link in the mesh, re-broadcast by nodes
+that had never asked for it.
 
 **The lease is wall-clock, not connection — which is what keeps this
 delay-tolerant.** Carrying bytes already moves a file with no link at all:
@@ -709,8 +711,7 @@ Conflating them is how the fountain-versus-torrent confusion started.
 
 | M11-D Link fragmentation: the remaining bridges | ⬜ | The codec (`src/linkfrag.rs`) and the shared path (`bridge::driver::run_datagram`) ship, and `spore-sim`'s `mixed-mtu-linkfrag` proves the fix: same topology and message as `mixed-mtu`, reached 0 → 1, `dropped_by_mtu` 6 → 0. Still owed: the nine `n.mtu.min(...)` clamps in bridges with their own send loops — `i2p` (2), `ax25` (2), `icmp` (1), plus the serial/stdio variants of `meshtastic` (1) and `reticulum` (3) — each needs split-on-send and reassemble-on-recv in its own loop. Then `Node::send`'s end-to-end fountain path becomes dead weight and goes, along with its `u8` count and the `TooLarge` error that only existed to report it |
 | M11-E Files: push a few chunks with the manifest | ⬜ | The pull half already exists (`fetch_n` → WANT → `on_want`). Add pushing the first N chunks alongside the manifest so a small file needs no round trip. **Local policy, not a wire constant** — sender and receiver never need to agree, since the receiver ignores what it holds and WANTs the rest either way. Counted in *chunks*, not bytes, so it scales with the MTU; charged to the same per-interface budget; `0` and `1` both legal. N from M11-C |
-| M11-I Recursive pull: adopt a neighbour's WANT, never forward it | ⬜ | Needs M11-J first. The file layer gains a pending-interest table and may WANT ids it does not hold, **only** when it holds the manifest naming them. Depth, lease, fanout, bulk budget and cache-don't-pin as above. Pipeline: WANT the next batch upstream while still serving the current one downstream, or the transfer costs n round trips |
-| M11-J Chunks stop travelling on their own | ⬜ | **Measured, and it undermines M11-I.** A chunk is built `fl::FLOOD` with `hops: 16`, and although the publisher never sends one, *every node that receives one re-floods it*: publish emits 1 forward (the root), a served WANT yields 6 chunk envelopes, and the fetcher re-emits all 6 — as does an **uninterested bystander**. `files.rs` says "chunks ride a per-file topic so only interested nodes carry them"; that is false, because the topic scopes **delivery**, not forwarding. So one answered WANT sprays a chunk mesh-wide today, and layering recursive pull on top would multiply it. Decide deliberately: serve chunks with hops zeroed so they stop at the requester and recursion becomes the *only* way a file crosses n hops, or keep the spread and bound it. Fix the comment either way |
+| M11-I Recursive pull: adopt a neighbour's WANT, never forward it | ⬜ | The file layer gains a pending-interest table and may WANT ids it does not hold, **only** when it holds the manifest naming them. Depth, lease, fanout, bulk budget and cache-don't-pin as above. Pipeline: WANT the next batch upstream while still serving the current one downstream, or the transfer costs n round trips |
 | M11-F Sealed manifests do not fit a small link | ⬜ | `publish_file_sealed` needs **MTU ≥ 256** for even one id, ≥ 264 with an 8-char name — measured. Raw LoRa P2P tops out at ~255, so it misses by a byte; Meshtastic's 237 by 19. It fails cleanly (returns `None`) but a narrow-link node can never publish a sealed file. The ~82-byte sealed header sits *inside* the signed root, on top of the root's own 114 bytes of key and signature; it belongs in its own object the root names. Per-hop fragmentation does not fix this — the root must fit as a unit for a stranger to verify it |
 
 **`spore-sim` must show all six of these before n-hop fetch is believed** — until
