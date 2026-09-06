@@ -199,6 +199,18 @@ pub const DEFAULT_PARTIAL_BUDGET: usize = 4 * 1024 * 1024;
 /// of a live object keep arriving; a set that has heard nothing for this long is
 /// either abandoned or was never real.
 pub const PARTIAL_TIMEOUT_SECS: u32 = 300;
+/// Chunks sent alongside a manifest when a file is published (M11-E).
+///
+/// Eight, which is ~10 kB at a 1400-byte MTU and ~1.4 kB over LoRa. Counted in
+/// chunks rather than bytes precisely so it scales with the link: a byte
+/// threshold would push 10 kB onto a radio and call it small.
+///
+/// **Local policy, not a wire rule.** The receiver ignores what it already holds
+/// and WANTs the rest either way, so the two ends never need to agree and `0`
+/// — pure pull — is a legal setting for a node that would rather not spend the
+/// airtime. Set it with [`Node::set_push_chunks`].
+pub const DEFAULT_PUSH_CHUNKS: usize = 8;
+
 /// Ids that a manifest we hold names, remembered so a neighbour's WANT for one
 /// of them can be answered by fetching it (M11-I).
 ///
@@ -628,6 +640,9 @@ pub struct Node {
     limits: Limits,
     pub mtu: usize,
     manifests: HashMap<Id, file::Manifest>,
+    /// Chunks pushed alongside a published manifest (M11-E). Local policy —
+    /// see [`DEFAULT_PUSH_CHUNKS`].
+    pub push_chunks: usize,
     /// **The authorization index for recursive pull (M11-I).** Every id a
     /// manifest we hold names, mapped to the root magnet it belongs to.
     ///
@@ -1516,26 +1531,37 @@ mod tests {
         let mut b = Node::new("b", &[]);
         meet(&mut a, &mut b, now);
 
-        let data: Vec<u8> = (0..9000u32).map(|i| (i.wrapping_mul(31)) as u8).collect();
+        // Past `DEFAULT_PUSH_CHUNKS` worth, so this still exercises the *pull*
+        // path. A file inside the push budget now arrives with its manifest and
+        // never asks for anything — that is `a_small_file_arrives_without_a_
+        // round_trip` in `invariant.rs`, and it is a different test.
+        let data: Vec<u8> = (0..40_000u32).map(|i| (i.wrapping_mul(31)) as u8).collect();
         let (magnet, mf) = a.publish_file("field-notes.txt", &data, ZERO_DEST, now);
 
-        // The small manifest floods; B absorbs it but holds no data yet.
+        // The manifest floods, and the first few chunks ride with it — but not
+        // enough of them to finish a file this size.
         for f in &mf {
             b.on_rx(&fwd_bytes(f), 0, Some(a.addr), now);
         }
-        assert!(!b.has_file(&magnet), "B knows the manifest but not the chunks");
+        assert!(!b.has_file(&magnet), "B knows the manifest but is still short of chunks");
         assert!(b.file_bytes(&magnet).is_none());
 
-        // B pulls the chunks it lacks; A answers from its store by content ID.
-        let want = b.fetch(&magnet);
-        assert_eq!(want.len(), 1, "one WANT covering the missing chunks");
-        for f in &want {
-            let rx = a.on_rx(&fwd_bytes(f), 0, Some(b.addr), now);
-            for cf in rx.forwards {
-                b.on_rx(&fwd_bytes(&cf), 0, Some(a.addr), now);
+        // B pulls what it lacks; A answers from its store by content ID. More
+        // than one round is expected now: a tree resolves top-down, so the
+        // interior nodes have to arrive before the chunks beneath them can be
+        // named at all.
+        for _ in 0..12 {
+            let want = b.fetch_n(&magnet, 4);
+            if want.is_empty() {
+                break;
+            }
+            for f in &want {
+                let rx = a.on_rx(&fwd_bytes(f), 0, Some(b.addr), now);
+                for cf in rx.forwards {
+                    b.on_rx(&fwd_bytes(&cf), 0, Some(a.addr), now);
+                }
             }
         }
-
         assert!(b.has_file(&magnet), "B now holds every chunk");
         assert_eq!(
             b.file_bytes(&magnet).as_deref(),

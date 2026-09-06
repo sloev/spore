@@ -145,7 +145,38 @@ impl Node {
         self.index_named(&magnet, &magnet, now);
         self.mark_seen(&me);
         self.store_put(&me, now);
-        let forwards = self.forward_intents(&me, NO_IFACE, now);
+        let mut forwards = self.forward_intents(&me, NO_IFACE, now);
+
+        // **Push the first few chunks with the manifest (M11-E).**
+        //
+        // A small file otherwise costs a round trip it does not need: the root
+        // floods, every interested node WANTs the chunks, and the publisher
+        // answers — three legs to move something that might be one frame of
+        // data. Sending a few alongside the root collapses that.
+        //
+        // Local policy, not a wire rule. The receiver's behaviour is identical
+        // either way: it ignores what it already holds and WANTs the rest, so
+        // sender and receiver never have to agree on the number and `0` is a
+        // legal setting. Counted in *chunks* rather than bytes so it scales with
+        // the link — eight chunks is ~10 kB at a 1400-byte MTU and ~1.4 kB over
+        // LoRa, where a byte threshold would push 10 kB onto a radio and call it
+        // small.
+        //
+        // Only for a public file. A sealed one is addressed to a single
+        // recipient, and pushing its chunks at everyone is the opposite of what
+        // sealing asked for; that path already custody-pushes like mail.
+        if key.is_none() && self.push_chunks > 0 {
+            for (id, _) in level.iter().take(self.push_chunks) {
+                if depth > 0 {
+                    break; // a tree's root names interiors, not chunks worth pushing
+                }
+                if let Some(wire) = self.store.wire(id) {
+                    if let Ok((ce, _)) = Envelope::decode(&wire) {
+                        forwards.append(&mut self.forward_intents(&ce, NO_IFACE, now));
+                    }
+                }
+            }
+        }
         (magnet, forwards)
     }
 

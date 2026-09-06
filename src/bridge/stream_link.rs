@@ -29,6 +29,7 @@ use std::time::Duration;
 pub fn run<S: Read + Write>(
     hub: Shared,
     iface: Iface,
+    mtu: Option<usize>,
     rx: &Receiver<Forward>,
     stream: &mut S,
     label: &str,
@@ -36,6 +37,12 @@ pub fn run<S: Read + Write>(
 ) -> std::io::Result<()> {
     let mut ks = KissStream::new();
     let mut buf = [0u8; 2048];
+    // Link fragmentation (M11-D). KISS frames a stream; it does not bound one,
+    // so `mtu` is whatever the medium underneath actually accepts — a paclen on
+    // packet radio, a single RNS packet, `None` on TCP where there is no such
+    // limit. One key, because a stream has exactly one peer.
+    let mut frag = crate::linkfrag::Reassembler::default();
+    let mut set_id: u16 = 0;
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(());
@@ -47,7 +54,9 @@ pub fn run<S: Read + Write>(
             }
             Ok(n) => {
                 for frame in ks.push(&buf[..n]) {
-                    hub.on_rx(iface, &frame, None);
+                    if let Some(whole) = frag.accept(0, &frame, crate::bridge::hub::now()) {
+                        hub.on_rx(iface, &whole, None);
+                    }
                 }
             }
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
@@ -55,8 +64,25 @@ pub fn run<S: Read + Write>(
         }
         while let Ok(f) = rx.try_recv() {
             let (Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f;
-            stream.write_all(&KissStream::frame(&bytes))?;
+            for piece in split_for(mtu, &bytes, &mut set_id) {
+                stream.write_all(&KissStream::frame(&piece))?;
+            }
         }
+    }
+}
+
+/// Split a frame for this link, or hand it back whole.
+///
+/// `None` means the medium imposes no frame limit — TCP, an onion circuit, an
+/// iroh stream — and there the frame goes as it is. A `Some` is a real limit a
+/// radio or a TNC will enforce whether or not we respect it.
+fn split_for(mtu: Option<usize>, bytes: &[u8], set_id: &mut u16) -> Vec<Vec<u8>> {
+    match mtu {
+        Some(m) if bytes.len() > m => {
+            *set_id = set_id.wrapping_add(1);
+            crate::linkfrag::split_for_link(bytes, m, *set_id)
+        }
+        _ => vec![bytes.to_vec()],
     }
 }
 
@@ -77,6 +103,7 @@ pub fn run<S: Read + Write>(
 pub fn run_reconnecting<S, F>(
     hub: Shared,
     iface: Iface,
+    mtu: Option<usize>,
     rx: Receiver<Forward>,
     mut connect: F,
     label: &str,
@@ -98,7 +125,7 @@ where
         match connect() {
             Ok(mut s) => {
                 wait = FIRST; // a successful connect resets the backoff
-                if let Err(e) = run(hub.clone(), iface, &rx, &mut s, label, stop) {
+                if let Err(e) = run(hub.clone(), iface, mtu, &rx, &mut s, label, stop) {
                     eprintln!("  [{label}] iface {iface} link error: {e}");
                 }
             }
@@ -139,6 +166,7 @@ where
 pub fn run_split<R, W>(
     hub: Shared,
     iface: Iface,
+    mtu: Option<usize>,
     rx: Receiver<Forward>,
     mut r: R,
     mut w: W,
@@ -153,12 +181,15 @@ where
     std::thread::spawn(move || {
         let mut ks = KissStream::new();
         let mut buf = [0u8; 2048];
+        let mut frag = crate::linkfrag::Reassembler::default();
         loop {
             match r.read(&mut buf) {
                 Ok(0) | Err(_) => break, // unplugged, or the pipe closed
                 Ok(n) => {
                     for frame in ks.push(&buf[..n]) {
-                        rhub.on_rx(iface, &frame, None);
+                        if let Some(whole) = frag.accept(0, &frame, crate::bridge::hub::now()) {
+                            rhub.on_rx(iface, &whole, None);
+                        }
                     }
                 }
             }
@@ -166,10 +197,13 @@ where
         println!("  [{tag}] iface {iface} reader ended");
     });
 
+    let mut set_id: u16 = 0;
     loop {
         let Ok(f) = rx.recv() else { return Ok(()) }; // hub gone
         let (Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f;
-        w.write_all(&KissStream::frame(&bytes))?;
+        for piece in split_for(mtu, &bytes, &mut set_id) {
+            w.write_all(&KissStream::frame(&piece))?;
+        }
         w.flush()?;
     }
 }
@@ -211,6 +245,7 @@ mod tests {
             let _ = run_reconnecting(
                 hub,
                 0,
+                None,
                 rx,
                 move || {
                     // Alternate: refuse, then connect-and-immediately-drop.
@@ -259,7 +294,7 @@ mod tests {
         // First attempt: a stream that dies before draining anything.
         let stop = AtomicBool::new(false);
         let mut dead = Dead;
-        let _ = run(hub.clone(), 0, &rx, &mut dead, "test", &stop);
+        let _ = run(hub.clone(), 0, None, &rx, &mut dead, "test", &stop);
 
         // Second attempt with the same receiver: the envelope is still there.
         // A real socket with a read timeout yields WouldBlock when idle, which
@@ -286,7 +321,7 @@ mod tests {
             }
         }
         let mut rec = Recorder(written.clone(), 0);
-        let _ = run(hub, 0, &rx, &mut rec, "test", &stop);
+        let _ = run(hub, 0, None, &rx, &mut rec, "test", &stop);
 
         let got = written.lock().unwrap().clone();
         assert!(!got.is_empty(), "the queued envelope was lost across the reconnect");

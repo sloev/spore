@@ -642,6 +642,15 @@ level, capped at `MAX_DEPTH = 4`:
 A file that fits one manifest encodes exactly as it did before trees existed, so
 nothing that already works changes.
 
+**Pushing the first chunks (local policy).** A publisher MAY send a few chunks
+alongside the manifest, so a file small enough to fit that budget arrives
+complete and costs no round trip. The receiver's behaviour is identical either
+way — it ignores what it holds and WANTs the rest — so the two ends never agree
+on a number and `0` is a legal setting. Counted in *chunks*, not bytes, so it
+scales with the link: eight chunks is about 10 kB at a 1400-byte MTU and 1.4 kB
+over LoRa, where a byte threshold would push 10 kB onto a radio and call it
+small. Sealed files are not pushed; they are addressed to one recipient.
+
 **Fetching across more than one hop (endpoint profile, not a wire rule).** A node
 MAY adopt a neighbour's WANT as its own for ids named by a manifest it holds,
 subject to depth, lease, fanout and bulk budget. It MUST NOT forward the WANT

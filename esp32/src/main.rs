@@ -193,9 +193,19 @@ fn main() {
                 .spawn(move || {
                     // Same loop the desktop serial and TNC bridges run. Nothing
                     // about it knows this is an MCU.
-                    if let Err(e) =
-                        spore::bridge::stream_link::run_split(hub_for_tether, iface, rx, r, w, "tether")
-                    {
+                    // `None`: the USB tether is a byte stream with no frame
+                    // limit of its own, so nothing here needs splitting. The
+                    // radio is where this board meets a narrow link, and that
+                    // path does its own.
+                    if let Err(e) = spore::bridge::stream_link::run_split(
+                        hub_for_tether,
+                        iface,
+                        None,
+                        rx,
+                        r,
+                        w,
+                        "tether",
+                    ) {
                         log::error!("tether bridge stopped: {e}");
                     }
                 })

@@ -183,7 +183,6 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
         Some((p, d)) if p.starts_with("sam=") => (&p[4..], d.trim()),
         _ => (DEFAULT_SAM, target.trim()),
     };
-    hub.with_node(|n| n.mtu = n.mtu.min(I2P_MTU));
 
     // The session id only has to be unique on this SAM bridge; our own address
     // already is.
@@ -198,6 +197,7 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
     super::stream_link::run_reconnecting(
         hub,
         iface,
+        Some(I2P_MTU),
         rx,
         move || {
             let _keepalive = &session; // the session dies if this socket closes
@@ -220,7 +220,6 @@ pub fn run(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> st
 /// outbound queue rather than fanning writes across connections.
 pub fn run_accept(hub: Shared, iface: Iface, rx: Receiver<Forward>, sam_addr: &str) -> std::io::Result<()> {
     let sam = if sam_addr.is_empty() { DEFAULT_SAM } else { sam_addr };
-    hub.with_node(|n| n.mtu = n.mtu.min(I2P_MTU));
 
     let a = hub.addr();
     let nick = format!("spore-{}", a.iter().map(|b| format!("{b:02x}")).collect::<String>());
@@ -233,6 +232,7 @@ pub fn run_accept(hub: Shared, iface: Iface, rx: Receiver<Forward>, sam_addr: &s
     super::stream_link::run_reconnecting(
         hub,
         iface,
+        Some(I2P_MTU),
         rx,
         move || {
             let _keepalive = &session;

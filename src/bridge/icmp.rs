@@ -143,7 +143,10 @@ pub fn run(
 
     let dst: Ipv4Addr =
         peer.parse().map_err(|_| std::io::Error::other(format!("icmp: bad peer {peer:?}")))?;
-    hub.with_node(|n| n.mtu = n.mtu.min(ICMP_MDU));
+    // No node-wide clamp (M11-D): this link splits what it cannot carry, so a
+    // peer upstream is not dragged down to one echo payload.
+    let mut frag = crate::linkfrag::Reassembler::default();
+    let mut set_id: u16 = 0;
 
     // SOCK_RAW + IPPROTO_ICMP: the kernel fills the IP header on send and hands
     // us the IP header on receive (hence the 20-byte skip below).
@@ -166,16 +169,22 @@ pub fn run(
         if let Ok((n, _)) = sock.recv_from(&mut buf) {
             if let Some(off) = ipv4_payload_offset(&buf[..n]) {
                 if let Some(env) = decode_echo(&buf[off..n]) {
-                    hub.on_rx(iface, &env, None);
+                    // One peer per bridge here (`dst`), so one key.
+                    if let Some(whole) = frag.accept(0, &env, crate::bridge::hub::now()) {
+                        hub.on_rx(iface, &whole, None);
+                    }
                 }
             }
         }
         // Send whatever the router queued, each as one echo request.
         while let Ok(f) = rx.try_recv() {
             let (crate::Forward::Flood { bytes, .. } | crate::Forward::Directed { bytes, .. }) = f;
-            seq = seq.wrapping_add(1);
-            let pkt = encode_echo(&bytes, false, ident, seq);
-            let _ = sock.send_to(&pkt, dst_sa);
+            set_id = set_id.wrapping_add(1);
+            for piece in crate::linkfrag::split_for_link(&bytes, ICMP_MDU, set_id) {
+                seq = seq.wrapping_add(1);
+                let pkt = encode_echo(&piece, false, ident, seq);
+                let _ = sock.send_to(&pkt, dst_sa);
+            }
         }
     }
 }

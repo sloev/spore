@@ -62,6 +62,7 @@ pub fn run(
     super::stream_link::run_reconnecting(
         hub,
         iface,
+        None,
         rx,
         move || {
             let s = match (&target, &listener) {

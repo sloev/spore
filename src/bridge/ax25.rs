@@ -37,12 +37,12 @@ pub const BULK_BYTES_PER_SEC: u32 = 0;
 /// Bridge a TNC listening on a TCP socket (`host:port`, e.g. Direwolf's
 /// `localhost:8001`).
 pub fn run_tcp(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -> std::io::Result<()> {
-    hub.with_node(|n| n.mtu = n.mtu.min(AX25_PACLEN));
     println!("  [ax25] iface {iface} on {target} (KISS/TCP, {AX25_PACLEN}-byte paclen)");
     let target = target.to_string();
     super::stream_link::run_reconnecting(
         hub,
         iface,
+        Some(AX25_PACLEN),
         rx,
         move || {
             let s = std::net::TcpStream::connect(&target)?;
@@ -59,10 +59,9 @@ pub fn run_tcp(hub: Shared, iface: Iface, rx: Receiver<Forward>, target: &str) -
 /// Bridge a TNC on a serial port, by path. Configure the line first, e.g.
 /// `stty -F /dev/ttyUSB0 9600 raw -echo`.
 pub fn run_serial(hub: Shared, iface: Iface, rx: Receiver<Forward>, path: &str) -> std::io::Result<()> {
-    hub.with_node(|n| n.mtu = n.mtu.min(AX25_PACLEN));
     let (r, w) = super::serial::open(path)?;
     println!("  [ax25] iface {iface} on {path} (KISS/serial, {AX25_PACLEN}-byte paclen)");
-    super::stream_link::run_split(hub, iface, rx, r, w, "ax25")
+    super::stream_link::run_split(hub, iface, Some(AX25_PACLEN), rx, r, w, "ax25")
 }
 
 #[cfg(test)]
@@ -108,13 +107,17 @@ mod tests {
             let _ = run_tcp(h, iface, rx, &target);
         });
 
-        // The MTU is clamped to the radio's paclen, so the core fragments to fit
-        // rather than handing the TNC something it would silently truncate.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while hub.with_node(|n| n.mtu) > AX25_PACLEN && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert_eq!(hub.with_node(|n| n.mtu), AX25_PACLEN, "paclen must clamp the MTU");
+        // The node keeps its own MTU (M11-D). This used to assert the opposite —
+        // that attaching a packet-radio bridge dragged the whole node down to a
+        // 256-byte paclen — which is the workaround, not the goal: it punished
+        // every other link this node has for one narrow one, and being `min` it
+        // never came back. The link splits what it cannot carry instead, so what
+        // the TNC receives still fits paclen without the node knowing about it.
+        assert_eq!(
+            hub.with_node(|n| n.mtu),
+            crate::DEFAULT_MTU,
+            "attaching a narrow bridge must not clamp the node"
+        );
 
         hub.send(ZERO_DEST, b"cq cq de spore".to_vec()).unwrap();
         let frames = tnc.join().unwrap();
