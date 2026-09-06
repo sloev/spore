@@ -24,6 +24,11 @@ hop count one lower — so copies spread outward and die out instead of looping.
 Sending is how routes are found: the first copy to arrive teaches everyone
 along the way which direction the sender lies in, and replies come back that
 way until the path stops working, at which point it spreads out again.</p>
+<p class="text-muted">Files work the other way round. Their index floods, but
+the pieces are only ever sent to someone who asked — and a node asked for a
+piece it does not have will go and fetch it, so wanting a file pulls it toward
+you across nodes that never had it, without anyone routing a request back to
+whoever published it.</p>
 <p><a href="spec.html#5-forwarding-rules-the-entire-router">The forwarding rules →</a>
 · <a href="continuity.html">Why this survives outages →</a></p>
 </div></div></div>
@@ -61,6 +66,17 @@ already moves bytes across many physical hops. SPORE hands one of them a frame
 and treats the whole crossing as a single hop. They aren't rivals to replace;
 they're transports it can ride.</p>
 <p><a href="spec.html#bindings--spore-on-everything">Every medium is one of five shapes →</a></p>
+</div></div></div>
+
+<div class="col-6"><div class="card"><div class="card-body">
+<h2 class="text-h5">A slow radio is still a hop</h2>
+<p class="text-muted">Links disagree wildly about how big a frame can be — a
+Wi-Fi frame is 1400 bytes, a LoRa one 237, a Zigbee one 54. A bridge whose link
+cannot carry a message splits it for that link alone and the far side puts it
+back, so the sender never has to know what the far end of the path is made of.
+Because a radio drops frames, a few repair pieces go with it: any complete-enough
+subset rebuilds the message, and nothing has to be asked for again.</p>
+<p><a href="spec.html#link-fragmentation--crossing-a-hop-that-cannot-carry-the-frame">Link fragmentation →</a></p>
 </div></div></div>
 
 <div class="col-6"><div class="card"><div class="card-body">

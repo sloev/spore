@@ -265,13 +265,16 @@ things**, and all the shared logic already lives in `src/bridge/`:
    generic over `U`: it snoops the source of inbound frames to bind
    `spore_addr → U`, resolves a SPORE `dest` to a `U` for directed sends, and ages
    bindings out (`expire`) or drops them on disconnect (`forget`).
-2. **A payload budget (MTU)** — the bridge clamps the shared node's `mtu`, and
-   SPORE's fountain fragmentation (`Node::send`) auto-splits to fit. There is no
-   per-medium chunking code to write.
+2. **A payload budget (MTU)** — report it, and the shared driver splits frames
+   that do not fit *for this link only*, reassembling at the far end. There is no
+   per-medium chunking code to write. **Do not clamp the node's `mtu`.** Bridges
+   used to, and it was a workaround: dragging the whole node down to its narrowest
+   link punished every other link it had, and only ever helped a node that owned
+   the narrow one — never a node upstream of it.
 3. **`recv` / `send`** — the *only* platform-specific part. A datagram medium
    implements [`bridge::driver::DatagramTransport`](../src/bridge/driver.rs) (just
    `recv`, `send`, optional `mtu`) and gets neighbour learning, resolution, relay,
-   and MTU clamping for free from `driver::run_datagram`.
+   and link fragmentation for free from `driver::run_datagram`.
 
 So adding a medium is: **pick `U`, set the MTU, write `recv`/`send`.** Everything
 else is in the lib.
@@ -482,8 +485,8 @@ and the fastest way to bring a local mesh up.
 and reports the sender's `SocketAddr` as `U`, which `Neighbors<SocketAddr>` snoops
 to bind `spore_addr → ip:port`. Broadcast is native: `255.255.255.255` (limited) or
 the primary interface's directed broadcast (`192.168.x.255`), which `run_primary`
-derives from the interface netmask for zero-config LAN. MTU is clamped to 1400 so
-the fountain fragmenter splits larger objects into datagram-sized chunks. No
+derives from the interface netmask for zero-config LAN. MTU is reported as 1400
+and the driver splits anything larger for this link. No
 connection lifecycle — a neighbour ages out when its heartbeats stop.
 
 **Security.** UDP itself has no authentication or encryption (its checksum is
@@ -1407,7 +1410,7 @@ over the same LoRa air Reticulum uses, but does not route RNS packets.
   on stdin/stdout exactly like the [audio modem](#audio), and a small **companion**
   ([`tools/reticulum_companion.py`](../tools/reticulum_companion.py)) does the real
   RNS work with the library — so nothing security-critical is re-implemented. The
-  node's MTU is clamped to a single RNS packet (383 B); larger objects fountain-
+  node reports a single RNS packet (383 B) as its MTU; larger objects link-
   fragment. `U` is effectively `()` (the bus is broadcast; the envelope `dest`
   filters). Verified off-network at the framing layer (the companion's KISS matches
   `src/kiss.rs` byte-for-byte); the live RNS path needs a Reticulum network to
@@ -2587,7 +2590,7 @@ based set reconciliation is efficient for large stores.
 
 ### A. MTU reference
 
-The bridge clamps the node's `mtu` to this; SPORE's fountain fragmenter splits
+The bridge reports this as its MTU; the driver's link fragmenter splits
 larger objects automatically. Values are the practical per-frame budget.
 
 | MTU | Media |
@@ -2707,8 +2710,10 @@ Building a new bridge? Work down this list:
 1. **Pick the form.** Frames → `dgram`; byte stream → `stream`; shared container →
    `store`. (See [Driver form comparison](#c-driver-form-comparison).)
 2. **Pick `U`.** How does the medium name a peer? Use `()` if it is broadcast-only.
-3. **Set the MTU.** The per-frame payload budget; the fountain fragmenter handles
-   the rest. (See [MTU reference](#a-mtu-reference).)
+3. **Report the MTU.** The per-frame payload budget; the driver splits for this
+   link and reassembles at the far end, with a few repair symbols so a dropped
+   frame does not cost the whole envelope. Do not clamp the node's own `mtu`.
+   (See [MTU reference](#a-mtu-reference).)
 4. **Write `recv`/`send`** — the only platform-specific code. `dgram`: implement
    `driver::DatagramTransport` and hand it to `driver::run_datagram`. `stream`: add
    framing (reuse `kiss_stream`). `store`: poll + write items.

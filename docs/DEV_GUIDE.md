@@ -45,13 +45,16 @@ branches, releases). Read those once; this one is a lookup table.
 
 | Path | Layer |
 |---|---|
-| `lib.rs` | Router kernel: envelope, fountain fragmentation/reassembly, path/ID derivation, `Node`, sealing. Re-exports the frozen public API. |
+| `lib.rs` | Router kernel: envelope, erasure coding, path/ID derivation, `Node`, sealing. Re-exports the frozen public API. |
 | `node/` | `Node` split by concern: `identity.rs`, `send.rs`, `ingest.rs`, `sync.rs` (INV/WANT), `datagram.rs`, `files.rs`. |
 | `envelope.rs`, `armor.rs`, `kiss.rs` | Wire level: (de)serialization, printable armor, KISS framing. |
 | `seal.rs`, `ratchet.rs`, `session.rs` | Crypto: prekey sealing, §7 Double Ratchet, and the bootstrap that picks between them. |
 | `topic.rs` | Encrypted topics — KEYROT membership and rotation. |
 | `mix.rs` | Onion wrap/peel, size-class padding, batching. Opt-in; not Tor. |
-| `file.rs`, `fountain.rs`, `bundle.rs` | Content-addressed files: fountain chunks, manifests, tree-of-manifests. |
+| `file.rs`, `bundle.rs` | Content-addressed files: chunks, manifests, tree-of-manifests. |
+| `fountain.rs` | The erasure code — data and repair symbols over GF(2). Used by `linkfrag`, and by the end-to-end fragment path that is on its way out. |
+| `linkfrag.rs` | **Link fragmentation:** how one envelope crosses one hop that cannot carry it. Splits below the node and below the signature; the far end of the same link reassembles, so a fragment never reaches the router. |
+| `invariant.rs` | The resource invariant, with one test per path a stranger can push on. Test-only. |
 | `rpc.rs`, `feed.rs` | Request/response over ordinary signed envelopes; topic-scoped feed. |
 | `congestion.rs` | Trickle/CSMA flood damping. |
 | `store.rs` | Spillable envelope store — memory to a budget, then a `SpillBackend`. |
