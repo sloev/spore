@@ -656,6 +656,18 @@ made the file legitimate to ask about, and the tree names every legal child, so 
 want-id nobody has a manifest for starts no hunt. *Cached, not pinned* keeps a
 popular magnet from filling the mesh's stores.
 
+*Depth* rides as one trailing byte on the WANT payload — ids are 16 bytes, so an
+odd byte on the end is unambiguous, and a WANT without one is a plain request
+getting the default budget. Each adopting hop decrements it; at zero a node
+answers from its own store or says nothing.
+
+*Fanout* is bounded by the interest table rather than by a neighbour count. A
+node asks on every interface except the one that asked it, but a node that
+already holds a live interest in an id records the new waiter and stays quiet —
+so total traffic is linear in the nodes reached, not exponential in the paths to
+them. That is the pending-interest-table argument, and it is what makes depth 8
+safe on a node with several links.
+
 This is a Part III profile because it changes what an endpoint chooses to ask
 for, not what any envelope looks like. T0 is unchanged: receive → dedup → store →
 deliver → forward.

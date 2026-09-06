@@ -73,6 +73,8 @@ impl Node {
             limits: Limits::default(),
             mtu: DEFAULT_MTU,
             manifests: HashMap::new(),
+            named: HashMap::new(),
+            interests: HashMap::new(),
             pending: HashMap::new(),
             acked: HashSet::new(),
             rpc_pending: HashSet::new(),
@@ -179,6 +181,12 @@ impl Node {
     /// both or neither (audit F-3, #189).
     pub fn set_partial_budget(&mut self, bytes: usize) {
         self.limits.partial_bytes = bytes.max(1024);
+    }
+
+    /// Interests adopted from neighbours right now (M11-I). Each is a promise
+    /// to pass something back, so it is worth being able to look at.
+    pub fn open_interests(&self) -> usize {
+        self.interests.len()
     }
 
     /// Incomplete fragment sets held right now, across every interface.

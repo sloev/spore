@@ -294,6 +294,14 @@ impl Node {
         trim_map(&mut self.sessions, lim.peers);
         trim_map(&mut self.manifests, lim.manifests);
         trim_set(&mut self.acked, lim.acked);
+        // M11-I's two tables. `named` is what this node is willing to remember
+        // about other people's trees; `interests` is what it has promised to go
+        // and fetch. Both are grown by neighbours, so both are bounded like
+        // everything else — and an interest is dropped on its lease first, so
+        // capacity goes to whoever is still actually waiting.
+        self.interests.retain(|_, i| i.until > now);
+        trim_map(&mut self.named, lim.named);
+        trim_map(&mut self.interests, lim.interests);
 
         // Inboxes are queues the application drains. If it has not, drop from the
         // front: the oldest request or event is the one most likely to be stale.
@@ -505,6 +513,22 @@ impl Node {
         if within_quota {
             // Store for later opportunistic sync.
             self.store_put(e, now);
+
+            // An interior manifest just landed: its children inherit whichever
+            // root already names *it*, so the authorization index stays complete
+            // as a tree resolves without anyone walking the whole thing. A node
+            // nobody named is not indexed, which is the point — an unsolicited
+            // manifest cannot make this node willing to hunt for its chunks.
+            let id = e.id();
+            if matches!(e.payload.first(), Some(&file::TREE_TAG) | Some(&file::MANIFEST_TAG)) {
+                if let Some(root) = self.named_by(&id) {
+                    self.index_named(&id, &root, now);
+                }
+            }
+
+            // Anyone waiting on this id gets it now — the return leg of an
+            // adopted interest (M11-I).
+            rx.forwards.append(&mut self.serve_interest(&id, now));
 
             // Relay.
             if allow_forward && e.hops > 0 {

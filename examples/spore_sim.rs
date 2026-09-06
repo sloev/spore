@@ -540,22 +540,34 @@ fn file_multihop() -> Report {
     assert_eq!(knows, 4, "the root should reach every node; the scenario is meaningless otherwise");
 
     sim.start_measuring();
-    let want = sim.world.nodes[3].fetch(&magnet);
-    sim.emit(3, want);
-    sim.run(sim.now_ms + 120_000, None);
+    // Ask repeatedly: one fetch names one frame of ids, and a tree resolves
+    // top-down — the root's children have to arrive before the chunks beneath
+    // them can even be named. A real client polls the same way.
+    for _ in 0..12 {
+        let want = sim.world.nodes[3].fetch_n(&magnet, 4);
+        if want.is_empty() {
+            break;
+        }
+        sim.emit(3, want);
+        sim.run(sim.now_ms + 30_000, None);
+    }
 
     let reached = usize::from(sim.world.nodes[3].has_file(&magnet));
-    Report {
-        name: "file-multihop".into(),
-        note: if reached == 1 {
-            "a file crossed three hops"
-        } else {
-            "all four know the magnet; the fetcher three hops away gets nothing — M11-I"
-        },
-        reached,
-        of: 1,
-        m: sim.m,
-    }
+    // The middle nodes fetched on the far node's behalf, so they hold what they
+    // passed along — a helper relay caches. That is what makes a second fetcher
+    // on this path cheap, and it is why the interest table serves *all* waiters
+    // for an id rather than only the first.
+    let cached: usize = (1..3).map(|i| sim.world.nodes[i].store_len()).sum();
+    let note: &'static str = if reached == 1 {
+        "a file crossed three hops; the middle nodes cached what they carried"
+    } else {
+        "all four know the magnet; the fetcher three hops away gets nothing — M11-I"
+    };
+    assert!(
+        reached == 0 || cached > 2,
+        "helper relays should hold what they passed on, got {cached} envelopes across the middle"
+    );
+    Report { name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
 }
 
 /// Two clusters joined by a single node: does a partition heal through one
@@ -665,7 +677,7 @@ fn main() {
             // The M11-D acceptance test: with link fragmentation the narrow hop
             // is no longer fatal, and if that ever stops being true it is a
             // regression rather than a known bug.
-            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" => {
+            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" | "file-multihop" => {
                 if r.reached != r.of {
                     bad.push(format!("{}: reached {} of {}", r.name, r.reached, r.of));
                 }
