@@ -97,5 +97,71 @@ other doesn't.</p>
 
 </div>
 
+<h2>Walked through</h2>
+
+<p class="text-muted">The cards above are the shape. These are four things that
+actually happen, with the real numbers — each one is a scenario in the
+simulator, so if the behaviour changes the description fails with it.</p>
+
+<div class="card"><div class="card-body">
+<h3 class="text-h5">A 4 kB message, over Wi-Fi, then Wi-Fi, then LoRa</h3>
+<p class="text-muted">Ada sends Rae 4 kB. The path runs across two Wi-Fi hops
+and then a LoRa radio, and Ada has no idea the radio is there.</p>
+<ol class="text-muted">
+<li>The envelope is about 4 114 bytes signed. Ada's own link takes 1 400, so she
+splits it into four pieces of roughly 1 362 and sends those.</li>
+<li>Both Wi-Fi hops carry each piece whole.</li>
+<li>The node holding the LoRa link cannot: its frames are 237 bytes. It cuts each
+arriving piece into six, adds a couple of repair pieces, and sends those. The far
+end reassembles before its router ever sees a fragment.</li>
+<li>Rae's node puts the four pieces back and checks one signature.</li>
+</ol>
+<p class="text-muted">54 frames, 25 kB on the wire, first delivery at 130 ms.
+Before per-hop splitting existed the same send produced 18 frames, 25 kB, and
+<strong>nothing arrived</strong> — the pieces were cut for a link three hops away
+and no node on the path could re-cut them.</p>
+</div></div>
+
+<div class="card"><div class="card-body">
+<h3 class="text-h5">A file three hops away, from someone who has gone home</h3>
+<p class="text-muted">Someone published a file. Its index flooded, so everyone
+knows it exists; the pieces did not, so nobody between you and the publisher has
+them.</p>
+<ol class="text-muted">
+<li>You ask your neighbour for the pieces. It has none.</li>
+<li>Rather than forward your request, it <em>adopts</em> it — it now wants those
+pieces itself — and asks its own neighbours. That repeats, up to a depth limit.</li>
+<li>Somewhere along the line a node has them. They come back the way the interest
+went, and every node that carried them keeps a copy, so the next person on that
+path is faster.</li>
+</ol>
+<p class="text-muted">Nothing routed a request to the publisher, so it works when
+the publisher is offline and ten caches are not. A node only ever adopts interest
+in pieces some index it already holds names — otherwise "want this id" would be a
+request to search the mesh on a stranger's behalf.</p>
+</div></div>
+
+<div class="card"><div class="card-body">
+<h3 class="text-h5">A small file, with no round trip at all</h3>
+<p class="text-muted">A 2 kB note is published. The index goes out, and the first
+few pieces go with it — enough that the whole file arrives in one shot. The
+receiver has nothing left to ask for, so it asks for nothing.</p>
+<p class="text-muted">How many pieces ride along is the sender's choice alone.
+The receiver ignores what it already has and asks for the rest either way, so the
+two ends never have to agree, and a node that would rather not spend the airtime
+can send none.</p>
+</div></div>
+
+<div class="card"><div class="card-body">
+<h3 class="text-h5">A message on a link that drops one frame in ten</h3>
+<p class="text-muted">A 900-byte envelope over a 237-byte radio is five pieces,
+and all five have to arrive — so a link losing 10% of frames loses closer to half
+of messages. Adding one repair piece takes that from 54% delivered to 90%; two
+take it to 96%.</p>
+<p class="text-muted">Repair, rather than asking again, because asking needs a
+way back. A one-way radio has none, and on a shared channel a complaint collides
+with the traffic it is complaining about.</p>
+</div></div>
+
 <p><a class="btn" href="developer.html">Developer docs</a>
 <a class="btn btn-cancel" href="apps.html">Get a node</a></p>

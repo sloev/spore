@@ -722,6 +722,8 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | M11-C The push threshold | ⬜ | The fountain half is done: repair symbols ship in `src/linkfrag.rs`, every bridge sends them, and `default_repair` is a quarter of the set (min 1). Measured over 200 trials of a 900-byte envelope on a 237-byte link — 5% loss 79%→97%, 10% 54%→90%, 20% 36%→67% with one repair symbol, and 96% at 10% with two, against the 70% repetition managed for the same redundancy. What remains is the **push-N threshold**, which needs M11-E to exist before anything can be pushed, and **adapting repair to observed loss** rather than sending a flat fraction |
 
 | M11-D Retire the end-to-end fountain path | ⬜ | The bridge half shipped: `src/linkfrag.rs`, both shared paths (`driver::run_datagram`, `stream_link`), the three custom loops (meshtastic serial, icmp, and the reticulum/i2p stream variants), and **every** `n.mtu.min(...)` clamp deleted. `spore-sim`'s `mixed-mtu-linkfrag` is the acceptance test. What remains is the other side of the same change: with per-hop splitting in place, `Node::send`'s end-to-end fountain fragmentation is redundant work that also floods unsigned fragments across the mesh. Delete it, with `MAX_FOUNTAIN_CHUNKS`, the `u8` count, and the `TooLarge` error that existed only to report the 255-chunk cap. Needs M11-C first, since whether the fountain relocates to the link or gives way to hop-local retry is the measurement that decides what replaces it |
+| M11-K Cancel an adopted interest | ⬜ | The lease is wall-clock so an interest survives a meeting — right for sneakernet, and too slow on its own. A relay whose last waiter has gone keeps pulling until the lease runs out, so a popular magnet plus a flaky requester is a standing pull against every seeder in range. Cancel when you can tell, expire when you cannot. `spore-sim` acceptance test 5 stays red until this exists |
+| M11-L A malicious-WANT scenario in `spore-sim` | ⬜ | Recursive pull's amplification story is *reasoned*, and one unit test covers the gate (`a_want_for_an_id_no_manifest_names_starts_no_hunt`). Nothing measures what a node that adopts interest in everything, or lies about depth, costs a mesh. Until that exists the bound is argued rather than known — which is the thing `spore-sim` was built to stop |
 | M11-I Recursive pull: the refinements | ⬜ | The mechanism ships — adopt-don't-forward, the parent-manifest gate, a wall-clock lease, depth on the WANT payload, sealed files excluded, and helper relays caching what they carry. `spore-sim`'s `file-multihop` is the acceptance test: a file crosses three hops where it previously could not. Owed: **fanout by neighbour** rather than by interface (today a node asks on every interface but the asker's, bounded by interest-table dedupe rather than by a 2–3 cap, so a node with many links is noisier than it should be); **preferring neighbours that INV'd the id or announced the magnet**, which needs per-neighbour INV memory; **cancel**, so a relay stops pulling when its last waiter goes rather than waiting out the lease; and seed advertisement (`have::<magnet>`) so recursion aims instead of spreading sideways |
 
 **`spore-sim` must show all six of these before n-hop fetch is believed** — until
@@ -753,6 +755,103 @@ a `spore-sim` scenario proving it; files push a measured number of chunks and
 pull the rest; the resource invariant is stated and has a test per path.
 
 ---
+
+## A public library people opt into — pools, not a global catalogue
+
+**Almost all of this exists.** A pool is a topic. Membership is `subscribe`, which
+puts the topic in ANNOUNCE, and `unsubscribe` takes it out again. `foldersync`
+already publishes a directory's files as manifests **addressed to a topic**, and
+already resolves newest-manifest-per-name and strips directory components so
+`../../etc/passwd` lands as `passwd` inside the output directory. Roots flood;
+chunks are link-local and move only because someone WANTed them. Recursive pull
+fetches from whoever has it. The catalogue *is* the roots a node has heard, and
+search is a local query over them.
+
+So this is a Part III profile — a topic convention, three quotas, and a UI. Not a
+new envelope type, not a new index format, and emphatically not a DHT or a
+"search the mesh" RPC: queries do not return in a store-and-forward network.
+
+**One correction to the obvious mental model.** Addressing a manifest to a pool
+topic does **not** limit which nodes carry it. Forwarding does not consult
+subscriptions — that is exactly why chunks used to spray until they were made
+link-local, where an uninterested bystander was measured re-flooding all six
+chunks of a file it had never asked for. The topic scopes **who files it into a
+catalogue**, not who relays it. Non-members still carry pool manifests as
+ordinary flooded envelopes under their store budget; they simply do not index
+them. Any "the pool is contained" reasoning that assumes otherwise is wrong.
+
+**Three objects, three budgets, and they must not collapse into one number.**
+
+| | Size | Moves how | The operator's question |
+|---|---|---|---|
+| **Catalogue** — roots heard on the pool | ~one envelope each | gossip with the topic | "how much of *what exists* will I remember?" |
+| **Cache** — chunks of files being seeded or filled | the actual bytes | WANT only, `hops=0` | "how much disk do I donate?" |
+| **Meeting** — one encounter's transfer | session cap | INV/WANT while in contact | "how much for *this* pass?" |
+
+The last one is what makes sneakernet feel right: a radio meeting is 20 MB, a USB
+or copyparty meeting is 2 GB, and it is the same protocol with a different
+allowance. Collapse these into one setting and the disk fills with names that
+cannot be fetched.
+
+**Order of business on meeting, with fill off by default:**
+
+1. Exchange catalogue ids — INV/WANT, cheap, always.
+2. Serve chunks someone actually WANTed.
+3. *Only* if the operator enabled **fill**, spend what is left of the session
+   quota on complete small files or things already cached — never a random tree.
+
+Step 3 as a default is how "members exchange files" becomes the chunk flood that
+was just deleted, with a search box on it. Membership is permission to carry an
+index and donate cache, not a licence to push bytes. The resource invariant's
+second clause — an explicit bounded local allowance — is what an opt-in quota
+*is*; it does not suspend the first clause, evidence of demand.
+
+**Spam is the threat, not bandwidth.** A public topic plus a gossiped catalogue
+means anyone can insert ten thousand plausible roots, and nothing stops an
+attractive name because there is no trust to lean on. All local, all the same
+shape as every other bound here: a catalogue byte budget and entry cap, a
+per-publisher cap *within* your catalogue, expiry, and eviction by expired →
+lowest stamp → least recently wanted. Optionally, only catalogue publishers you
+have met, or those above a stamp threshold. Without these the search box is a
+spam folder.
+
+**Say "pool", never "global".** There is no global view and there cannot be one:
+catalogues are regional, delayed and partitioned, and a node that spent a week in
+another city has a different index. The UI must say **heard of**, not **exists**.
+Named pools — `sneakernet/maps`, `sneakernet/36c3` — are libraries; one planetary
+topic is a graffiti wall.
+
+**Listed, unlisted, sealed.** Publishing publicly and being listed are the same
+act today, whether the publisher meant it or not — a public manifest floods with
+the filename inside it. A sealed root already shows the precedent for separating
+them: it advertises `"sealed"` and keeps the true name in an object only the
+recipient opens. Applied to the pool that gives three states, with "anyone can
+carry it forward" surviving all of them:
+
+| | manifest name | fetchable by magnet | findable by search |
+|---|---|---|---|
+| **listed** — in the pool folder | the real one | yes | yes |
+| **unlisted** — public, not listed | says nothing | yes | no |
+| **sealed** — to one recipient | says nothing | yes (ciphertext) | no |
+
+**Copyparty is the face, not the transport.** Browse on-disk versus heard-of,
+search the local catalogue, set the three quotas, point at the seed volume and
+the received volume. The syncing is `foldersync` plus INV/WANT, which exists; the
+existing copyparty bridge stays what it is, a bag of envelopes. Two copyparty
+nodes meeting over HTTP is simply a fat sneakernet hop — merge catalogue, then
+WANT within the session quota. The radio path is the same algorithm with a small
+number.
+
+**Minimum version that is still the idea:** a pool topic joined by subscribe; a
+seed folder published to it; catalogue INV/WANT on meeting; local search; fetch
+by recursive pull; three quotas with fill off. Then `spore-sim` earns it: two
+members and a USB-sized meeting converge their catalogues, chunks move only for
+wanted or seeded files, a non-member does not absorb the pool, and a spammer
+cannot push the catalogue past its cap.
+
+**Do not:** replicate by popularity (want-counts are a traffic graph), carry
+manifests and a derived catalogue and the files under one budget, or put any of
+it in T0.
 
 ## Explicitly out of scope / non-goals (locked)
 
