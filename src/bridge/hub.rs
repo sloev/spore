@@ -159,9 +159,12 @@ impl Hub {
     /// onto every interface. The convenience the daemon's `main` and the Android
     /// app both use to *send*.
     ///
-    /// Forwards [`TooLarge`] from [`Node::send`] rather than hiding it: an object
-    /// past one fountain set is the caller's payload choice, and silently sending
-    /// nothing would be the worst of the available outcomes.
+    /// Forwards [`TooLarge`] from [`Node::send`] rather than hiding it. The
+    /// error changed meaning: it used to mean "needs more than one fountain
+    /// set", a ceiling that disappeared when splitting moved to the link, and
+    /// now means "past what `plen` can describe". Silently sending nothing —
+    /// or worse, sending a truncated wire — would be the worst outcome
+    /// available.
     pub fn send(&self, dest: Addr, data: Vec<u8>) -> Result<(), crate::TooLarge> {
         let forwards = {
             let mut n = lock(&self.node);

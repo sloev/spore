@@ -176,92 +176,11 @@ impl Node {
     /// peer re-announces, a dropped partial object is re-fetched, an evicted dedup
     /// entry costs one duplicate relay. Nothing here can make the node *wrong*,
     /// only forgetful.
-    /// Bound `frags` by both count and bytes.
-    ///
-    /// Separate from `enforce_bounds` because it has to run *after* a fragment
-    /// is inserted, not only at the start of the next ingest — otherwise the
-    /// budget is exceeded by up to one chunk for as long as no further traffic
-    /// arrives, which on a link an attacker controls is indefinitely.
-    ///
-    /// Bounded twice on purpose. A set holds up to `count` rows of `chunk`
-    /// bytes and both come off the wire, so `MAX_PARTIAL_OBJECTS` alone bounds
-    /// cardinality while permitting gigabytes on a desktop and several times the
-    /// whole heap on an MCU (audit F-3, #189).
-    ///
-    /// **Evicted fairly between interfaces, not globally oldest.** The budget is
-    /// one pool shared by every link, and the previous rule — drop the oldest set
-    /// anywhere — let the loudest link empty it. That matters most on the media
-    /// where it can least be defended: on a broadcast-only transport (`U = ()`:
-    /// raw LoRa P2P, audio) frames carry no underlay address, so a receiver
-    /// cannot tell two senders apart and cannot bound them separately. One
-    /// transmitter on a shared radio could therefore open sets until every
-    /// partial set on the node's *Ethernet* link had been evicted.
-    ///
-    /// Charging each set to the interface it arrived on confines that: the
-    /// heaviest interface gives up its oldest set first, so a link can only ever
-    /// spend its own share. Within one broadcast interface senders still cannot
-    /// be separated — that is inherent to a medium with no addresses, and it is
-    /// the weaker of two exposures, because anyone able to flood that radio with
-    /// fragments can also simply jam it, which is cheaper and stops everything.
-    ///
-    /// This is the per-hop reassembly bound M11-D needs, arrived at early: it
-    /// holds for today's end-to-end fragments and keeps holding when reassembly
-    /// moves to the link.
-    pub(crate) fn enforce_partial_budget(&mut self) {
-        let held: usize = self.frags.values().map(|f| f.held_bytes()).sum();
-        if self.frags.len() <= self.limits.partial_objects && held <= self.limits.partial_bytes {
-            return;
-        }
-
-        // Oldest-first within each interface: the set least likely to still have
-        // chunks coming. Ordering is by (iface, started), so each interface's
-        // queue is a contiguous run and the next victim is its head.
-        let mut sets: Vec<(Iface, u32, Id, usize)> =
-            self.frags.iter().map(|(k, f)| (f.iface, f.started, *k, f.held_bytes())).collect();
-        sets.sort_unstable_by_key(|(iface, started, id, _)| (*iface, *started, *id));
-
-        let mut per_iface: HashMap<Iface, usize> = HashMap::new();
-        for (iface, _, _, sz) in &sets {
-            *per_iface.entry(*iface).or_insert(0) += sz;
-        }
-        let mut next: HashMap<Iface, usize> = HashMap::new();
-        for (i, (iface, _, _, _)) in sets.iter().enumerate() {
-            next.entry(*iface).or_insert(i);
-        }
-
-        let (mut n, mut bytes) = (self.frags.len(), held);
-        while n > self.limits.partial_objects || bytes > self.limits.partial_bytes {
-            // Take from whoever is holding the most. Ties break on the lower
-            // interface id so eviction is deterministic — a test that cannot
-            // predict which set went cannot assert the rule.
-            let Some((&victim, _)) = per_iface
-                .iter()
-                .filter(|(_, held)| **held > 0)
-                .min_by_key(|(iface, held)| (std::cmp::Reverse(**held), **iface))
-            else {
-                break;
-            };
-            let Some(i) = next.get(&victim).copied() else { break };
-            let Some((_, _, id, sz)) = sets.get(i).copied() else { break };
-            self.frags.remove(&id);
-            n -= 1;
-            bytes = bytes.saturating_sub(sz);
-            *per_iface.entry(victim).or_insert(0) -= sz.min(per_iface[&victim]);
-            next.insert(victim, i + 1);
-            // That interface is spent; stop considering it.
-            if sets.get(i + 1).map(|(f, _, _, _)| *f) != Some(victim) {
-                per_iface.insert(victim, 0);
-            }
-        }
-    }
-
     pub(crate) fn enforce_bounds(&mut self, now: u32) {
         if now.saturating_sub(self.last_sweep) >= SWEEP_INTERVAL_SECS {
             self.last_sweep = now;
             // Dedup entries carry their own retain-until (§5).
             self.seen.retain(|_, until| *until > now);
-            // A set that has heard nothing for the timeout is abandoned or fake.
-            self.frags.retain(|_, f| now.saturating_sub(f.started) < PARTIAL_TIMEOUT_SECS);
             // §7 prekey ring. Driven from the sweep rather than left to the
             // embedder, because a forward-secrecy property that each platform has
             // to remember to switch on is one that most platforms will not have.
@@ -283,8 +202,6 @@ impl Node {
                 self.seen.remove(&id);
             }
         }
-
-        self.enforce_partial_budget();
 
         let lim = self.limits;
         self.paths.trim(lim.peers);
@@ -480,34 +397,6 @@ impl Node {
                     rx.forwards.append(&mut self.forward_intents(&ack, NO_IFACE, now));
                 }
             }
-        }
-
-        // Reassemble only objects bound for us; a pure relay just forwards the
-        // fragments (each is an ordinary envelope) without hoarding chunks. A
-        // source over its quota can't make us hoard its chunks either.
-        // `idx` and `count` are two bytes each now, not one: a single byte
-        // capped a set at 255 pieces, which is under 12 kB on a Zigbee frame.
-        if within_quota && deliverable && e.flags & fl::FRAGMENT != 0 && e.payload.len() >= 20 {
-            let mut oid = [0u8; 16];
-            oid.copy_from_slice(&e.payload[..16]);
-            let idx = u16::from_be_bytes([e.payload[16], e.payload[17]]);
-            let count = u16::from_be_bytes([e.payload[18], e.payload[19]]);
-            let chunk = e.payload[20..].to_vec();
-            if let Some(orig) = self
-                .frags
-                .entry(oid)
-                .or_insert_with(|| Fountain::started_on(now, iface))
-                .add(&oid, idx, count, chunk)
-            {
-                if let Ok((oe, _)) = Envelope::decode(&orig) {
-                    // Deliver the recombined original; do not re-forward it.
-                    let mut inner = self.ingest(&oe, iface, nbr, now, false);
-                    rx.delivered.append(&mut inner.delivered);
-                    rx.forwards.append(&mut inner.forwards);
-                }
-            }
-            // After the insert, not only on the next ingest — see the method.
-            self.enforce_partial_budget();
         }
 
         // Store + relay only within the source's quota — this is the mesh-load

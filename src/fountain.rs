@@ -16,10 +16,6 @@
 
 use crate::*;
 
-/// Bytes a fragment envelope adds around its chunk: 16 header + 2 plen +
-/// 16 orig_id + 2 index + 2 count. `chunk = mtu - FRAG_OVERHEAD`.
-pub(crate) const FRAG_OVERHEAD: usize = 38;
-
 /// Most chunks one fountain set can hold.
 ///
 /// Structural, not policy: `count` is a `u16` in the fragment header, so a set
@@ -129,23 +125,6 @@ pub fn fragment(
 /// Online reassembler: feed chunks in any order, at any loss rate. Decodes once
 /// `count` linearly-independent chunks have arrived (typically count+2).
 pub struct Fountain {
-    /// When the first chunk of this set arrived, so an incomplete set can be
-    /// collected. A sender who opens a set and never finishes it is otherwise a
-    /// permanent allocation.
-    ///
-    /// `started`, `count`, `rows` and `done` are `pub(crate)` rather than private
-    /// only because `Node::enforce_bounds` sweeps and evicts partial sets from
-    /// outside this module. Extracting the code did not widen the *public* API —
-    /// none of these appear in `spore`'s surface — but it is worth naming the one
-    /// coupling the move exposed rather than leaving it implicit.
-    pub(crate) started: u32,
-    /// The interface this set was first heard on, so the partial budget can be
-    /// shared fairly between links instead of first-come-first-served.
-    ///
-    /// First arrival, not last: fragments flood, so the same set legitimately
-    /// arrives on several interfaces. Attribution has to pick one, and the link
-    /// that opened the allocation is the one that caused it.
-    pub(crate) iface: Iface,
     pub(crate) count: usize,
     chunk: usize,
     pub(crate) rows: Vec<Row>, // kept in reduced row-echelon form
@@ -157,18 +136,8 @@ pub(crate) struct Row {
     data: Vec<u8>,
 }
 impl Fountain {
-    /// Chunk bytes this set is holding.
-    ///
-    /// `MAX_PARTIAL_OBJECTS` bounds how many sets exist, not how large they are:
-    /// a set holds up to `count` rows of `chunk` bytes, and both come off the
-    /// wire. Counting sets is therefore not the same as counting memory, which
-    /// is what the eviction sweep actually needs to bound.
-    pub(crate) fn held_bytes(&self) -> usize {
-        self.rows.iter().map(|r| r.data.len()).sum()
-    }
-
     pub fn new() -> Self {
-        Fountain { started: 0, iface: NO_IFACE, count: 0, chunk: 0, rows: Vec::new(), done: None }
+        Fountain { count: 0, chunk: 0, rows: Vec::new(), done: None }
     }
     /// Feed one fragment's `(orig_id, idx, count, chunk_bytes)`.
     /// Returns the reassembled original envelope bytes once solvable.
@@ -239,19 +208,6 @@ impl Fountain {
             }
             _ => None,
         }
-    }
-}
-impl Fountain {
-    /// A reassembler that records when it opened, so [`PARTIAL_TIMEOUT_SECS`] can
-    /// collect it if the sender never finishes the set.
-    pub fn started_at(now: u32) -> Self {
-        Self::started_on(now, NO_IFACE)
-    }
-
-    /// As [`Fountain::started_at`], recording which interface opened the set so
-    /// the partial budget can be shared between links.
-    pub fn started_on(now: u32, iface: Iface) -> Self {
-        Fountain { started: now, iface, ..Self::new() }
     }
 }
 impl Default for Fountain {
