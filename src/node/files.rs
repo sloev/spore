@@ -343,7 +343,7 @@ impl Node {
     }
 
     /// How many ids fit in one WANT frame at this node's MTU.
-    fn want_window(&self) -> usize {
+    pub(crate) fn want_window(&self) -> usize {
         (self.mtu.saturating_sub(file::INTERIOR_ENV_OVERHEAD) / 16).max(1)
     }
 

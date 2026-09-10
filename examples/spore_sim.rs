@@ -352,7 +352,7 @@ impl Sim {
 
 struct Report {
     name: String,
-    note: &'static str,
+    note: String,
     reached: usize,
     of: usize,
     m: Metrics,
@@ -397,7 +397,13 @@ fn line() -> Report {
     sim.run(sim.now_ms + 60_000, Some(4));
     let reached = usize::from(!sim.seen_delivered[4].is_empty());
     let _ = &sim.m;
-    Report { name: "line".into(), note: "control: 5-node line, uniform MTU", reached, of: 1, m: sim.m }
+    Report {
+        name: "line".into(),
+        note: "control: 5-node line, uniform MTU".to_string(),
+        reached,
+        of: 1,
+        m: sim.m,
+    }
 }
 
 /// **The M11-D case.** A Wi-Fi island (MTU 1400) bridged to a LoRa hop (MTU
@@ -423,7 +429,7 @@ fn mixed_mtu() -> Report {
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
     Report {
         name: "mixed-mtu".into(),
-        note: "wifi island bridged to LoRa; M11-D must flip reached to 1",
+        note: "wifi island bridged to LoRa; M11-D must flip reached to 1".to_string(),
         reached,
         of: 1,
         m: sim.m,
@@ -454,7 +460,8 @@ fn mixed_mtu_clamped() -> Report {
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
     Report {
         name: "mixed-mtu-clamped".into(),
-        note: "each node clamped to its own narrowest link; sender still owns none of the narrow hop",
+        note: "each node clamped to its own narrowest link; sender still owns none of the narrow hop"
+            .to_string(),
         reached,
         of: 1,
         m: sim.m,
@@ -487,7 +494,7 @@ fn mixed_mtu_linkfrag() -> Report {
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
     Report {
         name: "mixed-mtu-linkfrag".into(),
-        note: "same topology and message, link fragmentation on",
+        note: "same topology and message, link fragmentation on".to_string(),
         reached,
         of: 1,
         m: sim.m,
@@ -527,11 +534,11 @@ fn linkfrag_loss(loss_pct: u32, attempts: usize) -> Report {
         m.bytes_tx += sim.m.bytes_tx;
         m.dropped_loss += sim.m.dropped_loss;
     }
-    let note: &'static str = match loss_pct {
-        0 => "900 B over a 237-byte link, no loss",
-        5 => "900 B over a 237-byte link, 5% frame loss",
-        10 => "900 B over a 237-byte link, 10% frame loss",
-        _ => "900 B over a 237-byte link, 20% frame loss",
+    let note: String = match loss_pct {
+        0 => "900 B over a 237-byte link, no loss".to_string(),
+        5 => "900 B over a 237-byte link, 5% frame loss".to_string(),
+        10 => "900 B over a 237-byte link, 10% frame loss".to_string(),
+        _ => "900 B over a 237-byte link, 20% frame loss".to_string(),
     };
     Report { name: format!("linkfrag-loss-{loss_pct}pct"), note, reached: arrived, of: attempts, m }
 }
@@ -564,7 +571,7 @@ fn linkfrag_repair(loss_pct: u32, repair: usize, attempts: usize) -> Report {
     }
     Report {
         name: format!("linkfrag-{loss_pct}pct-repair{repair}"),
-        note: "900 B over a 237-byte link, erasure-coded repair",
+        note: "900 B over a 237-byte link, erasure-coded repair".to_string(),
         reached: arrived,
         of: attempts,
         m,
@@ -598,10 +605,10 @@ fn lossy_mesh(loss_pct: u32) -> Report {
     sim.emit(0, f);
     sim.run(sim.now_ms + 120_000, None);
     let reached = sim.reached(0);
-    let note: &'static str = match loss_pct {
-        0 => "100 nodes, no loss",
-        10 => "100 nodes, 10% loss",
-        _ => "100 nodes, 50% loss",
+    let note: String = match loss_pct {
+        0 => "100 nodes, no loss".to_string(),
+        10 => "100 nodes, 10% loss".to_string(),
+        _ => "100 nodes, 50% loss".to_string(),
     };
     Report { name: format!("lossy-mesh-{loss_pct}pct"), note, reached, of: N - 1, m: sim.m }
 }
@@ -649,16 +656,123 @@ fn file_multihop() -> Report {
     // on this path cheap, and it is why the interest table serves *all* waiters
     // for an id rather than only the first.
     let cached: usize = (1..3).map(|i| sim.world.nodes[i].store_len()).sum();
-    let note: &'static str = if reached == 1 {
-        "a file crossed three hops; the middle nodes cached what they carried"
+    let note: String = if reached == 1 {
+        "a file crossed three hops; the middle nodes cached what they carried".to_string()
     } else {
-        "all four know the magnet; the fetcher three hops away gets nothing — M11-I"
+        "all four know the magnet; the fetcher three hops away gets nothing — M11-I".to_string()
     };
     assert!(
         reached == 0 || cached > 2,
         "helper relays should hold what they passed on, got {cached} envelopes across the middle"
     );
     Report { name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
+}
+
+/// The fetcher walks away mid-transfer. How long does the mesh keep hunting?
+///
+/// This is the cost M11-K exists to remove, and it is worth measuring rather
+/// than asserting: an adopted interest is a *standing* obligation, so a chain of
+/// relays that has adopted one keeps asking every seeder in range until the
+/// lease expires. With a fifteen-minute wall-clock lease — right for sneakernet,
+/// where a courier really may be fifteen minutes away — a popular magnet plus a
+/// flaky requester is a permanent load nobody asked for.
+///
+/// Three ways a fetch can end, measured side by side:
+///   * **vanishes** — nothing is said; only the lease stops it. The backstop.
+///   * **cancels** — the fetcher says so, and the cancel unwinds the chain.
+///   * **link drops** — the fetcher cannot say so, but its neighbour can tell.
+fn fetch_abandoned() -> Report {
+    // How many interests are still open across the relays, after each ending.
+    fn open_after(ending: Ending) -> usize {
+        let links = (0..3).map(|i| Link { a: i, b: i + 1, mtu: 1400, loss_pct: 0, latency_ms: 10 }).collect();
+        let mut sim = Sim::new(World::new(4, links), 0xCA7CE1);
+        let now = sim.now_secs();
+        let bytes = vec![0xAB; 60_000];
+        let (magnet, fwds) = sim.world.nodes[0].publish_file("gone.bin", &bytes, ZERO_DEST, now);
+        sim.emit(0, fwds);
+        sim.run(sim.now_ms + 60_000, None);
+
+        // Let the pull get going properly first. A tree resolves top-down, so the
+        // relays have to actually carry some of it before they hold the
+        // sub-manifests that make a deeper id legal to adopt — `may_adopt` is a
+        // capability check, not a guess, and starving the chain from the start
+        // would just make every node correctly refuse.
+        for _ in 0..4 {
+            let want = sim.world.nodes[3].fetch_n(&magnet, 4);
+            if want.is_empty() {
+                break;
+            }
+            sim.emit(3, want);
+            sim.run(sim.now_ms + 30_000, None);
+        }
+
+        // Now the seeder goes away — out of range, powered down. This is what
+        // makes an interest *stand open* rather than resolve in a millisecond:
+        // the relays know the file exists and what it names, they have adopted
+        // the obligation to find it, and the only node holding the remaining
+        // bytes is unreachable. An interest that gets served retires itself; the
+        // expensive case is the one that never can.
+        sim.world.links[0].loss_pct = 100;
+
+        let mut adopted = 0;
+        for _ in 0..8 {
+            let want = sim.world.nodes[3].fetch_n(&magnet, 4);
+            if want.is_empty() {
+                break;
+            }
+            sim.emit(3, want);
+            sim.run(sim.now_ms + 30_000, None);
+            adopted = (1..3).map(|i| sim.world.nodes[i].open_interests()).sum();
+            if adopted > 0 {
+                break;
+            }
+        }
+        assert!(adopted > 0, "the relays must have adopted something for the ending to matter");
+
+        match ending {
+            Ending::Vanishes => {}
+            Ending::Cancels => {
+                let bye = sim.world.nodes[3].abandon(&magnet);
+                sim.emit(3, bye);
+                sim.run(sim.now_ms + 30_000, None);
+            }
+            Ending::LinkDrops => {
+                // Node 2 notices the link to 3 is gone. Node 2 sits on links
+                // (1,2) and (2,3), so the fetcher is behind its second interface.
+                let unwind = sim.world.nodes[2].forget_interests_on(1);
+                sim.emit(2, unwind);
+                sim.run(sim.now_ms + 30_000, None);
+            }
+        }
+        (1..3).map(|i| sim.world.nodes[i].open_interests()).sum()
+    }
+
+    let vanished = open_after(Ending::Vanishes);
+    let cancelled = open_after(Ending::Cancels);
+    let dropped = open_after(Ending::LinkDrops);
+
+    // The measurement that matters: saying so must beat saying nothing.
+    assert!(
+        cancelled < vanished,
+        "a cancel should retire interests a silent departure leaves standing ({cancelled} vs {vanished})"
+    );
+    assert!(dropped < vanished, "a dropped link should too ({dropped} vs {vanished})");
+    let reached = usize::from(cancelled == 0 && dropped == 0);
+    Report {
+        name: "fetch-abandoned".into(),
+        note: format!(
+            "interests still open across the relays — vanished: {vanished}, cancelled: {cancelled}, link dropped: {dropped}"
+        ),
+        reached,
+        of: 1,
+        m: Metrics::default(),
+    }
+}
+
+enum Ending {
+    Vanishes,
+    Cancels,
+    LinkDrops,
 }
 
 /// Two clusters joined by a single node: does a partition heal through one
@@ -691,7 +805,7 @@ fn partition() -> Report {
     let reached = usize::from(!sim.seen_delivered[10].is_empty());
     Report {
         name: "partition".into(),
-        note: "two 5-node clusters joined by one bridge, 5% loss",
+        note: "two 5-node clusters joined by one bridge, 5% loss".to_string(),
         reached,
         of: 1,
         m: sim.m,
@@ -719,7 +833,8 @@ fn hop_limit(len: usize) -> Report {
     let reached = usize::from(!sim.seen_delivered[len - 1].is_empty());
     Report {
         name: format!("hop-limit-{len}"),
-        note: if reached == 1 { "reached the far end" } else { "hop budget exhausted before the far end" },
+        note: if reached == 1 { "reached the far end" } else { "hop budget exhausted before the far end" }
+            .to_string(),
         reached,
         of: 1,
         m: sim.m,
@@ -749,7 +864,7 @@ fn main() {
             linkfrag_repair(20, 14, 200),
         ],
         "partition" => vec![partition()],
-        "files" => vec![file_multihop()],
+        "files" => vec![file_multihop(), fetch_abandoned()],
         "hop-limit" => vec![hop_limit(8), hop_limit(17), hop_limit(19)],
         _ => vec![
             line(),
@@ -760,6 +875,7 @@ fn main() {
             lossy_mesh(10),
             partition(),
             file_multihop(),
+            fetch_abandoned(),
             // The fragment-loss cliff, kept in the smoke suite as a standing
             // record: only the clean case is asserted, because the rest are
             // probabilities and a threshold on a coin flip is a flaky build.
@@ -792,7 +908,7 @@ fn main() {
             // is no longer fatal, and if that ever stops being true it is a
             // regression rather than a known bug.
             "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" | "file-multihop"
-            | "linkfrag-loss-0pct" => {
+            | "fetch-abandoned" | "linkfrag-loss-0pct" => {
                 if r.reached != r.of {
                     bad.push(format!("{}: reached {} of {}", r.name, r.reached, r.of));
                 }

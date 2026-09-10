@@ -20,9 +20,9 @@ checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
 name = "base64ct"
-version = "1.6.0"
+version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
+checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "blake2"
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "spore"
-version = "1.0.0"
+version = "0.7.0"
 dependencies = [
  "base64ct",
  "blake2",
@@ -497,7 +497,6 @@ dependencies = [
  "sha2",
  "x25519-dalek",
  "zeroize",
- "zeroize_derive",
 ]
 
 [[package]]

@@ -6,6 +6,19 @@
 
 use crate::*;
 
+/// A WANT carrying `fl::CANCEL` — "I no longer want these ids".
+///
+/// No depth byte: depth budgets how far a request may *travel*, and a cancel
+/// travels exactly as far as the interests it retires, which the receivers
+/// already know. An even payload length also means an older build parses it as
+/// a plain WANT rather than mistaking a trailing depth byte for half an id.
+fn cancel_frame(ids: &[Id]) -> Vec<u8> {
+    let payload: Vec<u8> = ids.iter().flatten().copied().collect();
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, payload);
+    e.flags |= fl::CANCEL;
+    e.wire()
+}
+
 impl Node {
     /// INV = concatenated 16-byte IDs of stored envelopes relevant to a peer
     /// that follows `peer_topics` (public + those topics + unicast for custody).
@@ -66,6 +79,10 @@ impl Node {
             _ => (&e.payload[..], DEFAULT_WANT_DEPTH),
         };
 
+        if e.flags & fl::CANCEL != 0 {
+            return self.on_cancel(ids, iface, nbr);
+        }
+
         let mut adopt: Vec<Id> = Vec::new();
         for chunk in ids.chunks(16).take(MAX_IDS_PER_GOSSIP) {
             if chunk.len() != 16 {
@@ -94,6 +111,78 @@ impl Node {
             rx.forwards.append(&mut self.adopt_interest(&adopt, iface, nbr, depth, now));
         }
         rx
+    }
+
+    /// A neighbour has stopped wanting these ids (M11-K).
+    ///
+    /// Without this, the only way an adopted interest ends is `INTEREST_LEASE_SECS`
+    /// — fifteen minutes of a chain of relays still hunting for a file whose only
+    /// asker walked away. The lease is the backstop for a fetcher that vanishes
+    /// without saying so; this is the fast path for one that can.
+    ///
+    /// **A cancel only ever removes the sender's own waiter.** That is what keeps
+    /// it from being a denial-of-service primitive: a hostile neighbour cancelling
+    /// ids it never asked for finds nothing of its own to remove and changes
+    /// nothing for anyone else. The upstream cancel is emitted only when the last
+    /// waiter leaves, so n ids in produce at most n ids out, once — a second
+    /// cancel for the same id finds no interest and dies here. Unlike a WANT,
+    /// this path can only shrink the table, so it needs no admission check.
+    fn on_cancel(&mut self, ids: &[u8], iface: Iface, nbr: Option<Addr>) -> Rx {
+        let mut rx = Rx::default();
+        let mut orphaned: Vec<Id> = Vec::new();
+        for chunk in ids.chunks(16).take(MAX_IDS_PER_GOSSIP) {
+            if chunk.len() != 16 {
+                continue;
+            }
+            let mut id = [0u8; 16];
+            id.copy_from_slice(chunk);
+            let Some(entry) = self.interests.get_mut(&id) else { continue };
+            entry.waiters.retain(|w| *w != (iface, nbr));
+            if entry.waiters.is_empty() {
+                self.interests.remove(&id);
+                orphaned.push(id);
+            }
+        }
+        if !orphaned.is_empty() {
+            rx.forwards.push(Forward::Flood { except: iface, bytes: cancel_frame(&orphaned) });
+        }
+        rx
+    }
+
+    /// Stop fetching `magnet`: drop what we were still asking for and tell the
+    /// neighbours we asked, so the cancel unwinds the chain they adopted.
+    ///
+    /// Returns the frames to send. Emitting them is the caller's choice — a node
+    /// that simply stops calling `fetch` is still correct, just fifteen minutes
+    /// slower to stop costing the mesh anything.
+    pub fn abandon(&mut self, magnet: &Id) -> Vec<Forward> {
+        let window = self.want_window();
+        let ids = self.missing(magnet, usize::MAX);
+        self.interests.retain(|id, _| !ids.contains(id));
+        ids.chunks(window).map(|w| Forward::Flood { except: NO_IFACE, bytes: cancel_frame(w) }).collect()
+    }
+
+    /// A link went away, so every interest it was the sole waiter for is dead.
+    ///
+    /// The other half of M11-K, and the half that covers a fetcher which cannot
+    /// say goodbye — a phone out of radio range, a peer that crashed. Stateful
+    /// bridges know when a link drops; this converts that knowledge into the same
+    /// unwind an explicit cancel performs.
+    pub fn forget_interests_on(&mut self, iface: Iface) -> Vec<Forward> {
+        let mut orphaned: Vec<Id> = Vec::new();
+        self.interests.retain(|id, entry| {
+            entry.waiters.retain(|(i, _)| *i != iface);
+            if entry.waiters.is_empty() {
+                orphaned.push(*id);
+                return false;
+            }
+            true
+        });
+        if orphaned.is_empty() {
+            return Vec::new();
+        }
+        let window = self.want_window();
+        orphaned.chunks(window).map(|w| Forward::Flood { except: iface, bytes: cancel_frame(w) }).collect()
     }
 
     /// May this node go looking for `id` on someone else's behalf?
