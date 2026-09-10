@@ -29,7 +29,7 @@ jobs:
           - seal_open
           - radio_codecs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # libFuzzer needs nightly; this is the only place the project uses it.
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
@@ -51,7 +51,7 @@ jobs:
       # A crash is the point of the job, so keep the input that caused it.
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts-${{ matrix.target }}
           path: fuzz/artifacts/
