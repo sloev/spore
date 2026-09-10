@@ -391,7 +391,8 @@ fn line() -> Report {
     sim.start_measuring();
     let dest = sim.world.nodes[4].addr;
     let now = sim.now_secs();
-    let f = sim.world.nodes[0].send(dest, b"hello across five".to_vec(), now).expect("fits");
+    let f =
+        sim.world.nodes[0].send(dest, b"hello across five".to_vec(), now).expect("well under the ceiling");
     sim.emit(0, f);
     sim.run(sim.now_ms + 60_000, Some(4));
     let reached = usize::from(!sim.seen_delivered[4].is_empty());
@@ -415,8 +416,8 @@ fn mixed_mtu() -> Report {
     sim.start_measuring();
     let dest = sim.world.nodes[3].addr;
     let now = sim.now_secs();
-    // 4 kB: comfortably over one Wi-Fi frame, so it fragments at 1400.
-    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("fits one set");
+    // 4 kB: one envelope now, over one Wi-Fi frame. The link splits it.
+    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("well under the ceiling");
     sim.emit(0, f);
     sim.run(sim.now_ms + 120_000, Some(3));
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
@@ -447,7 +448,7 @@ fn mixed_mtu_clamped() -> Report {
     sim.start_measuring();
     let dest = sim.world.nodes[3].addr;
     let now = sim.now_secs();
-    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("fits one set");
+    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("well under the ceiling");
     sim.emit(0, f);
     sim.run(sim.now_ms + 120_000, Some(3));
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
@@ -480,7 +481,7 @@ fn mixed_mtu_linkfrag() -> Report {
     sim.start_measuring();
     let dest = sim.world.nodes[3].addr;
     let now = sim.now_secs();
-    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("fits one set");
+    let f = sim.world.nodes[0].send(dest, vec![0x5A; 4000], now).expect("well under the ceiling");
     sim.emit(0, f);
     sim.run(sim.now_ms + 120_000, Some(3));
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
@@ -516,7 +517,7 @@ fn linkfrag_loss(loss_pct: u32, attempts: usize) -> Report {
         // fountain-fragment it end to end and this measures the link layer
         // alone. A larger payload measures both codes at once and the numbers
         // stop matching any single theory.
-        let f = sim.world.nodes[0].send(dest, vec![0x33; 900], now).expect("fits");
+        let f = sim.world.nodes[0].send(dest, vec![0x33; 900], now).expect("well under the ceiling");
         sim.emit(0, f);
         sim.run(sim.now_ms + 60_000, Some(1));
         if !sim.seen_delivered[1].is_empty() {
@@ -551,7 +552,7 @@ fn linkfrag_repair(loss_pct: u32, repair: usize, attempts: usize) -> Report {
         sim.start_measuring();
         let dest = sim.world.nodes[1].addr;
         let now = sim.now_secs();
-        let f = sim.world.nodes[0].send(dest, vec![0x33; 900], now).expect("fits");
+        let f = sim.world.nodes[0].send(dest, vec![0x33; 900], now).expect("well under the ceiling");
         sim.emit(0, f);
         sim.run(sim.now_ms + 60_000, Some(1));
         if !sim.seen_delivered[1].is_empty() {
@@ -684,7 +685,7 @@ fn partition() -> Report {
     sim.start_measuring();
     let dest = sim.world.nodes[10].addr;
     let now = sim.now_secs();
-    let f = sim.world.nodes[0].send(dest, b"across the join".to_vec(), now).expect("fits");
+    let f = sim.world.nodes[0].send(dest, b"across the join".to_vec(), now).expect("well under the ceiling");
     sim.emit(0, f);
     sim.run(sim.now_ms + 180_000, Some(10));
     let reached = usize::from(!sim.seen_delivered[10].is_empty());
@@ -712,7 +713,7 @@ fn hop_limit(len: usize) -> Report {
     sim.start_measuring();
     let dest = sim.world.nodes[len - 1].addr;
     let now = sim.now_secs();
-    let f = sim.world.nodes[0].send(dest, b"how far".to_vec(), now).expect("fits");
+    let f = sim.world.nodes[0].send(dest, b"how far".to_vec(), now).expect("well under the ceiling");
     sim.emit(0, f);
     sim.run(sim.now_ms + 120_000, Some(len - 1));
     let reached = usize::from(!sim.seen_delivered[len - 1].is_empty());

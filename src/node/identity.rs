@@ -69,7 +69,6 @@ impl Node {
             prekey_lifetime_secs: PREKEY_LIFETIME_SECS,
             max_store_bytes: 10 * 1024 * 1024,
             seq: 0,
-            frags: HashMap::new(),
             limits: Limits::default(),
             mtu: DEFAULT_MTU,
             manifests: HashMap::new(),
@@ -194,24 +193,6 @@ impl Node {
     /// to pass something back, so it is worth being able to look at.
     pub fn open_interests(&self) -> usize {
         self.interests.len()
-    }
-
-    /// Incomplete fragment sets held right now, across every interface.
-    ///
-    /// Reassembly is the one place a remote party allocates memory on this node
-    /// without being asked for anything, so it is worth being able to look at.
-    pub fn partial_sets(&self) -> usize {
-        self.frags.len()
-    }
-
-    /// Incomplete fragment sets charged to one interface.
-    ///
-    /// The budget is shared between links rather than first-come-first-served,
-    /// which is what stops a loud link — in particular a broadcast-only radio,
-    /// where senders cannot be told apart at all — from evicting a quiet link's
-    /// reassembly along with its own.
-    pub fn partial_sets_on(&self, iface: Iface) -> usize {
-        self.frags.values().filter(|f| f.iface == iface).count()
     }
 
     /// Replace every table ceiling at once.

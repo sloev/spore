@@ -1256,27 +1256,24 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeOpenFile(
     env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
-/// Receive-side fragmentation status as "idhex:have/count" lines joined by
-/// '\n' (empty string when nothing is reassembling) — the UI's "receiving X/N".
+/// Always empty now, and kept only so the Kotlin side keeps linking.
+///
+/// This reported end-to-end fountain reassembly — "receiving X/N" — and the node
+/// no longer does any. Splitting moved to the link, so what is half-finished is
+/// a *bridge's* business for one hop, typically for milliseconds, and is not a
+/// transfer a person is waiting on. The honest replacement is file-transfer
+/// progress (`Node::files` gives chunks held out of chunks known), which the UI
+/// already has; this string had nothing left to say.
+///
+/// Remove the symbol when the Kotlin caller goes — `bindings/spore.h` is
+/// freeze-on-remove and this is the same courtesy.
 #[no_mangle]
 pub extern "system" fn Java_org_spore_node_SporeNative_nativeFragStatus(
     env: JNIEnv,
     _class: JClass,
-    ptr: jlong,
+    _ptr: jlong,
 ) -> jni::sys::jstring {
-    let Some(r) = rt(ptr) else {
-        return std::ptr::null_mut();
-    };
-    let rows = r.hub.with_node(|n| n.frag_progress());
-    let s = rows
-        .iter()
-        .map(|(id, have, count)| {
-            let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
-            format!("{hex}:{have}/{count}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+    env.new_string("").map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
 /// Start the plain limited-broadcast UDP bridge (255.255.255.255) — used on a

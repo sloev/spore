@@ -183,8 +183,12 @@ pub const DEFAULT_GOSSIP_BUDGET: u32 = 32 * 1024;
 /// universal ceiling: a constrained runtime replaces them together with
 /// [`Node::set_limits`] rather than inheriting laptop numbers (audit #189).
 pub const MAX_SEEN: usize = 1 << 16;
-/// Incomplete fountain sets held at once. Each holds real chunk bytes, so this is
-/// the tightest of these bounds.
+/// Half-finished reassembly sets held at once, across every link.
+///
+/// Reassembly moved: the node used to hold end-to-end fountain sets, and now a
+/// *bridge* holds link fragments for the hop it is splitting across. The bound
+/// is the same idea in the new place — each set holds real bytes a neighbour
+/// caused this node to allocate, so it is the tightest of these ceilings.
 pub const MAX_PARTIAL_OBJECTS: usize = 256;
 /// Chunk bytes held across *all* incomplete fountain sets.
 ///
@@ -195,10 +199,23 @@ pub const MAX_PARTIAL_OBJECTS: usize = 256;
 /// an MCU (audit F-3, #189). Lower it with [`Node::set_partial_budget`], or with
 /// [`Node::set_limits`] to scale it alongside every other table at once.
 pub const DEFAULT_PARTIAL_BUDGET: usize = 4 * 1024 * 1024;
-/// How long an incomplete fountain set is kept before it is collected. Fragments
-/// of a live object keep arriving; a set that has heard nothing for this long is
-/// either abandoned or was never real.
-pub const PARTIAL_TIMEOUT_SECS: u32 = 300;
+/// The largest payload one envelope can carry.
+///
+/// **Structural, not policy.** §2 writes the payload length as a `u16`, so this
+/// is what the format can describe and no node may raise it. It is also now the
+/// *only* ceiling on an object: splitting moved to the link, so a fragment count
+/// no longer bounds anything, and what an envelope can hold is the same number
+/// on every link rather than a different one per frame size.
+///
+/// Enforced where a caller chooses the size — [`Node::send`] and the other
+/// originate paths return [`TooLarge`] past it — and asserted in the encoder, so
+/// a hand-built envelope trips in any test run. It cannot be enforced *in* the
+/// encoder: `Envelope::id` shares that path and an envelope's identity is a
+/// content hash used as a map key, so it must be infallible. A fallible `wire`
+/// beside an infallible `id` would leave the same silent truncation in the half
+/// that matters more.
+pub const MAX_PAYLOAD_BYTES: usize = u16::MAX as usize;
+
 /// Chunks sent alongside a manifest when a file is published (M11-E).
 ///
 /// Eight, which is ~10 kB at a 1400-byte MTU and ~1.4 kB over LoRa. Counted in
@@ -265,9 +282,9 @@ const SWEEP_INTERVAL_SECS: u32 = 60;
 pub struct Limits {
     /// Dedup entries (`MAX_SEEN`).
     pub seen: usize,
-    /// Incomplete fountain sets (`MAX_PARTIAL_OBJECTS`).
+    /// Half-finished link-reassembly sets (`MAX_PARTIAL_OBJECTS`).
     pub partial_objects: usize,
-    /// Chunk bytes across all incomplete fountain sets (`DEFAULT_PARTIAL_BUDGET`).
+    /// Bytes across all half-finished link-reassembly sets (`DEFAULT_PARTIAL_BUDGET`).
     pub partial_bytes: usize,
     /// Peers kept in each of the peer-keyed maps (`MAX_PEERS`).
     pub peers: usize,
@@ -423,19 +440,19 @@ impl Limits {
 /// [`Node::send`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TooLarge {
-    /// Chunks the object would need at the MTU in force.
-    pub needed: usize,
-    /// Bytes per chunk at that MTU (`mtu - FRAG_OVERHEAD`).
-    pub chunk: usize,
+    /// Payload bytes the caller passed.
+    pub len: usize,
+    /// The ceiling — [`MAX_PAYLOAD_BYTES`].
+    pub max: usize,
 }
 
 impl core::fmt::Display for TooLarge {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "object needs {} chunks of {} B but one fountain set holds {}; \
+            "payload is {} B but an envelope carries at most {} B; \
              use the file/manifest layer for objects this large",
-            self.needed, self.chunk, MAX_FOUNTAIN_CHUNKS
+            self.len, self.max
         )
     }
 }
@@ -634,8 +651,7 @@ pub struct Node {
 
     max_store_bytes: usize,
     seq: u64,
-    frags: HashMap<Id, Fountain>,
-    /// Every table ceiling, including the byte budget for `frags`. See
+    /// Every table ceiling. See
     /// [`Limits`]; defaults to the desktop set.
     limits: Limits,
     pub mtu: usize,
@@ -750,7 +766,6 @@ pub use seal::{open_sealed, prekey_keypair, seal, topic_open, topic_seal, SEALED
 use seal::{chunk_open, chunk_seal, seal_nonce};
 
 mod fountain;
-use fountain::FRAG_OVERHEAD;
 pub use fountain::{fragment, Fountain, MAX_FOUNTAIN_CHUNKS};
 
 pub mod congestion;
@@ -934,47 +949,6 @@ mod tests {
         // node still *receives* public mail it is over budget to pass on;
         // dropping that would be a worse failure than relaying too much.
         assert!(delivered > 0, "over-quota unsigned mail must still be delivered locally");
-    }
-
-    #[test]
-    fn partial_fragment_memory_is_bounded_by_bytes_not_just_sets() {
-        // Audit F-3 (#189). MAX_PARTIAL_OBJECTS bounds how many incomplete
-        // fountain sets exist, not how large they are — and both `count` and
-        // `chunk` come off the wire. Before the byte budget, 256 sets could hold
-        // gigabytes on a desktop and many times the whole heap on an MCU.
-        //
-        // Unsigned and addressed to the public destination, so this is what an
-        // unauthenticated peer in range can do: no key, no forgery, no quota
-        // (see F-2, which is why `within_quota` does not stop it).
-        let mut n = Node::new("victim", &[]);
-        let now = 1_700_000_000u32;
-        n.set_partial_budget(64 * 1024);
-
-        const CHUNK: usize = 4 * 1024;
-        for set in 0..MAX_PARTIAL_OBJECTS {
-            let mut payload = Vec::with_capacity(18 + CHUNK);
-            let mut oid = [0u8; 16];
-            oid[..8].copy_from_slice(&(set as u64).to_be_bytes());
-            payload.extend_from_slice(&oid);
-            payload.push(0); // idx
-            payload.push(255); // count — the set can never complete
-            payload.extend_from_slice(&vec![0xAB; CHUNK]);
-
-            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
-            e.flags |= fl::FRAGMENT;
-            assert!(matches!(e.src, Src::None), "unsigned: no source quota applies");
-            let _ = n.on_rx(&e.wire(), 0, None, now);
-        }
-
-        let held: usize = n.frags.values().map(|f| f.held_bytes()).sum();
-        assert!(
-            held <= 64 * 1024,
-            "partial sets hold {held} bytes, over the 64 KiB budget — the count \
-             cap alone does not bound memory"
-        );
-        // Still bounded the old way too, and still functional rather than empty.
-        assert!(n.frags.len() <= MAX_PARTIAL_OBJECTS);
-        assert!(!n.frags.is_empty(), "eviction must not clear the table wholesale");
     }
 
     #[test]
@@ -1283,53 +1257,77 @@ mod tests {
     fn send_small_is_a_single_envelope() {
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
-        let f = a.send(topic_of("news"), b"hi".to_vec(), now).unwrap();
+        let f = a.send(topic_of("news"), b"hi".to_vec(), now).expect("under the ceiling");
         assert_eq!(f.len(), 1, "a small payload must not fragment");
     }
 
     #[test]
-    fn send_large_object_fragments_and_reassembles() {
+    fn a_large_object_crosses_a_link_as_one_envelope() {
+        // This used to assert that `send` produced many fragments and that the
+        // app saw one reassembled object rather than raw pieces. The sender does
+        // not fragment any more, so the *end* the test cared about — the app
+        // sees one whole object, never a piece — is now true by construction,
+        // and worth stating that way.
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
         let mut b = Node::new("b", &["news"]);
 
         let payload = vec![0x5Au8; 5000]; // well over one MTU
-        let forwards = a.send(topic_of("news"), payload.clone(), now).unwrap();
-        assert!(forwards.len() > 1, "a large payload must fragment into many sends");
+        let forwards = a.send(topic_of("news"), payload.clone(), now).expect("under the ceiling");
+        assert_eq!(forwards.len(), 1, "one envelope, whatever the size");
 
-        // Flood every fragment across the A—B link.
         let mut delivered = Vec::new();
         for f in &forwards {
             if let Forward::Flood { bytes, .. } = f {
+                assert!(bytes.len() > a.mtu, "bigger than the sender's own link");
                 let rx = b.on_rx(bytes, 0, Some(a.addr), now);
                 delivered.extend(rx.delivered);
             }
         }
 
-        // The app sees exactly one reassembled object — never a raw fragment.
-        assert_eq!(delivered.len(), 1, "one delivery, no raw fragments leaked to the app");
-        assert_eq!(delivered[0].payload, payload, "reassembled payload matches");
-        assert!(delivered[0].verify(), "reassembled signature verifies");
+        assert_eq!(delivered.len(), 1, "the app sees exactly one object");
+        assert_eq!(delivered[0].payload, payload, "and every byte of it");
+
+        // A link too small for it splits it; the far end puts it back.
+        let wire = match &forwards[0] {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        let pieces = crate::linkfrag::split_for_link(wire, 237, 3);
+        assert!(pieces.len() > 1);
+        let mut r = crate::linkfrag::Reassembler::default();
+        let mut out = None;
+        for p in &pieces {
+            if let Some(w) = r.accept(1, p, now) {
+                out = Some(w);
+            }
+        }
+        assert_eq!(out.as_deref(), Some(&wire[..]), "identical after a narrow hop");
     }
 
     #[test]
-    fn relays_forward_fragments_without_reassembling() {
-        // C follows no relevant topic and is not the dest, so it must relay the
-        // fragments onward but never buffer/reassemble the object itself.
+    fn a_relay_carries_a_large_object_without_opening_it() {
+        // C follows no relevant topic and is not the dest, so it relays and
+        // delivers nothing. This used to assert that it forwarded *fragments*
+        // without reassembling them; there are no end-to-end fragments now, and
+        // the property that mattered is unchanged and easier to see: an object
+        // larger than the relay's own MTU crosses it untouched, because
+        // splitting for a narrow link is the bridge's business, not the router's.
         let now = 1_700_000_000;
         let mut a = Node::new("a", &["news"]);
         let mut c = Node::new("c", &[]); // relay: no matching topic
-        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now).unwrap();
+        let forwards = a.send(topic_of("news"), vec![0x11u8; 5000], now).expect("under the ceiling");
+        assert_eq!(forwards.len(), 1, "one envelope, not a fragment set");
 
         let mut relayed = 0;
         for f in &forwards {
             if let Forward::Flood { bytes, .. } = f {
+                assert!(bytes.len() > c.mtu, "and it is bigger than the relay's own link");
                 let rx = c.on_rx(bytes, 0, Some(a.addr), now);
                 assert!(rx.delivered.is_empty(), "a relay delivers nothing to its app");
                 relayed += rx.forwards.len();
             }
         }
-        assert!(relayed > 1, "a relay must forward the fragments onward");
+        assert_eq!(relayed, 1, "it passes the whole object on");
     }
 
     #[test]
@@ -1870,42 +1868,6 @@ mod tests {
         let inv = Envelope::new(ty::INV, ZERO_DEST, 0, inv_payload).wire();
         let rx = a.on_rx(&inv, 1, None, now);
         assert_eq!(rx.forwards.len(), 1, "one WANT asking for what we lack");
-    }
-
-    #[test]
-    fn incomplete_fountain_sets_cannot_accumulate() {
-        // Measured before this bound: 20,000 incomplete sets held, each carrying
-        // real chunk bytes, and still held 10 million seconds later. Cheapest
-        // possible attack — unsigned fragments are Src::None, which the quota
-        // admits unconditionally, so this cost the sender nothing.
-        let now = 1_700_000_000;
-        let mut v = Node::new("victim", &[]);
-        for i in 0..3_000u32 {
-            let mut payload = vec![0u8; 18];
-            payload[..4].copy_from_slice(&i.to_be_bytes()); // a distinct orig_id each
-            payload[16] = 0; // idx
-            payload[17] = 4; // claims 4 chunks, sends 1 — never solvable
-            payload.extend_from_slice(&[0xAA; 200]);
-            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
-            e.flags |= fl::FRAGMENT | fl::FLOOD;
-            v.on_rx(&e.wire(), 1, None, now);
-        }
-        assert!(
-            v.frags.len() <= MAX_PARTIAL_OBJECTS + 1,
-            "held {} partial objects against a cap of {MAX_PARTIAL_OBJECTS}",
-            v.frags.len()
-        );
-
-        // And an abandoned set is collected on time, not kept forever.
-        let live = v.frags.len();
-        assert!(live > 0);
-        v.on_rx(
-            &Envelope::new(ty::DATA, ZERO_DEST, now + PARTIAL_TIMEOUT_SECS + 100, b"tick".to_vec()).wire(),
-            1,
-            None,
-            now + PARTIAL_TIMEOUT_SECS + 1,
-        );
-        assert_eq!(v.frags.len(), 0, "sets past PARTIAL_TIMEOUT_SECS are collected");
     }
 
     #[test]
@@ -3419,13 +3381,14 @@ mod tests {
         let (from, rid, _) = server.poll_requests().into_iter().next().unwrap();
         assert_eq!(rid, id);
 
-        // The responder builds the RESPONSE payload by hand and fragments it with
-        // `send` — the same bytes and path the JNI layer uses. 20 KB forces a
-        // multi-fragment fountain set.
+        // The responder builds the RESPONSE payload by hand and sends it with
+        // `send` — the same bytes and path the JNI layer uses. 20 KB used to
+        // force a multi-fragment fountain set; it is one envelope now, and a
+        // link that cannot carry it splits it.
         let body = vec![0xABu8; 20_000];
         let payload = rpc::encode_response(rid, &rpc::Response { status: 200, body: body.clone() });
-        let rf = server.send(from, payload.clone(), now).expect("fits a fountain set");
-        assert!(rf.len() > 1, "a 20 KB reply must fragment");
+        let rf = server.send(from, payload.clone(), now).expect("under the ceiling");
+        assert_eq!(rf.len(), 1, "a 20 KB reply is one envelope");
 
         for f in &rf {
             client.on_rx(&fwd_bytes(f), 0, Some(server.addr), now);

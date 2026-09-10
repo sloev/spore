@@ -250,8 +250,11 @@ pub struct Reassembler {
 }
 
 impl Default for Reassembler {
+    /// The node-wide ceilings, so an operator who sized a small runtime with
+    /// [`crate::Limits::for_budget`] sizes this too. Reassembly moved from the
+    /// node to the bridge; the budget for it should not have been left behind.
     fn default() -> Self {
-        Self::new(64, 256 * 1024)
+        Self::new(crate::MAX_PARTIAL_OBJECTS, crate::DEFAULT_PARTIAL_BUDGET)
     }
 }
 

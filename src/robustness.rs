@@ -215,24 +215,22 @@ fn a_node_survives_arbitrary_bytes_on_its_receive_path() {
 }
 
 #[test]
-fn fragment_reassembly_survives_hostile_chunks() {
-    // Fountain-coded fragments arrive out of order, duplicated, and from anyone.
-    // Reassembly is stateful, which is exactly what makes it worth hammering.
+fn link_reassembly_survives_hostile_pieces() {
+    // Reassembly is stateful, which is what makes it worth hammering — and it
+    // moved. The sender no longer fragments, so the pieces an attacker gets to
+    // shape are the ones a *bridge* puts on a link, and the thing that must not
+    // fall over is `linkfrag::Reassembler`. Same hostile input, one layer down.
     let now = 1_700_000_000;
     let mut sender = Node::new("sender", &[]);
-    sender.mtu = 128;
-    let fwds = sender.send(ZERO_DEST, vec![0xA5; 4000], now).expect("4 kB fits one set at mtu 128");
-    let frags: Vec<Vec<u8>> = fwds
-        .into_iter()
-        .map(|f| {
-            let (Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. }) = f;
-            bytes
-        })
-        .collect();
-    assert!(frags.len() > 1, "payload should have fragmented");
+    let fwds = sender.send(ZERO_DEST, vec![0xA5; 4000], now).expect("under the ceiling");
+    let wire = match &fwds[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    let frags = crate::linkfrag::split_for_link(&wire, 128, 7);
+    assert!(frags.len() > 1, "a 4 kB envelope must not fit a 128-byte link");
 
     let mut r = Rng(0x5EED);
-    let mut node = Node::new("reassembler", &[]);
+    let mut re = crate::linkfrag::Reassembler::default();
     for _ in 0..3000 {
         let mut f = frags[r.below(frags.len())].clone();
         match r.below(4) {
@@ -247,8 +245,11 @@ fn fragment_reassembly_survives_hostile_chunks() {
             }
             _ => f.extend_from_slice(&r.some_bytes(32)),
         }
-        let _ = node.on_rx(&f, 1, None, now);
+        // Vary the key: on a shared medium these arrive interleaved from peers
+        // with nothing to do with each other.
+        let _ = re.accept(r.below(3) as u32, &f, now);
     }
+    assert!(re.open_sets() <= 64, "and the buffer stayed bounded throughout");
 }
 
 #[test]
@@ -285,30 +286,38 @@ fn a_zero_count_fragment_does_not_kill_the_node() {
 }
 
 #[test]
-fn the_fragment_count_ceiling_is_no_longer_reachable() {
-    // `send` used to assert when an object needed more than 255 fragments, then
-    // returned an error instead. With `count` widened to a `u16` the ceiling is
-    // 65 535 pieces — and an envelope cannot get there, because `plen` is also a
-    // `u16`, so the payload runs out first.
-    //
-    // At a 128-byte MTU a chunk is 90 bytes and the largest legal envelope is
-    // 65 649, which is 730 pieces. The error path is now unreachable for
-    // anything the wire can express. It stays, because `send` takes a `Vec` the
-    // caller chose and reporting is better than asserting, but nothing legal
-    // trips it.
+fn send_emits_one_envelope_whatever_the_size() {
+    // `send` used to fountain-fragment anything past the node's MTU, and to
+    // return `TooLarge` when that needed more than 255 pieces. Both are gone.
+    // Splitting belongs to the link that cannot carry the frame, so the sender
+    // emits the object and stops thinking about it — and `TooLarge` now means
+    // the one ceiling that is real and permanent: what `plen` can describe.
     let now = 1_700_000_000;
     let mut n = Node::new("sender", &[]);
     n.mtu = 128;
-    let chunk = 128 - crate::fountain::FRAG_OVERHEAD;
 
-    // Far past the old 255-piece ceiling, and now perfectly sendable.
-    let big = vec![0u8; chunk * 300];
-    let fwds = n.send(ZERO_DEST, big, now).expect("300 pieces is within a u16 count");
-    assert!(fwds.len() > 300, "data plus repair went out: {}", fwds.len());
+    // Far past what the old fragment ceiling allowed, and past this node's MTU.
+    let fwds = n.send(ZERO_DEST, vec![0u8; 40_000], now).expect("40 kB is under the ceiling");
+    assert_eq!(fwds.len(), 1, "one envelope, not a set of fragments");
+    let wire = match &fwds[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+    };
+    assert!(wire.len() > n.mtu, "and it is bigger than this node's own link");
+    let (e, _) = Envelope::decode(wire).expect("a whole envelope");
+    assert!(e.verify(), "signed once, not split into unsigned pieces");
 
-    // The largest payload `plen` can describe still fits one set.
-    let max = vec![0u8; 60_000];
-    assert!(n.send(ZERO_DEST, max, now).is_ok(), "the biggest legal envelope still fragments");
+    // The link is what deals with it — down to an acoustic frame.
+    let pieces = crate::linkfrag::split_for_link(wire, 32, 1);
+    assert!(pieces.len() > 1 && pieces.iter().all(|p| p.len() <= 32));
+
+    // Past the ceiling is refused rather than silently truncated, which is what
+    // `plen as u16` did before: 70 000 bytes encoded as 4 464 and decoded wrong.
+    let err = n
+        .send(ZERO_DEST, vec![0u8; MAX_PAYLOAD_BYTES + 1], now)
+        .expect_err("one byte past what plen can describe");
+    assert_eq!(err.len, MAX_PAYLOAD_BYTES + 1);
+    assert_eq!(err.max, MAX_PAYLOAD_BYTES);
+    assert!(n.send(ZERO_DEST, vec![0u8; MAX_PAYLOAD_BYTES], now).is_ok(), "exactly at it is fine");
 }
 
 #[test]

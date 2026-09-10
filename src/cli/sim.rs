@@ -161,7 +161,8 @@ pub(crate) fn sim() {
     //    line reassembles and signature-verifies the original.
     w.floods = 0;
     let big = vec![0xABu8; 6000];
-    let sf = w.nodes[a].send(topic_of("news"), big.clone(), NOW).expect("demo payload fits one fountain set");
+    let sf =
+        w.nodes[a].send(topic_of("news"), big.clone(), NOW).expect("demo payload is well under the ceiling");
     let chunks = sf.len();
     let del = w.run(sf.into_iter().map(|f| (a, f)).collect());
     let got: Vec<&str> =

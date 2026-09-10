@@ -109,13 +109,17 @@ impl Node {
     /// Originate a signed DATA message, fountain-fragmenting it if it exceeds the
     /// MTU.
     ///
-    /// Returns [`TooLarge`] rather than panicking when the object needs more than
+    /// Emits one envelope, whatever the size — see below. It used to return
+    /// `TooLarge` when the object needed more than
     /// [`MAX_FOUNTAIN_CHUNKS`] chunks at the MTU in force. That ceiling is
     /// structural, not policy — the fragment header carries `count` as one wire
     /// byte — so exceeding it is a property of the payload the caller handed over:
     /// an error to report, not a bug to abort on. For objects that large, use the
     /// file/manifest layer, which exists for exactly this.
     pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Result<Vec<Forward>, TooLarge> {
+        if data.len() > MAX_PAYLOAD_BYTES {
+            return Err(TooLarge { len: data.len(), max: MAX_PAYLOAD_BYTES });
+        }
         let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, data);
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
@@ -127,32 +131,23 @@ impl Node {
             e.sign(&self.sk);
         }
 
-        let wire = e.wire();
-        if wire.len() <= self.mtu {
-            self.mark_seen(&e);
-            self.store_put(&e, now);
-            return Ok(self.forward_intents(&e, NO_IFACE, now));
-        }
-
-        // Too big for one envelope: fountain-fragment the signed wire form.
-        let chunk = self.mtu.saturating_sub(FRAG_OVERHEAD).max(1);
-        let count = wire.len().div_ceil(chunk);
-        if count > MAX_FOUNTAIN_CHUNKS {
-            return Err(TooLarge { needed: count, chunk });
-        }
-        let orig_id = e.id();
-        // Data chunks 0..count, then a few repair chunks for loss resilience.
-        let repair = (count / 8 + 2).min(MAX_FOUNTAIN_CHUNKS - count);
-        let indices: Vec<u16> = (0..(count + repair)).map(|i| i as u16).collect();
-        let frags = fragment(&wire, chunk, e.hops, e.expiry, dest, orig_id, &indices);
-
-        let mut forwards = Vec::new();
-        for fr in &frags {
-            self.mark_seen(fr);
-            self.store_put(fr, now);
-            forwards.append(&mut self.forward_intents(fr, NO_IFACE, now));
-        }
-        Ok(forwards)
+        // **One envelope, whatever its size.** This used to fountain-fragment
+        // anything over `self.mtu` into unsigned fragments that flooded the mesh
+        // — and that never solved the problem it existed for: a fragment carries
+        // no nesting, so pieces cut for a 1400-byte link died at the first
+        // 237-byte hop and no node on the path could re-cut them.
+        //
+        // Splitting belongs to the link that cannot carry the frame, not to the
+        // sender guessing on behalf of a path it cannot see. A bridge now splits
+        // for its own hop and the far end reassembles before the router sees
+        // anything, so the sender emits the object and stops thinking about it.
+        //
+        // The size ceiling is `plen`: 65 535 payload bytes, checked by the
+        // envelope encoder rather than by a fragment count. Larger objects are
+        // the file layer's job.
+        self.mark_seen(&e);
+        self.store_put(&e, now);
+        Ok(self.forward_intents(&e, NO_IFACE, now))
     }
 
     /// Originate a unicast message that asks the recipient for a delivery

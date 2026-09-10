@@ -722,6 +722,9 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | M11-C The push threshold | ⬜ | The fountain half is done: repair symbols ship in `src/linkfrag.rs`, every bridge sends them, and `default_repair` is a quarter of the set (min 1). Measured over 200 trials of a 900-byte envelope on a 237-byte link — 5% loss 79%→97%, 10% 54%→90%, 20% 36%→67% with one repair symbol, and 96% at 10% with two, against the 70% repetition managed for the same redundancy. What remains is the **push-N threshold**, which needs M11-E to exist before anything can be pushed, and **adapting repair to observed loss** rather than sending a flat fraction |
 
 | M11-D Retire the end-to-end fountain path | ⬜ | The bridge half shipped: `src/linkfrag.rs`, both shared paths (`driver::run_datagram`, `stream_link`), the three custom loops (meshtastic serial, icmp, and the reticulum/i2p stream variants), and **every** `n.mtu.min(...)` clamp deleted. `spore-sim`'s `mixed-mtu-linkfrag` is the acceptance test. What remains is the other side of the same change: with per-hop splitting in place, `Node::send`'s end-to-end fountain fragmentation is redundant work that also floods unsigned fragments across the mesh. Delete it, with `MAX_FOUNTAIN_CHUNKS`, the `u8` count, and the `TooLarge` error that existed only to report the 255-chunk cap. Needs M11-C first, since whether the fountain relocates to the link or gives way to hop-local retry is the measurement that decides what replaces it |
+| M11-M Content-defined chunking (#256.4) | ⬜ | Fixed boundaries mean a one-byte edit re-chunks a file and shares nothing with the previous version. FastCDC boundaries make identical regions produce identical chunks, and chunks are already content-addressed, so dedup falls out with no new mechanism. Needs per-chunk sizes in the manifest instead of one `chunk_size`; real win for firmware and versioned content |
+| M11-N Name the file layer's ceilings (#256.6) | ⬜ | M11-A's argument applied to files: max blocks, max chunk size (bounded by `MAX_PAYLOAD_BYTES` minus the chunk header — *not* 64 KiB, a chunk must fit an envelope), max tree depth, max manifest size. **Not** "relays drop oversized envelopes": that is the M11-D bug, and a relay splits rather than drops |
+| M11-O A one-way push profile (#256.1, narrowed) | ⬜ | Erasure-coded symbols streamed with no back-channel, for the case pull cannot serve at all: a simplex link, where there is no WANT and no HAVE. Its own budget, never the default path, and explicitly *not* a replacement for chunk/WANT — content-addressed chunks are what make caching, dedup and the recursive-pull authorisation gate work |
 | M11-K Cancel an adopted interest | ⬜ | The lease is wall-clock so an interest survives a meeting — right for sneakernet, and too slow on its own. A relay whose last waiter has gone keeps pulling until the lease runs out, so a popular magnet plus a flaky requester is a standing pull against every seeder in range. Cancel when you can tell, expire when you cannot. `spore-sim` acceptance test 5 stays red until this exists |
 | M11-L A malicious-WANT scenario in `spore-sim` | ⬜ | Recursive pull's amplification story is *reasoned*, and one unit test covers the gate (`a_want_for_an_id_no_manifest_names_starts_no_hunt`). Nothing measures what a node that adopts interest in everything, or lies about depth, costs a mesh. Until that exists the bound is argued rather than known — which is the thing `spore-sim` was built to stop |
 | M11-I Recursive pull: the refinements | ⬜ | The mechanism ships — adopt-don't-forward, the parent-manifest gate, a wall-clock lease, depth on the WANT payload, sealed files excluded, and helper relays caching what they carry. `spore-sim`'s `file-multihop` is the acceptance test: a file crosses three hops where it previously could not. Owed: **fanout by neighbour** rather than by interface (today a node asks on every interface but the asker's, bounded by interest-table dedupe rather than by a 2–3 cap, so a node with many links is noisier than it should be); **preferring neighbours that INV'd the id or announced the magnet**, which needs per-neighbour INV memory; **cancel**, so a relay stops pulling when its last waiter goes rather than waiting out the lease; and seed advertisement (`have::<magnet>`) so recursion aims instead of spreading sideways |
@@ -852,6 +855,64 @@ cannot push the catalogue past its cap.
 **Do not:** replicate by popularity (want-counts are a traffic graph), carry
 manifests and a derived catalogue and the files under one budget, or put any of
 it in T0.
+
+## Issue #256 — file-layer proposals, decided
+
+Six suggestions, assessed against the code as it now is. Two accepted, one
+accepted in a narrower form, three declined with reasons.
+
+**Accepted: content-defined chunking (#256.4).** The strongest of the six. Fixed
+chunk boundaries mean a one-byte edit re-chunks a whole file and shares nothing
+with the previous version; FastCDC boundaries make identical regions produce
+identical chunks, and chunks are already content-addressed, so dedup falls out
+with no new mechanism. Needs the manifest to carry per-chunk sizes rather than
+one `chunk_size`. Real win for firmware and versioned content.
+
+**Accepted: explicit file-layer limits (#256.6)** — but with one recommendation
+rejected outright. Naming the ceilings is M11-A's argument applied to files, and
+it is right. The exception is *"relays SHOULD enforce a maximum envelope size
+(e.g. 2 KiB for LoRa) and drop larger ones"*, which would reinstate exactly the
+bug M11-D removed: a relay dropping a 4 kB envelope because its own link is 237
+bytes is what link fragmentation exists to prevent. A relay splits, it does not
+drop. Also `max chunk size 64 KiB` cannot hold — a chunk must fit inside an
+envelope, so the real ceiling is `MAX_PAYLOAD_BYTES` minus the chunk header.
+
+**Accepted narrowly: symbols instead of chunks (#256.1), as a one-way profile
+only.** The rationale — lost pieces should not stall a transfer — is already
+served, per hop, by link repair symbols, without making anything open-loop. As a
+*replacement* for the chunk/WANT model it costs three properties that were just
+built: any node holding a named chunk can serve it, chunks dedup across files,
+and recursive pull is authorised by "a manifest I hold names this id". Parity
+symbols are not stable named objects, so all three weaken. It is also
+sender-driven — a seeder streaming until told to stop is the open loop M11-J
+deleted, and the resource invariant forbids it.
+
+Where it genuinely wins is the case pull cannot serve at all: a **one-way link**,
+where there is no WANT and no HAVE. That is worth having as an explicit push
+profile with its own budget, and it should never be the default path.
+
+**Declined: HAVE as a new message type (#256.2).** The useful half is "stop
+sending", which is already owed as M11-K (cancel an adopted interest) and does
+not need a new envelope type — an interest that is not renewed lapses, and a
+cancel is a WANT-shaped message on the same 1-hop path. HAVE is only *necessary*
+because #256.1 makes senders stream; under pull, not asking is the signal. The
+block-bitfield WANT is a fair efficiency point for very large files and is worth
+revisiting when a file needs more ids than one WANT frame holds.
+
+**Declined as a file-layer change: DRAP (#256.3).** Encrypting the whole manifest
+and signing with a one-time key is a real anonymity improvement, and it belongs
+with §9 mix mode rather than bolted to files — it is the same property, and
+having two answers to it would be worse than having one. It also conflicts
+concretely with M11-F: the sealed header was just moved *out* of the root to drop
+the sealed floor from 256 bytes to 188 so LoRa can carry it. Folding all metadata
+back inside would undo that. Revisit as an anonymity feature, with the LoRa floor
+as a constraint.
+
+**Already true: multipath (#256.5).** Recursive pull already asks on every
+interface except the one that asked it, and any symbol from any path is useful
+because chunks are content-addressed. The refinement worth having — prefer
+neighbours that INV'd the id, cap fanout by neighbour rather than by interface —
+is already recorded under M11-I.
 
 ## Explicitly out of scope / non-goals (locked)
 

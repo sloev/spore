@@ -88,6 +88,17 @@ impl Envelope {
             Src::Full(pk) => b.extend_from_slice(pk),
             Src::Short(a) => b.extend_from_slice(a),
         }
+        // Silent truncation here is the worst failure this format can have: a
+        // 70 kB payload used to write `plen = 4464` and produce a wire that
+        // decoded to the wrong bytes with nothing reporting it. The originate
+        // paths refuse past `MAX_PAYLOAD_BYTES`; this catches anything that
+        // built an envelope by hand.
+        debug_assert!(
+            self.payload.len() <= crate::MAX_PAYLOAD_BYTES,
+            "payload {} exceeds MAX_PAYLOAD_BYTES {} — plen cannot describe it",
+            self.payload.len(),
+            crate::MAX_PAYLOAD_BYTES
+        );
         b.extend_from_slice(&(self.payload.len() as u16).to_be_bytes());
         b.extend_from_slice(&self.payload);
         b
