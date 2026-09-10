@@ -139,6 +139,12 @@ path is faster.</li>
 the publisher is offline and ten caches are not. A node only ever adopts interest
 in pieces some index it already holds names — otherwise "want this id" would be a
 request to search the mesh on a stranger's behalf.</p>
+<p class="text-muted">And if you close the app halfway through, those adopted
+wants unwind: you tell your neighbour you have stopped, it stops, and it tells
+the next one. A neighbour that watches you walk out of range does the same
+without being told. Only a node that vanishes with no warning at all leaves
+anything behind, and that expires on its own — which is deliberate, because on a
+sneakernet the person carrying the file really might be fifteen minutes away.</p>
 </div></div>
 
 <div class="card"><div class="card-body">

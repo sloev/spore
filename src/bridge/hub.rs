@@ -90,6 +90,13 @@ thread_local! {
     static IN_WITH_NODE: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// Is this thread currently inside `with_node` for this particular hub — and so
+/// already holding its node lock?
+fn inside_with_node(hub: &Hub) -> bool {
+    let key = hub as *const Hub as usize;
+    IN_WITH_NODE.with(|active| active.borrow().contains(&key))
+}
+
 /// Marks this hub as entered for as long as it lives, and unmarks on unwind as
 /// well as on return — a panic inside `f` must not leave the thread believing it
 /// is still inside `with_node`.
@@ -224,11 +231,42 @@ impl Hub {
     /// misroute the `except`, so **iface ids are never recycled** within a process.
     /// The paired `Receiver` sees the channel disconnect when its `Sender` drops.
     /// Idempotent, and a no-op for an id that was never registered.
+    /// Retiring the interface also retires the pulls it was the reason for
+    /// (M11-K): anything this node adopted an interest in *on behalf of* a peer
+    /// behind this link has lost its waiter, and hunting for it is now work for
+    /// nobody. Neighbours that cannot tell us they have stopped — out of range,
+    /// powered off, crashed — are exactly the case the explicit cancel cannot
+    /// cover, and a retired interface is the one moment we can tell on their
+    /// behalf. The unwind goes out every *other* interface, so it propagates back
+    /// along the path the demand originally took.
     pub fn unregister(&self, iface: Iface) {
-        let mut o = lock(&self.out);
-        if let Some(slot) = o.get_mut(iface as usize) {
-            slot.tx = None;
-            slot.bulk = None;
+        {
+            let mut o = lock(&self.out);
+            match o.get_mut(iface as usize) {
+                Some(slot) => {
+                    slot.tx = None;
+                    slot.bulk = None;
+                }
+                // Unknown id: no-op, and in particular no cancels — an interface
+                // that never existed cannot have been waiting on anything.
+                None => return,
+            }
+        } // the `out` lock is released before `dispatch` takes it again
+
+        // Retiring an interface now touches the node, which it did not before.
+        // The node lock is not reentrant, so calling this from inside `with_node`
+        // would deadlock in a way that is very hard to diagnose — say so instead,
+        // the same way `ReentrancyGuard` does for the case it covers.
+        assert!(
+            !inside_with_node(self),
+            "Hub::unregister called from inside Hub::with_node on the same hub. \
+             Retiring an interface has to retire the interests it was waiting on, \
+             which needs the node lock, and that lock is not reentrant. Unregister \
+             the interface after the closure returns."
+        );
+        let unwind = lock(&self.node).forget_interests_on(iface);
+        if !unwind.is_empty() {
+            self.dispatch(unwind);
         }
     }
 
@@ -426,6 +464,49 @@ mod tests {
         let fast_served = drained(&fast_rx);
         assert!(fast_served > 0, "the fast link answered with chunks");
         assert_eq!(drained(&slow_rx), 0, "the slow link refused to haul them");
+    }
+
+    #[test]
+    fn retiring_an_interface_retires_the_pulls_it_was_waiting_on() {
+        // M11-K's link-drop half, wired: a peer that walks out of range cannot
+        // send a cancel, but the interface going away says the same thing.
+        let hub = Hub::new(Node::new("relay", &[]));
+        let (a, _a_rx) = hub.register();
+        let (_b, b_rx) = hub.register();
+
+        // The relay learns a file exists — the flooded root is what makes its
+        // chunks legal to adopt an interest in at all.
+        let mut publisher = Node::new("publisher", &[]);
+        let now = crate::bridge::hub::now();
+        let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, now);
+        for f in &fwds {
+            let bytes = match f {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            hub.on_rx(a, bytes, None);
+        }
+        let _ = drained(&b_rx);
+
+        // A peer behind interface `a` asks for chunks the relay does not hold.
+        let missing = hub.with_node(|n| n.missing(&magnet, 4));
+        assert!(!missing.is_empty(), "there is something to adopt an interest in");
+        for id in &missing {
+            hub.on_rx(a, &Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(), None);
+        }
+        assert!(hub.with_node(|n| n.open_interests()) > 0, "the relay adopted them");
+        let _ = drained(&b_rx);
+
+        // That peer's link goes away.
+        hub.unregister(a);
+
+        assert_eq!(hub.with_node(|n| n.open_interests()), 0, "its only waiter is gone");
+        assert!(drained(&b_rx) > 0, "and the unwind goes out the other interface");
+    }
+
+    #[test]
+    fn retiring_an_unknown_interface_is_still_a_no_op() {
+        let hub = Hub::new(Node::new("relay", &[]));
+        hub.unregister(99); // no slot, no cancels, no panic
     }
 
     #[test]

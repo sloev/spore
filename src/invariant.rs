@@ -368,6 +368,150 @@ fn an_adopted_interest_is_bounded_and_expires() {
     assert_eq!(relay.open_interests(), 0, "an interest nobody renewed is forgotten");
 }
 
+/// Set a relay hunting for a chunk on a neighbour's behalf, and hand back the
+/// magnet plus the ids it is now looking for.
+fn relay_with_an_adopted_interest(relay: &mut Node, iface: Iface) -> Id {
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, iface, None, NOW);
+    }
+    let missing = relay.missing(&magnet, 4);
+    assert!(!missing.is_empty());
+    for id in &missing {
+        relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(), iface, None, NOW);
+    }
+    assert!(relay.open_interests() > 0, "the relay adopted the interest");
+    magnet
+}
+
+#[test]
+fn a_cancel_retires_an_adopted_interest_at_once() {
+    // The lease is fifteen minutes. A fetcher that can say it has stopped should
+    // not cost the mesh fifteen minutes of hunting.
+    let mut relay = Node::new("relay", &[]);
+    let magnet = relay_with_an_adopted_interest(&mut relay, 0);
+
+    let ids = relay.missing(&magnet, 4);
+    let mut payload: Vec<u8> = ids.iter().flatten().copied().collect();
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, std::mem::take(&mut payload));
+    e.flags |= fl::CANCEL;
+    let rx = relay.on_rx(&e.wire(), 0, None, NOW);
+
+    assert_eq!(relay.open_interests(), 0, "the cancel retired it now, not at the lease");
+    // And the cancel unwinds: the relay tells whoever it had asked.
+    assert!(!rx.forwards.is_empty(), "the last waiter left, so the chain unwinds");
+    let (out, _) = match &rx.forwards[0] {
+        Forward::Flood { bytes, .. } => Envelope::decode(bytes).expect("a frame"),
+        Forward::Directed { bytes, .. } => Envelope::decode(bytes).expect("a frame"),
+    };
+    assert_eq!(out.typ, ty::WANT);
+    assert!(out.flags & fl::CANCEL != 0, "and it is itself a cancel");
+}
+
+#[test]
+fn a_cancel_only_removes_the_senders_own_waiter() {
+    // Otherwise a cancel is a denial-of-service primitive: one hostile neighbour
+    // silences a fetch that somebody else is waiting on.
+    let mut relay = Node::new("relay", &[]);
+    let magnet = relay_with_an_adopted_interest(&mut relay, 0);
+    let before = relay.open_interests();
+
+    // A second neighbour, on a different link, asks for the same ids.
+    let ids = relay.missing(&magnet, 4);
+    for id in &ids {
+        relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(), 1, None, NOW);
+    }
+
+    // Now the second neighbour cancels. The first is still waiting.
+    let payload: Vec<u8> = ids.iter().flatten().copied().collect();
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, payload);
+    e.flags |= fl::CANCEL;
+    let rx = relay.on_rx(&e.wire(), 1, None, NOW);
+
+    assert_eq!(relay.open_interests(), before, "the other waiter's fetch survives");
+    assert!(rx.forwards.is_empty(), "and nothing unwinds while someone still waits");
+}
+
+#[test]
+fn a_cancel_for_an_id_nobody_asked_for_does_nothing() {
+    // A cancel must not be a way to make a node emit traffic. n ids in, at most
+    // n out, and only where an interest actually died.
+    let mut relay = Node::new("relay", &[]);
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0xAB; 64]);
+    e.flags |= fl::CANCEL;
+    let rx = relay.on_rx(&e.wire(), 0, None, NOW);
+    assert!(rx.forwards.is_empty(), "nothing was retired, so nothing is said");
+    assert_eq!(relay.open_interests(), 0);
+}
+
+#[test]
+fn a_cancel_cannot_be_replayed_into_an_echo() {
+    // The second cancel finds no interest, so the unwind happens once.
+    let mut relay = Node::new("relay", &[]);
+    let magnet = relay_with_an_adopted_interest(&mut relay, 0);
+    let ids = relay.missing(&magnet, 4);
+    let payload: Vec<u8> = ids.iter().flatten().copied().collect();
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, payload);
+    e.flags |= fl::CANCEL;
+    let wire = e.wire();
+
+    let first = relay.on_rx(&wire, 0, None, NOW);
+    let second = relay.on_rx(&wire, 0, None, NOW);
+    assert!(!first.forwards.is_empty());
+    assert!(second.forwards.is_empty(), "a replayed cancel is silence");
+}
+
+#[test]
+fn a_dropped_link_retires_the_interests_it_was_waiting_on() {
+    // The half that covers a fetcher which cannot say goodbye — out of range, or
+    // crashed. A stateful bridge knows the link went; this is what it does about it.
+    let mut relay = Node::new("relay", &[]);
+    relay_with_an_adopted_interest(&mut relay, 3);
+    assert!(relay.open_interests() > 0);
+
+    let unwind = relay.forget_interests_on(3);
+    assert_eq!(relay.open_interests(), 0, "its only waiter is gone");
+    assert!(!unwind.is_empty(), "and the chain unwinds behind it");
+
+    // A link that nobody was waiting on costs nothing.
+    let mut quiet = Node::new("quiet", &[]);
+    assert!(quiet.forget_interests_on(3).is_empty());
+}
+
+#[test]
+fn abandoning_a_fetch_tells_the_neighbours() {
+    // The fetcher's own side of the cancel.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut fetcher = Node::new("fetcher", &[]);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        fetcher.on_rx(wire, 0, None, NOW);
+    }
+    assert!(!fetcher.fetch(&magnet).is_empty(), "there is something to ask for");
+
+    let frames = fetcher.abandon(&magnet);
+    assert!(!frames.is_empty(), "abandoning a fetch in progress says so");
+    for f in &frames {
+        let bytes = match f {
+            Forward::Flood { bytes, .. } => bytes,
+            Forward::Directed { bytes, .. } => bytes,
+        };
+        let (e, _) = Envelope::decode(bytes).expect("a frame");
+        assert_eq!(e.typ, ty::WANT);
+        assert!(e.flags & fl::CANCEL != 0);
+        assert_eq!(e.payload.len() % 16, 0, "a cancel carries no depth byte");
+    }
+}
+
 #[test]
 fn a_sealed_file_is_never_fetched_on_someone_elses_behalf() {
     // Sealed chunks are ciphertext, so confidentiality holds either way — but

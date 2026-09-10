@@ -67,9 +67,10 @@ header rather than carrying it. Both were deliberate and neither needed a
 major-version label, because the guard correctly did not consider them frozen.
 
 Saying so matters more than it looks. A third-party T0 built against "Part I is
-frozen" would have assumed the fragment header was stable. It is not, and §3 in
-particular is on its way out (Part II's link fragmentation replaces it). Build
-against the vectors; treat the rest of Part I as current, not permanent.
+frozen" would have assumed the fragment header was stable. It was not: §3's
+end-to-end form has since been **removed entirely**, replaced by Part II's link
+fragmentation plus a stated envelope ceiling. Build against the vectors; treat
+the rest of Part I as current, not permanent.
 
 ## 1. Identity & addressing
 
@@ -84,7 +85,7 @@ off len field
 0   1   ver    = 0x01  (exact match to decode; see "Versioning and unknown bits")
 1   1   type   0=DATA 1=INV 2=WANT 3=ANNOUNCE
 2   1   flags  b0 ENCRYPTED b1 SIGNED b2 FRAGMENT b3 ACKREQ b4 FLOOD b5 SRC8
-               b6 RATCHET (0x40, §7)   b7 unassigned in v1
+               b6 RATCHET (0x40, §7)   b7 CANCEL (0x80, on WANT: §8)
 3   1   hops   remaining relays (default 16; relays clamp incoming to ≤ 16)
 4   4   expiry unix seconds u32 (stores clamp horizon to 30 d)
 8   8   dest   address | topic | 0x00×8 = public
@@ -99,10 +100,14 @@ off len field
 any `ver != 0x01` rather than guess, so v2 is a hard fork and not a negotiation.
 **Flags are the extension point instead.** Bits defined in v1 MUST be interpreted
 as named; a bit a node does not understand MUST be ignored, MUST be forwarded
-unchanged, and MUST NOT cause a drop. That is what makes b7 usable later without
-a version bump — and it is why the table above says *unassigned*, not *must be
-zero*: forbidding the bit and relying on it as the agility hatch cannot both be
-true, and the forwarding rule is the one the code implements.
+unchanged, and MUST NOT cause a drop. That rule is the agility hatch, and it has
+now been used twice without a version bump: b6 `RATCHET` and b7 `CANCEL` were
+both added to a shipped v1 wire. Forbidding unknown bits and relying on them for
+extension cannot both be true, and the forwarding rule is the one the code
+implements. **All eight bits are now assigned**, so the next extension needs
+either a retired bit — b2 `FRAGMENT` is spent, but reusing it would collide with
+envelopes older builds still emit — or a payload-level tag, which is where the
+file layer and §7 already put theirs.
 
 **ID** = first 16 B of SHA-256(envelope, hops zeroed); computed, never
 transmitted (except inside INV/WANT/frag/ack). Zeroing `hops` is what keeps the
@@ -113,23 +118,38 @@ provably hold your key; relays never verify — endpoints do (see "Verify before
 binding trust state", Part II). **No priority field: priority is bought, not
 claimed** (§10 stamp).
 
-## 3. Fragmentation — fountain coded, end to end
+## 3. Fragmentation — retired from the mesh, alive under the link
 
-**This is not how an envelope crosses a narrow hop.** That is link
-fragmentation (Part II), which splits below the node and below the signature,
-reassembles at the far end of the same link, and never puts a fragment on the
-mesh. This section describes the *end-to-end* form: the sender splits once, at
-its own MTU, and only the destination reassembles.
+**An envelope is never split end to end.** A node emits exactly one envelope per
+message, and a hop too narrow to carry it splits it *below* the node and below
+the signature — link fragmentation (Part II) — reassembling at the far end of
+that same link. No fragment ever reaches the mesh, and no node other than the two
+ends of one link ever sees one.
 
-Keeping both is redundant, and the end-to-end form is the one that goes. It
-cannot repair the case it exists for — a fragment carries no nesting, so frames
-cut for a 1400-byte link die at the first 237-byte hop they meet and no node on
-the path can fix it. It is described here because it is still on the wire, not
-because a new implementation should emit it.
+**There used to be a second, end-to-end form, and it is gone.** The sender split
+once at its own MTU and only the destination reassembled. It could not repair the
+case it existed for: a fragment carries no nesting, so frames cut for a
+1400-byte link died at the first 237-byte hop they met and no node on the path
+could fix it. It also flooded unsigned fragments across the mesh to solve a
+problem that is local to one link. Nothing emits it and nothing parses it; `b2
+FRAGMENT` stays named so the bit is not reused for something that would collide
+with an envelope minted by an older build.
+
+What replaced the size limit is a **stated ceiling** rather than a splitting
+rule. `plen` is a `u16`, so a payload is at most 65,535 bytes and the largest
+envelope on the wire is 65,649. Originating a message above that returns an error
+rather than silently truncating — which is what the encoder used to do, wrapping
+a 70,000-byte payload to a `plen` of 4,464 and producing a well-formed envelope
+containing the wrong bytes.
+
+The coding below is **retained, and still used** — but by the link, not by the
+mesh: `src/fountain.rs` is what mints erasure-repair symbols for a hop-local
+fragment set, which is what lets a lossy narrow link recover without a return
+path. The payload shape described here is the historical end-to-end one.
 
 payload = `[orig_id:16][index:2][count:2][chunk]`; all chunks equal size (pad the
-original; the envelope self-delimits). Fragments are ordinary envelopes (own IDs,
-same dest/expiry).
+original; the envelope self-delimits). Fragments were ordinary envelopes (own
+IDs, same dest/expiry).
 
 - **index < count**: plain chunk *index* of the original envelope's bytes.
 - **index ≥ count**: **repair chunk** = XOR of the data chunks selected by the
@@ -609,7 +629,8 @@ relay airtime rate-limited, ≈10% default · payload UTF-8. T0 ≈ 60 lines; fu
 
 **Link and file defaults, all local policy:** link fragment repair ¼ of the set
 (min 1) · half-finished link set dropped after 30 s · chunks pushed with a
-manifest 8 · adopted-interest lease 15 min · WANT recursion depth 8.
+manifest 8 · adopted-interest lease 15 min (cancel is the fast path) · WANT
+recursion depth 8.
 
 **Known limits, on purpose:** no stream semantics; **an envelope is at most
 65 535 payload bytes**, because `plen` is a `u16` — larger objects ride the file
@@ -798,6 +819,30 @@ already holds a live interest in an id records the new waiter and stays quiet �
 so total traffic is linear in the nodes reached, not exponential in the paths to
 them. That is the pending-interest-table argument, and it is what makes depth 8
 safe on a node with several links.
+
+*Cancel* is the other end of the lease. An adopted interest is a standing
+obligation, so a relay whose last waiter has gone keeps asking every seeder in
+range until the lease runs out — fifteen minutes of load nobody wants. A node
+that no longer wants an id SHOULD say so with a **WANT carrying `CANCEL` (b7)**,
+and a node MUST treat that as removing only *the sender's own* waiter. When the
+last waiter for an id leaves, the interest is dropped and the node SHOULD emit
+its own cancel onward, so the unwind follows the same path the demand did. A
+receiver that cannot say goodbye — out of range, powered off — is covered by the
+lease as before, and by its neighbour retiring the interests that link was the
+sole waiter for.
+
+A flag rather than a new envelope type, deliberately: INV and WANT are consumed
+before anything else, so a node that does not know b7 still treats the frame as
+a WANT — consumed, never stored, never relayed. A new *type* would fall through
+to the store-and-forward path, which is the one thing a one-hop control message
+must never do. The cancel carries no depth byte, so its payload length stays a
+multiple of 16.
+
+Cancel cannot be turned into an attack. It only ever removes the sender's own
+waiter, so a hostile neighbour cancelling ids it never asked for changes nothing
+for anyone; the onward cancel is emitted only where an interest actually died,
+so n ids in produce at most n out, once — a replayed cancel finds no interest and
+stops. Unlike a WANT it can only shrink state, so it needs no admission check.
 
 This is a Part III profile because it changes what an endpoint chooses to ask
 for, not what any envelope looks like. T0 is unchanged: receive → dedup → store →

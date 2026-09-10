@@ -31,6 +31,10 @@ pub mod ty {
 pub mod fl {
     pub const ENCRYPTED: u8 = 1;
     pub const SIGNED: u8 = 2;
+    /// **Retired.** Marked an end-to-end fountain fragment. Nothing emits one
+    /// since splitting moved to the link, and nothing reads it; the bit stays
+    /// spoken for so it is not reused for something whose meaning would collide
+    /// with an envelope minted by an older build.
     pub const FRAGMENT: u8 = 4;
     pub const ACKREQ: u8 = 8;
     pub const FLOOD: u8 = 16; // multicast / topic / public / route-discovery
@@ -40,6 +44,15 @@ pub mod fl {
     /// flags verbatim with no known-bit validation, so this is a forward- and
     /// backward-compatible addition — older code simply never reads it.
     pub const RATCHET: u8 = 64;
+    /// On a WANT: **I no longer want these ids** (M11-K).
+    ///
+    /// A flag rather than a new envelope type, and that choice is the safe one.
+    /// `on_rx` consumes INV and WANT before anything else, so a node that does
+    /// not know this bit still treats the frame as a WANT — consumed, never
+    /// stored, never relayed. A new *type* would fall through to `ingest` and be
+    /// stored and forwarded, which is the one thing a 1-hop control message must
+    /// never do.
+    pub const CANCEL: u8 = 128;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
