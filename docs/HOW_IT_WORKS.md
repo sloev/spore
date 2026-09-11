@@ -171,6 +171,18 @@ because there is nothing to save. But the index <em>is</em> an ordinary stored
 message, it is what makes a file's pieces legal to ask for, and anyone holding
 one can ask anywhere. Carrying the index is carrying the demand — which is why
 the small index floods and the large pieces do not.</p>
+<p class="text-muted"><strong>Alice's actual request can travel too.</strong> If
+the courier is standing there when she asks, his node can take the job: it
+remembers the specific pieces she wanted, keeps that through a flat battery and a
+border, and re-states it every few minutes wherever it happens to be. A stranger
+abroad answers a question asked on another continent by someone who left. The
+courier never wanted the file and never learns who did — it remembers
+<em>what</em> was asked, not <em>who</em> asked, which is also why the memory is
+safe to write to a disk that might be read later.</p>
+<p class="text-muted">It keeps that promise for as long as the file could still
+turn up, and not a second longer. The pieces die on the publisher's schedule, so
+a want that outlived them would be a search for bytes nobody will serve — the
+kind of standing request that costs every node it touches and helps no one.</p>
 <p class="text-muted">Nobody in this story needed a route, an account, or the
 publisher, who may have been offline throughout. What the journey <em>does</em>
 need is to finish in time: pieces carry the publisher's expiry — a week, by

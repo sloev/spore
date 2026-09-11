@@ -280,6 +280,55 @@ pub unsafe extern "C" fn spore_node_prekey_ring(n: *mut Node, out: *mut u8) -> u
     r.len()
 }
 
+/// Bytes needed for [`spore_node_pending_interests`].
+///
+/// # Safety
+/// `n` is a valid handle.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_pending_interests_len(n: *mut Node) -> usize {
+    (*n).pending_interests().len()
+}
+
+/// Write the interests this node is still carrying on other nodes' behalf
+/// (M11-P), so a page can persist them beside the seed.
+///
+/// **Not secret**, unlike the prekey ring: these are content ids for objects the
+/// mesh has already agreed exist, and the node is about to ask strangers for
+/// them out loud anyway. Persisting them is what lets a phone close its tab in
+/// one country and still be carrying the request when it opens in another.
+///
+/// # Safety
+/// `n` is a valid handle; `out` points to at least
+/// [`spore_node_pending_interests_len`] writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_pending_interests(n: *mut Node, out: *mut u8) -> usize {
+    let b = (*n).pending_interests();
+    std::ptr::copy_nonoverlapping(b.as_ptr(), out, b.len());
+    b.len()
+}
+
+/// Restore interests written by [`spore_node_pending_interests`]. Returns 1 on
+/// success, 0 if the blob is malformed — in which case the node is untouched.
+///
+/// Merges rather than replaces, and drops anything already expired or past the
+/// node's own ceiling: a blob cannot hand a node a longer promise than it would
+/// have made itself.
+///
+/// # Safety
+/// `n` is valid; `blob`/`len` describe readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn spore_node_restore_pending_interests(
+    n: *mut Node,
+    blob: *const u8,
+    len: usize,
+    now: u32,
+) -> u32 {
+    if blob.is_null() {
+        return 0;
+    }
+    u32::from((*n).restore_pending_interests(std::slice::from_raw_parts(blob, len), now))
+}
+
 /// Restore a ring written by [`spore_node_prekey_ring`]. Returns 1 on success, 0
 /// if the blob is malformed — in which case the node is left untouched.
 ///
