@@ -1088,3 +1088,41 @@ fn a_stranger_cannot_claim_a_deeper_want_than_local_policy_allows() {
     // break recursion at the second hop.
     assert_eq!(ask_with(3), 2, "a smaller budget is honoured, not raised");
 }
+/// Every envelope a node stored, by id.
+fn stored(n: &Node) -> Vec<Id> {
+    n.store_wires().into_iter().map(|(i, _)| i).collect()
+}
+
+#[test]
+fn a_file_published_twice_shares_nothing_with_itself() {
+    // **The premise M11-M was written on is false**, and this is the test that
+    // says so. Content-defined chunking was scoped as "chunks are already
+    // content-addressed, so dedup falls out with no new mechanism". They are not.
+    //
+    // A chunk's id is the hash of its whole *envelope*, and that envelope
+    // carries `file_id` — 16 random bytes minted per publish — in the payload,
+    // a per-file topic derived from it in `dest`, and a wall-clock `expiry`.
+    // Identical bytes therefore produce a different id every time they are
+    // published, by anyone, including the same node one line later.
+    //
+    // So chunks are *publish*-addressed, not content-addressed. Cutting smarter
+    // boundaries on top of this would produce identical chunk *contents* and
+    // still share zero ids — CDC would measure as a pure regression: more
+    // chunks, larger manifests, no dedup. M11-M cannot start here.
+    let now = NOW;
+    let body = vec![0x42u8; 20_000];
+
+    let mut a = Node::new("a", &[]);
+    let mut b = Node::new("b", &[]);
+    let (m1, _) = a.publish_file("v1.bin", &body, ZERO_DEST, now);
+    let (m2, _) = b.publish_file("v1.bin", &body, ZERO_DEST, now);
+
+    assert_ne!(m1, m2, "two publishers, identical bytes, different magnets");
+    let (ia, ib) = (stored(&a), stored(&b));
+    let shared = ia.iter().filter(|i| ib.contains(i)).count();
+    assert_eq!(shared, 0, "and not one envelope in common out of {}", ia.len());
+
+    // Not even the same node publishing the same bytes twice.
+    let (m3, _) = a.publish_file("v1.bin", &body, ZERO_DEST, now);
+    assert_ne!(m1, m3, "the same node, the same bytes, a different file");
+}
