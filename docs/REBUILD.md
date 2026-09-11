@@ -28,6 +28,23 @@ algorithms are what matter, not the implementation.
 A node that only needs to **receive, verify, and display** public messages needs
 just Ed25519 and SHA-256 — everything in sections 1–4 below.
 
+```mermaid
+flowchart LR
+  SEED["32-byte seed"] --> SK["Ed25519 secret key"] --> PK["public key"]
+  PK --> ADDR["address = SHA-256(pubkey) first 8 bytes"]
+  TOPIC["a topic string"] --> TADDR["topic = SHA-256(string) first 8 bytes"]
+  ADDR --> DEST["dest field: the two are indistinguishable on the wire, deliberately"]
+  TADDR --> DEST
+  DEST --> ENV["envelope"]
+  PAY["payload"] --> ENV
+  ENV --> WIRE["wire bytes"]
+  WIRE --> ID["id = SHA-256(wire, hops zeroed) first 16 bytes"]
+  WIRE --> SIG["signature = Ed25519 over the same pre-image"]
+  SIG --> ENV
+```
+
+Everything below is that diagram in bytes. Work down it and you have a node.
+
 ## 1. Identity — addresses are hashes of keys
 
 A node's address is the first 8 bytes of the SHA-256 of its Ed25519 public key.
@@ -52,25 +69,32 @@ payload, and an optional signature. All multi-byte integers are **big-endian**.
 
 | Offset | Size | Field | Notes |
 |---|---|---|---|
-| 0 | 1 | `ver` | always `0x01` |
+| 0 | 1 | `ver` | always `0x02` |
 | 1 | 1 | `typ` | `0`=DATA, `1`=INV, `2`=WANT, `3`=ANNOUNCE |
 | 2 | 1 | `flags` | bitfield, below |
 | 3 | 1 | `hops` | TTL; decremented by each relay |
-| 4 | 4 | `expiry` | unix seconds, big-endian |
+| 4 | 4 | `created_at` | unix seconds, big-endian — when it was **minted**, not when it dies |
 | 8 | 8 | `dest` | destination address (all-zero = public) |
 | 16 | 32 or 8 or 0 | `src` | present only if `SIGNED`: 32-byte key, or 8-byte address if `SRC8` |
 | … | 2 | `plen` | payload length, big-endian |
 | … | `plen` | `payload` | the bytes |
 | … | 64 or 0 | `sig` | present only if `SIGNED` |
 
-**Flag bits:** `0x01` ENCRYPTED · `0x02` SIGNED · `0x04` FRAGMENT · `0x08` ACKREQ ·
-`0x10` FLOOD · `0x20` SRC8.
+**Flag bits:** `0x01` ENCRYPTED · `0x02` SIGNED · `0x04` FRAGMENT (retired) ·
+`0x08` ACKREQ · `0x10` FLOOD · `0x20` SRC8 · `0x40` RATCHET · `0x80` CANCEL.
+
+**Nothing expires.** `created_at` says when the envelope was made and that is all
+it says. A node keeps what it is given until it needs the room, and only then
+does age decide what goes — so how long a message survives is a property of
+whoever is carrying it, not of the message. The one rule you must implement is
+that an envelope claiming to be from the future (more than a few minutes ahead of
+your clock) is refused outright.
 
 A public, unsigned DATA message to `"news"` carrying `"the dam holds"`:
 
 ```
-ver typ flags hops  expiry      dest              plen  payload
-01  00  10    10    6553f100    19fba0e995b9794f  000d  7468652064616d20686f6c6473
+ver typ flags hops  created_at  dest              plen  payload
+02  00  10    10    6553f100    19fba0e995b9794f  000d  7468652064616d20686f6c6473
 
 full wire: 020010106553f10019fba0e995b9794f000d7468652064616d20686f6c6473
 ```
@@ -96,7 +120,7 @@ INV/WANT, and for the priority stamp (§10: the stamp is the count of leading ze
 
 ## 3b. Content ID — what names a chunk
 
-An envelope ID hashes the whole envelope, so it covers `expiry` and `dest`. That
+An envelope ID hashes the whole envelope, so it covers `created_at` and `dest`. That
 is right for a *message* and wrong for *bytes*: the same chunk published a second
 later is a different envelope, so a file published twice would share nothing with
 itself — which is what happened before this existed.
@@ -173,7 +197,7 @@ You don't need the whole system to be useful — each tier is a working node.
   Ed25519 + SHA-256. Small enough to hand-type.
 - **Tier 1 — originate.** Build and sign your own envelopes; encode armor (§5). You
   can now send.
-- **Tier 2 — relay.** Keep a `seen` set of IDs, drop duplicates and expired
+- **Tier 2 — relay.** Keep a `seen` set of IDs, drop duplicates and post-dated
   envelopes, decrement `hops`, and re-broadcast. You are now a router node. The
   flood/dedup/store rules are in [Spec](SPEC.md) §4–§6.
 - **Beyond.** Fragmentation (§3 of the spec, a GF(2) fountain code), sealed boxes,
