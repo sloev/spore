@@ -813,6 +813,17 @@ odd byte on the end is unambiguous, and a WANT without one is a plain request
 getting the default budget. Each adopting hop decrements it; at zero a node
 answers from its own store or says nothing.
 
+A node **MUST clamp the incoming depth to its own default** rather than honour
+what the frame claims. The byte arrives unsigned from anyone in range, and it is
+the only one of this section's three bounds that the asker supplies: the manifest
+gate and the interest table are both checked locally, but reach was whatever the
+stranger wrote. Measured on a 24-node line: an honest depth of 8 leaves 8 nodes
+holding an interest, a forged 255 leaves 23 — one frame, and every one of those
+interests is a multi-day obligation that is re-stated on a cadence. Clamp rather
+than reject, because a relayed WANT legitimately carries a *decremented* depth:
+asking for less is normal and must keep working, and only claiming more is
+refused.
+
 *Fanout* is bounded by the interest table rather than by a neighbour count. A
 node asks on every interface except the one that asked it, but a node that
 already holds a live interest in an id records the new waiter and stays quiet —

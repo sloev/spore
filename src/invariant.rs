@@ -1047,3 +1047,44 @@ fn a_node_carrying_nothing_stays_quiet() {
     assert!(n.tick(NOW + INTEREST_RESUME_SECS + 1).is_empty());
     assert!(n.tick(NOW + 2 * INTEREST_RESUME_SECS + 2).is_empty());
 }
+
+#[test]
+fn a_stranger_cannot_claim_a_deeper_want_than_local_policy_allows() {
+    // M11-L. Depth is what bounds how far one neighbour's curiosity travels, and
+    // it arrives as a byte on an *unsigned* frame from anyone in range. It was
+    // the only one of recursive pull's three bounds taken on trust: the manifest
+    // gate and the interest table are both checked locally, but reach was
+    // whatever the asker claimed. `spore-sim`'s `malicious-want` measures the
+    // difference across a mesh; this pins the rule at one node.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, fwds) = publisher.publish_file("bait.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+
+    let ask_with = |depth: u8| -> u8 {
+        let mut relay = Node::new("relay", &[]);
+        for f in &fwds {
+            let wire = match f {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            relay.on_rx(wire, 0, None, NOW);
+        }
+        let missing = relay.missing(&magnet, 1);
+        let mut payload: Vec<u8> = missing[0].to_vec();
+        payload.push(depth);
+        let rx = relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire(), 0, None, NOW);
+        // What it asks onward carries the depth it decided to grant, minus one.
+        let out = match &rx.forwards[0] {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+        };
+        let (e, _) = Envelope::decode(&out).expect("a WANT");
+        e.payload[e.payload.len() - 1]
+    };
+
+    let honest = ask_with(DEFAULT_WANT_DEPTH);
+    assert_eq!(honest, DEFAULT_WANT_DEPTH - 1, "an honest budget is passed on decremented");
+    assert_eq!(ask_with(255), honest, "a forged budget buys exactly what an honest one does");
+
+    // Asking for *less* must keep working — a relayed WANT always carries a
+    // decremented depth, so a clamp that rejected anything but the default would
+    // break recursion at the second hop.
+    assert_eq!(ask_with(3), 2, "a smaller budget is honoured, not raised");
+}

@@ -81,6 +81,7 @@ is honest.
 |---|---|---|
 | Forge a delivery receipt to fake "delivered" | Receipt must carry a verified signature from the actual destination | [S-032](SECURITY_FINDINGS.md#s-032) |
 | Reflect/amplify via WANT | Per-interface token bucket on gossip service | [S-012](SECURITY_FINDINGS.md#s-012) |
+| Claim a deeper WANT than policy allows, so one frame makes the *whole* mesh adopt an interest | Incoming depth is clamped to `DEFAULT_WANT_DEPTH`; asking for less is honoured, asking for more degrades to local policy | M11-L — measured: a forged depth reached 23 of 24 nodes against an honest 8 |
 | Bypass congestion control with a low-effort flood | Stamp (proof-of-work) threshold gate | [S-003](SECURITY_FINDINGS.md#s-003) |
 | Forge a path-table entry to redirect unicast | Relays verify a signature before binding a path to it | [S-002](SECURITY_FINDINGS.md#s-002) |
 | Flood ten different growable tables | Bounded, with deliberate eviction order (expired → lowest stamp → largest → oldest) | [S-013](SECURITY_FINDINGS.md#s-013) |
