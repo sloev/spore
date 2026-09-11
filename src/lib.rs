@@ -465,8 +465,12 @@ impl Limits {
     }
 }
 
-/// An object too large to carry as one fountain set — returned by
-/// [`Node::send`].
+/// A payload past what `plen` can describe — returned by [`Node::send`].
+///
+/// The name outlived its original meaning: this used to be "too large to carry
+/// as one fountain set", back when `send` fragmented end to end. Splitting moved
+/// to the link, so the only ceiling left is structural —
+/// [`MAX_PAYLOAD_BYTES`], what a `u16` length field can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TooLarge {
     /// Payload bytes the caller passed.
