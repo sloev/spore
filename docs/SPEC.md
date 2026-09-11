@@ -820,6 +820,28 @@ so total traffic is linear in the nodes reached, not exponential in the paths to
 them. That is the pending-interest-table argument, and it is what makes depth 8
 safe on a node with several links.
 
+*The lease is scoped to the object, not to a timer* (M11-P). An adopted interest
+lives until the expiry of the manifest that named the id — clamped into
+`[now + 900 s, now + 7 days]` — because the chunks being hunted for die with the
+publisher's expiry, and an interest that outlives them is hunting for bytes
+nobody will serve. A fixed short lease made adopted interest an **online-only**
+mechanism inside a store-and-forward protocol: a courier who takes a day to reach
+the next mesh had forgotten what it was carrying long before arriving.
+
+Lengthening a remote-caused commitment is safe only because three bounds hold it,
+and an implementation MUST keep all three: the deadline is read from a *signed*
+manifest whose expiry the asker does not control and the store already clamps;
+the number of simultaneous interests is capped locally; and cancel retires one as
+soon as its last waiter leaves.
+
+An interest MAY be persisted and restored, which is what lets a request cross an
+offline leg. Restored entries carry no waiters — an interface index means nothing
+after a restart — and a node MUST drop any that are already expired or past the
+ceiling it would have set itself, so a blob cannot mint a promise the node would
+not have made. A node holding interests SHOULD re-state them on a slow cadence
+(the reference build: every 5 minutes), since a WANT is otherwise only emitted
+when a neighbour asks, and after a journey the neighbour who asked is gone.
+
 *Cancel* is the other end of the lease. An adopted interest is a standing
 obligation, so a relay whose last waiter has gone keeps asking every seeder in
 range until the lease runs out — fifteen minutes of load nobody wants. A node

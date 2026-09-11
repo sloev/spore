@@ -372,6 +372,34 @@ class SporeNode {
     this.s.ex.spore_free(p, blob.length);
     return ok === 1;
   }
+  /** Interests this node is carrying for other nodes (M11-P) - persist beside
+   * seed() and prekeyRing().
+   *
+   * A request in SPORE is normally a one-hop thing: spoken to whoever is
+   * present, answered or not, forgotten. An adopted interest is the exception,
+   * and this is what lets one survive a closed tab, a flat battery or a flight.
+   * The node re-states what it is carrying every few minutes, so a want picked
+   * up in one country can be answered in another.
+   *
+   * Not secret: these are content ids the node asks strangers for out loud. */
+  pendingInterests() {
+    const n = this.s.ex.spore_node_pending_interests_len(this.ptr);
+    const p = this.s.ex.spore_alloc(n);
+    const wrote = this.s.ex.spore_node_pending_interests(this.ptr, p);
+    const r = this.s._u8(p, wrote).slice();
+    this.s.ex.spore_free(p, n);
+    return r;
+  }
+  /** Restore interests from pendingInterests(). Merges with what the node
+   * already has; drops anything expired or past its own ceiling. Returns false
+   * for a malformed blob, in which case the node is left as it was. */
+  restorePendingInterests(blob, now) {
+    const p = this.s._put(blob);
+    const ok = this.s.ex.spore_node_restore_pending_interests(
+      this.ptr, p, blob.length, now ?? Math.floor(Date.now() / 1000));
+    this.s.ex.spore_free(p, blob.length);
+    return ok === 1;
+  }
   subscribe(topic) {
     const t = new TextEncoder().encode(topic);
     const p = this.s._put(t);

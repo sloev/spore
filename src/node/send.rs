@@ -289,7 +289,22 @@ impl Node {
     /// behaves exactly as it did before.
     pub fn tick(&mut self, now: u32) -> Vec<Forward> {
         self.enforce_bounds(now);
-        self.resend_unacked(now)
+        let mut out = self.resend_unacked(now);
+        // M11-P: say what we are still carrying, now and then.
+        //
+        // An interest that survived a journey is worth nothing until it is spoken
+        // somewhere new, and no other path would speak it: a WANT goes out when a
+        // neighbour asks, and the neighbour who asked is by definition not here
+        // any more. Paced rather than event-driven because "we have arrived
+        // somewhere new" is not a thing a node can observe — an interface coming
+        // up does not mean anyone is listening, and on broadcast media there is no
+        // event at all. Asking on a slow cadence covers arrival, reconnection and
+        // a neighbour that simply rebooted, with one mechanism.
+        if now.saturating_sub(self.last_interest_resume) >= INTEREST_RESUME_SECS {
+            self.last_interest_resume = now;
+            out.append(&mut self.resume_interests(now));
+        }
+        out
     }
 
     // ---- L4 request/response (RPC) --------------------------------------

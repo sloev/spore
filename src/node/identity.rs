@@ -75,6 +75,7 @@ impl Node {
             push_chunks: DEFAULT_PUSH_CHUNKS,
             named: HashMap::new(),
             interests: HashMap::new(),
+            last_interest_resume: 0,
             pending: HashMap::new(),
             acked: HashSet::new(),
             rpc_pending: HashSet::new(),
