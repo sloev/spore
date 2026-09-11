@@ -2296,7 +2296,13 @@ mod tests {
         a.set_mem_budget(16 * 1024); // tiny, so almost everything spills
         a.set_spill_dir(&dir.0, now).expect("spill dir");
 
-        let body: Vec<u8> = (0..400_000u32).map(|i| i.wrapping_mul(13) as u8).collect();
+        // Every 4-byte group is its own index, so no two chunks are ever
+        // identical. That matters since M11-M: chunks are content-addressed, and
+        // the old `i.wrapping_mul(13) as u8` repeats every 256 bytes — its 300
+        // chunks collapsed to about 32 distinct objects and the test stopped
+        // exercising spilling at all. Dedup is the feature; this test is not
+        // about it.
+        let body: Vec<u8> = (0..100_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, _) = a.publish_file("big.bin", &body, ZERO_DEST, now);
 
         // The file is held, but almost none of it is resident.
@@ -2321,7 +2327,11 @@ mod tests {
     fn a_restart_adopts_what_was_spilled_and_resumes_the_transfer() {
         let now = 1_700_000_000;
         let dir = TmpDir::new("adopt");
-        let body: Vec<u8> = (0..200_000u32).map(|i| i.wrapping_mul(7) as u8).collect();
+        // Non-repeating, for the same reason the spill test is: since M11-M
+        // chunks are content-addressed, and `i.wrapping_mul(7) as u8` repeats
+        // every 256 bytes — its ~150 chunks dedup down to a handful, which is
+        // correct behaviour and makes this a poor test of *adoption*.
+        let body: Vec<u8> = (0..50_000u32).flat_map(|i| i.to_be_bytes()).collect();
 
         let magnet = {
             let mut a = Node::new("a", &[]);
@@ -2432,10 +2442,14 @@ mod tests {
             }
             true
         });
-        let wire = b.get_wire(&leaves[3]).expect("a middle chunk");
+        // Leaves are named by **content** now, and the AEAD nonce is the chunk's
+        // position in the file rather than a field inside it (M11-M). The reader
+        // knows the position from walking the tree, so the chunk no longer has
+        // to carry — and be made unique by — anything about which file it is in.
+        let idx = 3u32;
+        let wire = b.named_wire(&leaves[idx as usize]).expect("a middle chunk");
         let (ce, _) = Envelope::decode(&wire).unwrap();
-        let idx = u32::from_be_bytes([ce.payload[17], ce.payload[18], ce.payload[19], ce.payload[20]]);
-        let plain = chunk_open(&ce.payload[21..], &key, idx).expect("one chunk opens alone");
+        let plain = chunk_open(&ce.payload[1..], &key, idx).expect("one chunk opens alone");
         let start = idx as usize * held.chunk_size as usize;
         assert_eq!(plain, body[start..start + plain.len()]);
 

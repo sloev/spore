@@ -2,7 +2,15 @@ use super::*;
 
 /// First payload byte of a leaf manifest — its ids name data chunks.
 pub const MANIFEST_TAG: u8 = 0x01;
-/// First payload byte of a chunk: `[CHUNK_TAG][file_id:16][index:4][bytes]`.
+/// First payload byte of a chunk: `[CHUNK_TAG][bytes]`.
+///
+/// It used to be `[CHUNK_TAG][file_id:16][index:4][bytes]`, and those twenty
+/// bytes are why a file published twice shared nothing with itself: `file_id`
+/// was 16 random bytes minted per publish, so identical content produced a
+/// different chunk every time (M11-M). Neither field was load-bearing — the
+/// manifest already says which chunks are this file and in what order, and a
+/// sealed chunk's AEAD nonce comes from its position in that order, which the
+/// reader knows from walking the tree rather than from trusting the payload.
 pub const CHUNK_TAG: u8 = 0x07;
 /// First payload byte of an interior manifest — its ids name manifests one
 /// level down. Followed immediately by the depth byte.
@@ -89,6 +97,30 @@ pub struct Manifest {
     /// Naming the header instead of carrying it costs 16 bytes and brings the
     /// floor to ~188, which every LoRa profile clears.
     pub hdr_id: Id,
+}
+
+/// The **content id** of a file-layer payload: the first 16 bytes of its
+/// SHA-256 (M11-M).
+///
+/// Distinct from an envelope id, which hashes the whole envelope and so covers
+/// `expiry` and `dest`. That is correct for a message and wrong for bytes: it
+/// means the same chunk published a second later is a different object. A
+/// content id names the bytes and nothing else, so two publishers — or the same
+/// publisher twice — produce the same name for the same content.
+pub fn content_id(payload: &[u8]) -> Id {
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&Sha256::digest(payload)[..16]);
+    id
+}
+
+/// The content id of whatever file-layer object an envelope carries, if it
+/// carries one. Used by the store to index content alongside envelopes.
+pub fn content_id_of_wire(wire: &[u8]) -> Option<Id> {
+    let (e, _) = Envelope::decode(wire).ok()?;
+    match e.payload.first()? {
+        &MANIFEST_TAG | &CHUNK_TAG | &TREE_TAG | &SEALED_TAG => Some(content_id(&e.payload)),
+        _ => None,
+    }
 }
 
 impl Manifest {

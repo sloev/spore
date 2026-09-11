@@ -192,6 +192,10 @@ impl Node {
 
     /// Interests adopted from neighbours right now (M11-I). Each is a promise
     /// to pass something back, so it is worth being able to look at.
+    #[doc(hidden)]
+    pub fn interest_ids(&self) -> Vec<Id> {
+        self.interests.keys().copied().collect()
+    }
     pub fn open_interests(&self) -> usize {
         self.interests.len()
     }

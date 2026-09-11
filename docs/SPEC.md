@@ -881,6 +881,18 @@ This is a Part III profile because it changes what an endpoint chooses to ask
 for, not what any envelope looks like. T0 is unchanged: receive → dedup → store →
 deliver → forward.
 
+- **Content ids, not envelope ids** (M11-M). A manifest names the **content id**
+  of each part: the first 16 bytes of SHA-256 over the part's payload, and
+  nothing else. This is deliberately *not* the envelope id, which hashes the
+  whole envelope and so covers `expiry` and `dest` — right for a message, wrong
+  for bytes. Conflating them meant a byte-identical file published twice shared
+  **zero of sixteen** envelopes with itself, because a chunk carried a random
+  per-publish `file_id`. A chunk payload is therefore `[CHUNK_TAG][bytes]` with
+  no file or index field: the manifest already says which parts are this file and
+  in what order, and a sealed part's AEAD nonce is its **position in that order**,
+  which the reader counts while walking rather than trusting the payload to
+  state. A node MUST be able to resolve a named content id to whichever stored
+  envelope carries it, and a WANT may name either kind.
 - **Integrity is free.** The root is signed, and every ID below it — chunk or
   sub-manifest — *is* the hash of the bytes it names, so a forged or corrupt part
   simply never matches. **Only the root is signed**: the hash chain covers the

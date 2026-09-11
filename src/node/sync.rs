@@ -105,9 +105,14 @@ impl Node {
             }
             let mut id = [0u8; 16];
             id.copy_from_slice(chunk);
+            // Envelope id first, then content id (M11-M). A WANT carries both
+            // kinds: INV lists envelope ids, a manifest names content. Both are
+            // 16-byte hashes of different things, so trying each in turn is
+            // unambiguous in practice and keeps one message type serving both.
+            //
             // `store.wire` may read from the spill directory, so an unbounded WANT
             // buys disk reads as well as bandwidth.
-            let Some(wire) = self.store.wire(&id) else {
+            let Some(wire) = self.store.wire(&id).or_else(|| self.store.wire_by_content(&id)) else {
                 // Not held. This is where a fetch more than one hop from a
                 // holder used to end.
                 if self.may_adopt(&id, depth) {
@@ -144,6 +149,25 @@ impl Node {
     /// this path can only shrink the table, so it needs no admission check.
     fn on_cancel(&mut self, ids: &[u8], iface: Iface, nbr: Option<Addr>) -> Rx {
         let mut rx = Rx::default();
+        // **An empty list means "nothing at all, from me".** A departing node
+        // cannot reliably enumerate what it asked for: a fetcher names ids by
+        // walking a manifest tree, and it can only descend into the parts it
+        // holds, so ids it requested while a parent was resolving may no longer
+        // be nameable. Measured — `fetch-abandoned` had a fetcher able to list
+        // 37 of the 45 interests its neighbour was holding for it, and the other
+        // 8 sat adopted until the lease.
+        //
+        // So the wildcard is not a convenience, it is the only form that is
+        // *complete*. It is also one frame regardless of file size, and it
+        // cannot grow anything: like every cancel it removes only the sender's
+        // own waiter.
+        if ids.is_empty() {
+            let orphaned = self.drop_waiters(|w| *w == (iface, nbr));
+            if !orphaned.is_empty() {
+                rx.forwards.push(Forward::Flood { except: iface, bytes: cancel_frame(&orphaned) });
+            }
+            return rx;
+        }
         let mut orphaned: Vec<Id> = Vec::new();
         for chunk in ids.chunks(16).take(MAX_IDS_PER_GOSSIP) {
             if chunk.len() != 16 {
@@ -162,6 +186,29 @@ impl Node {
             rx.forwards.push(Forward::Flood { except: iface, bytes: cancel_frame(&orphaned) });
         }
         rx
+    }
+
+    /// Drop every waiter matching `pred`, and report the interests left with
+    /// none — the shared core of an explicit cancel and a dropped link.
+    fn drop_waiters(&mut self, pred: impl Fn(&(Iface, Option<Addr>)) -> bool) -> Vec<Id> {
+        let mut orphaned: Vec<Id> = Vec::new();
+        self.interests.retain(|id, entry| {
+            entry.waiters.retain(|w| !pred(w));
+            if entry.waiters.is_empty() {
+                orphaned.push(*id);
+                return false;
+            }
+            true
+        });
+        orphaned
+    }
+
+    /// Tell every neighbour we want nothing further from them (M11-K, M11-P).
+    ///
+    /// What a node says on its way out. One frame per link, no enumeration, and
+    /// complete in a way `abandon` cannot be — see `on_cancel`.
+    pub fn abandon_all(&mut self) -> Vec<Forward> {
+        vec![Forward::Flood { except: NO_IFACE, bytes: cancel_frame(&[]) }]
     }
 
     /// Stop fetching `magnet`: drop what we were still asking for and tell the
@@ -184,15 +231,7 @@ impl Node {
     /// bridges know when a link drops; this converts that knowledge into the same
     /// unwind an explicit cancel performs.
     pub fn forget_interests_on(&mut self, iface: Iface) -> Vec<Forward> {
-        let mut orphaned: Vec<Id> = Vec::new();
-        self.interests.retain(|id, entry| {
-            entry.waiters.retain(|(i, _)| *i != iface);
-            if entry.waiters.is_empty() {
-                orphaned.push(*id);
-                return false;
-            }
-            true
-        });
+        let orphaned = self.drop_waiters(|(i, _)| *i == iface);
         if orphaned.is_empty() {
             return Vec::new();
         }
