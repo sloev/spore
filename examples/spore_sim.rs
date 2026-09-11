@@ -625,7 +625,13 @@ fn lossy_mesh(loss_pct: u32) -> Report {
 /// Reported, not asserted: M11-I flipping this to 1 is the result to look for.
 fn file_multihop() -> Report {
     let links = (0..3).map(|i| Link { a: i, b: i + 1, mtu: 1400, loss_pct: 0, latency_ms: 10 }).collect();
-    let mut sim = Sim::new(World::new(4, links), 0xF11E);
+    // **With link fragmentation.** Chunks are a protocol-fixed size now (M11-M)
+    // rather than cut to the publisher's MTU, so they are routinely larger than
+    // a link's frame and rely on the bridge splitting them. That is the whole
+    // point — a publisher cannot see the narrowest hop on a path — but it makes
+    // per-hop splitting a *dependency* of the file layer rather than an
+    // optimisation: without it, this scenario delivers nothing.
+    let mut sim = Sim::new(World::new(4, links), 0xF11E).with_link_fragmentation();
     let now = sim.now_secs();
     let bytes = vec![0xAB; 6000];
     let (magnet, fwds) = sim.world.nodes[0].publish_file("far.bin", &bytes, ZERO_DEST, now);
@@ -748,9 +754,13 @@ fn fetch_abandoned() -> Report {
     // How many interests are still open across the relays, after each ending.
     fn open_after(ending: Ending) -> usize {
         let links = (0..3).map(|i| Link { a: i, b: i + 1, mtu: 1400, loss_pct: 0, latency_ms: 10 }).collect();
-        let mut sim = Sim::new(World::new(4, links), 0xCA7CE1);
+        let mut sim = Sim::new(World::new(4, links), 0xCA7CE1).with_link_fragmentation();
         let now = sim.now_secs();
-        let bytes = vec![0xAB; 60_000];
+        // Non-repeating: since M11-M chunks are content-addressed, so 60 kB of one
+        // byte is two distinct objects, not fifty. This scenario is about a
+        // *standing pull* with many outstanding parts, so it needs a file that
+        // actually has many parts.
+        let bytes: Vec<u8> = (0..15_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, fwds) = sim.world.nodes[0].publish_file("gone.bin", &bytes, ZERO_DEST, now);
         sim.emit(0, fwds);
         sim.run(sim.now_ms + 60_000, None);
@@ -794,8 +804,12 @@ fn fetch_abandoned() -> Report {
 
         match ending {
             Ending::Vanishes => {}
+            // The fetcher says it is leaving. `abandon_all` rather than
+            // `abandon(&magnet)`: a departing node cannot reliably enumerate
+            // what it asked for — see `on_cancel` — and this scenario is about
+            // leaving, not about dropping one file.
             Ending::Cancels => {
-                let bye = sim.world.nodes[3].abandon(&magnet);
+                let bye = sim.world.nodes[3].abandon_all();
                 sim.emit(3, bye);
                 sim.run(sim.now_ms + 30_000, None);
             }

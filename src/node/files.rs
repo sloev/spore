@@ -41,7 +41,22 @@ impl Node {
         // rather than carried inside it — see `file::Manifest::hdr_id`. Stored
         // and pushed like a chunk, so the recipient fetches it the same way.
         let mut hdr_id: Id = [0u8; 16];
-        let chunk_size = self.mtu.saturating_sub(64).max(1);
+        // **A static, protocol-fixed chunk size** (M11-M).
+        // It was `mtu - 64` (chunk-fragment-ok: naming what it replaced).
+        //
+        // Deriving it from the publisher's MTU was a leftover from before link
+        // fragmentation, when a sender had to cut for the narrowest hop it might
+        // meet because nothing downstream could re-cut. M11-D ended that, and
+        // afterwards the only thing the publisher's MTU still decided was that a
+        // Wi-Fi node and a LoRa node cut the same file differently and so shared
+        // no content ids — defeating content addressing exactly as thoroughly as
+        // the random `file_id` did.
+        //
+        // Chunks and fragments are different things and neither is derived from
+        // the other: a chunk is a content-addressed file-layer object of fixed
+        // size, a fragment is one hop's way of carrying whatever will not fit its
+        // frame.
+        let chunk_size = file::CHUNK_BYTES;
         let count = bytes.len().div_ceil(chunk_size).max(1);
         let expiry = now + 7 * 86400;
         let mut file_id = [0u8; 16];
@@ -65,11 +80,26 @@ impl Node {
                 Some(k) => chunk_seal(&bytes[start..end], k, i as u32),
                 None => bytes[start..end].to_vec(),
             };
-            let mut payload = Vec::with_capacity(21 + body.len());
+            // `[CHUNK_TAG][bytes]` — no `file_id`, no index (M11-M). Those twenty
+            // bytes made every chunk unique to its publish, which is why a file
+            // published twice shared nothing with itself. The manifest already
+            // says which chunks are this file and in what order, and a sealed
+            // chunk's nonce comes from that order rather than from the payload.
+            let mut payload = Vec::with_capacity(1 + body.len());
             payload.push(file::CHUNK_TAG);
-            payload.extend_from_slice(&file_id);
-            payload.extend_from_slice(&(i as u32).to_be_bytes());
             payload.extend_from_slice(&body);
+            // Already held? Then this part of the file is already published —
+            // reuse it rather than minting a second envelope for the same bytes.
+            // This is what makes *republishing* cheap: a one-byte edit changes
+            // the chunks it touches and nothing else, so an edited file costs a
+            // few new objects instead of a whole second copy. Without this the
+            // content index would dedup for *fetchers* while the publisher
+            // quietly stored the file twice.
+            let cid = file::content_id(&payload);
+            if self.store.has_content(&cid) {
+                level.push((cid, (end - start) as u64));
+                continue;
+            }
             let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
             ce.flags |= fl::FLOOD;
             // **Link-local (M11-J).** A chunk travels one hop, to whoever asked
@@ -89,7 +119,9 @@ impl Node {
             // to answer with. The spray only ever reached nodes that had not
             // asked. Making a file cross n hops on purpose is M11-I.
             ce.hops = 0;
-            level.push((ce.id(), (end - start) as u64));
+            // Named by **content**, not by envelope. This is the whole change:
+            // the same bytes get the same name from any publisher, at any time.
+            level.push((file::content_id(&ce.payload), (end - start) as u64));
             self.mark_seen(&ce);
             self.store_put(&ce, now);
         }
@@ -133,7 +165,7 @@ impl Node {
                 };
                 let mut ne = Envelope::new(ty::DATA, ft, expiry, node.encode());
                 ne.flags |= fl::FLOOD;
-                next.push((ne.id(), covered));
+                next.push((file::content_id(&ne.payload), covered));
                 self.mark_seen(&ne);
                 self.store_put(&ne, now);
             }
@@ -197,7 +229,11 @@ impl Node {
                 if depth > 0 {
                     break; // a tree's root names interiors, not chunks worth pushing
                 }
-                if let Some(wire) = self.store.wire(id) {
+                // `named_wire`, not `store.wire`: `level` holds **content** ids
+                // now (M11-M), and looking them up as envelope ids silently
+                // pushed nothing — every small file would have quietly gone back
+                // to costing a round trip.
+                if let Some(wire) = self.named_wire(id) {
                     if let Ok((ce, _)) = Envelope::decode(&wire) {
                         forwards.append(&mut self.forward_intents(&ce, NO_IFACE, now));
                     }
@@ -269,8 +305,23 @@ impl Node {
     /// so an id a verified parent named can only resolve to the bytes that
     /// parent meant. `expect` pins the child's depth — it must be exactly one
     /// less than its parent's, or a crafted tree could recurse sideways.
+    /// Does this node hold the object a manifest named? (M11-M)
+    ///
+    /// Manifests name **content**, so this asks the content index first. The
+    /// fallback to the envelope id covers objects that carry no file-layer tag —
+    /// a sealed header is raw ciphertext — and anything published before the
+    /// file layer stopped conflating the two names.
+    pub(crate) fn holds_named(&self, id: &Id) -> bool {
+        self.store.has_content(id) || self.store.contains(id)
+    }
+
+    /// The wire bytes of an object a manifest named.
+    pub(crate) fn named_wire(&self, id: &Id) -> Option<Vec<u8>> {
+        self.store.wire_by_content(id).or_else(|| self.store.wire(id))
+    }
+
     fn tree_node(&self, id: &Id, expect: u8) -> Option<file::Manifest> {
-        let wire = self.store.wire(id)?;
+        let wire = self.named_wire(id)?;
         let (e, _) = Envelope::decode(&wire).ok()?;
         let m = file::Manifest::decode(&e.payload)?;
         (m.depth == expect).then_some(m)
@@ -290,7 +341,7 @@ impl Node {
     {
         for id in &m.chunk_ids {
             if m.depth == 0 {
-                if !f(id, 0, self.store.contains(id)) {
+                if !f(id, 0, self.holds_named(id)) {
                     return false;
                 }
                 continue;
@@ -333,8 +384,15 @@ impl Node {
                 return out;
             }
         }
+        // **Distinct** ids (M11-M). Now that a chunk is named by its content, a
+        // file with repeated content names the same id many times — 40 kB of one
+        // byte is thirty chunks and *two* distinct objects. Asking for each
+        // occurrence would spend the holder's whole gossip budget re-sending
+        // bytes we already asked for, and on a file like that the tail chunk
+        // never gets reached at all. One name, one request.
+        let mut seen: HashSet<Id> = HashSet::new();
         self.walk_tree(root, &mut |id, _, held| {
-            if !held {
+            if !held && seen.insert(*id) {
                 out.push(*id);
             }
             out.len() < limit
@@ -344,7 +402,17 @@ impl Node {
 
     /// How many ids fit in one WANT frame at this node's MTU.
     pub(crate) fn want_window(&self) -> usize {
-        (self.mtu.saturating_sub(file::INTERIOR_ENV_OVERHEAD) / 16).max(1)
+        // Clamped to what the *receiver* will actually look at. `on_want` and
+        // `on_cancel` both stop after `MAX_IDS_PER_GOSSIP` ids, so at a 1400-byte
+        // MTU this used to put 86 ids in a frame of which 22 were read by nobody.
+        //
+        // For a WANT that was invisible waste — the unread ids are simply asked
+        // for again next round. For a **cancel** it was a leak: there is no next
+        // round, so every id past the 64th stayed adopted upstream until the
+        // lease ran out, which is the load M11-K exists to remove. `spore-sim`'s
+        // `fetch-abandoned` caught it as an 8-interest residue once M11-M made
+        // files big enough in *distinct* parts to cross the cap.
+        (self.mtu.saturating_sub(file::INTERIOR_ENV_OVERHEAD) / 16).clamp(1, MAX_IDS_PER_GOSSIP)
     }
 
     /// Ask neighbours for the parts of `magnet` we don't hold yet. Reuses the
@@ -604,8 +672,10 @@ impl Node {
     /// file is announced by one manifest, exactly as it was before trees
     /// existed, and one round trip is enough to learn every chunk id.
     pub fn max_flat_file_bytes(&self) -> usize {
-        let chunk = self.mtu.saturating_sub(64).max(1);
-        file::root_fanout(self.mtu, 96, 0, false) * chunk
+        // How many ids fit in the root is still a question about *this* node's
+        // frame — the root is the part that floods, so it earns being one frame.
+        // How much file each id covers is a protocol constant (M11-M).
+        file::root_fanout(self.mtu, 96, 0, false) * file::CHUNK_BYTES
     }
 
     /// The ceiling on everything this node holds at once, files included.
@@ -638,18 +708,33 @@ impl Node {
         self.manifests
             .iter()
             .map(|(magnet, m)| {
-                let total = if m.chunk_size == 0 {
+                // `chunk_size` is an advertised *average* since M11-M, so
+                // `total_len / chunk_size` is an estimate rather than the count.
+                // Count the leaves the tree actually names, and fall back to the
+                // estimate only while part of the tree is still hidden — an
+                // unheld interior conceals its whole subtree, so the walk
+                // undercounts exactly then.
+                let estimate = if m.chunk_size == 0 {
                     m.count
                 } else {
                     m.total_len.div_ceil(m.chunk_size as u64) as u32
                 };
                 let mut have = 0u32;
+                let mut leaves = 0u32;
+                let mut resolved = true;
                 self.walk_tree(m, &mut |_, depth, held| {
-                    if depth == 0 && held {
-                        have += 1;
+                    if depth == 0 {
+                        leaves += 1;
+                        if held {
+                            have += 1;
+                        }
+                    }
+                    if !held {
+                        resolved = false;
                     }
                     true
                 });
+                let total = if resolved { leaves } else { estimate.max(leaves) };
                 (*magnet, m.name.clone(), m.total_len, have, total.max(1))
             })
             .collect()
@@ -689,6 +774,7 @@ impl Node {
         let total = root.total_len;
         let mut written = 0u64;
         let mut ok = true;
+        let mut leaf = 0usize; // position in file order — the sealed chunk nonce
         self.walk_tree(root, &mut |id, depth, held| {
             if !held {
                 ok = false;
@@ -697,7 +783,7 @@ impl Node {
             if depth != 0 {
                 return true; // an interior node carries ids, not bytes
             }
-            let Some(wire) = self.store.wire(id) else {
+            let Some(wire) = self.named_wire(id) else {
                 ok = false;
                 return false;
             };
@@ -705,17 +791,26 @@ impl Node {
                 ok = false;
                 return false;
             };
-            if ce.payload.len() < 21 {
+            if ce.payload.is_empty() {
                 ok = false; // not a well-formed chunk
                 return false;
             }
-            // The chunk carries the index it was encrypted under, and the id
-            // that named it is a hash of those very bytes, so it is as
-            // trustworthy as the chunk itself.
-            let index = u32::from_be_bytes([ce.payload[17], ce.payload[18], ce.payload[19], ce.payload[20]]);
+            // The AEAD nonce is the chunk's **position in the file**, counted by
+            // this walk, rather than an index carried in the payload (M11-M).
+            // The walk visits leaves in file order — the same order they were
+            // sealed in — so the two agree without the chunk having to say so.
+            //
+            // Taking it from the payload was what made every chunk unique to its
+            // publish. Note this is also why sealed chunks do not dedup even when
+            // their plaintext repeats: same bytes, different position, different
+            // nonce, different ciphertext. That is the correct trade — a nonce
+            // reused across a file would be a far worse bug than a missed
+            // saving.
+            let index = leaf as u32;
+            leaf += 1;
             let plain;
             let body = match key {
-                Some(k) => match chunk_open(&ce.payload[21..], k, index) {
+                Some(k) => match chunk_open(&ce.payload[1..], k, index) {
                     Some(p) => {
                         plain = p;
                         &plain[..]
@@ -725,7 +820,7 @@ impl Node {
                         return false;
                     }
                 },
-                None => &ce.payload[21..],
+                None => &ce.payload[1..],
             };
             let take = total.saturating_sub(written).min(body.len() as u64) as usize;
             if w.write_all(&body[..take]).is_err() {

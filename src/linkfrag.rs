@@ -18,7 +18,7 @@
 //! what makes it cheap:
 //!
 //! ```text
-//! [0xF6][set:2][idx:2][count:2][chunk …]        7 bytes
+//! [0xF6][set:2][idx:2][count:2][piece …]        7 bytes
 //! ```
 //!
 //! against the 36 the end-to-end fountain header costs (16 envelope header, 2
@@ -49,7 +49,13 @@ use std::collections::HashMap;
 /// fragment are distinguishable on sight.
 pub const LINK_FRAG_MAGIC: u8 = 0xF6;
 
-/// Bytes a link fragment adds around its chunk.
+/// Bytes a link fragment adds around its piece.
+///
+/// **Piece, not chunk.** A chunk is a file-layer object of a fixed protocol size,
+/// named by the hash of its content; a piece is however much of *some* envelope
+/// fits one hop's frame, and is never named or stored. This module used to call
+/// its pieces chunks, which is the confusion that let chunk size be derived from
+/// an MTU in the first place.
 pub const LINK_FRAG_OVERHEAD: usize = 7;
 
 /// Most fragments one link set may hold — the `u16` count field's range. At a
@@ -63,7 +69,7 @@ pub const LINK_PARTIAL_TIMEOUT_SECS: u32 = 30;
 /// so in practice every set a link will ever see.
 ///
 /// It used to be 255, because the code derived each repair symbol's inputs from
-/// a single SHA-256 and one digest addresses 256 chunks. That ceiling bit hardest
+/// a single SHA-256 and one digest addresses 256 pieces. That ceiling bit hardest
 /// exactly where loss does: 255 pieces is under 12 kB on a 54-byte Zigbee frame,
 /// and past it a set had no repair at all and needed every piece. A 20 kB
 /// envelope is 426 pieces, which at 1% frame loss delivers 1.4% of the time.
@@ -139,14 +145,14 @@ pub fn split_with_repair(wire: &[u8], mtu: usize, set_id: u16, repair: usize) ->
     if count < 2 || repair == 0 || count > MAX_REPAIRABLE_PIECES {
         return out;
     }
-    let chunk = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
+    let piece = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
     let seed = set_seed(set_id, count);
     // Indices at or past `count` are repair symbols; the sender can mint as many
     // distinct ones as it likes, which is what rateless means.
     let repair = repair.min(MAX_REPAIRABLE_PIECES - count);
     let indices: Vec<u16> = (count..count + repair).map(|i| i as u16).collect();
-    for e in crate::fragment(wire, chunk, 0, 0, crate::ZERO_DEST, seed, &indices) {
-        // `fragment` hands back envelopes; only the chunk body matters here,
+    for e in crate::fragment(wire, piece, 0, 0, crate::ZERO_DEST, seed, &indices) {
+        // `fragment` hands back envelopes; only the piece body matters here,
         // re-framed as a link fragment. The envelope header it built is the
         // end-to-end form this layer exists to replace.
         let idx = u16::from_be_bytes([e.payload[16], e.payload[17]]);
@@ -168,8 +174,8 @@ pub fn split_for_link(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
     if wire.len() <= mtu {
         return vec![wire.to_vec()];
     }
-    let chunk = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
-    let count = wire.len().div_ceil(chunk);
+    let piece = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
+    let count = wire.len().div_ceil(piece);
     split_with_repair(wire, mtu, set_id, default_repair(count))
 }
 
@@ -178,8 +184,8 @@ pub fn split(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
     if wire.len() <= mtu {
         return vec![wire.to_vec()];
     }
-    let chunk = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
-    let count = wire.len().div_ceil(chunk);
+    let piece = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
+    let count = wire.len().div_ceil(piece);
     if count > MAX_LINK_FRAGMENTS {
         // Structurally impossible for a legal envelope: 65 535 fragments of even
         // one byte exceeds what `plen` can describe. Refuse rather than emit a
@@ -187,7 +193,7 @@ pub fn split(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
         return Vec::new();
     }
     let mut out = Vec::with_capacity(count);
-    for (i, part) in wire.chunks(chunk).enumerate() {
+    for (i, part) in wire.chunks(piece).enumerate() {
         let mut f = Vec::with_capacity(LINK_FRAG_OVERHEAD + part.len());
         f.push(LINK_FRAG_MAGIC);
         f.extend_from_slice(&set_id.to_be_bytes());
@@ -205,7 +211,7 @@ struct Partial {
     bytes: usize,
     /// Symbols as they arrived, by index. Held rather than decoded incrementally
     /// because the decoder needs every symbol to be the same length, and the
-    /// *last* data piece of a set is short — so the full chunk size is only
+    /// *last* data piece of a set is short — so the full piece size is only
     /// known once a full-length piece has been seen. Padding on the wire instead
     /// would waste up to a whole frame on every fragmented set, which on a
     /// 237-byte LoRa link is most of a packet.
@@ -215,7 +221,7 @@ struct Partial {
 /// Feed a set's symbols to the erasure decoder.
 ///
 /// Every symbol must be the same length, and the last data piece of a set is
-/// short — so pad up to the longest symbol seen. That length *is* the chunk
+/// short — so pad up to the longest symbol seen. That length *is* the piece
 /// size: every piece but the last fills the frame, and a set that has reached
 /// `count` symbols has at least one of those.
 ///
@@ -224,13 +230,13 @@ struct Partial {
 /// here — on a medium without addresses two senders can collide on a set id, and
 /// the bytes that produces must not reach the router.
 fn decode_coded(set: u16, count: usize, symbols: &HashMap<u16, Vec<u8>>) -> Option<Vec<u8>> {
-    let chunk = symbols.values().map(Vec::len).max()?;
+    let piece = symbols.values().map(Vec::len).max()?;
     let seed = set_seed(set, count);
     let mut f = Fountain::new();
     let mut out = None;
     for (idx, body) in symbols {
         let mut padded = body.clone();
-        padded.resize(chunk, 0);
+        padded.resize(piece, 0);
         out = f.add(&seed, *idx, count as u16, padded);
         if out.is_some() {
             break;
@@ -545,7 +551,7 @@ mod tests {
         assert_eq!(r.open_sets(), 1, "but index 9 of a 2-set is a repair symbol, not junk");
 
         // There is no longer a size past which a high index is nonsense: the
-        // code addresses as many chunks as the `u16` can name, so a 300-piece
+        // code addresses as many pieces as the `u16` can name, so a 300-piece
         // set takes repair symbols exactly like a 2-piece one. That was not true
         // before `selection` hashed in blocks, and the sets it excluded — under
         // 12 kB on a Zigbee frame — were the ones least able to lose a piece.

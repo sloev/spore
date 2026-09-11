@@ -80,6 +80,22 @@ keys by QR/paper/voice. Petnames are local.
 
 ## 2. Envelope (the only object; big-endian; fixed part = 16 B)
 
+```mermaid
+packet-beta
+0-7: "ver = 0x01"
+8-15: "type"
+16-23: "flags"
+24-31: "hops"
+32-63: "expiry (u32, unix seconds)"
+64-127: "dest (8 B) — address | topic | 0x00×8 = public"
+128-383: "src — present only if SIGNED: 32-B pubkey, or 8 B if SRC8"
+384-399: "plen (u16)"
+400-527: "payload (plen bytes)"
+528-1039: "sig — Ed25519 over everything above, hops zeroed (SIGNED only)"
+```
+
+The fixed part is the first 16 bytes. Everything after `dest` is conditional:
+
 ```
 off len field
 0   1   ver    = 0x01  (exact match to decode; see "Versioning and unknown bits")
@@ -94,6 +110,20 @@ off len field
     N   payload
     64  sig    Ed25519 over all bytes above with hops zeroed
 -- unsigned: no src, no sig; rides last everywhere --
+```
+
+The flags byte, bit by bit:
+
+```mermaid
+packet-beta
+0: "b0 ENCRYPTED"
+1: "b1 SIGNED"
+2: "b2 FRAGMENT (retired)"
+3: "b3 ACKREQ"
+4: "b4 FLOOD"
+5: "b5 SRC8"
+6: "b6 RATCHET"
+7: "b7 CANCEL"
 ```
 
 **Versioning and unknown bits.** `ver` is an exact match: a decoder MUST reject
@@ -210,6 +240,26 @@ analysis, not a parser change.
 
 ## 5. Forwarding rules (the entire router)
 
+```mermaid
+flowchart TB
+  RX["frame arrives on an interface"] --> FRAG{"starts 0xF6?"}
+  FRAG -->|yes| REASM["link reassembly (Part II — the router never sees a piece)"]
+  REASM -->|"set complete"| DEC
+  FRAG -->|no| DEC["decode envelope ver must be 0x01"]
+  DEC --> CTRL{"type"}
+  CTRL -->|"INV / WANT"| CONSUME["answer from the store, or adopt an interest. hops=0 · unsigned · consumed · never stored · never relayed"]
+  CTRL -->|"DATA / ANNOUNCE"| SEEN{"id seen, or expired?"}
+  SEEN -->|yes| DROP["drop"]
+  SEEN -->|no| MARK["remember the id · learn paths"]
+  MARK --> MINE{"dest is mine, a topic I follow, or public?"}
+  MINE -->|yes| DELIVER["deliver to the app (verify / decrypt per flags)"]
+  MINE -->|no| STORE
+  DELIVER --> STORE["store until expiry"]
+  STORE --> HOPS{"hops > 0?"}
+  HOPS -->|no| STOP["carry, but do not relay"]
+  HOPS -->|yes| FWD["decrement hops · forward on every other interface, inside the per-interface token bucket"]
+```
+
 1. Envelope arrives: ID seen or expired → drop. Add ID (keep ≥ until expiry).
    Learn paths (§4).
 2. dest ∈ {my addresses, followed topics, 0×8} → deliver (verify/decrypt per
@@ -298,7 +348,16 @@ A bridge whose link has a smaller frame than the envelope splits it, and the far
 end of that same link puts it back. **Below the node and below the signature**: a
 fragment lives for one hop, is never relayed, and the router is never shown one.
 
-    [0xF6][set:2][idx:2][count:2][chunk …]        7 bytes
+    [0xF6][set:2][idx:2][count:2][piece …]        7 bytes
+
+```mermaid
+packet-beta
+0-7: "0xF6 — not 0x01, so it is not an envelope"
+8-23: "set (u16)"
+24-39: "idx (u16)"
+40-55: "count (u16)"
+56-183: "piece — a slice of whatever envelope is crossing this hop"
+```
 
 **This is link framing, not wire.** A fragment never leaves the link, so its
 shape is a bridge's business the way KISS is, and it is not part of Part I. That
@@ -853,6 +912,32 @@ not have made. A node holding interests SHOULD re-state them on a slow cadence
 (the reference build: every 5 minutes), since a WANT is otherwise only emitted
 when a neighbour asks, and after a journey the neighbour who asked is gone.
 
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Alice (wants it)
+  participant B as relay
+  participant C as relay
+  participant S as seeder
+  Note over A,S: the root already flooded, so everyone can name the parts
+  A->>B: WANT ids (depth 8)
+  Note right of B: holds none, but a manifest it holds names them, so it may adopt
+  B->>B: adopt interest, waiter is A
+  B->>C: WANT ids (depth 7) — B's own request, not A's relayed
+  C->>C: adopt interest, waiter is B
+  C->>S: WANT ids (depth 6)
+  S-->>C: chunks
+  Note right of C: caches what it carried
+  C-->>B: chunks (directed at the waiter, not flooded)
+  B-->>A: chunks
+  Note over A,S: a second fetcher on this path is now served by B or C
+
+  A->>B: WANT + CANCEL (or the link drops)
+  B->>B: last waiter gone → drop interest
+  B->>C: CANCEL — the unwind follows the path the demand took
+  C->>C: last waiter gone → drop interest
+```
+
 *Cancel* is the other end of the lease. An adopted interest is a standing
 obligation, so a relay whose last waiter has gone keeps asking every seeder in
 range until the lease runs out — fifteen minutes of load nobody wants. A node
@@ -881,6 +966,68 @@ This is a Part III profile because it changes what an endpoint chooses to ask
 for, not what any envelope looks like. T0 is unchanged: receive → dedup → store →
 deliver → forward.
 
+- **Chunks are a static size, fixed by the protocol** (M11-M): `CHUNK_BYTES`,
+  4 KiB, the same for every publisher on every medium. It used to be `mtu - 64`,
+  which was a leftover from before link fragmentation, when a sender had to cut
+  for the narrowest hop it might meet because nothing downstream could re-cut.
+  After M11-D the only thing publisher MTU still decided was that a Wi-Fi node
+  and a LoRa node cut the same file differently and therefore shared no content
+  ids — which defeats content addressing as thoroughly as a random `file_id`
+  would. Identical bytes MUST produce identical chunks for everyone.
+
+  ```mermaid
+  flowchart TB
+    subgraph FILE["file layer - Part III - travels the mesh"]
+      direction LR
+      F["a 10 KB file"] --> C1["chunk 0: 4096 B"] & C2["chunk 1: 4096 B"] & C3["chunk 2: 1808 B"]
+      C1 -.-> M["manifest names the content ids, in order"]
+      C2 -.-> M
+      C3 -.-> M
+    end
+    subgraph LINK["link layer - Part II - never leaves one hop"]
+      direction LR
+      C1 ==> P1["piece 0"] & P2["piece 1"] & P3["piece n"] & PR["repair symbol"]
+      P1 --> R["far end reassembles the envelope"]
+      P2 --> R
+      P3 --> R
+      PR --> R
+    end
+    R ==> OK["router sees one envelope, and never saw a piece"]
+  ```
+
+  **A chunk is not a fragment, and neither is derived from the other.** A chunk
+  is a file-layer object: content-addressed, one fixed size everywhere, the unit
+  a manifest names and a WANT asks for. A fragment is a link-layer artefact:
+  sized by one hop's MTU, carrying whatever will not fit that hop — a chunk, or
+  any other envelope — and reassembled at the far end of that same link. Chunks
+  are therefore routinely larger than a frame, which makes per-hop splitting a
+  **dependency** of the file layer rather than an optimisation: a transport that
+  cannot split cannot move files.
+
+  4 KiB is chosen against the smallest node, not the largest file: a minimal
+  profile floors link reassembly at 16 KiB, so four chunks fit its buffer at
+  once, and a 1 MB file is 256 ids rather than the
+  ~6000 an MTU-sized chunk needed on LoRa (chunk-fragment-ok: the rejected sizing).
+  `chunk_size` in a manifest is exact — every chunk but the last
+  is that size — so a reader may compute which chunk holds a given byte.
+
+  *What this gives up:* boundaries are offsets from the start of the file, so
+  inserting a byte shifts all of them and an edited file shares nothing with its
+  predecessor. Appending shares everything. Content-*defined* boundaries would
+  fix the insert case at the cost of variable-length chunks and losing the offset
+  property; the choice here is static.
+- **Content ids, not envelope ids** (M11-M). A manifest names the **content id**
+  of each part: the first 16 bytes of SHA-256 over the part's payload, and
+  nothing else. This is deliberately *not* the envelope id, which hashes the
+  whole envelope and so covers `expiry` and `dest` — right for a message, wrong
+  for bytes. Conflating them meant a byte-identical file published twice shared
+  **zero of sixteen** envelopes with itself, because a chunk carried a random
+  per-publish `file_id`. A chunk payload is therefore `[CHUNK_TAG][bytes]` with
+  no file or index field: the manifest already says which parts are this file and
+  in what order, and a sealed part's AEAD nonce is its **position in that order**,
+  which the reader counts while walking rather than trusting the payload to
+  state. A node MUST be able to resolve a named content id to whichever stored
+  envelope carries it, and a WANT may name either kind.
 - **Integrity is free.** The root is signed, and every ID below it — chunk or
   sub-manifest — *is* the hash of the bytes it names, so a forged or corrupt part
   simply never matches. **Only the root is signed**: the hash chain covers the
@@ -890,6 +1037,18 @@ deliver → forward.
   pulled. `fetch(magnet)` emits a WANT for the IDs it lacks and any peer holding
   them answers from its store — the existing §6 machinery, untouched.
   Multi-source and resumable, because parts are named by content, not by origin.
+```mermaid
+flowchart TB
+  ROOT["root manifest: signed, flooded, its id is the magnet"] --> I0["interior, unsigned"] & I1["interior, unsigned"]
+  I0 --> K0["chunk"] & K1["chunk"] & K2["chunk"]
+  I1 --> K3["chunk"] & K4["chunk"] & K5["chunk"]
+  ROOT -.-> HDR["sealed files only: header object holding the file key and real name"]
+```
+
+Only the root is signed and only the root floods. Every id beneath it *is* the
+hash of the bytes it names, so a parent authenticates its children and interior
+nodes need no signature — which buys back ~96 bytes of fan-out each.
+
 - **It resolves top-down.** A WANT frame holds ~86 IDs, and deeper levels are not
   even *nameable* until the levels above arrive, so `fetch` returns one frame's
   worth per call and is called until complete.

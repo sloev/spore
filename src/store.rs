@@ -46,6 +46,17 @@ pub(crate) struct Stored {
 
 pub(crate) struct Store {
     map: HashMap<Id, Stored>,
+    /// **Content id → envelope id**, for file-layer objects only (M11-M).
+    ///
+    /// An envelope's id is the hash of the whole envelope, so it covers `expiry`
+    /// and `dest` — which is right for a *message*, and wrong for *bytes*. The
+    /// same chunk published twice is two different envelopes, and before this
+    /// index existed a file published twice shared nothing with itself.
+    ///
+    /// So the file layer names content and this resolves it to whichever
+    /// envelope happens to be carrying it. Two namespaces, deliberately: an
+    /// envelope id identifies a message, a content id identifies bytes.
+    by_content: HashMap<Id, Id>,
     spill: Option<Box<dyn SpillBackend>>,
     /// Bytes currently resident. Spilling drives this down; it is not a ceiling
     /// on what the node holds, only on what it holds *in memory*.
@@ -222,6 +233,7 @@ impl Store {
     pub fn new() -> Store {
         Store {
             map: HashMap::new(),
+            by_content: HashMap::new(),
             spill: None,
             mem_bytes: 0,
             // Half the default store budget stays resident; the rest spills once
@@ -281,7 +293,14 @@ impl Store {
 
     pub fn put(&mut self, id: Id, wire: Vec<u8>, expiry: u32, stamp: u8, seq: u64, dest: Addr) {
         if self.map.contains_key(&id) {
-            return; // content-addressed: same id, same bytes, nothing to do
+            return; // same envelope id, same bytes, nothing to do
+        }
+        // Index the *content* too, if this envelope carries a file-layer object.
+        // First writer wins: a later envelope carrying identical bytes resolves
+        // to the copy already held, which is the whole point — the second
+        // publisher's chunk costs nothing to have heard about.
+        if let Some(cid) = crate::file::content_id_of_wire(&wire) {
+            self.by_content.entry(cid).or_insert(id);
         }
         let len = wire.len();
         // Write through, so what the node holds outlives the process. A failed
@@ -296,7 +315,26 @@ impl Store {
         self.shed();
     }
 
+    /// The envelope carrying this content, if any is held.
+    pub fn by_content(&self, cid: &Id) -> Option<Id> {
+        self.by_content.get(cid).copied()
+    }
+
+    /// Is this content held, under whatever envelope?
+    pub fn has_content(&self, cid: &Id) -> bool {
+        self.by_content.contains_key(cid)
+    }
+
+    /// The wire bytes carrying this content.
+    pub fn wire_by_content(&self, cid: &Id) -> Option<Vec<u8>> {
+        self.wire(&self.by_content(cid)?)
+    }
+
     pub fn remove(&mut self, id: &Id) {
+        // Drop the content mapping with the envelope, but only if it still
+        // points here — another envelope carrying the same bytes may have
+        // claimed it, and evicting one copy must not un-name the other.
+        self.by_content.retain(|_, e| e != id);
         let Some(s) = self.map.remove(id) else { return };
         if matches!(s.body, Body::Mem(_)) {
             self.mem_bytes = self.mem_bytes.saturating_sub(s.len);
@@ -382,6 +420,13 @@ impl Store {
                 continue;
             }
             let len = wire.len();
+            // Rebuild the content index too (M11-M), or a node that restarts
+            // comes back holding every byte of a file and unable to name any of
+            // it: the manifest points at content ids, and without this the
+            // resolution table is empty until something is re-received.
+            if let Some(cid) = crate::file::content_id_of_wire(&wire) {
+                self.by_content.entry(cid).or_insert(id);
+            }
             self.map.insert(
                 id,
                 Stored { body: Body::Evicted, len, expiry: e.expiry, stamp: e.stamp(), seq, dest: e.dest },

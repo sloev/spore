@@ -26,6 +26,18 @@ use crate::*;
 
 const NOW: u32 = 1_700_000_000;
 
+/// A file big enough, and varied enough, to still have parts left to ask for
+/// after the publisher's push budget.
+///
+/// Both halves matter since M11-M. Chunks average `CHUNK_AVG_BYTES` rather than
+/// an MTU-sized 1336, so a 40 kB file is ten chunks and `DEFAULT_PUSH_CHUNKS`
+/// nearly covers it; and chunks are content-addressed, so 40 kB of one repeated
+/// byte is a *single* distinct object however long it is. A test that wants a
+/// fetch to actually happen needs both size and variety.
+fn pullable_file() -> Vec<u8> {
+    (0..50_000u32).flat_map(|i| i.to_be_bytes()).collect()
+}
+
 /// Ceilings small enough to cross quickly, so a test proves the *rule* rather
 /// than spending a minute proving arithmetic.
 fn tight() -> Limits {
@@ -186,7 +198,7 @@ fn a_served_chunk_stops_at_the_node_that_asked_for_it() {
 
     // Bigger than the push budget (M11-E), or the file arrives complete with
     // its manifest and there is no serve path left to observe.
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xAB; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -265,7 +277,7 @@ fn a_neighbours_want_is_adopted_never_forwarded() {
     let mut publisher = Node::new("publisher", &[]);
     let mut relay = Node::new("relay", &[]);
     // Bigger than the push budget, so chunks are genuinely missing to ask for.
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
 
     // The relay hears the root, so it knows the file exists and what it names.
     for f in &fwds {
@@ -315,7 +327,7 @@ fn the_depth_budget_runs_out() {
     // zero a node answers from its own store or says nothing.
     let mut publisher = Node::new("publisher", &[]);
     let mut relay = Node::new("relay", &[]);
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -341,7 +353,7 @@ fn an_adopted_interest_is_bounded_and_expires() {
     let mut publisher = Node::new("publisher", &[]);
     let mut relay = Node::new("relay", &[]);
     relay.set_limits(tight());
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -380,7 +392,7 @@ fn an_adopted_interest_is_bounded_and_expires() {
 /// magnet plus the ids it is now looking for.
 fn relay_with_an_adopted_interest(relay: &mut Node, iface: Iface) -> Id {
     let mut publisher = Node::new("publisher", &[]);
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -496,7 +508,7 @@ fn abandoning_a_fetch_tells_the_neighbours() {
     // The fetcher's own side of the cancel.
     let mut publisher = Node::new("publisher", &[]);
     let mut fetcher = Node::new("fetcher", &[]);
-    let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
     for f in &fwds {
         let wire = match f {
             Forward::Flood { bytes, .. } => bytes,
@@ -741,7 +753,7 @@ fn a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher() {
     // that makes a file's chunks legal to ask for. Carrying the index *is*
     // carrying the demand.
     let mut publisher = Node::new("publisher", &[]);
-    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &pullable_file(), ZERO_DEST, NOW);
 
     // The root floods, so it reaches people the chunks never will. Alice hears
     // only that — she knows the file exists and cannot get a byte of it.
@@ -816,7 +828,7 @@ fn a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher() {
     assert!(alice.has_file(&magnet), "alice has the file she asked for two weeks ago");
     assert_eq!(
         alice.file_bytes(&magnet).expect("assembled"),
-        vec![0x5A; 40_000],
+        pullable_file(),
         "byte for byte, having never met anyone who had it when she asked"
     );
 }
@@ -829,7 +841,7 @@ fn a_sneakernet_journey_has_a_deadline_and_it_is_the_publisher_s_expiry() {
     // Worth pinning: the failure is silent — the courier still holds the
     // manifest, still knows the file exists, and simply never completes.
     let mut publisher = Node::new("publisher", &[]);
-    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &pullable_file(), ZERO_DEST, NOW);
 
     let mut holder = Node::new("holder", &[]);
     for f in &published {
@@ -890,7 +902,7 @@ fn an_adopted_interest_outlives_the_meeting_that_created_it() {
     // still turn up, and not one second longer.
     let mut publisher = Node::new("publisher", &[]);
     let mut courier = Node::new("courier", &[]);
-    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &pullable_file(), ZERO_DEST, NOW);
     courier_adopts_alices_want(&mut courier, &magnet, &published, NOW);
 
     // A day later — far past the old fixed lease — the courier still remembers.
@@ -914,7 +926,7 @@ fn alices_want_rides_in_a_pocket_and_comes_home_answered() {
     // restart, crosses to a mesh that never heard her ask, is answered there by a
     // stranger, and comes back. The courier never wanted the file itself.
     let mut publisher = Node::new("publisher", &[]);
-    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &pullable_file(), ZERO_DEST, NOW);
 
     let mut courier = Node::new("courier", &[]);
     let wanted = courier_adopts_alices_want(&mut courier, &magnet, &published, NOW);
@@ -952,7 +964,9 @@ fn alices_want_rides_in_a_pocket_and_comes_home_answered() {
     assert!(!asking.is_empty(), "an interest that survived is spoken somewhere new");
     meet(&mut courier, &mut bob, asking, abroad + 120);
     for id in &wanted {
-        assert!(courier.has(id), "the courier got what Alice asked for, from a stranger");
+        // `holds_named`, not `has`: a manifest names content, and `has` asks
+        // about envelope ids (M11-M).
+        assert!(courier.holds_named(id), "the courier got what Alice asked for, from a stranger");
     }
 
     // --- and home again, where Alice asks a second time ----------------------
@@ -1023,7 +1037,7 @@ fn a_carried_interest_is_restated_on_a_cadence_not_every_tick() {
     // prevent.
     let mut publisher = Node::new("publisher", &[]);
     let mut courier = Node::new("courier", &[]);
-    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &pullable_file(), ZERO_DEST, NOW);
     courier_adopts_alices_want(&mut courier, &magnet, &published, NOW);
 
     // First tick after adopting: it speaks, because it may have just arrived
@@ -1057,7 +1071,7 @@ fn a_stranger_cannot_claim_a_deeper_want_than_local_policy_allows() {
     // whatever the asker claimed. `spore-sim`'s `malicious-want` measures the
     // difference across a mesh; this pins the rule at one node.
     let mut publisher = Node::new("publisher", &[]);
-    let (magnet, fwds) = publisher.publish_file("bait.bin", &vec![0xCD; 40_000], ZERO_DEST, NOW);
+    let (magnet, fwds) = publisher.publish_file("bait.bin", &pullable_file(), ZERO_DEST, NOW);
 
     let ask_with = |depth: u8| -> u8 {
         let mut relay = Node::new("relay", &[]);
@@ -1088,41 +1102,280 @@ fn a_stranger_cannot_claim_a_deeper_want_than_local_policy_allows() {
     // break recursion at the second hop.
     assert_eq!(ask_with(3), 2, "a smaller budget is honoured, not raised");
 }
-/// Every envelope a node stored, by id.
-fn stored(n: &Node) -> Vec<Id> {
-    n.store_wires().into_iter().map(|(i, _)| i).collect()
-}
-
 #[test]
-fn a_file_published_twice_shares_nothing_with_itself() {
-    // **The premise M11-M was written on is false**, and this is the test that
-    // says so. Content-defined chunking was scoped as "chunks are already
-    // content-addressed, so dedup falls out with no new mechanism". They are not.
+fn a_file_published_twice_shares_every_chunk_with_itself() {
+    // M11-M. This test used to be `..._shares_nothing_with_itself`, and it
+    // passed: a byte-identical file published twice had **0 of 16 envelopes** in
+    // common, because a chunk's name was the hash of its whole envelope and that
+    // envelope carried a random per-publish `file_id`, a topic derived from it,
+    // and a wall-clock expiry.
     //
-    // A chunk's id is the hash of its whole *envelope*, and that envelope
-    // carries `file_id` — 16 random bytes minted per publish — in the payload,
-    // a per-file topic derived from it in `dest`, and a wall-clock `expiry`.
-    // Identical bytes therefore produce a different id every time they are
-    // published, by anyone, including the same node one line later.
-    //
-    // So chunks are *publish*-addressed, not content-addressed. Cutting smarter
-    // boundaries on top of this would produce identical chunk *contents* and
-    // still share zero ids — CDC would measure as a pure regression: more
-    // chunks, larger manifests, no dedup. M11-M cannot start here.
-    let now = NOW;
-    let body = vec![0x42u8; 20_000];
+    // Chunks are now named by their **content** — the hash of `[CHUNK_TAG][bytes]`
+    // and nothing else — so the same bytes get the same name from any publisher
+    // at any time. The envelopes still differ, and should: an envelope is a
+    // message, with an expiry and a destination. What changed is that the file
+    // layer stopped confusing the two.
+    let body = pullable_file();
 
     let mut a = Node::new("a", &[]);
     let mut b = Node::new("b", &[]);
-    let (m1, _) = a.publish_file("v1.bin", &body, ZERO_DEST, now);
-    let (m2, _) = b.publish_file("v1.bin", &body, ZERO_DEST, now);
+    let (m1, f1) = a.publish_file("v1.bin", &body, ZERO_DEST, NOW);
+    let (m2, _) = b.publish_file("v1.bin", &body, ZERO_DEST, NOW + 3600);
 
-    assert_ne!(m1, m2, "two publishers, identical bytes, different magnets");
-    let (ia, ib) = (stored(&a), stored(&b));
-    let shared = ia.iter().filter(|i| ib.contains(i)).count();
-    assert_eq!(shared, 0, "and not one envelope in common out of {}", ia.len());
+    // A third node learns the file from A, then meets B — who published the same
+    // bytes an hour later, having never met A.
+    let mut c = Node::new("c", &[]);
+    for f in &f1 {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        c.on_rx(wire, 0, None, NOW);
+    }
+    let wanted = c.missing(&m1, 9999);
+    assert!(!wanted.is_empty(), "c still needs most of the file");
 
-    // Not even the same node publishing the same bytes twice.
-    let (m3, _) = a.publish_file("v1.bin", &body, ZERO_DEST, now);
-    assert_ne!(m1, m3, "the same node, the same bytes, a different file");
+    // Every id A's manifest names, B can serve — without the two publishers ever
+    // having exchanged a byte, and without sharing a magnet.
+    assert_ne!(m1, m2, "different publishers, different signed roots");
+    let servable = wanted.iter().filter(|id| b.holds_named(id)).count();
+    assert_eq!(servable, wanted.len(), "B can serve all {} of them", wanted.len());
+}
+
+#[test]
+fn identical_content_inside_one_file_is_stored_once() {
+    // The same property seen from the other side, and the reason `missing` has
+    // to return *distinct* ids: 40 kB of one repeated byte is thirty chunks and
+    // two distinct objects. Before content addressing it was thirty objects.
+    let mut a = Node::new("a", &[]);
+    // Big enough to be many chunks at `CHUNK_AVG_BYTES`, and entirely uniform,
+    // so every one of them is the same object.
+    let (magnet, _) = a.publish_file("flat.bin", &vec![0xAA; 400_000], ZERO_DEST, NOW);
+    let m = a.files().into_iter().find(|(id, ..)| *id == magnet).expect("published");
+    assert!(m.2 >= 400_000, "the file is still 400 kB");
+
+    // Distinct leaves, counted through the manifest.
+    let mut leaves: HashSet<Id> = HashSet::new();
+    let mut visits = 0usize;
+    let held = a.manifests.get(&magnet).unwrap().clone();
+    a.walk_tree(&held, &mut |id, depth, _| {
+        if depth == 0 {
+            visits += 1;
+            leaves.insert(*id);
+        }
+        true
+    });
+    assert!(visits >= 20, "the file is still many chunks long, got {visits}");
+    assert!(leaves.len() <= 2, "but only {} distinct objects", leaves.len());
+
+    // And it still reassembles byte for byte — dedup must not lose repeats.
+    assert_eq!(a.file_bytes(&magnet).as_deref(), Some(&vec![0xAA; 400_000][..]));
+}
+
+#[test]
+fn a_departing_node_can_cancel_what_it_cannot_enumerate() {
+    // A fetcher names ids by walking a manifest tree, and can only descend into
+    // the parts it holds — so ids it asked for while a parent was still
+    // resolving may no longer be nameable. `spore-sim` measured a fetcher able
+    // to list 37 of the 45 interests its neighbour was holding for it.
+    //
+    // So "cancel these ids" cannot be complete, and a wildcard is not a
+    // convenience but the only correct form for a node that is leaving.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut relay = Node::new("relay", &[]);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, 0, None, NOW);
+    }
+    for id in relay.missing(&magnet, 8) {
+        relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(), 0, None, NOW);
+    }
+    assert!(relay.open_interests() > 0, "the relay is hunting on someone's behalf");
+
+    // One frame, no ids, and the relay is holding nothing for us.
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, Vec::new());
+    e.flags |= fl::CANCEL;
+    let rx = relay.on_rx(&e.wire(), 0, None, NOW);
+    assert_eq!(relay.open_interests(), 0, "a departing neighbour releases all of it");
+    assert!(!rx.forwards.is_empty(), "and the unwind carries on upstream");
+}
+
+#[test]
+fn a_wildcard_cancel_still_only_speaks_for_the_sender() {
+    // The wildcard is the widest cancel there is, so it is the one worth
+    // checking cannot speak for anyone else: a hostile neighbour saying "I want
+    // nothing" must not silence a fetch somebody else is waiting on.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut relay = Node::new("relay", &[]);
+    let (magnet, fwds) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
+    for f in &fwds {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        relay.on_rx(wire, 0, None, NOW);
+    }
+    for id in relay.missing(&magnet, 8) {
+        relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(), 0, None, NOW);
+    }
+    let wanted_by_zero = relay.open_interests();
+    assert!(wanted_by_zero > 0);
+
+    // A stranger on another link says it wants nothing. It never asked for
+    // anything, so it is releasing nothing.
+    let mut e = Envelope::new(ty::WANT, ZERO_DEST, 0, Vec::new());
+    e.flags |= fl::CANCEL;
+    let rx = relay.on_rx(&e.wire(), 1, None, NOW);
+    assert_eq!(relay.open_interests(), wanted_by_zero, "the real waiter is untouched");
+    assert!(rx.forwards.is_empty(), "and nothing unwinds");
+}
+
+#[test]
+fn two_publishers_on_different_links_cut_a_file_the_same_way() {
+    // The other half of M11-M, and the reason the chunk parameters are protocol
+    // constants rather than `mtu - 64`. Content addressing names identical bytes
+    // identically — but only if both publishers *produce* identical bytes, and a
+    // Wi-Fi node cutting 1336-byte chunks and a LoRa node cutting 173-byte ones
+    // never do. Link fragmentation (M11-D) is what made the MTU irrelevant here:
+    // a hop that cannot carry a chunk splits it, so the publisher no longer has
+    // to guess at the narrowest link on a path it cannot see.
+    let body = pullable_file();
+
+    let mut wifi = Node::new("wifi", &[]);
+    let mut lora = Node::new("lora", &[]);
+    lora.mtu = 237;
+    let (wm, wf) = wifi.publish_file("atlas.bin", &body, ZERO_DEST, NOW);
+    lora.publish_file("atlas.bin", &body, ZERO_DEST, NOW + 3600);
+
+    // A node that learned the file from the Wi-Fi publisher can be served every
+    // part of it by the LoRa publisher, which has never met either of them.
+    let mut c = Node::new("c", &[]);
+    for f in &wf {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        c.on_rx(wire, 0, None, NOW);
+    }
+    let wanted = c.missing(&wm, 9999);
+    assert!(!wanted.is_empty(), "there is something left to want");
+    let servable = wanted.iter().filter(|id| lora.holds_named(id)).count();
+    assert_eq!(servable, wanted.len(), "the LoRa publisher can serve all {} parts", wanted.len());
+}
+
+#[test]
+fn appending_to_a_file_reuses_every_earlier_chunk() {
+    // What a **static** chunk size buys. Boundaries are at fixed offsets from the
+    // start, so appending does not move any of them: every chunk before the
+    // append is byte-identical, has the same content id, and is already held.
+    let v1 = pullable_file();
+    let mut v2 = v1.clone();
+    v2.extend_from_slice(&[0xFF; 30_000]);
+
+    let mut a = Node::new("a", &[]);
+    let (m1, _) = a.publish_file("log.bin", &v1, ZERO_DEST, NOW);
+    let before = a.store_len();
+    let (m2, _) = a.publish_file("log.bin", &v2, ZERO_DEST, NOW);
+    let added = a.store_len() - before;
+
+    assert_ne!(m1, m2, "a longer file is a different file");
+    let parts = v1.len() / file::CHUNK_BYTES;
+    assert!(
+        added < parts / 2,
+        "appending stored {added} new objects; the {parts} chunks of the original should be reused"
+    );
+}
+
+#[test]
+fn inserting_a_byte_re_chunks_the_file_and_that_is_a_known_cost() {
+    // **The trade-off static chunking accepts**, recorded rather than left to be
+    // rediscovered. Boundaries are offsets from the start of the file, so
+    // inserting a byte at the front shifts every one of them: the bytes are the
+    // same, the chunks are not, and nothing is shared.
+    //
+    // Content-*defined* boundaries (a rolling hash choosing cut points) would fix
+    // this — measured at the time as keeping >90% of chunks across a one-byte
+    // prepend — at the cost of variable-length chunks, a gear table in the spec,
+    // and losing the ability to compute which chunk holds a given byte. The
+    // decision was static; this test is where it is written down, and it is the
+    // test to invert if that ever changes.
+    let v1 = pullable_file();
+    let mut v2 = v1.clone();
+    v2.insert(0, 0xFF);
+
+    let mut a = Node::new("a", &[]);
+    a.publish_file("doc.bin", &v1, ZERO_DEST, NOW);
+    let before = a.store_len();
+    a.publish_file("doc.bin", &v2, ZERO_DEST, NOW);
+    let added = a.store_len() - before;
+
+    let parts = v1.len() / file::CHUNK_BYTES;
+    assert!(
+        added * 2 > parts,
+        "a prepend re-chunks the file: expected most of {parts} parts to be new, got {added}"
+    );
+}
+
+#[test]
+fn a_chunk_is_the_same_size_whatever_link_the_publisher_has() {
+    // The regression this guards is the one that started M11-M: chunk size came
+    // from `mtu - 64`, so a Wi-Fi publisher and a LoRa publisher cut the same
+    // file differently and shared no content ids at all. A chunk is a file-layer
+    // object and its size is a protocol constant; the link has no say.
+    let body = pullable_file();
+    let ids_from = |mtu: usize| -> Vec<Id> {
+        let mut n = Node::new("p", &[]);
+        n.mtu = mtu;
+        let (magnet, _) = n.publish_file("same.bin", &body, ZERO_DEST, NOW);
+        let held = n.manifests.get(&magnet).expect("published").clone();
+        let mut leaves = Vec::new();
+        n.walk_tree(&held, &mut |id, depth, _| {
+            if depth == 0 {
+                leaves.push(*id);
+            }
+            true
+        });
+        leaves
+    };
+    let wide = ids_from(1400);
+    let narrow = ids_from(237);
+    let tiny = ids_from(54);
+
+    assert_eq!(wide, narrow, "a 237-byte link must cut the file exactly as a 1400-byte one does");
+    assert_eq!(wide, tiny, "and so must a 54-byte one");
+    assert_eq!(
+        wide.len(),
+        body.len().div_ceil(file::CHUNK_BYTES),
+        "one chunk per CHUNK_BYTES of file, whatever the link"
+    );
+}
+
+#[test]
+fn a_chunk_larger_than_a_frame_still_crosses_it() {
+    // The other half of the separation, and the dependency it creates: a chunk is
+    // routinely bigger than a hop's frame, so it only moves because the *link*
+    // splits it. Nothing about the chunk changes — the far end reassembles the
+    // envelope before the router sees anything, and the content id matches.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, _) = publisher.publish_file("big.bin", &pullable_file(), ZERO_DEST, NOW);
+    let held = publisher.manifests.get(&magnet).expect("published").clone();
+    let first = held.chunk_ids[0];
+    let wire = publisher.named_wire(&first).expect("a chunk");
+    assert!(wire.len() > 237, "a chunk exceeds a LoRa frame, which is the point");
+
+    // Split it for a 237-byte link and put it back, as a bridge pair does.
+    let pieces = linkfrag::split_for_link(&wire, 237, 1);
+    assert!(pieces.len() > 1, "the link had to cut it into {} pieces", pieces.len());
+    let mut rx = linkfrag::Reassembler::default();
+    let mut rebuilt = None;
+    for p in &pieces {
+        if let Some(whole) = rx.accept(0, p, NOW) {
+            rebuilt = Some(whole);
+        }
+    }
+    let rebuilt = rebuilt.expect("the far end reassembles it");
+    assert_eq!(rebuilt, wire, "byte for byte");
+
+    let (e, _) = Envelope::decode(&rebuilt).expect("a chunk envelope");
+    assert_eq!(file::content_id(&e.payload), first, "and it is still the same named content");
 }

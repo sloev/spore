@@ -69,6 +69,15 @@ impl Node {
             // no way to name what went missing.
             self.walk_tree(m, &mut |id, _, held| {
                 if held {
+                    // A manifest names *content*; eviction works on *envelopes*
+                    // (M11-M). Pinning the content id alone silently pinned
+                    // nothing, so an in-progress fetch could have its chunks
+                    // evicted out from under it. Pin both: the envelope carrying
+                    // the content, and the raw id for objects with no file-layer
+                    // tag — a sealed header is named by envelope id.
+                    if let Some(envelope) = self.store.by_content(id) {
+                        pinned.insert(envelope);
+                    }
                     pinned.insert(*id);
                 }
                 true
