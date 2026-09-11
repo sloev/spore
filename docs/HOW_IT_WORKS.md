@@ -148,6 +148,38 @@ sneakernet the person carrying the file really might be fifteen minutes away.</p
 </div></div>
 
 <div class="card"><div class="card-body">
+<h3 class="text-h5">A want that crosses an ocean in a pocket</h3>
+<p class="text-muted">Alice wants a file. She knows it exists — its index reached
+her — but nobody within radio range has a single byte of it, and there is no
+route to anyone who does. She asks anyway. Nothing answers.</p>
+<p class="text-muted">A courier is flying out that week, and takes a copy of the
+index with him on a USB key.</p>
+<ol class="text-muted">
+<li>In another country he meets a mesh he has never seen before, full of people
+who never met Alice and never heard her ask. His node says what it is looking
+for.</li>
+<li>Somebody there has the file. It has no idea who wants it or why — the index
+names the pieces, the pieces match, so it hands them over.</li>
+<li>He flies home and meets Alice. Now <em>he</em> is the one with the file, and
+her original question — asked to an empty room two weeks earlier — is finally
+answered by a neighbour.</li>
+</ol>
+<p class="text-muted"><strong>What actually travelled was the index, not the
+question.</strong> A request in SPORE is a one-hop thing: it is spoken to whoever
+is present, answered or not, and forgotten. It cannot be saved to a USB key
+because there is nothing to save. But the index <em>is</em> an ordinary stored
+message, it is what makes a file's pieces legal to ask for, and anyone holding
+one can ask anywhere. Carrying the index is carrying the demand — which is why
+the small index floods and the large pieces do not.</p>
+<p class="text-muted">Nobody in this story needed a route, an account, or the
+publisher, who may have been offline throughout. What the journey <em>does</em>
+need is to finish in time: pieces carry the publisher's expiry — a week, by
+default — so sneakernet range is measured in <strong>days, not distance</strong>.
+Fly too slowly and the courier arrives holding an index for a file the far end
+will no longer serve.</p>
+</div></div>
+
+<div class="card"><div class="card-body">
 <h3 class="text-h5">A small file, with no round trip at all</h3>
 <p class="text-muted">A 2 kB note is published. The index goes out, and the first
 few pieces go with it — enough that the whole file arrives in one shot. The

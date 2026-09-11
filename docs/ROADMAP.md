@@ -682,18 +682,36 @@ that had never asked for it.
 **The lease is wall-clock, not connection — which is what keeps this
 delay-tolerant.** Carrying bytes already moves a file with no link at all:
 publishing a 20 kB file leaves 16 envelopes in the store, and a node that copies
-them reassembles the file byte-for-byte having never met the publisher, over as
-many offline legs as you like. What sneakernet cannot do today is *pull* — "I
-want file X, go find it" needs a live neighbour to WANT from.
+many offline legs as you like.
 
-Recursive pull fixes that too, but only if a pending-interest entry is allowed to
-outlive the meeting that created it. B adopts A's interest, and B and A part; B
-meets C a day later, fetches, caches; B meets A a week later and serves. The
-request itself has travelled by sneakernet. If the lease is scoped to a live
-connection instead of to time, recursion becomes an online-only feature and
-throws away the one property the rest of the protocol is built on. So the PIT
-entry is stored, ages by dwell like everything else, and dies with the object's
-expiry.
+**Carrying your *own* demand already works, and it is the manifest that carries
+it.** A WANT cannot travel — hops=0, unsigned, consumed on receipt, never stored,
+so there is nothing to put on a USB key. The *manifest* can: it is an ordinary
+stored envelope, and holding one is exactly what makes a file's chunks legal to
+ask for. A courier who carries the index asks for its chunks wherever it lands,
+gets them from a stranger who never met the requester, and serves them on the way
+back. `a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher` is the
+test, over two multi-day legs with no shared link and no shared time base.
+
+Two real limits, both measured rather than assumed:
+
+- **The journey has a deadline.** Chunks carry the publisher's expiry
+  (`DEFAULT_MESSAGE_EXPIRY_SECS`, 7 days), so a round trip longer than that
+  arrives to find nothing left to serve. Sneakernet range is time, not distance.
+  Pinned by `a_sneakernet_journey_has_a_deadline_and_it_is_the_publisher_s_expiry`.
+- **Carrying *someone else's* demand does not work.** That is the PIT, and it is
+  an in-memory `HashMap` with a 900-second wall-clock lease. It does not survive
+  a restart, let alone a flight.
+
+This passage used to assert that "the PIT entry is stored, ages by dwell like
+everything else, and dies with the object's expiry." **None of that is
+implemented** — it stated the design the argument needs, in the present tense,
+beside code that does none of it. The argument itself still holds: if the lease
+is scoped to a live connection rather than to time, recursion becomes an
+online-only feature and throws away the property the rest of the protocol is
+built on. B adopts A's interest, B and A part, B meets C a day later and fetches,
+B meets A a week later and serves. That is **M11-P**, and until it exists adopted
+interest is an online-only mechanism sitting inside a delay-tolerant protocol.
 
 **The magnet is the index, and chunks alone are not a file.** A node handed only
 the chunks holds every byte and cannot name them — `has_file` is false, because
@@ -726,6 +744,7 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | M11-N Name the file layer's ceilings (#256.6) | ⬜ | M11-A's argument applied to files: max blocks, max chunk size (bounded by `MAX_PAYLOAD_BYTES` minus the chunk header — *not* 64 KiB, a chunk must fit an envelope), max tree depth, max manifest size. **Not** "relays drop oversized envelopes": that is the M11-D bug, and a relay splits rather than drops |
 | M11-O A one-way push profile (#256.1, narrowed) | ⬜ | Erasure-coded symbols streamed with no back-channel, for the case pull cannot serve at all: a simplex link, where there is no WANT and no HAVE. Its own budget, never the default path, and explicitly *not* a replacement for chunk/WANT — content-addressed chunks are what make caching, dedup and the recursive-pull authorisation gate work |
 | M11-K Cancel an adopted interest | ✅ | A WANT carrying `fl::CANCEL` (b7) retires the sender's waiter; when the last waiter for an id leaves, the interest is dropped and the cancel is emitted onward, so the unwind follows the path the demand did. A flag rather than a new type on purpose: an unknown *flag* is still consumed as a WANT, an unknown *type* would fall through to store-and-forward. `Node::abandon` is the fetcher's side, `Node::forget_interests_on` covers a fetcher that cannot say goodbye. Cancel only ever removes the *sender's own* waiter, so it is not a DoS primitive, and it can only shrink state, so it needs no admission check. `spore-sim`'s `fetch-abandoned` is the acceptance test and measures all three endings: a silent departure leaves **28** interests standing across the relays, a cancel and a dropped link both leave **0** |
+| M11-P A pending interest that survives the meeting | ⬜ | Adopted interest is delay-*intolerant* inside a delay-tolerant protocol: `interests` is an in-memory `HashMap` with a 900-second wall-clock lease, so it does not survive a restart, let alone a courier's flight. Carrying your *own* demand already works — the manifest is the carryable want, proved by `a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher` — but carrying *someone else's* does not. Needed: persist the PIT, age it by dwell like the store rather than by wall clock, and bound it by the object's expiry instead of by 900 s (a file's chunks die at `DEFAULT_MESSAGE_EXPIRY_SECS` anyway, so an interest outliving them is pure cost). M11-K's cancel is what keeps a longer lease affordable — without it, lengthening the lease would multiply exactly the standing pull `fetch-abandoned` measures. The roadmap asserted this was already the design; it never was |
 | M11-L A malicious-WANT scenario in `spore-sim` | ⬜ | Recursive pull's amplification story is *reasoned*, and one unit test covers the gate (`a_want_for_an_id_no_manifest_names_starts_no_hunt`). Nothing measures what a node that adopts interest in everything, or lies about depth, costs a mesh. Until that exists the bound is argued rather than known — which is the thing `spore-sim` was built to stop |
 | M11-I Recursive pull: the refinements | ⬜ | The mechanism ships — adopt-don't-forward, the parent-manifest gate, a wall-clock lease, depth on the WANT payload, sealed files excluded, and helper relays caching what they carry. `spore-sim`'s `file-multihop` is the acceptance test: a file crosses three hops where it previously could not. Owed: **fanout by neighbour** rather than by interface (today a node asks on every interface but the asker's, bounded by interest-table dedupe rather than by a 2–3 cap, so a node with many links is noisier than it should be); **preferring neighbours that INV'd the id or announced the magnet**, which needs per-neighbour INV memory; and seed advertisement (`have::<magnet>`) so recursion aims instead of spreading sideways |
 

@@ -708,3 +708,150 @@ fn a_sealed_file_reaches_its_recipient_over_the_wire() {
     assert_eq!(n, body.len() as u64);
     assert_eq!(out, body);
 }
+
+/// A meeting: hand every frame `a` wants to send to `b`, and every frame that
+/// provokes back to `a`, until the exchange goes quiet. Two nodes in a room.
+fn meet(a: &mut Node, b: &mut Node, opening: Vec<Forward>, now: u32) {
+    let mut in_flight = opening;
+    for _ in 0..64 {
+        if in_flight.is_empty() {
+            return;
+        }
+        let back = pump(a, b, in_flight, now);
+        if back.is_empty() {
+            return;
+        }
+        in_flight = pump(b, a, back, now);
+    }
+}
+
+#[test]
+fn a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher() {
+    // The sneakernet pull. A WANT itself cannot travel — it is hops=0, unsigned
+    // and consumed on receipt, so there is nothing to put on a USB key. What
+    // travels is the **manifest**: an ordinary stored envelope, and the thing
+    // that makes a file's chunks legal to ask for. Carrying the index *is*
+    // carrying the demand.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+
+    // The root floods, so it reaches people the chunks never will. Alice hears
+    // only that — she knows the file exists and cannot get a byte of it.
+    let root = match &published[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    let mut alice = Node::new("alice", &[]);
+    let mut courier = Node::new("courier", &[]);
+    alice.on_rx(&root, 0, None, NOW);
+    courier.on_rx(&root, 0, None, NOW);
+
+    assert!(alice.file_name(&magnet).is_some(), "alice knows the file exists");
+    assert!(!alice.has_file(&magnet), "and holds none of it");
+    assert!(!alice.missing(&magnet, 8).is_empty(), "she has something to want");
+
+    // Alice asks the room. Nobody here has it, so the want dies at the edge of
+    // the local mesh — this is the case sneakernet exists for.
+    let asked = alice.fetch(&magnet);
+    assert!(!asked.is_empty(), "she asks");
+
+    // --- the courier flies. No link, no session, no shared time base. ---------
+    // A week later, in another country, and long past INTEREST_LEASE_SECS.
+    // Two days out. The journey has a *deadline*: a file's chunks carry the
+    // publisher's expiry (`DEFAULT_MESSAGE_EXPIRY_SECS`, 7 days), so the whole
+    // round trip has to finish inside it. Sneakernet range is measured in time,
+    // not distance, and this is the constant that sets it.
+    let abroad = NOW + 2 * 86_400;
+
+    // Bob has the bytes. He never met alice and never heard her ask.
+    let mut bob = Node::new("bob", &[]);
+    for f in &published {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        bob.on_rx(wire, 0, None, abroad);
+    }
+    for round in 0..24 {
+        // The clock advances: a meeting takes time, and the per-link gossip
+        // budget refills with it. Holding `now` still would model a link that
+        // spends its whole allowance in one instant and never gets it back.
+        let t = abroad + round * 60;
+        let want = bob.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        meet(&mut bob, &mut publisher, want, t);
+    }
+    assert!(bob.has_file(&magnet), "bob holds the whole file");
+
+    // The courier announces what it wants, because it still holds the manifest.
+    for round in 0..24 {
+        let t = abroad + round * 60;
+        let want = courier.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        meet(&mut courier, &mut bob, want, t);
+    }
+    assert!(courier.has_file(&magnet), "the courier carries it home");
+
+    // --- and flies back. Another week; the publisher is still never involved. -
+    let home = abroad + 2 * 86_400; // four days total, inside the expiry
+    for round in 0..24 {
+        let t = home + round * 60;
+        let want = alice.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        meet(&mut alice, &mut courier, want, t);
+    }
+
+    assert!(alice.has_file(&magnet), "alice has the file she asked for two weeks ago");
+    assert_eq!(
+        alice.file_bytes(&magnet).expect("assembled"),
+        vec![0x5A; 40_000],
+        "byte for byte, having never met anyone who had it when she asked"
+    );
+}
+
+#[test]
+fn a_sneakernet_journey_has_a_deadline_and_it_is_the_publisher_s_expiry() {
+    // The limit on carrying a file by hand is **time, not distance**. Chunks are
+    // ordinary envelopes and carry the publisher's expiry, so a courier who takes
+    // longer than that arrives holding bytes the far end will no longer serve.
+    // Worth pinning: the failure is silent — the courier still holds the
+    // manifest, still knows the file exists, and simply never completes.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+
+    let mut holder = Node::new("holder", &[]);
+    for f in &published {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        holder.on_rx(wire, 0, None, NOW);
+    }
+    for round in 0..24 {
+        let want = holder.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        meet(&mut holder, &mut publisher, want, NOW + round * 60);
+    }
+    assert!(holder.has_file(&magnet), "the holder has it while it is fresh");
+
+    // A courier who set out with the manifest and came back too late.
+    let mut courier = Node::new("courier", &[]);
+    let root = match &published[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    courier.on_rx(&root, 0, None, NOW);
+    let late = NOW + DEFAULT_MESSAGE_EXPIRY_SECS + 3600;
+    for round in 0..24 {
+        let want = courier.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        meet(&mut courier, &mut holder, want, late + round * 60);
+    }
+    assert!(!courier.has_file(&magnet), "past the expiry there is nothing left to fetch");
+}
