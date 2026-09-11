@@ -41,8 +41,21 @@ impl Node {
         // rather than carried inside it — see `file::Manifest::hdr_id`. Stored
         // and pushed like a chunk, so the recipient fetches it the same way.
         let mut hdr_id: Id = [0u8; 16];
-        let chunk_size = self.mtu.saturating_sub(64).max(1);
-        let count = bytes.len().div_ceil(chunk_size).max(1);
+        // **Content-defined boundaries, on protocol-fixed parameters** (M11-M).
+        //
+        // This was `mtu - 64`, cut at fixed offsets, and both halves were wrong.
+        // MTU-derived: a leftover from before link fragmentation, when a sender
+        // had to cut for the narrowest hop it might meet. M11-D ended that, and
+        // all the publisher's MTU still bought was that a Wi-Fi node and a LoRa
+        // node cut the same file differently and therefore shared nothing —
+        // which defeats content addressing exactly as thoroughly as the random
+        // `file_id` did. Fixed offsets: inserting one byte shifts every later
+        // boundary, so an edited file shares nothing with the version before it.
+        let mut lens = cdc::chunk_lengths(bytes);
+        if lens.is_empty() {
+            lens.push(0); // an empty file is still one (empty) chunk
+        }
+        let count = lens.len();
         let expiry = now + 7 * 86400;
         let mut file_id = [0u8; 16];
         OsRng.fill_bytes(&mut file_id);
@@ -56,9 +69,9 @@ impl Node {
 
         // (id, plaintext bytes of file covered) for the level being grouped.
         let mut level: Vec<(Id, u64)> = Vec::with_capacity(count);
-        for i in 0..count {
-            let start = i * chunk_size;
-            let end = ((i + 1) * chunk_size).min(bytes.len());
+        let mut start = 0usize;
+        for (i, len) in lens.iter().enumerate() {
+            let end = (start + len).min(bytes.len());
             // The AEAD tag adds 16 bytes, which the chunk size already has room
             // for — a sealed chunk rides the same frame an open one does.
             let body = match key {
@@ -73,6 +86,19 @@ impl Node {
             let mut payload = Vec::with_capacity(1 + body.len());
             payload.push(file::CHUNK_TAG);
             payload.extend_from_slice(&body);
+            // Already held? Then this part of the file is already published —
+            // reuse it rather than minting a second envelope for the same bytes.
+            // This is what makes *republishing* cheap: a one-byte edit changes
+            // the chunks it touches and nothing else, so an edited file costs a
+            // few new objects instead of a whole second copy. Without this the
+            // content index would dedup for *fetchers* while the publisher
+            // quietly stored the file twice.
+            let cid = file::content_id(&payload);
+            if self.store.has_content(&cid) {
+                level.push((cid, (end - start) as u64));
+                start = end;
+                continue;
+            }
             let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
             ce.flags |= fl::FLOOD;
             // **Link-local (M11-J).** A chunk travels one hop, to whoever asked
@@ -97,6 +123,7 @@ impl Node {
             level.push((file::content_id(&ce.payload), (end - start) as u64));
             self.mark_seen(&ce);
             self.store_put(&ce, now);
+            start = end;
         }
 
         // The sealed header, as its own object on the same per-file topic. It is
@@ -128,7 +155,7 @@ impl Node {
                 let covered: u64 = group.iter().map(|(_, n)| *n).sum();
                 let node = file::Manifest {
                     file_id,
-                    chunk_size: chunk_size as u32,
+                    chunk_size: cdc::CHUNK_AVG_BYTES as u32,
                     count: group.len() as u32,
                     total_len: covered,
                     name: String::new(),
@@ -148,7 +175,7 @@ impl Node {
 
         let manifest = file::Manifest {
             file_id,
-            chunk_size: chunk_size as u32,
+            chunk_size: cdc::CHUNK_AVG_BYTES as u32,
             count: level.len() as u32,
             total_len: bytes.len() as u64,
             name: name.to_string(),
@@ -645,8 +672,10 @@ impl Node {
     /// file is announced by one manifest, exactly as it was before trees
     /// existed, and one round trip is enough to learn every chunk id.
     pub fn max_flat_file_bytes(&self) -> usize {
-        let chunk = self.mtu.saturating_sub(64).max(1);
-        file::root_fanout(self.mtu, 96, 0, false) * chunk
+        // The *average* chunk, not an MTU-derived one (M11-M): how many ids fit
+        // in the root is still a question about this node's frame, but how much
+        // file each id covers is a protocol constant now, the same everywhere.
+        file::root_fanout(self.mtu, 96, 0, false) * cdc::CHUNK_AVG_BYTES
     }
 
     /// The ceiling on everything this node holds at once, files included.
@@ -679,18 +708,33 @@ impl Node {
         self.manifests
             .iter()
             .map(|(magnet, m)| {
-                let total = if m.chunk_size == 0 {
+                // `chunk_size` is an advertised *average* since M11-M, so
+                // `total_len / chunk_size` is an estimate rather than the count.
+                // Count the leaves the tree actually names, and fall back to the
+                // estimate only while part of the tree is still hidden — an
+                // unheld interior conceals its whole subtree, so the walk
+                // undercounts exactly then.
+                let estimate = if m.chunk_size == 0 {
                     m.count
                 } else {
                     m.total_len.div_ceil(m.chunk_size as u64) as u32
                 };
                 let mut have = 0u32;
+                let mut leaves = 0u32;
+                let mut resolved = true;
                 self.walk_tree(m, &mut |_, depth, held| {
-                    if depth == 0 && held {
-                        have += 1;
+                    if depth == 0 {
+                        leaves += 1;
+                        if held {
+                            have += 1;
+                        }
+                    }
+                    if !held {
+                        resolved = false;
                     }
                     true
                 });
+                let total = if resolved { leaves } else { estimate.max(leaves) };
                 (*magnet, m.name.clone(), m.total_len, have, total.max(1))
             })
             .collect()

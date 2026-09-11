@@ -813,6 +813,8 @@ pub mod congestion;
 // content, not by who made it.
 // ---------------------------------------------------------------------------
 
+/// Content-defined chunking (M11-M) — where a file's parts begin and end.
+pub mod cdc;
 pub mod file;
 
 // ---------------------------------------------------------------------------
@@ -1408,7 +1410,9 @@ mod tests {
     fn in_progress_file_chunks_are_pinned_under_memory_pressure() {
         let now = 1_700_000_000;
         let mut src = Node::new("src", &[]);
-        let file: Vec<u8> = (0..4000u32).map(|i| (i.wrapping_mul(7)) as u8).collect();
+        // Several chunks' worth at `CHUNK_AVG_BYTES`, and non-repeating so they
+        // are several *distinct* chunks (M11-M).
+        let file: Vec<u8> = (0..8_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, _mf) = src.publish_file("f.bin", &file, ZERO_DEST, now);
 
         // Pull the manifest wire and the chunk wires straight out of src's store.
@@ -1568,7 +1572,10 @@ mod tests {
         // path. A file inside the push budget now arrives with its manifest and
         // never asks for anything — that is `a_small_file_arrives_without_a_
         // round_trip` in `invariant.rs`, and it is a different test.
-        let data: Vec<u8> = (0..40_000u32).map(|i| (i.wrapping_mul(31)) as u8).collect();
+        // Non-repeating and past the push budget: chunks average CHUNK_AVG_BYTES
+        // and are content-addressed, so a short or uniform file is a handful of
+        // objects that ride along with the manifest (M11-M).
+        let data: Vec<u8> = (0..15_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, mf) = a.publish_file("field-notes.txt", &data, ZERO_DEST, now);
 
         // The manifest floods, and the first few chunks ride with it — but not
@@ -2178,7 +2185,10 @@ mod tests {
         let mut n = Node::new("n", &[]);
         // A small MTU buys deep trees for the price of a small file.
         n.mtu = 200;
-        let body: Vec<u8> = (0..30_000u32).map(|i| i.wrapping_mul(31) as u8).collect();
+        // Non-repeating and past the push budget: chunks average CHUNK_AVG_BYTES
+        // and are content-addressed, so a short or uniform file is a handful of
+        // objects that ride along with the manifest (M11-M).
+        let body: Vec<u8> = (0..60_000u32).flat_map(|i| i.to_be_bytes()).collect();
         assert!(body.len() > n.max_flat_file_bytes() * 8, "big enough to need levels");
 
         let (magnet, forwards) = n.publish_file("deep.bin", &body, ZERO_DEST, now);
@@ -2205,7 +2215,13 @@ mod tests {
         b.mtu = 200;
         meet(&mut a, &mut b, now);
 
-        let body: Vec<u8> = (0..12_000u32).map(|i| i.wrapping_mul(17) as u8).collect();
+        // Non-repeating and past the push budget: chunks average CHUNK_AVG_BYTES
+        // and are content-addressed, so a short or uniform file is a handful of
+        // objects that ride along with the manifest (M11-M).
+        // A 200-byte MTU names ~3 ids in the root, so a few chunks already needs
+        // levels. Kept inside one gossip burst because the loop below holds the
+        // clock still, and the per-interface budget only refills with time.
+        let body: Vec<u8> = (0..6_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, forwards) = a.publish_file("deep.bin", &body, ZERO_DEST, now);
 
         // Only the root reaches B. It names sub-manifests, not chunks, so B
@@ -2302,7 +2318,7 @@ mod tests {
         // chunks collapsed to about 32 distinct objects and the test stopped
         // exercising spilling at all. Dedup is the feature; this test is not
         // about it.
-        let body: Vec<u8> = (0..100_000u32).flat_map(|i| i.to_be_bytes()).collect();
+        let body: Vec<u8> = (0..300_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, _) = a.publish_file("big.bin", &body, ZERO_DEST, now);
 
         // The file is held, but almost none of it is resident.
@@ -2331,7 +2347,7 @@ mod tests {
         // chunks are content-addressed, and `i.wrapping_mul(7) as u8` repeats
         // every 256 bytes — its ~150 chunks dedup down to a handful, which is
         // correct behaviour and makes this a poor test of *adoption*.
-        let body: Vec<u8> = (0..50_000u32).flat_map(|i| i.to_be_bytes()).collect();
+        let body: Vec<u8> = (0..150_000u32).flat_map(|i| i.to_be_bytes()).collect();
 
         let magnet = {
             let mut a = Node::new("a", &[]);
@@ -2397,7 +2413,10 @@ mod tests {
         meet(&mut a, &mut b, now);
 
         // Past what one sealed manifest can list, so this is a tree as well.
-        let body: Vec<u8> = (0..120_000u32).map(|i| i.wrapping_mul(29) as u8).collect();
+        // Non-repeating and past the push budget: chunks average CHUNK_AVG_BYTES
+        // and are content-addressed, so a short or uniform file is a handful of
+        // objects that ride along with the manifest (M11-M).
+        let body: Vec<u8> = (0..120_000u32).flat_map(|i| i.to_be_bytes()).collect();
         let (magnet, _) = a.publish_file_sealed("plans.pdf", &body, b.addr, now).expect("prekey known");
 
         let root = a.manifests.get(&magnet).unwrap();
@@ -2410,7 +2429,12 @@ mod tests {
         // every wire — a few probes catch a plaintext chunk just as well.
         let probes: Vec<&[u8]> = (0..8).map(|i| &body[i * 9_000..i * 9_000 + 32]).collect();
         for (_, w) in a.store_wires() {
-            assert!(w.len() <= a.mtu, "a sealed chunk must still fit the link");
+            // **Not** `w.len() <= a.mtu`. A chunk stopped being sized to the
+            // publisher's link in M11-M: cutting for the local MTU was what made
+            // a Wi-Fi node and a LoRa node chunk the same file differently and
+            // share nothing. A hop that cannot carry this splits it and the far
+            // end reassembles (M11-D), so the only ceiling left is the envelope's.
+            assert!(w.len() <= MAX_PAYLOAD_BYTES, "a chunk must fit an envelope");
             assert!(!w.windows(9).any(|x| x == b"plans.pdf"), "the file name leaked");
             for p in &probes {
                 assert!(!w.windows(32).any(|x| x == *p), "file contents leaked");
@@ -2450,7 +2474,15 @@ mod tests {
         let wire = b.named_wire(&leaves[idx as usize]).expect("a middle chunk");
         let (ce, _) = Envelope::decode(&wire).unwrap();
         let plain = chunk_open(&ce.payload[1..], &key, idx).expect("one chunk opens alone");
-        let start = idx as usize * held.chunk_size as usize;
+        // Chunks vary in length now, so the offset is the sum of what came
+        // before rather than `idx * chunk_size`.
+        let start: usize = (0..idx as usize)
+            .map(|i| {
+                let w = b.named_wire(&leaves[i]).expect("an earlier chunk");
+                let (e, _) = Envelope::decode(&w).unwrap();
+                chunk_open(&e.payload[1..], &key, i as u32).expect("opens").len()
+            })
+            .sum();
         assert_eq!(plain, body[start..start + plain.len()]);
 
         // A relay carries every part and can read none of it.

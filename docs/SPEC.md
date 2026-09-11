@@ -881,6 +881,25 @@ This is a Part III profile because it changes what an endpoint chooses to ask
 for, not what any envelope looks like. T0 is unchanged: receive → dedup → store →
 deliver → forward.
 
+- **Boundaries are content-defined, on parameters fixed by the protocol**
+  (M11-M). A publisher cuts at points chosen by a rolling hash of the bytes —
+  min 1 KiB, average 4 KiB, max 8 KiB — and **not** at multiples of its own MTU.
+  Both halves are load-bearing. Content-defined: cutting every *N* bytes means
+  inserting one byte shifts every later boundary, so an edited file shares
+  nothing with the version before it. Protocol-fixed: a Wi-Fi publisher cutting
+  1336-byte chunks and a LoRa publisher cutting 173-byte ones produce different
+  bytes for the same file and so share no content ids at all, which defeats
+  content addressing as thoroughly as a random `file_id` would.
+  MTU-independence is only *possible* because a hop that cannot carry a chunk
+  splits it (Part II) — which makes link fragmentation a **dependency** of the
+  file layer, not an optimisation. A transport that cannot split cannot move
+  files.
+  The sizes are chosen against the smallest node rather than the largest file: an
+  8 KiB ceiling fits the 16 KiB reassembly floor a minimal profile sets, and a
+  4 KiB average keeps a 1 MB file to ~256 ids instead of the ~6000 a LoRa-sized
+  chunk would need. A manifest's `chunk_size` is therefore an advertised
+  *average*, not the size of every chunk, and MUST NOT be used to compute a
+  chunk's offset — parts are written in the order the manifest names them.
 - **Content ids, not envelope ids** (M11-M). A manifest names the **content id**
   of each part: the first 16 bytes of SHA-256 over the part's payload, and
   nothing else. This is deliberately *not* the envelope id, which hashes the

@@ -453,8 +453,12 @@ mod tests {
                 v.extend_from_slice(id);
             }
             // Nothing is missing — we published it — so ask for what we hold.
+            // Take what there *is*: chunks average `CHUNK_AVG_BYTES` now, so a
+            // file of this size is far fewer objects than it was and a fixed
+            // eight-id slice can run off the end.
             if v.is_empty() {
-                v.extend_from_slice(&n.stored_ids()[..16 * 8]);
+                let all = n.stored_ids();
+                v.extend_from_slice(&all[..all.len().min(16 * 8)]);
             }
             v
         });
@@ -478,7 +482,12 @@ mod tests {
         // chunks legal to adopt an interest in at all.
         let mut publisher = Node::new("publisher", &[]);
         let now = crate::bridge::hub::now();
-        let (magnet, fwds) = publisher.publish_file("f.bin", &vec![0xCD; 40_000], ZERO_DEST, now);
+        let (magnet, fwds) = publisher.publish_file(
+            "f.bin",
+            &(0..50_000u32).flat_map(|i| i.to_be_bytes()).collect::<Vec<u8>>(),
+            ZERO_DEST,
+            now,
+        );
         for f in &fwds {
             let bytes = match f {
                 Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
