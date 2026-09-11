@@ -362,8 +362,16 @@ fn an_adopted_interest_is_bounded_and_expires() {
         relay.limits().interests
     );
 
-    // Long past the lease, with any traffic at all to drive the sweep.
-    let later = NOW + INTEREST_LEASE_SECS + 1;
+    // Past the *old* fixed lease it is still held, because M11-P scopes an
+    // interest to the object rather than to a timer: these chunks have not
+    // expired, so the hunt for them still makes sense.
+    let old_lease = NOW + INTEREST_LEASE_SECS + 1;
+    relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, old_lease);
+    assert!(relay.open_interests() > 0, "an interest now outlives the meeting that created it");
+
+    // Past the object, it is gone. Bounded is bounded — what changed is *what*
+    // bounds it, not whether anything does.
+    let later = NOW + MAX_INTEREST_LEASE_SECS + 1;
     relay.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, later);
     assert_eq!(relay.open_interests(), 0, "an interest nobody renewed is forgotten");
 }
@@ -854,4 +862,188 @@ fn a_sneakernet_journey_has_a_deadline_and_it_is_the_publisher_s_expiry() {
         meet(&mut courier, &mut holder, want, late + round * 60);
     }
     assert!(!courier.has_file(&magnet), "past the expiry there is nothing left to fetch");
+}
+
+/// Set a courier hunting on Alice's behalf, and return what it was asked for.
+fn courier_adopts_alices_want(courier: &mut Node, magnet: &Id, published: &[Forward], now: u32) -> Vec<Id> {
+    let mut alice = Node::new("alice", &[]);
+    let root = match &published[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    alice.on_rx(&root, 0, None, now);
+    courier.on_rx(&root, 0, None, now);
+
+    let wanted = alice.missing(magnet, 4);
+    assert!(!wanted.is_empty(), "alice has something to want");
+    for id in &wanted {
+        courier.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(), 0, None, now);
+    }
+    assert!(courier.open_interests() > 0, "the courier took the job");
+    wanted
+}
+
+#[test]
+fn an_adopted_interest_outlives_the_meeting_that_created_it() {
+    // M11-P. Fifteen minutes was shorter than any journey worth making, which
+    // made adopted interest an online-only mechanism inside a delay-tolerant
+    // protocol. The lease now comes from the object: as long as the chunks could
+    // still turn up, and not one second longer.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut courier = Node::new("courier", &[]);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    courier_adopts_alices_want(&mut courier, &magnet, &published, NOW);
+
+    // A day later — far past the old fixed lease — the courier still remembers.
+    let a_day = NOW + 86_400;
+    courier.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, a_day);
+    assert!(
+        courier.open_interests() > 0,
+        "a {INTEREST_LEASE_SECS}s lease would have forgotten this before the courier reached the airport"
+    );
+
+    // But not past the object it is hunting for. Nothing will serve these chunks
+    // once the publisher's expiry has passed, so wanting them is pure cost.
+    let too_late = NOW + MAX_INTEREST_LEASE_SECS + 3600;
+    courier.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, too_late);
+    assert_eq!(courier.open_interests(), 0, "an interest must not outlive the object");
+}
+
+#[test]
+fn alices_want_rides_in_a_pocket_and_comes_home_answered() {
+    // The whole of M11-P in one story: Alice's *specific* request survives a
+    // restart, crosses to a mesh that never heard her ask, is answered there by a
+    // stranger, and comes back. The courier never wanted the file itself.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+
+    let mut courier = Node::new("courier", &[]);
+    let wanted = courier_adopts_alices_want(&mut courier, &magnet, &published, NOW);
+
+    // Onto the USB key.
+    let blob = courier.pending_interests();
+    assert!(blob.len() > 3, "there is something to carry");
+
+    // --- the courier's node is powered off and brought up again elsewhere -----
+    let abroad = NOW + 2 * 86_400;
+    let mut courier = Node::new("courier", &[]);
+    assert_eq!(courier.open_interests(), 0, "a fresh node remembers nothing by itself");
+    assert!(courier.restore_pending_interests(&blob, abroad), "the blob is well formed");
+    assert!(courier.open_interests() > 0, "and the want came back with it");
+
+    // Bob, abroad, has the file. He never met Alice.
+    let mut bob = Node::new("bob", &[]);
+    for f in &published {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        bob.on_rx(wire, 0, None, abroad);
+    }
+    for round in 0..24 {
+        let want = bob.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        meet(&mut bob, &mut publisher, want, abroad + round * 60);
+    }
+    assert!(bob.has_file(&magnet), "bob holds it");
+
+    // The courier arrives and says what it is carrying. Nobody asked it to.
+    let asking = courier.resume_interests(abroad);
+    assert!(!asking.is_empty(), "an interest that survived is spoken somewhere new");
+    meet(&mut courier, &mut bob, asking, abroad + 120);
+    for id in &wanted {
+        assert!(courier.has(id), "the courier got what Alice asked for, from a stranger");
+    }
+
+    // --- and home again, where Alice asks a second time ----------------------
+    let home = abroad + 2 * 86_400;
+    let mut served = 0usize;
+    for (k, id) in wanted.iter().enumerate() {
+        let rx = courier.on_rx(
+            &Envelope::new(ty::WANT, ZERO_DEST, 0, id.to_vec()).wire(),
+            0,
+            None,
+            home + k as u32,
+        );
+        served += usize::from(!rx.forwards.is_empty());
+    }
+    assert_eq!(served, wanted.len(), "every id Alice wanted is answered from the pocket");
+}
+
+#[test]
+fn a_restored_interest_cannot_buy_a_longer_promise_than_the_node_would_make() {
+    // Otherwise "restore" is a way to hand a node an obligation it never adopted
+    // and could not have — a blob is not a signed manifest, and the resource
+    // invariant does not care that the bytes came from disk.
+    let mut n = Node::new("victim", &[]);
+    let forged = {
+        let mut b = vec![1u8, 0, 1];
+        b.extend_from_slice(&[0xAB; 16]);
+        b.extend_from_slice(&u32::MAX.to_be_bytes()); // "wanted until the heat death"
+        b
+    };
+    assert!(n.restore_pending_interests(&forged, NOW));
+    assert_eq!(n.open_interests(), 1);
+
+    // Past the ceiling the node sets for itself, it is gone regardless.
+    let past = NOW + MAX_INTEREST_LEASE_SECS + 3600;
+    n.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, past);
+    assert_eq!(n.open_interests(), 0, "a blob cannot mint an immortal interest");
+}
+
+#[test]
+fn a_malformed_interest_blob_changes_nothing() {
+    let mut n = Node::new("victim", &[]);
+    assert!(!n.restore_pending_interests(&[], NOW));
+    assert!(!n.restore_pending_interests(&[2, 0, 1], NOW), "wrong version byte");
+    assert!(!n.restore_pending_interests(&[1, 0, 5], NOW), "count does not match length");
+    assert_eq!(n.open_interests(), 0);
+}
+
+#[test]
+fn restoring_interests_is_still_capped_by_the_local_limit() {
+    // The blob is a local allowance, not an exemption from one.
+    let mut n = Node::new("victim", &[]);
+    n.set_limits(tight());
+    let mut b = vec![1u8];
+    b.extend_from_slice(&100u16.to_be_bytes());
+    for i in 0..100u8 {
+        b.extend_from_slice(&[i; 16]);
+        b.extend_from_slice(&(NOW + 3600).to_be_bytes());
+    }
+    assert!(n.restore_pending_interests(&b, NOW));
+    assert!(n.open_interests() <= n.limits().interests, "restored {}", n.open_interests());
+}
+
+#[test]
+fn a_carried_interest_is_restated_on_a_cadence_not_every_tick() {
+    // The cadence is what turns a remembered want into an asked one after a
+    // journey — but a node that re-asked every tick would be a beacon of other
+    // people's requests, which is the amplifier the whole invariant exists to
+    // prevent.
+    let mut publisher = Node::new("publisher", &[]);
+    let mut courier = Node::new("courier", &[]);
+    let (magnet, published) = publisher.publish_file("atlas.bin", &vec![0x5A; 40_000], ZERO_DEST, NOW);
+    courier_adopts_alices_want(&mut courier, &magnet, &published, NOW);
+
+    // First tick after adopting: it speaks, because it may have just arrived
+    // somewhere new and nothing else would make it ask.
+    let spoke = courier.tick(NOW + 1);
+    assert!(spoke.iter().any(|f| matches!(f, Forward::Flood { .. })), "a node holding an interest says so");
+
+    // Immediately again: silence. The question is standing, not a retry.
+    assert!(courier.tick(NOW + 2).is_empty(), "it does not repeat itself every tick");
+
+    // And once the cadence has elapsed, it asks again — this is the arrival path.
+    let later = NOW + INTEREST_RESUME_SECS + 3;
+    assert!(!courier.tick(later).is_empty(), "a standing question is restated");
+}
+
+#[test]
+fn a_node_carrying_nothing_stays_quiet() {
+    // The cadence must cost nothing when there is nothing to carry, or every
+    // node in the mesh pays for a feature almost none of them are using.
+    let mut n = Node::new("quiet", &[]);
+    assert!(n.tick(NOW + INTEREST_RESUME_SECS + 1).is_empty());
+    assert!(n.tick(NOW + 2 * INTEREST_RESUME_SECS + 2).is_empty());
 }

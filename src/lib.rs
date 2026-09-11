@@ -247,7 +247,36 @@ pub const MAX_INTERESTS: usize = 256;
 /// holder later and serve A at the next meeting. Scoping this to a live link
 /// would make recursive pull an online-only feature and throw away the
 /// store-and-forward property the rest of the protocol is built on.
+/// The **floor**, not the lease. `Node::interest_deadline` takes the expiry of
+/// the manifest that names the id and clamps it into
+/// `[now + INTEREST_LEASE_SECS, now + MAX_INTEREST_LEASE_SECS]`, so an interest
+/// lives as long as the object could still turn up and no longer. This constant
+/// is what an id with no readable manifest expiry falls back to.
 pub const INTEREST_LEASE_SECS: u32 = 900;
+
+/// The **ceiling** on an adopted interest (M11-P).
+///
+/// Matches `DEFAULT_MESSAGE_EXPIRY_SECS`, because that is when the chunks being
+/// hunted for die: an interest that outlives the object is hunting for bytes
+/// nobody will serve. Fifteen minutes — the old fixed lease — made adopted
+/// interest an online-only mechanism inside a delay-tolerant protocol, which a
+/// courier crossing a border in a day could never use.
+///
+/// Lengthening a remote-caused commitment is only safe because three other
+/// bounds hold it: the deadline is read from a *signed* manifest whose expiry the
+/// asker does not control, `Limits::interests` caps how many exist at once, and
+/// M11-K's cancel retires one as soon as its last waiter leaves.
+pub const MAX_INTEREST_LEASE_SECS: u32 = DEFAULT_MESSAGE_EXPIRY_SECS;
+
+/// How often a node re-states the interests it is still carrying (M11-P).
+///
+/// The cadence is what turns a *remembered* want into an *asked* one after a
+/// journey. Slow on purpose: this is a standing question, not a retry, and the
+/// answer is cached by whoever hears it. Five minutes costs one small frame per
+/// interest-holding node per five minutes and covers arrival, reconnection and a
+/// neighbour that rebooted.
+pub const INTEREST_RESUME_SECS: u32 = 300;
+
 /// How far a WANT may be re-asked. Decremented at each adopting hop.
 pub const DEFAULT_WANT_DEPTH: u8 = 8;
 
@@ -436,8 +465,12 @@ impl Limits {
     }
 }
 
-/// An object too large to carry as one fountain set — returned by
-/// [`Node::send`].
+/// A payload past what `plen` can describe — returned by [`Node::send`].
+///
+/// The name outlived its original meaning: this used to be "too large to carry
+/// as one fountain set", back when `send` fragmented end to end. Splitting moved
+/// to the link, so the only ceiling left is structural —
+/// [`MAX_PAYLOAD_BYTES`], what a `u16` length field can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TooLarge {
     /// Payload bytes the caller passed.
@@ -674,6 +707,8 @@ pub struct Node {
     /// requester in its own right and passes the answer back down. Entries carry
     /// a wall-clock lease, so an interest survives the meeting that created it.
     interests: HashMap<Id, Interest>,
+    /// When `tick` last re-stated them (M11-P).
+    last_interest_resume: u32,
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
     acked: HashSet<Id>,            // orig ids we've received receipts for
     rpc_pending: HashSet<u64>,     // request ids awaiting a response (L4)

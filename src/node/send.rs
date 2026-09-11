@@ -98,24 +98,19 @@ impl Node {
 
     /// High-level send: deliver `data` of *any* size to an address or topic.
     ///
-    /// Small payloads ride a single signed envelope (identical to `originate`).
-    /// Anything larger than `self.mtu` is fountain-fragmented (§3) into equal
-    /// chunks plus a margin of repair chunks, so it survives lossy, reordered,
-    /// even one-way delivery; the receiver reassembles and verifies the original
-    /// signature before the app ever sees it. Callers never think about MTUs.
+    /// **One signed envelope, whatever the size.** Callers never think about
+    /// MTUs: a hop that cannot carry the frame splits it for that hop alone and
+    /// the far end reassembles before the router sees anything. The sender does
+    /// not guess on behalf of a path it cannot see.
     ///
-    /// One fountain set caps at ~`mtu`×255 (≈ 50 KB at defaults); larger objects
-    /// belong to the manifest+swarm layer (files), not a single `send`.
-    /// Originate a signed DATA message, fountain-fragmenting it if it exceeds the
-    /// MTU.
+    /// Returns [`TooLarge`] past [`MAX_PAYLOAD_BYTES`] (65 535 — what `plen` can
+    /// describe). That ceiling is structural rather than policy, so exceeding it
+    /// is a property of the payload the caller handed over: an error to report,
+    /// not a bug to abort on. For objects that large, use the file/manifest
+    /// layer, which exists for exactly this.
     ///
-    /// Emits one envelope, whatever the size — see below. It used to return
-    /// `TooLarge` when the object needed more than
-    /// [`MAX_FOUNTAIN_CHUNKS`] chunks at the MTU in force. That ceiling is
-    /// structural, not policy — the fragment header carries `count` as one wire
-    /// byte — so exceeding it is a property of the payload the caller handed over:
-    /// an error to report, not a bug to abort on. For objects that large, use the
-    /// file/manifest layer, which exists for exactly this.
+    /// The error kept its name and changed its meaning. It used to mean "needs
+    /// more than one fountain set"; `send` no longer fragments at all.
     pub fn send(&mut self, dest: Addr, data: Vec<u8>, now: u32) -> Result<Vec<Forward>, TooLarge> {
         if data.len() > MAX_PAYLOAD_BYTES {
             return Err(TooLarge { len: data.len(), max: MAX_PAYLOAD_BYTES });
@@ -289,7 +284,22 @@ impl Node {
     /// behaves exactly as it did before.
     pub fn tick(&mut self, now: u32) -> Vec<Forward> {
         self.enforce_bounds(now);
-        self.resend_unacked(now)
+        let mut out = self.resend_unacked(now);
+        // M11-P: say what we are still carrying, now and then.
+        //
+        // An interest that survived a journey is worth nothing until it is spoken
+        // somewhere new, and no other path would speak it: a WANT goes out when a
+        // neighbour asks, and the neighbour who asked is by definition not here
+        // any more. Paced rather than event-driven because "we have arrived
+        // somewhere new" is not a thing a node can observe — an interface coming
+        // up does not mean anyone is listening, and on broadcast media there is no
+        // event at all. Asking on a slow cadence covers arrival, reconnection and
+        // a neighbour that simply rebooted, with one mechanism.
+        if now.saturating_sub(self.last_interest_resume) >= INTEREST_RESUME_SECS {
+            self.last_interest_resume = now;
+            out.append(&mut self.resume_interests(now));
+        }
+        out
     }
 
     // ---- L4 request/response (RPC) --------------------------------------

@@ -246,8 +246,8 @@ impl Node {
             if self.interests.len() >= self.limits.interests && !self.interests.contains_key(id) {
                 break; // a bounded promise-to-return-something, and it is full
             }
-            self.interests
-                .insert(*id, Interest { waiters: vec![(iface, nbr)], until: now + INTEREST_LEASE_SECS });
+            let until = self.interest_deadline(id, now);
+            self.interests.insert(*id, Interest { waiters: vec![(iface, nbr)], until });
             fresh.push(*id);
         }
         if fresh.is_empty() {
@@ -259,6 +259,135 @@ impl Node {
         let mut payload: Vec<u8> = fresh.iter().flatten().copied().collect();
         payload.push(depth.saturating_sub(1));
         vec![Forward::Flood { except: iface, bytes: Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire() }]
+    }
+
+    /// How long this node is willing to keep looking for `id` (M11-P).
+    ///
+    /// **Bounded by the object, not by a fixed timer.** An adopted interest is a
+    /// promise to keep hunting, and the honest duration of that promise is "as
+    /// long as the thing could still turn up". Chunks are ordinary envelopes and
+    /// die with the publisher's expiry, so an interest that outlives the manifest
+    /// naming it is hunting for bytes nobody will serve — pure cost, and exactly
+    /// the standing pull `fetch-abandoned` measures.
+    ///
+    /// The old fixed `INTEREST_LEASE_SECS` was the opposite failure: fifteen
+    /// minutes is far *shorter* than the object lives, which made adopted
+    /// interest an online-only mechanism inside a delay-tolerant protocol. A
+    /// courier who takes a day to reach the next mesh had forgotten what it was
+    /// carrying long before it arrived.
+    ///
+    /// Still bounded three ways, so the longer lease does not weaken M11-A: the
+    /// deadline comes from a *signed* manifest whose expiry the asker does not
+    /// control and the store already clamps to its horizon; `limits.interests`
+    /// caps how many can exist at once; and M11-K's cancel retires one the moment
+    /// its last waiter goes. Without cancel, lengthening this would have
+    /// multiplied the very load M11-K removed.
+    fn interest_deadline(&self, id: &Id, now: u32) -> u32 {
+        let floor = now.saturating_add(INTEREST_LEASE_SECS);
+        let ceiling = now.saturating_add(MAX_INTEREST_LEASE_SECS);
+        // The manifest that makes this id legal to want is also what says how
+        // long wanting it makes sense. No manifest expiry to read — an id named
+        // by a tree we are still resolving — falls back to the old short lease.
+        let by_object =
+            self.named_by(id).and_then(|root| self.store.meta(&root).map(|s| s.expiry)).unwrap_or(floor);
+        by_object.clamp(floor, ceiling)
+    }
+
+    /// Ask again for everything still outstanding (M11-P).
+    ///
+    /// The courier's arrival. An adopted interest that survived a journey is
+    /// worth nothing until it is *spoken* somewhere new, and there is no other
+    /// path that would: WANT is emitted when a neighbour asks, and by definition
+    /// the neighbour who asked is not here any more. A sync loop calls this when
+    /// it meets someone it has not asked yet.
+    ///
+    /// Bounded by the same window as any other request, so meeting a stranger
+    /// costs one frame's worth of ids rather than the whole table.
+    pub fn resume_interests(&mut self, now: u32) -> Vec<Forward> {
+        self.interests.retain(|_, i| i.until > now);
+        let ids: Vec<Id> = self.interests.keys().copied().collect();
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        let window = self.want_window();
+        ids.chunks(window)
+            .map(|w| {
+                let mut payload: Vec<u8> = w.iter().flatten().copied().collect();
+                payload.push(DEFAULT_WANT_DEPTH.saturating_sub(1));
+                Forward::Flood {
+                    except: NO_IFACE,
+                    bytes: Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire(),
+                }
+            })
+            .collect()
+    }
+
+    /// The outstanding interests, as a blob to persist (M11-P).
+    ///
+    /// `[1][n:2]` then `n × ([id:16][until:4])`. The counterpart to
+    /// `Node::prekey_ring`, and saved the same way: this is what makes a pending
+    /// interest survive a restart — or a flight, which is the case that matters.
+    ///
+    /// **Waiters are deliberately not carried.** A waiter is an `(iface, nbr)`
+    /// pair, and an interface index means nothing after a restart, still less on
+    /// another continent. Carrying them would serialise a promise to send bytes
+    /// down a link that no longer exists.
+    ///
+    /// Nothing is lost by dropping them, because the courier does not need to
+    /// remember *who* wanted this — only *what* was wanted. It keeps asking, and
+    /// what comes back is stored like any other envelope; when it meets the
+    /// original asker again, that node asks once more and is answered from the
+    /// cache. The demand is carried as the id, exactly as the file layer carries
+    /// demand as the manifest.
+    pub fn pending_interests(&self) -> Vec<u8> {
+        let n = self.interests.len().min(u16::MAX as usize);
+        let mut out = Vec::with_capacity(3 + n * 20);
+        out.push(1);
+        out.extend_from_slice(&(n as u16).to_be_bytes());
+        for (id, i) in self.interests.iter().take(n) {
+            out.extend_from_slice(id);
+            out.extend_from_slice(&i.until.to_be_bytes());
+        }
+        out
+    }
+
+    /// Restore interests from [`Node::pending_interests`], **merging** them.
+    ///
+    /// Merging rather than replacing, the opposite of `restore_prekey_ring` and
+    /// for the opposite reason: a prekey blob is the authority on which secrets
+    /// still exist, whereas an interest is a *want*, and a node that has since
+    /// acquired others has not stopped having them. A restored entry never
+    /// overwrites a live one, since the live one has real waiters attached.
+    ///
+    /// Restored entries arrive with no waiters and are dropped if already expired
+    /// or past the ceiling — a blob cannot buy a longer promise than the node
+    /// would have made itself, or "restore" would be a way to hand a node an
+    /// interest it never adopted and could not have. `limits.interests` still
+    /// caps the total. Returns `false` and changes nothing if the blob is
+    /// malformed.
+    pub fn restore_pending_interests(&mut self, blob: &[u8], now: u32) -> bool {
+        if blob.len() < 3 || blob[0] != 1 {
+            return false;
+        }
+        let n = u16::from_be_bytes([blob[1], blob[2]]) as usize;
+        if blob.len() != 3 + n * 20 {
+            return false;
+        }
+        let ceiling = now.saturating_add(MAX_INTEREST_LEASE_SECS);
+        for i in 0..n {
+            let o = 3 + i * 20;
+            let mut id = [0u8; 16];
+            id.copy_from_slice(&blob[o..o + 16]);
+            let until = u32::from_be_bytes([blob[o + 16], blob[o + 17], blob[o + 18], blob[o + 19]]);
+            if until <= now || self.interests.contains_key(&id) {
+                continue;
+            }
+            if self.interests.len() >= self.limits.interests {
+                break;
+            }
+            self.interests.insert(id, Interest { waiters: Vec::new(), until: until.min(ceiling) });
+        }
+        true
     }
 
     /// Hand a just-arrived envelope to whoever adopted an interest in it.
