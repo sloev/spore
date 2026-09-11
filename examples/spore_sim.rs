@@ -668,6 +668,69 @@ fn file_multihop() -> Report {
     Report { name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
 }
 
+/// What does one forged WANT cost a mesh? (M11-L)
+///
+/// Recursive pull's amplification story was *reasoned*: a node adopts only ids a
+/// manifest it holds names, the interest table dedupes so traffic is linear in
+/// nodes reached rather than exponential in paths to them, and `DEFAULT_WANT_DEPTH`
+/// bounds how far one neighbour's curiosity travels. Two of those three are
+/// enforced by the node. The third is a **number the asker supplies**.
+///
+/// Depth rides as a trailing byte on the WANT payload, and `on_want` reads it
+/// verbatim. `DEFAULT_WANT_DEPTH` is only the fallback for a WANT that carries no
+/// byte at all — so a node that simply writes `255` there buys 255 hops of
+/// recursion instead of 8.
+///
+/// The topology is a line longer than the honest depth, so reach is the thing
+/// being measured: with an honest budget the interest stops partway along it,
+/// and with a forged one it should not.
+///
+/// The ids asked for are **legitimate** — named by a manifest every node holds —
+/// because that is the interesting case. An id nobody has a manifest for is
+/// already refused (`a_want_for_an_id_no_manifest_names_starts_no_hunt`); this
+/// measures what the gate still lets through.
+fn malicious_want(depth: u8) -> Report {
+    const N: usize = 24;
+    let links = (0..N - 1).map(|i| Link { a: i, b: i + 1, mtu: 1400, loss_pct: 0, latency_ms: 5 }).collect();
+    let mut sim = Sim::new(World::new(N, links), 0xBADDA7A);
+    let now = sim.now_secs();
+
+    // The publisher is outside the mesh: every node learns the file exists, and
+    // none of them holds a byte of it. That isolates the measurement — nobody
+    // can answer, so every interest adopted along the way stays adopted.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, published) = publisher.publish_file("bait.bin", &vec![0x11; 40_000], ZERO_DEST, now);
+    let root = match &published[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    for i in 0..N {
+        sim.world.nodes[i].on_rx(&root, 0, None, now);
+    }
+
+    // One legitimate id, asked for once, from one end of the line.
+    let target = sim.world.nodes[N - 1].missing(&magnet, 1);
+    assert!(!target.is_empty(), "the manifest names something to ask for");
+    let mut payload: Vec<u8> = target[0].to_vec();
+    payload.push(depth);
+    let want = Envelope::new(ty::WANT, ZERO_DEST, 0, payload).wire();
+
+    sim.start_measuring();
+    sim.emit(N - 1, vec![Forward::Flood { except: NO_IFACE, bytes: want }]);
+    sim.run(sim.now_ms + 120_000, None);
+
+    // How far did one frame reach, and how many nodes took on an obligation?
+    let holding = (0..N).filter(|i| sim.world.nodes[*i].open_interests() > 0).count();
+    Report {
+        name: format!("malicious-want-depth{depth}"),
+        note: format!(
+            "one WANT claiming depth {depth}: {holding} of {N} nodes now hold an interest nobody can serve"
+        ),
+        reached: holding,
+        of: N,
+        m: sim.m,
+    }
+}
+
 /// The fetcher walks away mid-transfer. How long does the mesh keep hunting?
 ///
 /// This is the cost M11-K exists to remove, and it is worth measuring rather
@@ -865,6 +928,7 @@ fn main() {
         ],
         "partition" => vec![partition()],
         "files" => vec![file_multihop(), fetch_abandoned()],
+        "malicious" => vec![malicious_want(DEFAULT_WANT_DEPTH), malicious_want(255)],
         "hop-limit" => vec![hop_limit(8), hop_limit(17), hop_limit(19)],
         _ => vec![
             line(),
@@ -887,6 +951,10 @@ fn main() {
             linkfrag_repair(10, 2, 200),
             hop_limit(17),
             hop_limit(19),
+            // M11-L: one forged frame against a 24-node line. Cheap, and the
+            // only scenario whose failure mode is reaching *too far*.
+            malicious_want(DEFAULT_WANT_DEPTH),
+            malicious_want(255),
         ],
     };
 
@@ -924,6 +992,23 @@ fn main() {
             _ => {}
         }
     }
+
+    // M11-L, and the one threshold phrased as "no *more* than". Every other
+    // scenario here fails by delivering too little; this one fails by a stranger
+    // reaching too far. A forged depth must buy exactly what an honest one does,
+    // so the two reports are compared against each other rather than against a
+    // fixed number — the honest reach is allowed to change, the gap is not.
+    let reach = |name: &str| reports.iter().find(|r| r.name == name).map(|r| r.reached);
+    if let (Some(honest), Some(forged)) =
+        (reach(&format!("malicious-want-depth{DEFAULT_WANT_DEPTH}")), reach("malicious-want-depth255"))
+    {
+        if forged > honest {
+            bad.push(format!(
+                "a forged WANT depth reaches {forged} nodes against an honest {honest} — the depth byte is attacker-supplied and must be clamped (M11-L)"
+            ));
+        }
+    }
+
     if !bad.is_empty() {
         eprintln!("\nspore-sim regressions:");
         for b in &bad {

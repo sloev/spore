@@ -74,8 +74,23 @@ impl Node {
         // A WANT may carry one trailing byte of remaining depth (M11-I). Ids are
         // 16 bytes, so an odd byte on the end is unambiguous; without one the
         // asker is a plain requester and gets the default budget.
+        //
+        // **Clamped, because the asker writes it** (M11-L). This byte arrives on
+        // an unsigned frame from anyone in radio range, and it is the only one of
+        // recursive pull's three bounds that was taken on trust: the manifest
+        // gate is checked locally and the interest table dedupes locally, but
+        // reach was whatever the stranger claimed. `spore-sim`'s
+        // `malicious-want` measured the difference on a 24-node line — an honest
+        // depth of 8 leaves 8 nodes holding an interest, a forged 255 leaves 23.
+        // One frame, and since M11-P each of those interests is a multi-day
+        // obligation re-stated on a cadence.
+        //
+        // `min` rather than a rejection: a legitimate relayed WANT carries a
+        // *decremented* depth, so asking for less is normal and must keep
+        // working. Only claiming more is refused, and it degrades to local
+        // policy rather than dropping the request.
         let (ids, depth) = match e.payload.len() % 16 {
-            1 => (&e.payload[..e.payload.len() - 1], e.payload[e.payload.len() - 1]),
+            1 => (&e.payload[..e.payload.len() - 1], e.payload[e.payload.len() - 1].min(DEFAULT_WANT_DEPTH)),
             _ => (&e.payload[..], DEFAULT_WANT_DEPTH),
         };
 
