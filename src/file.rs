@@ -22,6 +22,32 @@ pub const TREE_TAG: u8 = 0x08;
 /// file costs one chunk of memory rather than all of it.
 pub const SEALED_TAG: u8 = 0x09;
 
+/// The size of every chunk but the last (M11-M).
+///
+/// **Static, and fixed by the protocol rather than by the publisher.** It used to
+/// be `mtu - 64`, which was a leftover from before link fragmentation: a sender
+/// had to cut for the narrowest hop it might meet, because nothing downstream
+/// could re-cut. M11-D ended that — a bridge splits what its own link cannot
+/// carry — and after it, all the publisher's MTU still decided was that a Wi-Fi
+/// node and a LoRa node cut the same file differently and therefore shared no
+/// content ids at all. Identical bytes have to produce identical chunks *for
+/// everyone*, or content addressing names nothing twice.
+///
+/// That is the separation this constant exists to keep. A **chunk** is a
+/// file-layer object, content-addressed, the same size everywhere. A **fragment**
+/// is a link-layer artefact, sized by one hop's MTU, carrying whatever crosses
+/// that hop — a chunk, or any other envelope. Neither should be derived from the
+/// other, and for a while the chunk was.
+///
+/// 4 KiB is chosen against the smallest node rather than the largest file:
+/// `Limits::for_budget` floors link reassembly at 16 KiB, so four chunks fit the
+/// tightest profile's buffer at once, and a 1 MB file is 256 ids rather than the
+/// ~6000 an MTU-sized chunk needed on LoRa. Over a 237-byte frame one chunk is
+/// about eighteen fragments, which erasure repair covers better than it covers a
+/// five-piece set — a fixed *fraction* of repair symbols gets more reliable as a
+/// set grows, not less.
+pub const CHUNK_BYTES: usize = 4096;
+
 /// How deep a manifest tree may go. Each level multiplies capacity by the
 /// interior fan-out (~84 at a 1400-byte MTU), so four levels is already ~5 TB —
 /// the cap exists to bound recursion on a hostile tree, not to bound files.

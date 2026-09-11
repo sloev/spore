@@ -813,8 +813,6 @@ pub mod congestion;
 // content, not by who made it.
 // ---------------------------------------------------------------------------
 
-/// Content-defined chunking (M11-M) — where a file's parts begin and end.
-pub mod cdc;
 pub mod file;
 
 // ---------------------------------------------------------------------------

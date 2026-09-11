@@ -1264,25 +1264,54 @@ fn two_publishers_on_different_links_cut_a_file_the_same_way() {
 }
 
 #[test]
-fn an_edit_reuses_the_parts_it_did_not_touch() {
-    // What content-defined boundaries buy that fixed offsets cannot. Cutting
-    // every N bytes means inserting one byte shifts every later boundary, so the
-    // edited file shares nothing with the original — the whole thing is
-    // republished to change a byte.
+fn appending_to_a_file_reuses_every_earlier_chunk() {
+    // What a **static** chunk size buys. Boundaries are at fixed offsets from the
+    // start, so appending does not move any of them: every chunk before the
+    // append is byte-identical, has the same content id, and is already held.
+    let v1 = pullable_file();
+    let mut v2 = v1.clone();
+    v2.extend_from_slice(&[0xFF; 30_000]);
+
+    let mut a = Node::new("a", &[]);
+    let (m1, _) = a.publish_file("log.bin", &v1, ZERO_DEST, NOW);
+    let before = a.store_len();
+    let (m2, _) = a.publish_file("log.bin", &v2, ZERO_DEST, NOW);
+    let added = a.store_len() - before;
+
+    assert_ne!(m1, m2, "a longer file is a different file");
+    let parts = v1.len() / file::CHUNK_BYTES;
+    assert!(
+        added < parts / 2,
+        "appending stored {added} new objects; the {parts} chunks of the original should be reused"
+    );
+}
+
+#[test]
+fn inserting_a_byte_re_chunks_the_file_and_that_is_a_known_cost() {
+    // **The trade-off static chunking accepts**, recorded rather than left to be
+    // rediscovered. Boundaries are offsets from the start of the file, so
+    // inserting a byte at the front shifts every one of them: the bytes are the
+    // same, the chunks are not, and nothing is shared.
+    //
+    // Content-*defined* boundaries (a rolling hash choosing cut points) would fix
+    // this — measured at the time as keeping >90% of chunks across a one-byte
+    // prepend — at the cost of variable-length chunks, a gear table in the spec,
+    // and losing the ability to compute which chunk holds a given byte. The
+    // decision was static; this test is where it is written down, and it is the
+    // test to invert if that ever changes.
     let v1 = pullable_file();
     let mut v2 = v1.clone();
     v2.insert(0, 0xFF);
 
     let mut a = Node::new("a", &[]);
-    let (m1, _) = a.publish_file("doc.bin", &v1, ZERO_DEST, NOW);
+    a.publish_file("doc.bin", &v1, ZERO_DEST, NOW);
     let before = a.store_len();
-    let (m2, _) = a.publish_file("doc.bin", &v2, ZERO_DEST, NOW);
+    a.publish_file("doc.bin", &v2, ZERO_DEST, NOW);
     let added = a.store_len() - before;
 
-    assert_ne!(m1, m2, "a different file, with a different root");
-    let parts = a.files().iter().find(|(m, ..)| *m == m1).map(|r| r.4).expect("listed");
+    let parts = v1.len() / file::CHUNK_BYTES;
     assert!(
-        added * 4 < parts as usize,
-        "republishing after a one-byte edit stored {added} new objects against {parts} parts"
+        added * 2 > parts,
+        "a prepend re-chunks the file: expected most of {parts} parts to be new, got {added}"
     );
 }
