@@ -399,7 +399,7 @@ function buildToc(html) {
   return html.replace(/(<h1 id="[^"]+">[\s\S]*?<\/h1>)/, `$1${toc}`);
 }
 
-function page(title, bodyHtml, self, extraHtml = '') {
+function page(title, bodyHtml, self, extraHtml = '', withMermaid = false) {
   // A per-page body class, so a page can carry its own rules — the spec needs
   // print styling that would be wrong everywhere else.
   const cls = self.replace(/\.html$/, '');
@@ -519,11 +519,87 @@ ${extraHtml}
   });
 })();
 </script>
+${withMermaid ? mermaidTag() : ''}
 </body>
 </html>`;
 }
 
 marked.setOptions({ gfm: true, breaks: false });
+
+// ```mermaid fences become diagrams (rendered in the browser from the same text
+// that is in the markdown, so GitHub and the site show the one source).
+//
+// Set per page by the render loop: a page with no diagram must not pay for the
+// mermaid bundle, which is far larger than any page on this site.
+let usedMermaid = false;
+/// Every diagram source in the whole site, as `[source-file, text]`, so the build
+/// can check they parse. Rendering happens in the browser, which means a syntax
+/// error would otherwise be invisible here and a broken box on the published
+/// page — the one failure mode client-side rendering introduces.
+const diagrams = [];
+let currentSrc = '';
+marked.use({
+  renderer: {
+    code(code, infostring) {
+      const lang = (infostring || '').trim().split(/\s+/)[0];
+      if (lang !== 'mermaid') return false; // fall through to the default
+      usedMermaid = true;
+      diagrams.push([currentSrc, typeof code === 'string' ? code : code.text]);
+      // The source is kept in a data attribute as well as in the text, because
+      // mermaid replaces the text with SVG and re-rendering on a theme change
+      // needs the original back.
+      const src = esc(typeof code === 'string' ? code : code.text);
+      return `<pre class="mermaid" data-mermaid="${src}">${src}</pre>\n`;
+    },
+  },
+});
+
+/// Minimal HTML-text escape for diagram sources.
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/// The loader and theme-follower for pages that carry diagrams.
+///
+/// Deliberately *not* inlined, and deliberately the single-file build. Mermaid is
+/// larger than the rest of this site put together, so it is one cached file
+/// referenced only by pages that have a diagram. The ESM entry would be 30 KB but
+/// lazily imports a 14 MB tree of chunks that would all have to be published;
+/// `mermaid.min.js` is 3.5 MB and self-contained, and sets `globalThis.mermaid`.
+///
+/// A reader with JS off still sees the diagram source, which for a protocol
+/// document is worth something: the text is the definition either way.
+function mermaidTag() {
+  return `<script src="mermaid.min.js"></script>
+<script>
+(function () {
+  if (!window.mermaid) return; // no renderer: the source stays readable
+  var themeFor = function () {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'neutral';
+  };
+  var render = function () {
+    var nodes = document.querySelectorAll('pre.mermaid');
+    Array.prototype.forEach.call(nodes, function (n) {
+      n.removeAttribute('data-processed');
+      n.innerHTML = n.getAttribute('data-mermaid');
+    });
+    window.mermaid.initialize({ startOnLoad: false, theme: themeFor(), securityLevel: 'strict' });
+    window.mermaid.run({ nodes: nodes });
+  };
+  render();
+  // Follow the site's light/dark toggle rather than baking one palette in.
+  new MutationObserver(function (m) {
+    for (var i = 0; i < m.length; i++) {
+      if (m[i].attributeName === 'data-theme') { render(); return; }
+    }
+  }).observe(document.documentElement, { attributes: true });
+})();
+</script>`;
+}
 
 // dst -> set of heading ids on that page, filled as we render and consumed by
 // checkLinks once every page exists.
@@ -536,6 +612,8 @@ for (const [src, dst, label] of pages) {
     continue;
   }
   const md = fs.readFileSync(abs, 'utf8');
+  usedMermaid = false;
+  currentSrc = src;
   // The front page's title is the promise, not the product name: it is what shows
   // in a search result and a browser tab, where "SPORE" alone means nothing to
   // someone who has not met it yet.
@@ -547,12 +625,63 @@ for (const [src, dst, label] of pages) {
   // Rendered as its own sibling section, not appended into bodyHtml — nesting it
   // inside page()'s own <section> put one <section> inside another.
   const extra = dst === 'index.html' ? shareBar() : '';
-  fs.writeFileSync(path.join(out, dst), page(title, anchored, dst, extra));
+  fs.writeFileSync(path.join(out, dst), page(title, anchored, dst, extra, usedMermaid));
   console.log(`rendered ${src} -> _site/${dst}`);
 }
 
 // Ship the favicon/icon/social-preview assets — plain HARDBRUT swatches and a
 // wordmark card, not a mascot; see site/favicon.svg's own comment.
+// Every diagram must parse, or the build fails rather than publishing a page with
+// an error box on it. `mermaid.parse` needs no DOM, so this is a real check and
+// not a keyword sniff.
+if (diagrams.length) {
+  let mermaidLib = null;
+  try {
+    // Mermaid sanitises labels through DOMPurify, which captures `window` when
+    // it is imported — so the DOM has to exist *before* mermaid does. Without it
+    // every flowchart with a quoted label or a subgraph fails to parse, which
+    // looks exactly like a syntax error and is not one.
+    const { JSDOM } = await import('jsdom');
+    const dom = new JSDOM('<!doctype html><html><body></body></html>');
+    for (const k of ['window', 'document', 'DOMParser', 'Node', 'Element', 'HTMLElement', 'SVGElement']) {
+      if (dom.window[k] !== undefined) globalThis[k] = dom.window[k];
+    }
+    mermaidLib = (await import('mermaid')).default;
+  } catch (e) {
+    console.warn(`diagram validation unavailable (${e.code || e.message}) — ` +
+                 `${diagrams.length} diagram(s) left unchecked; run npm install in site/`);
+  }
+  if (mermaidLib) {
+    mermaidLib.initialize({ startOnLoad: false });
+    const bad = [];
+    for (const [src, text] of diagrams) {
+      try {
+        await mermaidLib.parse(text);
+      } catch (e) {
+        bad.push(`${src}: ${String(e.message || e).split('\n')[0]}`);
+      }
+    }
+    if (bad.length) {
+      console.error(`\n${bad.length} diagram(s) do not parse:`);
+      for (const b of bad) console.error(`  ${b}`);
+      process.exit(1);
+    }
+    console.log(`${diagrams.length} diagram(s) parse`);
+  }
+}
+
+// The diagram renderer, copied once rather than inlined into every page that
+// uses it — see mermaidTag() for why this build and not the ESM one.
+{
+  const src = path.join(root, 'site', 'node_modules', 'mermaid', 'dist', 'mermaid.min.js');
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(out, 'mermaid.min.js'));
+    console.log('copied mermaid.min.js');
+  } else {
+    console.warn('mermaid not installed — diagram sources will show as text (npm install in site/)');
+  }
+}
+
 for (const asset of ['favicon.svg', 'favicon.ico', 'apple-touch-icon.png', 'og-image.png']) {
   fs.writeFileSync(path.join(out, asset), fs.readFileSync(path.join(root, 'site', asset)));
 }

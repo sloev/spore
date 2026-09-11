@@ -119,6 +119,26 @@ fn constants_are_frozen() {
     assert_eq!(fl::SRC8, 32);
     assert_eq!(ZERO_DEST, [0u8; 8]);
     assert_eq!(DEFAULT_MTU, 1400);
+
+    // --- the file layer's two frozen facts (M11-M) -------------------------
+    //
+    // A chunk's name must come out identical on two implementations that have
+    // never spoken, or a file published twice is two unrelated files. That needs
+    // both halves pinned: the payload shape, and how it is hashed.
+    assert_eq!(file::CHUNK_TAG, 0x07);
+    assert_eq!(file::CHUNK_BYTES, 4096, "a static size, and not derived from any MTU");
+
+    let chunk_payload = {
+        let mut v = vec![file::CHUNK_TAG];
+        v.extend_from_slice(b"the dam holds");
+        v
+    };
+    assert_eq!(hex(&chunk_payload), "077468652064616d20686f6c6473", "[CHUNK_TAG][bytes], nothing else");
+    assert_eq!(
+        hex(&file::content_id(&chunk_payload)),
+        "17679394b9bac1cf0bdea0ef71815f51",
+        "content id = SHA-256(payload)[..16] — the payload alone, never the envelope"
+    );
 }
 
 // ---------------------------------------------------------------------------

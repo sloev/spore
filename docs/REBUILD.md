@@ -88,9 +88,56 @@ envelope above:
 id = 1ff3a7d10b117b007309f1164c3998f7
 ```
 
-The ID is used for dedup (drop an ID you've seen), for content-addressed file
-chunks, and for the priority stamp (§10: the stamp is the count of leading zero
+The ID is used for dedup (drop an ID you've seen), for naming an envelope in
+INV/WANT, and for the priority stamp (§10: the stamp is the count of leading zero
 *bits* of the ID — free proof-of-work).
+
+**It is not what names a file's parts** — see *Content ID*, next.
+
+## 3b. Content ID — what names a chunk
+
+An envelope ID hashes the whole envelope, so it covers `expiry` and `dest`. That
+is right for a *message* and wrong for *bytes*: the same chunk published a second
+later is a different envelope, so a file published twice would share nothing with
+itself — which is what happened before this existed.
+
+So the file layer uses a second, narrower name. A **content ID** is
+`SHA-256(payload)[..16]` — the payload alone, nothing about the message carrying
+it:
+
+```
+chunk payload = [CHUNK_TAG] || bytes      CHUNK_TAG = 0x07
+              = 077468652064616d20686f6c6473
+content id    = 17679394b9bac1cf0bdea0ef71815f51
+```
+
+There is no file id and no chunk index in a chunk payload, and that absence is
+the point: either would make identical bytes produce different names. The
+manifest already says which chunks are this file and in what order, and a sealed
+chunk's AEAD nonce is its position in that order, which the reader counts while
+walking the tree.
+
+**Chunks are a static 4096 bytes** — every chunk but the last — the same
+on every medium, so two publishers cut a file identically and their chunks
+interchange. Do not derive this from an MTU.
+
+### Chunk vs fragment
+
+Two different things, at two different layers. Getting them confused is what
+caused the bug content IDs exist to fix, so:
+
+| | **chunk** | **fragment** |
+|---|---|---|
+| layer | file (Part III) | link (Part II) |
+| size | static, 4096 B, everywhere | one hop's MTU |
+| named by | content ID | nothing — it is not an object |
+| carries | a slice of one file | *any* envelope too big for that hop |
+| put together by | the fetcher, using the manifest | the far end of that one link |
+| lives on the mesh? | yes, it is an envelope | no, never leaves the link |
+
+A chunk is therefore routinely **larger** than a frame, and a bridge splits it
+like anything else. That makes per-hop fragmentation a requirement for moving
+files, not an optimisation.
 
 ## 4. Signing and verifying
 

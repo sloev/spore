@@ -42,7 +42,8 @@ pub const SEALED_TAG: u8 = 0x09;
 /// 4 KiB is chosen against the smallest node rather than the largest file:
 /// `Limits::for_budget` floors link reassembly at 16 KiB, so four chunks fit the
 /// tightest profile's buffer at once, and a 1 MB file is 256 ids rather than the
-/// ~6000 an MTU-sized chunk needed on LoRa. Over a 237-byte frame one chunk is
+/// ~6000 an MTU-sized chunk needed on LoRa (chunk-fragment-ok: naming the
+/// rejected sizing). Over a 237-byte frame one chunk is
 /// about eighteen fragments, which erasure repair covers better than it covers a
 /// five-piece set — a fixed *fraction* of repair symbols gets more reliable as a
 /// set grows, not less.

@@ -97,6 +97,44 @@ other doesn't.</p>
 
 </div>
 
+<h2>The shape of it</h2>
+
+<p class="text-muted">Four layers, and what each one is allowed to know. The
+diagram is generated from the same text that is in the markdown, so it cannot
+drift from the description.</p>
+
+```mermaid
+flowchart TB
+  subgraph APP["your app"]
+    MSG["a message"]
+    FILE["a file"]
+  end
+  subgraph FILEL["file layer: content, not messages"]
+    MAN["manifest: names the parts, in order"]
+    CH["chunks: 4096 B each, named by the hash of their bytes"]
+  end
+  subgraph ROUTER["router: 60 lines, knows nothing about files"]
+    ENV["envelope: to, from, expiry, payload, signature"]
+    DEDUP["seen it? drop it"]
+    STORE["hold until expiry"]
+    FLOOD["pass on, one hop fewer"]
+  end
+  subgraph LINK["links: one hop each, any medium"]
+    W["Wi-Fi 1400 B"]
+    L["LoRa 237 B"]
+    Z["Zigbee 54 B"]
+    U["a USB stick"]
+  end
+  MSG --> ENV
+  FILE --> MAN --> CH --> ENV
+  ENV --> DEDUP --> STORE --> FLOOD
+  FLOOD --> W & L & Z & U
+  L -.-> FR["too big for this frame, so the bridge cuts it into pieces and the far end puts it back"]
+```
+
+<p class="text-muted">Nothing above the router knows which medium it is on, and
+nothing below it knows what a file is. That is the whole trick.</p>
+
 <h2>Walked through</h2>
 
 <p class="text-muted">The cards above are the shape. These are four things that

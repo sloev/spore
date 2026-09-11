@@ -27,6 +27,21 @@ fn main() {
     signed.flags |= fl::FLOOD;
     signed.sign(&sk);
 
+    // --- file layer: the chunk, and the content id that names it (M11-M) ------
+    //
+    // Frozen because it is the one derivation two implementations must agree on
+    // *without* exchanging anything: an envelope id is the hash of a message, so
+    // two nodes naturally produce different ones for the same bytes, while a
+    // content id has to come out identical on both or a file published twice is
+    // two unrelated files. A chunk payload is `[CHUNK_TAG][bytes]` and nothing
+    // else — no file id, no index — which is exactly what makes that possible.
+    let chunk_payload = {
+        let mut v = vec![file::CHUNK_TAG];
+        v.extend_from_slice(b"the dam holds");
+        v
+    };
+    let chunk_content_id = file::content_id(&chunk_payload);
+
     // A tampered copy (flip one payload byte) — verification must fail on it.
     let mut tampered_wire = signed.wire();
     let plen_pos = tampered_wire.len() - 64 - 13; // start of the 13-byte payload
@@ -43,6 +58,10 @@ fn main() {
     println!("  \"signed_wire\": \"{}\",", hex(&signed.wire()));
     println!("  \"signed_id\": \"{}\",", hex(&signed.id()));
     println!("  \"armor\": \"{}\",", armor::wrap(&signed.wire()));
-    println!("  \"tampered_wire\": \"{}\"", hex(&tampered_wire));
+    println!("  \"tampered_wire\": \"{}\",", hex(&tampered_wire));
+    println!("  \"chunk_tag\": \"{:02x}\",", file::CHUNK_TAG);
+    println!("  \"chunk_bytes\": {},", file::CHUNK_BYTES);
+    println!("  \"chunk_payload\": \"{}\",", hex(&chunk_payload));
+    println!("  \"chunk_content_id\": \"{}\"", hex(&chunk_content_id));
     println!("}}");
 }

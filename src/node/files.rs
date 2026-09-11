@@ -41,7 +41,8 @@ impl Node {
         // rather than carried inside it — see `file::Manifest::hdr_id`. Stored
         // and pushed like a chunk, so the recipient fetches it the same way.
         let mut hdr_id: Id = [0u8; 16];
-        // **A static, protocol-fixed chunk size** (M11-M) — not `mtu - 64`.
+        // **A static, protocol-fixed chunk size** (M11-M).
+        // It was `mtu - 64` (chunk-fragment-ok: naming what it replaced).
         //
         // Deriving it from the publisher's MTU was a leftover from before link
         // fragmentation, when a sender had to cut for the narrowest hop it might

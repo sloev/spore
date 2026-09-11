@@ -1315,3 +1315,67 @@ fn inserting_a_byte_re_chunks_the_file_and_that_is_a_known_cost() {
         "a prepend re-chunks the file: expected most of {parts} parts to be new, got {added}"
     );
 }
+
+#[test]
+fn a_chunk_is_the_same_size_whatever_link_the_publisher_has() {
+    // The regression this guards is the one that started M11-M: chunk size came
+    // from `mtu - 64`, so a Wi-Fi publisher and a LoRa publisher cut the same
+    // file differently and shared no content ids at all. A chunk is a file-layer
+    // object and its size is a protocol constant; the link has no say.
+    let body = pullable_file();
+    let ids_from = |mtu: usize| -> Vec<Id> {
+        let mut n = Node::new("p", &[]);
+        n.mtu = mtu;
+        let (magnet, _) = n.publish_file("same.bin", &body, ZERO_DEST, NOW);
+        let held = n.manifests.get(&magnet).expect("published").clone();
+        let mut leaves = Vec::new();
+        n.walk_tree(&held, &mut |id, depth, _| {
+            if depth == 0 {
+                leaves.push(*id);
+            }
+            true
+        });
+        leaves
+    };
+    let wide = ids_from(1400);
+    let narrow = ids_from(237);
+    let tiny = ids_from(54);
+
+    assert_eq!(wide, narrow, "a 237-byte link must cut the file exactly as a 1400-byte one does");
+    assert_eq!(wide, tiny, "and so must a 54-byte one");
+    assert_eq!(
+        wide.len(),
+        body.len().div_ceil(file::CHUNK_BYTES),
+        "one chunk per CHUNK_BYTES of file, whatever the link"
+    );
+}
+
+#[test]
+fn a_chunk_larger_than_a_frame_still_crosses_it() {
+    // The other half of the separation, and the dependency it creates: a chunk is
+    // routinely bigger than a hop's frame, so it only moves because the *link*
+    // splits it. Nothing about the chunk changes — the far end reassembles the
+    // envelope before the router sees anything, and the content id matches.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, _) = publisher.publish_file("big.bin", &pullable_file(), ZERO_DEST, NOW);
+    let held = publisher.manifests.get(&magnet).expect("published").clone();
+    let first = held.chunk_ids[0];
+    let wire = publisher.named_wire(&first).expect("a chunk");
+    assert!(wire.len() > 237, "a chunk exceeds a LoRa frame, which is the point");
+
+    // Split it for a 237-byte link and put it back, as a bridge pair does.
+    let pieces = linkfrag::split_for_link(&wire, 237, 1);
+    assert!(pieces.len() > 1, "the link had to cut it into {} pieces", pieces.len());
+    let mut rx = linkfrag::Reassembler::default();
+    let mut rebuilt = None;
+    for p in &pieces {
+        if let Some(whole) = rx.accept(0, p, NOW) {
+            rebuilt = Some(whole);
+        }
+    }
+    let rebuilt = rebuilt.expect("the far end reassembles it");
+    assert_eq!(rebuilt, wire, "byte for byte");
+
+    let (e, _) = Envelope::decode(&rebuilt).expect("a chunk envelope");
+    assert_eq!(file::content_id(&e.payload), first, "and it is still the same named content");
+}

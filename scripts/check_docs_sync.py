@@ -48,9 +48,13 @@ def want(text, keys, where):
 # REBUILD.md shows these worked values verbatim (the armor is line-wrapped for
 # display, so check it against a whitespace-stripped copy).
 want(rebuild, ["pubkey", "addr", "topic_news", "unsigned_wire", "unsigned_id"], "docs/REBUILD.md")
+# The file layer's frozen derivation (M11-M): the chunk payload shape and the
+# content id over it. Two implementations have to agree on these without talking.
+want(rebuild, ["chunk_payload", "chunk_content_id"], "docs/REBUILD.md (file layer)")
 want("".join(rebuild.split()), ["armor"], "docs/REBUILD.md (armor)")
 # The frozen contract test hard-codes the full set (its whole point).
 want(frozen, ["pubkey", "addr", "topic_news", "unsigned_wire", "unsigned_id", "signed_wire", "signed_id"], "tests/api_freeze.rs")
+want(frozen, ["chunk_payload", "chunk_content_id"], "tests/api_freeze.rs (file layer)")
 
 # Terminology consistency: "shape" means the FIVE medium bindings (spec Page 2).
 # The reference's three driver categories are "forms" (dgram/stream/store) and the
@@ -72,6 +76,34 @@ for f in scan:
             rel = os.path.relpath(f, root)
             errors.append(f'{rel}:{i}: "{m.group(0)}" — say "form" (dgram/stream/store) or '
                           f'"service pattern"; "shape" is the five Page-2 medium bindings')
+
+# Chunk ⇄ fragment: two layers, and conflating them is what caused M11-M.
+#   chunk    = file layer, content-addressed, a static CHUNK_BYTES everywhere
+#   fragment = link layer, one hop's MTU, carries any envelope across that hop
+# Neither is derived from the other. The wrong phrasings below are the ones that
+# actually appeared in this repo before the distinction was fixed, so this guards
+# a real regression rather than a hypothetical one.
+confusions = [
+    (r"\bfile fragment", 'a file has chunks, not fragments'),
+    (r"\bfragments? of (?:a|the) file\b", 'a file is split into chunks; fragments are per-link'),
+    (r"\bfragment (?:id|ids|hash)\b", 'fragments are not named objects — chunks have content ids'),
+    (r"\bchunk\b[^.\n]{0,40}\b(?:mtu|MTU)\b", 'chunk size is a protocol constant, never MTU-derived'),
+    (r"\b(?:mtu|MTU)-(?:sized|derived) chunk", 'chunk size is a protocol constant, never MTU-derived'),
+    (r"\bchunk (?:fits|must fit) the (?:link|frame|hop)\b", 'a chunk is routinely larger than a frame; the bridge splits it'),
+]
+allow_marker = "chunk-fragment-ok"
+for f in scan:
+    if os.sep + "node_modules" + os.sep in f or os.sep + "_site" + os.sep in f:
+        continue
+    for i, ln in enumerate(open(f, encoding="utf-8", errors="replace"), 1):
+        if allow_marker in ln:
+            continue
+        for pat, why in confusions:
+            m = re.search(pat, ln)
+            if m:
+                rel = os.path.relpath(f, root)
+                errors.append(f'{rel}:{i}: "{m.group(0).strip()}" — {why} '
+                              f'(add "{allow_marker}" on the line if this really is about both)')
 
 # Bridge ⇄ BRIDGES.md sync: a bridge and its documented spec can't drift.
 #   1. every transport in web/transports/ (bar helpers) is documented,
