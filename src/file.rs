@@ -130,7 +130,7 @@ pub struct Manifest {
 /// SHA-256 (M11-M).
 ///
 /// Distinct from an envelope id, which hashes the whole envelope and so covers
-/// `expiry` and `dest`. That is correct for a message and wrong for bytes: it
+/// `created_at` and `dest`. That is correct for a message and wrong for bytes: it
 /// means the same chunk published a second later is a different object. A
 /// content id names the bytes and nothing else, so two publishers — or the same
 /// publisher twice — produce the same name for the same content.

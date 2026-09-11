@@ -218,7 +218,7 @@ pub(crate) fn sim() {
     let b_pk = w.nodes[a].peer_prekey(&w.nodes[bx].addr).unwrap();
     let c_pk = w.nodes[a].peer_prekey(&w.nodes[cx].addr).unwrap();
     let d_pk = w.nodes[a].peer_prekey(&d_addr).unwrap();
-    let mut inner = Envelope::new(ty::DATA, ZERO_DEST, NOW + 3600, seal(b"burn the ledgers", &d_pk));
+    let mut inner = Envelope::new(ty::DATA, ZERO_DEST, NOW, seal(b"burn the ledgers", &d_pk));
     inner.flags |= fl::ENCRYPTED;
     let hops = [(w.nodes[bx].addr, b_pk), (w.nodes[cx].addr, c_pk)];
     let onion = mix::onion_wrap(&inner, &hops, NOW + 3600).unwrap();

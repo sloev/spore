@@ -746,6 +746,7 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | M11-D Retire the end-to-end fountain path | ✅ | Both halves shipped. The bridge half: `src/linkfrag.rs`, both shared paths (`driver::run_datagram`, `stream_link`), the three custom loops (meshtastic serial, icmp, and the reticulum/i2p stream variants), and **every** `n.mtu.min(...)` clamp deleted — `spore-sim`'s `mixed-mtu-linkfrag` is the acceptance test. The sender half (#257): `Node::send` emits one envelope whatever the size, and the ceiling is now *stated* rather than implied — `MAX_PAYLOAD_BYTES`, what `plen` can describe. That mattered more than the tidy-up: the encoder used to wrap silently, turning a 70 000-byte payload into a well-formed envelope carrying the wrong bytes. Two deliberate deviations from the plan above: `TooLarge` was **repurposed rather than deleted** (it now means "past `plen`", which is a real error a caller must still handle), and `MAX_FOUNTAIN_CHUNKS` **stays** because the fountain itself stays — it mints the erasure-repair symbols for hop-local fragment sets, which is the one job it was always good at. The `u8` count was widened to `u16` in M11-G |
 | M11-M Content-addressed chunks, static size (#256.4) | ✅ | Two premises had to be fixed before any of this meant anything. **(1)** Chunks were not content-addressed: a byte-identical file published twice shared 0 of 16 envelopes, because a chunk's name hashed its whole envelope — including a random per-publish `file_id`, a topic derived from it, and a wall-clock expiry. Split into two namespaces: an **envelope id** names a message and must cover expiry and dest; a **content id** names bytes. **(2)** Chunk size was `mtu - 64` — a leftover from before link fragmentation, and after M11-D all it still decided was that a Wi-Fi and a LoRa publisher cut the same file differently and shared nothing. Now `file::CHUNK_BYTES`, a static 4 KiB for every publisher on every medium, sized against the 16 KiB reassembly floor of a minimal node. **Chunk and fragment are kept distinct**: a chunk is a content-addressed file-layer object of fixed size, a fragment is one hop's way of carrying what will not fit its frame. Measured: 400 kB of one byte is one stored object; publishers on 1400- and 237-byte links serve each other's fetchers; appending to a file reuses every earlier chunk. **Note the dependency** — chunks are routinely larger than a frame, so per-hop splitting is now required rather than optional, and `file-multihop` delivers nothing without it (see M11-O2). **Considered and not taken: content-defined boundaries.** A rolling hash choosing cut points was built and measured — it keeps >90% of chunks across a one-byte prepend, which fixed offsets cannot — but it costs variable-length chunks, a gear table in the spec, and the ability to compute which chunk holds a given byte. `inserting_a_byte_re_chunks_the_file_and_that_is_a_known_cost` is where the trade-off is written down, and the test to invert if it is ever revisited |
 | M11-O2 Link fragmentation in the browser node | ⬜ **blocking, as of M11-M** | The JS transports in `web/transports/` have no `bridge::driver` equivalent, so a browser node neither splits what its link cannot carry nor reassembles what arrives split. That was a gap while chunks were cut to the publisher's MTU — a browser node could still move files, just not across a narrow hop. M11-M made chunks a protocol-fixed size larger than most frames, so per-hop splitting is now a *requirement* of the file layer: `spore-sim`'s `file-multihop` delivers **nothing** with fragmentation off, and a browser node is currently in that state. `src/linkfrag.rs` is already compiled into the wasm blob, so the work is to expose split/reassemble across the ABI and call it from the transport layer, not to reimplement it |
+| M12-A An incomplete file pins its parts forever | ⬜ | Found while testing M12's eviction order. `pinned_ids` protects the chunks of any file that is *not* complete, so that memory pressure cannot stall a fetch in flight — but nothing ever un-pins a file that will never complete. Evicting one small interior manifest makes the file incomplete, which pins all of its remaining chunks, and `enforce_budget`'s `None => break` then lets the store sit over budget indefinitely. A publisher that goes away mid-transfer is enough to trigger it. Needs a bound: pin only while the fetch is making progress, or only up to a share of the budget, or drop the whole partial file rather than half-holding it. The resource invariant's own words — "an explicit bounded local allowance" — are not currently satisfied here |
 | M11-N Name the file layer's ceilings (#256.6) | ⬜ | M11-A's argument applied to files: max blocks, max chunk size (bounded by `MAX_PAYLOAD_BYTES` minus the chunk header — *not* 64 KiB, a chunk must fit an envelope), max tree depth, max manifest size. **Not** "relays drop oversized envelopes": that is the M11-D bug, and a relay splits rather than drops |
 | M11-O A one-way push profile (#256.1, narrowed) | ⬜ | Erasure-coded symbols streamed with no back-channel, for the case pull cannot serve at all: a simplex link, where there is no WANT and no HAVE. Its own budget, never the default path, and explicitly *not* a replacement for chunk/WANT — content-addressed chunks are what make caching, dedup and the recursive-pull authorisation gate work |
 | M11-K Cancel an adopted interest | ✅ | A WANT carrying `fl::CANCEL` (b7) retires the sender's waiter; when the last waiter for an id leaves, the interest is dropped and the cancel is emitted onward, so the unwind follows the path the demand did. A flag rather than a new type on purpose: an unknown *flag* is still consumed as a WANT, an unknown *type* would fall through to store-and-forward. `Node::abandon` is the fetcher's side, `Node::forget_interests_on` covers a fetcher that cannot say goodbye. Cancel only ever removes the *sender's own* waiter, so it is not a DoS primitive, and it can only shrink state, so it needs no admission check. `spore-sim`'s `fetch-abandoned` is the acceptance test and measures all three endings: a silent departure leaves **28** interests standing across the relays, a cancel and a dropped link both leave **0**  Extended by M11-M's measurements: a cancel frame carried up to 86 ids while receivers read only `MAX_IDS_PER_GOSSIP` (64), so everything past the 64th leaked — invisible for a WANT, which simply re-asks, but a permanent leak for a cancel, which has no next round. `want_window` is now clamped to what the receiver will read. And a departing node gets a **wildcard cancel** (empty id list), because per-id cancel cannot be complete: a fetcher can only name ids it can still walk to, and was measured listing 37 of the 45 interests its neighbour held for it |
@@ -766,13 +767,39 @@ the last one is green, recursive pull is how the mesh becomes a reflector again:
    leaves 0
 6. a WANT for ids named by no held manifest generates **no** recursive WANT
 
-**Considered and rejected: `created_at` + `lifetime` instead of absolute expiry.**
-The stated motivation is that a relay might extend a message's lifetime. It
-cannot: `expiry` is inside the signed bytes and the ID is their hash, so changing
-it invalidates the signature and the id together. Stores already clamp the
-horizon to 30 days and a clockless node ages by dwell. The change buys clarity of
-expression and no property the protocol lacks. Revisit only if something else
-needs `created_at`.
+**Adopted: `created_at` instead of absolute expiry (M12, #266).** This was once
+recorded here as *considered and rejected*, on the grounds that a relay cannot
+extend a message's lifetime anyway — `expiry` is inside the signature — so the
+change bought expression and no property. That answered a question nobody was
+asking. The argument that carried is a different one: with `expiry`, **the sender
+decides how long everyone else stores something**, which is the one place the
+resource invariant was violated by design. An envelope now states when it was
+minted, and each node decides what it is willing to carry.
+
+Three consequences, and the second is the reason to do it:
+
+- Age is consulted **only when the store is full**, as an eviction rank. Nothing
+  expires, nothing is turned away for being old, and a node under no pressure
+  never asks how old anything is.
+- A **courier** becomes a setting rather than a feature. Raise `max_relay_age`
+  and the node keeps what others have discarded, then hands it on. Measured: at
+  one day's tolerance a carrier under pressure kept 1 of 30 ten-day-old
+  envelopes; at a month's, 15 of 30. No new envelope type, no new message, and
+  nothing on the wire distinguishes a courier from anything else.
+- Post-dating is refused, not clamped — `created_at > now + MAX_CLOCK_SKEW_SECS`
+  → drop. Clamping would have left "look newer than you are" as a way to outlive
+  honest traffic under an age-ordered eviction policy.
+
+`VER` goes to **0x02**: the header kept its shape and changed the meaning of four
+bytes, which is exactly what the version byte is for. Left at 0x01 the two builds
+would still have refused each other, but by accident rather than by design.
+
+**Known and accepted: a wrong clock misjudges the post-dating check.** A node
+reading far in the past rejects current traffic; one reading far in the future
+accepts anything. It is the same failure such a node already has for every other
+time-based decision, and both alternatives are worse — trusting the sender puts
+the decision back with the attacker, and a "my clock is unreliable" flag is a
+switch the platforms that most need it are least likely to set correctly.
 
 **Considered and rejected: manifests for generic objects.** Only files get a
 manifest. Anything else that does not fit a hop is fragmented by that hop.

@@ -42,9 +42,9 @@ impl Node {
             .filter(|(magnet, _)| self.store.meta(magnet).map(|s| s.dest) == Some(t))
             .map(|(magnet, m)| (*magnet, m.name.clone(), self.has_file(magnet)))
             .collect();
-        // Newest first, by the manifest envelope's expiry.
+        // Newest first, by the manifest envelope's created_at.
         out.sort_by_key(|(magnet, _, _)| {
-            std::cmp::Reverse(self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0))
+            std::cmp::Reverse(self.store.meta(magnet).map(|s| s.created_at).unwrap_or(0))
         });
         out
     }
@@ -118,7 +118,7 @@ mod tests {
     fn latest_bundle_picks_the_newest() {
         let mut src = Node::new("origin", &[]);
         let (m_old, _) = src.publish_bundle("v1.tar", &vec![1u8; 2000], NOW);
-        // A later expiry wins; publish_bundle stamps expiry = now + 7 days.
+        // A later created_at wins; publish_bundle stamps created_at = now + 7 days.
         let (m_new, _) = src.publish_bundle("v2.tar", &vec![2u8; 2000], NOW + 10);
         assert_ne!(m_old, m_new);
         assert_eq!(src.latest_bundle().map(|(m, _)| m), Some(m_new), "newest bundle wins");

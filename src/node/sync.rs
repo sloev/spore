@@ -24,7 +24,7 @@ impl Node {
     /// that follows `peer_topics` (public + those topics + unicast for custody).
     pub fn build_inv(&self, peer_topics: &HashSet<Addr>) -> Vec<u8> {
         let mut ids: Vec<(&Id, &store::Stored)> = self.store.entries().collect();
-        ids.sort_by_key(|(_, s)| std::cmp::Reverse(s.expiry)); // newest first
+        ids.sort_by_key(|(_, s)| std::cmp::Reverse(s.created_at)); // newest first
         let mut p = Vec::new();
         for (id, s) in ids {
             let relevant =
@@ -320,7 +320,7 @@ impl Node {
     /// **Bounded by the object, not by a fixed timer.** An adopted interest is a
     /// promise to keep hunting, and the honest duration of that promise is "as
     /// long as the thing could still turn up". Chunks are ordinary envelopes and
-    /// die with the publisher's expiry, so an interest that outlives the manifest
+    /// die with the publisher's created_at, so an interest that outlives the manifest
     /// naming it is hunting for bytes nobody will serve — pure cost, and exactly
     /// the standing pull `fetch-abandoned` measures.
     ///
@@ -331,7 +331,7 @@ impl Node {
     /// carrying long before it arrived.
     ///
     /// Still bounded three ways, so the longer lease does not weaken M11-A: the
-    /// deadline comes from a *signed* manifest whose expiry the asker does not
+    /// deadline comes from a *signed* manifest whose created_at the asker does not
     /// control and the store already clamps to its horizon; `limits.interests`
     /// caps how many can exist at once; and M11-K's cancel retires one the moment
     /// its last waiter goes. Without cancel, lengthening this would have
@@ -340,10 +340,17 @@ impl Node {
         let floor = now.saturating_add(INTEREST_LEASE_SECS);
         let ceiling = now.saturating_add(MAX_INTEREST_LEASE_SECS);
         // The manifest that makes this id legal to want is also what says how
-        // long wanting it makes sense. No manifest expiry to read — an id named
+        // long wanting it makes sense. No manifest created_at to read — an id named
         // by a tree we are still resolving — falls back to the old short lease.
-        let by_object =
-            self.named_by(id).and_then(|root| self.store.meta(&root).map(|s| s.expiry)).unwrap_or(floor);
+        // The manifest that makes this id legal to want also says how long
+        // wanting it makes sense: as long as this node would still be carrying
+        // the file itself. Under M12 that is the manifest's *birth* plus our own
+        // age policy, not a deadline the publisher chose — so the answer is local,
+        // and a courier that carries for longer also hunts for longer.
+        let by_object = self
+            .named_by(id)
+            .and_then(|root| self.store.meta(&root).map(|s| s.created_at.saturating_add(self.max_relay_age)))
+            .unwrap_or(floor);
         by_object.clamp(floor, ceiling)
     }
 

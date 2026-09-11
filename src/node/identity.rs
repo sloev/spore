@@ -68,6 +68,8 @@ impl Node {
             sessions: HashMap::new(),
             prekey_lifetime_secs: PREKEY_LIFETIME_SECS,
             max_store_bytes: 10 * 1024 * 1024,
+            max_relay_age: DEFAULT_MAX_RELAY_AGE_SECS,
+
             seq: 0,
             limits: Limits::default(),
             mtu: DEFAULT_MTU,
@@ -87,6 +89,7 @@ impl Node {
             gossip: HashMap::new(),
             gossip_rate: DEFAULT_GOSSIP_BUDGET,
             last_sweep: 0,
+            last_now: 0,
         }
     }
 
@@ -108,6 +111,43 @@ impl Node {
     /// Set the store's byte budget. When exceeded, low-priority envelopes are
     /// evicted (lowest stamp → largest → oldest), but chunks of a file still being
     /// assembled are pinned and never dropped. Defaults to 10 MiB.
+    /// How old an envelope may be and still be carried here (M12).
+    ///
+    /// This is what makes a **courier** a configuration rather than a protocol
+    /// feature: raise it and the node will accept and relay envelopes its
+    /// neighbours have already given up on, then hand them to whoever it meets
+    /// next. Nothing in the envelope knows or needs to.
+    ///
+    /// Clamped to [`MAX_RELAY_AGE_SECS`] — permissive is the point, unbounded is
+    /// not.
+    pub fn set_max_relay_age(&mut self, secs: u32) {
+        self.max_relay_age = secs.min(MAX_RELAY_AGE_SECS);
+    }
+
+    /// What this node will currently carry.
+    pub fn max_relay_age(&self) -> u32 {
+        self.max_relay_age
+    }
+
+    /// **The one normative check on `created_at`** (M12): an envelope must not
+    /// claim to be from the future.
+    ///
+    /// Refused, not clamped. Clamping would leave post-dating as a way to look
+    /// newer than you are; refusing makes it worthless, because the envelope
+    /// simply does not travel.
+    ///
+    /// **A node with a badly wrong clock will misjudge this**, and that is
+    /// accepted rather than solved. One reading far in the past rejects current
+    /// traffic; one reading far in the future accepts anything. Both are the same
+    /// failure a node with a wrong clock already has for every other time-based
+    /// decision it makes, and the alternatives are worse: trusting the sender
+    /// puts the decision back with the attacker, and a "my clock is unreliable"
+    /// flag is a switch that the platforms which most need it are the least
+    /// likely to set correctly. A node that cares should fix its clock.
+    pub(crate) fn is_post_dated(&self, e: &Envelope, now: u32) -> bool {
+        e.created_at > now.saturating_add(MAX_CLOCK_SKEW_SECS)
+    }
+
     pub fn set_store_budget(&mut self, bytes: usize) {
         self.max_store_bytes = bytes.max(1);
         self.enforce_budget();
@@ -293,7 +333,7 @@ impl Node {
     /// The newest entry always survives, so the ring is never empty and a node can
     /// always be sealed to. A bootstrap entry (`born == 0`) is exempt until a
     /// rotation stamps it: its real age is unknown, and guessing would either
-    /// discard a live key or claim an expiry it cannot honour.
+    /// discard a live key or claim an created_at it cannot honour.
     pub fn sweep_prekeys(&mut self, now: u32) {
         let lifetime = self.prekey_lifetime_secs;
         let newest = self.ring.len().saturating_sub(1);

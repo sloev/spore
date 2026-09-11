@@ -200,7 +200,7 @@ fn a_node_survives_arbitrary_bytes_on_its_receive_path() {
     // ...and on plausible-looking envelopes, where the parser gets further in.
     let mut victim = Node::new("victim", &[]);
     for i in 0..300u32 {
-        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, r.some_bytes(120));
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, r.some_bytes(120));
         e.flags = r.byte();
         e.hops = r.byte();
         e.typ = r.byte();
@@ -267,7 +267,7 @@ fn a_zero_count_fragment_does_not_kill_the_node() {
     payload[17] = 0; // count — the poison
     payload.extend_from_slice(b"chunk");
 
-    let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, payload);
+    let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, payload);
     e.flags |= fl::FRAGMENT | fl::FLOOD;
     let _ = node.on_rx(&e.wire(), 1, None, now); // must return, not panic
 
@@ -278,7 +278,7 @@ fn a_zero_count_fragment_does_not_kill_the_node() {
             p[16] = idx;
             p[17] = count;
             p.extend_from_slice(b"chunk");
-            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, p);
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, p);
             e.flags |= fl::FRAGMENT | fl::FLOOD;
             let _ = node.on_rx(&e.wire(), 1, None, now);
         }

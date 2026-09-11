@@ -40,16 +40,16 @@ fn main() {
 
     // ---- 3. Envelope wire bytes -------------------------------------------
     // A public DATA message to the "news" topic, expiring at a fixed time.
-    let expiry: u32 = 1_700_000_000;
-    let mut e = Envelope::new(ty::DATA, topic, expiry, b"the dam holds".to_vec());
+    let created_at: u32 = 1_700_000_000;
+    let mut e = Envelope::new(ty::DATA, topic, created_at, b"the dam holds".to_vec());
     e.flags |= fl::FLOOD;
     e.hops = 16;
     let wire_unsigned = e.wire();
     println!("[3] Envelope (unsigned) wire layout");
-    println!("    ver   typ flags hops  expiry(4 BE)  dest(8)            plen(2)  payload");
+    println!("    ver   typ flags hops  created_at(4 BE)  dest(8)            plen(2)  payload");
     println!(
         "    01    00  10    10    {}     {}   {}   {}",
-        hex(&expiry.to_be_bytes()),
+        hex(&created_at.to_be_bytes()),
         hex(&topic),
         hex(&(b"the dam holds".len() as u16).to_be_bytes()),
         hex(b"the dam holds")
@@ -58,15 +58,15 @@ fn main() {
     println!("    id = SHA-256(wire, hops=0)[..16] = {}\n", hex(&e.id()));
 
     // ---- 4. Sign + verify --------------------------------------------------
-    let mut s = Envelope::new(ty::DATA, topic, expiry, b"the dam holds".to_vec());
+    let mut s = Envelope::new(ty::DATA, topic, created_at, b"the dam holds".to_vec());
     s.flags |= fl::FLOOD;
     s.sign(&sk);
     // The signature covers the body with hops zeroed (so relays can decrement
     // hops without breaking it). Recompute it by hand to show the pre-image.
     let preimage = {
-        // ver,typ,flags(with SIGNED),hops=0,expiry,dest,srcpubkey,plen,payload
+        // ver,typ,flags(with SIGNED),hops=0,created_at,dest,srcpubkey,plen,payload
         let mut b = vec![VER, ty::DATA, fl::FLOOD | fl::SIGNED, 0];
-        b.extend_from_slice(&expiry.to_be_bytes());
+        b.extend_from_slice(&created_at.to_be_bytes());
         b.extend_from_slice(&topic);
         b.extend_from_slice(&pk);
         b.extend_from_slice(&(b"the dam holds".len() as u16).to_be_bytes());

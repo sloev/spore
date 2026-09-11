@@ -27,7 +27,7 @@ Part IV is how the core is embedded, and changes nothing on the wire.
 
 ## 0. The whole protocol in one breath
 
-A SPORE message is a **signed postcard**: to, from, expiry, payload, signature.
+A SPORE message is a **signed postcard**: to, from, when it was written, payload, signature.
 Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't
 seen, hands copies to anyone it meets who wants them, and drops duplicates and
 expired mail. That alone is a working planetary network. Of the four hard
@@ -82,11 +82,11 @@ keys by QR/paper/voice. Petnames are local.
 
 ```mermaid
 packet-beta
-0-7: "ver = 0x01"
+0-7: "ver = 0x02"
 8-15: "type"
 16-23: "flags"
 24-31: "hops"
-32-63: "expiry (u32, unix seconds)"
+32-63: "created_at (u32, unix seconds)"
 64-127: "dest (8 B) — address | topic | 0x00×8 = public"
 128-383: "src — present only if SIGNED: 32-B pubkey, or 8 B if SRC8"
 384-399: "plen (u16)"
@@ -98,12 +98,12 @@ The fixed part is the first 16 bytes. Everything after `dest` is conditional:
 
 ```
 off len field
-0   1   ver    = 0x01  (exact match to decode; see "Versioning and unknown bits")
+0   1   ver    = 0x02  (exact match to decode; see "Versioning and unknown bits")
 1   1   type   0=DATA 1=INV 2=WANT 3=ANNOUNCE
 2   1   flags  b0 ENCRYPTED b1 SIGNED b2 FRAGMENT b3 ACKREQ b4 FLOOD b5 SRC8
                b6 RATCHET (0x40, §7)   b7 CANCEL (0x80, on WANT: §8)
 3   1   hops   remaining relays (default 16; relays clamp incoming to ≤ 16)
-4   4   expiry unix seconds u32 (stores clamp horizon to 30 d)
+4   4   created_at unix seconds u32 — when it was minted, not when it dies
 8   8   dest   address | topic | 0x00×8 = public
 -- if SIGNED: src = 32-B pubkey, or 8-B address if SRC8 --
     2   plen   u16
@@ -127,7 +127,14 @@ packet-beta
 ```
 
 **Versioning and unknown bits.** `ver` is an exact match: a decoder MUST reject
-any `ver != 0x01` rather than guess, so v2 is a hard fork and not a negotiation.
+any `ver != 0x02` rather than guess, so a version change is a hard fork and not a
+negotiation. **0x02 is that fork.** The header kept its shape — the four bytes at
+offset 4 are still four bytes at offset 4 — and changed their meaning, from a
+deadline the sender chose to the moment the envelope was minted. Left at 0x01 the
+two builds would still have refused each other, but by accident: a v1 `expiry`
+read as a birth time lands in the future, and a v2 birth time read as a deadline
+looks long expired. Both directions fail closed, which is luck rather than
+design.
 **Flags are the extension point instead.** Bits defined in v1 MUST be interpreted
 as named; a bit a node does not understand MUST be ignored, MUST be forwarded
 unchanged, and MUST NOT cause a drop. That rule is the agility hatch, and it has
@@ -254,17 +261,20 @@ flowchart TB
   MARK --> MINE{"dest is mine, a topic I follow, or public?"}
   MINE -->|yes| DELIVER["deliver to the app (verify / decrypt per flags)"]
   MINE -->|no| STORE
-  DELIVER --> STORE["store until expiry"]
+  DELIVER --> STORE["store: keep it until the room is needed"]
   STORE --> HOPS{"hops > 0?"}
   HOPS -->|no| STOP["carry, but do not relay"]
   HOPS -->|yes| FWD["decrement hops · forward on every other interface, inside the per-interface token bucket"]
 ```
 
-1. Envelope arrives: ID seen or expired → drop. Add ID (keep ≥ until expiry).
+1. Envelope arrives: ID seen, or `created_at` more than `MAX_CLOCK_SKEW_SECS`
+   ahead of our clock → drop. **Age is not checked here.** Add ID.
    Learn paths (§4).
 2. dest ∈ {my addresses, followed topics, 0×8} → deliver (verify/decrypt per
    flags).
-3. Store until expiry. Evict: expired → lowest stamp → largest → oldest. TX
+3. Store it. Nothing expires; entries leave only when the room is needed, and
+   only then is age consulted. Evict: past this node's `max_relay_age` → lowest
+   stamp → largest → oldest arrival. TX
    order: local origin, then stamp, then FIFO.
 4. **Congestion control**, four rules: **(a)** token bucket — a node MUST rate
    limit what it relays per interface, and SHOULD default to ≈10% of that
@@ -294,8 +304,13 @@ flowchart TB
    discovery; replies teach reverse paths and heal blackholes. A receipt is the
    only delivery signal: overhearing your own envelope rebroadcast means the mesh
    took it, not that anyone received it, and MUST NOT clear a pending resend.
-7. Untrusted clock? Relay regardless of expiry; age by dwell, drop after 7 local
-   days.
+7. A wrong clock misjudges rule 1, and that is accepted rather than solved: a
+   clock far in the past rejects current traffic, one far in the future accepts
+   anything. It is the same failure such a node already has for every other
+   time-based decision, and both alternatives are worse — trusting the sender
+   puts the decision back with the attacker, and a "my clock is unreliable" flag
+   is a switch the platforms that most need it are least likely to set. Fix the
+   clock.
 
 ```
 def on_rx(e, iface, nbr):
@@ -509,7 +524,7 @@ operator set a budget, and a peer may fill it but never exceed it.
 
 | Path a stranger can push on | What bounds it |
 |---|---|
-| Dedup table | `MAX_SEEN`, evicting nearest-expiry first |
+| Dedup table | `MAX_SEEN`, evicting nearest-to-forgetting first |
 | Custody store | `max_store_bytes`; adoption additionally by `MAX_ADOPT_BYTES` |
 | Peer prekeys, busy bytes, names, sessions | `MAX_PEERS` on each |
 | Learned paths | `MAX_PEERS`, plus a time purge |
@@ -518,13 +533,28 @@ operator set a budget, and a peer may fill it but never exceed it.
 | Undrained RPC and feed inboxes | `MAX_INBOX`, oldest dropped first |
 | Fragment reassembly | set count, byte budget, a timeout, and a per-interface share |
 | Answering INV/WANT | `MAX_IDS_PER_GOSSIP` per request and a token bucket per link |
-| Relaying | per-source quota, per-interface budget, hop count, expiry |
+| Relaying | per-source quota, per-interface budget, hop count |
 
 Three of these are the general form, and an implementation should be able to
-point at all three: an object's **lifetime** (the signed `expiry`, which a store
-may clamp down but never extend), a **transfer allowance** (a bounded request, or
-a lease), and a **transport budget** (the token bucket and backpressure of §5.4).
-Transmit only while all three still hold.
+point at all three: an object's **welcome** (this node's `max_relay_age` against
+the envelope's `created_at` — a local opinion, consulted only when the store is
+full), a **transfer allowance** (a bounded request, or a lease), and a **transport
+budget** (the token bucket and backpressure of §5.4). Transmit only while all
+three still hold.
+
+The first of those used to be the sender's to set, and moving it is the point of
+M12. A sender wrote a deadline and every relay honoured it, which let a stranger
+reserve a week of somebody else's storage — precisely what the invariant above
+forbids everywhere else. An envelope now states a fact about itself (when it was
+minted) and each node decides what to do about it.
+
+**A courier is a setting, not a feature.** Because age is a local preference
+rather than a wire property, a node that raises `max_relay_age` simply keeps old
+envelopes when others have thrown theirs out, and hands them on to whoever it
+meets. Nothing new is negotiated, no envelope knows it is being couriered, and a
+node that does this is not distinguishable on the wire from one that does not.
+Measured: at one day's tolerance a carrier under storage pressure kept 1 of 30
+ten-day-old envelopes; at a month's, 15 of 30.
 
 Two rules that are easy to get wrong, and were:
 

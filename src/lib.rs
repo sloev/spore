@@ -30,23 +30,35 @@ pub const ZERO_DEST: Addr = [0u8; 8]; // public flood
 
 pub const SEEN_MIN_SECS: u32 = 30 * 24 * 3600;
 pub const PATH_FRESH_SECS: u32 = 3 * 3600;
-
-/// The default lifetime a locally-originated `DATA` envelope is given
-/// (§11's "expiry 7 d"), used everywhere `Node` mints one: `send`,
-/// `send_direct`, `originate_ackreq`, RPC requests, feed and topic posts.
+/// **How old an envelope may be and still be relayed by this node, by default.**
 ///
-/// Named rather than left as a repeated `7 * 86400` literal because a UI
-/// needs the same number a client never otherwise sees: an unacknowledged
-/// send has no "gave up" signal from the core (§5.4d's resend backoff
-/// exhausts in minutes, long before the envelope itself expires, and
-/// `resend_unacked` drops the `Pending` entry silently either way) — so the
-/// only honest way to tell "still travelling" from "expired, never
-/// delivered" client-side is to compare this constant against a message's
-/// own send time. `spore_default_message_expiry_secs` (wasm) and
-/// `nativeDefaultMessageExpirySecs` (JNI) both read this value rather than
-/// duplicating it, so the UI's notion of "expired" can never drift from
-/// what the envelope's own `expiry` field actually says.
-pub const DEFAULT_MESSAGE_EXPIRY_SECS: u32 = 7 * 24 * 3600;
+/// A *policy*, not a property of the envelope (M12). An envelope says when it was
+/// born; each node decides how much age it is willing to carry. That is the whole
+/// of the change: a sender used to write a deadline every relay had to honour,
+/// which let a stranger reserve a week of somebody else's storage.
+///
+/// Making it local is what makes a **courier** expressible without a new envelope
+/// type or a new message: a courier is a node that sets this high. A phone can
+/// set it to a day, an archive to a year, and the same envelope crosses all three
+/// without knowing any of it.
+///
+/// Seven days matches the old default deadline, so a node that changes nothing
+/// behaves as it did.
+pub const DEFAULT_MAX_RELAY_AGE_SECS: u32 = 7 * 24 * 3600;
+
+/// How far ahead of *our* clock an envelope may claim to have been born.
+///
+/// **The one normative check on `created_at`** (M12, §5). Beyond this the
+/// envelope is refused rather than clamped, and that refusal is what makes lying
+/// about the timestamp pointless: post-dating buys a longer life only if someone
+/// carries it, and nobody will. It is the mirror of the age policy — too old is a
+/// local opinion, too *young* is a protocol error, because no honest clock
+/// disagrees with itself by this much.
+///
+/// A node whose clock it does not trust MUST NOT apply this check at all; see
+/// [`Node::set_clock_trusted`]. Applying it with a clock that reads 1970 would
+/// reject every envelope on the mesh.
+pub const MAX_CLOCK_SKEW_SECS: u32 = 300;
 
 /// How long a learned path is kept at all (§4: "Fresh < 3 h; purge 7 d").
 ///
@@ -60,20 +72,17 @@ pub const DEFAULT_MESSAGE_EXPIRY_SECS: u32 = 7 * 24 * 3600;
 /// source added a row that outlived the node. The spec had specified the purge
 /// since v1; only the code was missing.
 pub const PATH_PURGE_SECS: u32 = 7 * 24 * 3600;
-
-/// The furthest ahead a store will hold anything, whatever an envelope's
-/// `expiry` field claims (§2).
+/// The furthest any node may set its own [`DEFAULT_MAX_RELAY_AGE_SECS`] policy —
+/// a ceiling on the ceiling.
 ///
-/// Expiry is attacker-chosen — it is inside the signature, so it cannot be
-/// *edited* in flight, but nothing stops an originator from minting an envelope
-/// that expires in the next century. Without this clamp such an envelope is
-/// never "expired", so it never reaches the first rank of the eviction order and
-/// pins its bytes for as long as the node lives.
+/// A courier wants a permissive policy; it does not want an unbounded one. The
+/// store is still finite, and "carry anything ever minted" is how a node becomes
+/// an unwitting archive for whatever the mesh has seen. Thirty days is the figure
+/// §11 already states.
 ///
-/// Equal to [`SEEN_MIN_SECS`] on purpose: §11 states one 30-day figure, and a
-/// store horizon shorter than the dedup floor would drop an envelope while still
-/// refusing to re-accept it.
-pub const MAX_EXPIRY_HORIZON_SECS: u32 = 30 * 24 * 3600;
+/// Equal to [`SEEN_MIN_SECS`] on purpose: a store horizon shorter than the dedup
+/// floor would drop an envelope while still refusing to re-accept it.
+pub const MAX_RELAY_AGE_SECS: u32 = 30 * 24 * 3600;
 
 /// How often a node mints a fresh prekey (§7). One day.
 pub const PREKEY_PERIOD_SECS: u32 = 24 * 3600;
@@ -176,7 +185,7 @@ pub const DEFAULT_GOSSIP_BUDGET: u32 = 32 * 1024;
 // forgotten peer re-announces, a dropped partial object is re-fetched, an evicted
 // dedup entry costs one duplicate relay.
 
-/// The **default** dedup entries retained (§5). Evicts nearest-to-expiry first,
+/// The **default** dedup entries retained (§5). Evicts nearest-to-created_at first,
 /// so the ids most likely to still be in flight are the ones kept.
 ///
 /// Every `MAX_*` here is the desktop default for a field of [`Limits`], not a
@@ -247,26 +256,26 @@ pub const MAX_INTERESTS: usize = 256;
 /// holder later and serve A at the next meeting. Scoping this to a live link
 /// would make recursive pull an online-only feature and throw away the
 /// store-and-forward property the rest of the protocol is built on.
-/// The **floor**, not the lease. `Node::interest_deadline` takes the expiry of
+/// The **floor**, not the lease. `Node::interest_deadline` takes the created_at of
 /// the manifest that names the id and clamps it into
 /// `[now + INTEREST_LEASE_SECS, now + MAX_INTEREST_LEASE_SECS]`, so an interest
 /// lives as long as the object could still turn up and no longer. This constant
-/// is what an id with no readable manifest expiry falls back to.
+/// is what an id with no readable manifest created_at falls back to.
 pub const INTEREST_LEASE_SECS: u32 = 900;
 
 /// The **ceiling** on an adopted interest (M11-P).
 ///
-/// Matches `DEFAULT_MESSAGE_EXPIRY_SECS`, because that is when the chunks being
+/// Matches `DEFAULT_MAX_RELAY_AGE_SECS`, because that is when the chunks being
 /// hunted for die: an interest that outlives the object is hunting for bytes
 /// nobody will serve. Fifteen minutes — the old fixed lease — made adopted
 /// interest an online-only mechanism inside a delay-tolerant protocol, which a
 /// courier crossing a border in a day could never use.
 ///
 /// Lengthening a remote-caused commitment is only safe because three other
-/// bounds hold it: the deadline is read from a *signed* manifest whose expiry the
+/// bounds hold it: the deadline is read from a *signed* manifest whose created_at the
 /// asker does not control, `Limits::interests` caps how many exist at once, and
 /// M11-K's cancel retires one as soon as its last waiter leaves.
-pub const MAX_INTEREST_LEASE_SECS: u32 = DEFAULT_MESSAGE_EXPIRY_SECS;
+pub const MAX_INTEREST_LEASE_SECS: u32 = DEFAULT_MAX_RELAY_AGE_SECS;
 
 /// How often a node re-states the interests it is still carrying (M11-P).
 ///
@@ -291,7 +300,7 @@ pub const MAX_ACKED: usize = 8192;
 /// is better than growing until the process dies.
 pub const MAX_INBOX: usize = 1024;
 /// How often the time-based sweep runs. Hard caps apply on every ingest; this is
-/// only for expiry, which does not need to be immediate.
+/// only for created_at, which does not need to be immediate.
 const SWEEP_INTERVAL_SECS: u32 = 60;
 
 /// Every growable table's ceiling, in one place, so a runtime can size them
@@ -491,7 +500,7 @@ impl core::fmt::Display for TooLarge {
 }
 impl std::error::Error for TooLarge {}
 
-/// Datagrams are ephemeral: a short expiry keeps interactive session traffic
+/// Datagrams are ephemeral: a short created_at keeps interactive session traffic
 /// out of anyone's long-term store.
 pub const SESSION_EXPIRY_SECS: u32 = 300;
 
@@ -631,7 +640,7 @@ pub(crate) struct Interest {
     /// us). More than one node may want the same chunk, and the second should
     /// not have to wait for a second fetch.
     pub(crate) waiters: Vec<(Iface, Option<Addr>)>,
-    /// Wall-clock expiry. Not tied to a live link: B may adopt A's interest,
+    /// Wall-clock created_at. Not tied to a live link: B may adopt A's interest,
     /// part from A, meet a holder tomorrow and serve A next week.
     ///
     /// No depth is stored alongside it. Depth bounds *asking*, and the asking
@@ -683,6 +692,10 @@ pub struct Node {
     prekey_lifetime_secs: u32,
 
     max_store_bytes: usize,
+    /// How old an envelope may be and still be relayed here (M12). Local policy;
+    /// a courier raises it, a phone lowers it. Capped by `MAX_RELAY_AGE_SECS`.
+    max_relay_age: u32,
+
     seq: u64,
     /// Every table ceiling. See
     /// [`Limits`]; defaults to the desktop set.
@@ -723,7 +736,14 @@ pub struct Node {
     pinned: HashSet<Id>,                       // magnets a seed-vault keeps forever
     gossip: HashMap<Iface, congestion::TokenBucket>, // per-link WANT service budget
     gossip_rate: u32,
-    last_sweep: u32, // when expiry-based pruning last ran
+    last_sweep: u32, // when age-based pruning last ran
+    /// The most recent clock any caller handed us (M12).
+    ///
+    /// Eviction ranks by age, and `set_store_budget` can trigger eviction without
+    /// being given a time. Rather than widen a public setter to take one, the node
+    /// remembers the last `now` it was told — it is only ever used to order
+    /// eviction candidates, where being a few seconds stale costs nothing.
+    last_now: u32,
 }
 
 struct Pending {
@@ -956,9 +976,9 @@ mod tests {
     #[test]
     fn unsigned_traffic_is_paced_but_still_delivered() {
         // Audit F-2 (#189). Unsigned envelopes used to skip the source quota
-        // entirely, on the reasoning that dedup and expiry already bounded them.
+        // entirely, on the reasoning that dedup and created_at already bounded them.
         // They do not: dedup is keyed on content id and an attacker varies
-        // content for free, while expiry bounds lifetime rather than rate.
+        // content for free, while created_at bounds lifetime rather than rate.
         //
         // Now they share the UNATTRIBUTED bucket with signed-but-unverifiable
         // traffic — bounded, and impossible to aim at a chosen victim's budget.
@@ -971,7 +991,7 @@ mod tests {
         for i in 0..400u32 {
             let mut body = vec![0xAB; 4096];
             body[..4].copy_from_slice(&i.to_be_bytes()); // a new content id each time
-            let e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, body);
+            let e = Envelope::new(ty::DATA, ZERO_DEST, now, body);
             assert!(matches!(e.src, Src::None));
             let rx = n.on_rx(&e.wire(), 0, None, now);
             relayed += rx.forwards.len();
@@ -1047,14 +1067,14 @@ mod tests {
         let mut n = Node::new("victim", &[]);
         let now = 1_700_000_000u32;
         for i in 0..2000u64 {
-            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, i.to_be_bytes().to_vec());
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, i.to_be_bytes().to_vec());
             e.flags |= fl::FLOOD;
             let _ = n.on_rx(&e.wire(), 0, None, now);
         }
         assert!(n.seen.len() > 500, "precondition: the dedup table filled up");
 
         n.set_limits(Limits { seen: 300, ..Limits::default() });
-        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"one more".to_vec());
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, b"one more".to_vec());
         e.flags |= fl::FLOOD;
         let _ = n.on_rx(&e.wire(), 0, None, now);
         assert!(n.seen.len() <= 300, "seen held {} against a ceiling of 300", n.seen.len());
@@ -1180,7 +1200,7 @@ mod tests {
 
             // Emit data + plenty of repair, drop ~40% with a deterministic LCG.
             let indices: Vec<u16> = (0..(count as u16).saturating_add(60)).collect();
-            let frags = fragment(&wire, cs, 16, e.expiry, ZERO_DEST, id, &indices);
+            let frags = fragment(&wire, cs, 16, e.created_at, ZERO_DEST, id, &indices);
 
             let mut f = Fountain::new();
             let mut rng: u64 = 0x1234_5678;
@@ -1666,7 +1686,7 @@ mod tests {
 
     #[test]
     fn double_ratchet_bidirectional_and_out_of_order() {
-        let now = 1_700_000_000; // fixed clock; this test is about ordering, not expiry
+        let now = 1_700_000_000; // fixed clock; this test is about ordering, not created_at
         let (a_sec, a_pub) = ratchet::keypair();
         let (b_sec, b_pub) = ratchet::keypair();
         let mut alice = ratchet::Ratchet::init_alice(a_sec, b_pub, PREKEY_LIFETIME_SECS);
@@ -1732,7 +1752,7 @@ mod tests {
         let mut nbrs: bridge::Neighbors<u32> = bridge::Neighbors::new(3600);
         let victim = Node::new("victim", &[]);
 
-        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec());
+        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now, b"x".to_vec());
         forged.src = Src::Full(victim.sk.verifying_key().to_bytes());
         forged.flags |= fl::SIGNED;
         forged.sig = Some([0u8; 64]);
@@ -1754,7 +1774,7 @@ mod tests {
         let mut nbrs: bridge::Neighbors<u32> = bridge::Neighbors::new(3600);
         let victim = Node::new("victim", &[]);
 
-        let mut short = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"y".to_vec());
+        let mut short = Envelope::new(ty::DATA, ZERO_DEST, now, b"y".to_vec());
         short.src = Src::Short(victim.addr);
         short.flags |= fl::SIGNED | fl::SRC8;
         short.sig = Some([0u8; 64]);
@@ -1771,7 +1791,7 @@ mod tests {
         let mut n = Node::new("n", &[]);
         let victim = Node::new("victim", &[]);
 
-        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"z".to_vec());
+        let mut forged = Envelope::new(ty::DATA, ZERO_DEST, now, b"z".to_vec());
         forged.src = Src::Full(victim.sk.verifying_key().to_bytes());
         forged.flags |= fl::SIGNED;
         forged.sig = Some([0u8; 64]);
@@ -1780,7 +1800,7 @@ mod tests {
         assert!(n.paths.fresh(&victim.addr, now).is_none(), "no path learned from a forgery");
 
         // ...while a genuinely signed envelope from the same node still teaches.
-        let mut real = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"z".to_vec());
+        let mut real = Envelope::new(ty::DATA, ZERO_DEST, now, b"z".to_vec());
         real.sign(&victim.sk);
         n.on_rx(&real.wire(), 7, None, now);
         assert!(n.paths.fresh(&victim.addr, now).is_some(), "a real signature still learns");
@@ -1797,7 +1817,7 @@ mod tests {
         let mut victim = Node::new("victim", &[]);
 
         for i in 0..40u8 {
-            let mut junk = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, vec![i; 60]);
+            let mut junk = Envelope::new(ty::DATA, ZERO_DEST, now, vec![i; 60]);
             junk.src = Src::Short(victim.addr);
             junk.flags |= fl::SIGNED | fl::SRC8; // src is only parsed when SIGNED
             junk.sig = Some([0u8; 64]);
@@ -1990,12 +2010,20 @@ mod tests {
         assert!(n.paths.len() <= MAX_PEERS, "paths {}", n.paths.len());
     }
 
-    /// §2: a store clamps its horizon to 30 d. `expiry` is inside the signature,
+    /// §2: a store clamps its horizon to 30 d. `created_at` is inside the signature,
     /// so it cannot be edited in flight — but nothing stops an originator from
     /// minting one that expires next century, and an envelope that is never
     /// "expired" never reaches the first rank of the eviction order.
     #[test]
-    fn a_far_future_expiry_cannot_pin_the_store_or_the_dedup_table() {
+    fn a_post_dated_envelope_is_refused_rather_than_clamped() {
+        // M12 replaced this test's subject. There is no sender-chosen deadline to
+        // clamp any more: an envelope says when it was *born*, and the single
+        // normative check is that it cannot have been born in the future.
+        //
+        // Refused rather than clamped, and that is the point — clamping left
+        // post-dating as a way to look newer than you are, which under an
+        // age-ordered eviction policy is a way to outlive honest traffic. A node
+        // that will not carry it at all makes the lie worthless.
         let now = 1_700_000_000;
         let far = now + 40 * 365 * 86400; // ~2065
         let mut n = Node::new("n", &[]);
@@ -2004,24 +2032,28 @@ mod tests {
         e.flags |= fl::FLOOD;
         e.sign(&n.sk);
         let id = e.id();
-        n.on_rx(&e.wire(), 1, None, now);
+        let rx = n.on_rx(&e.wire(), 1, None, now);
 
-        let horizon = now + MAX_EXPIRY_HORIZON_SECS;
-        let stored = n.store.meta(&id).expect("stored");
-        assert_eq!(stored.expiry, horizon, "the store holds it to the horizon, not to {far}");
-        assert_eq!(n.seen[&id], horizon, "and does not hold the id longer than the bytes");
+        assert!(rx.forwards.is_empty(), "a post-dated envelope is not relayed");
+        assert!(rx.delivered.is_empty(), "nor delivered");
+        assert!(n.store.meta(&id).is_none(), "nor stored");
+        assert!(!n.seen.contains_key(&id), "and it does not even take a dedup slot");
 
-        // The wire is untouched: what was clamped is this node's willingness to
-        // carry it, not the envelope, whose signature still covers `far`.
-        let (decoded, _) = Envelope::decode(&e.wire()).unwrap();
-        assert_eq!(decoded.expiry, far, "the envelope itself is unchanged");
-        assert!(decoded.verify(), "and still verifies");
+        // Inside the skew allowance it is ordinary traffic — clocks disagree by
+        // seconds and that must not be fatal.
+        let mut ok = Envelope::new(ty::DATA, ZERO_DEST, now + MAX_CLOCK_SKEW_SECS - 1, b"fine".to_vec());
+        ok.flags |= fl::FLOOD;
+        ok.sign(&n.sk);
+        n.on_rx(&ok.wire(), 1, None, now);
+        assert!(n.store.meta(&ok.id()).is_some(), "a little skew is tolerated");
 
-        // Past the horizon it is ordinary expired stock: the sweep drops the id,
-        // and eviction can reclaim the bytes.
-        n.last_sweep = 0;
-        n.enforce_bounds(horizon + 1);
-        assert!(!n.seen.contains_key(&id), "the dedup entry expires at the horizon");
+        // And being *old* is never grounds for refusal — only for being evicted
+        // first when the store runs out of room.
+        let mut old = Envelope::new(ty::DATA, ZERO_DEST, now - 60 * 86400, b"ancient".to_vec());
+        old.flags |= fl::FLOOD;
+        old.sign(&n.sk);
+        n.on_rx(&old.wire(), 1, None, now);
+        assert!(n.store.meta(&old.id()).is_some(), "an old envelope is carried, not turned away");
     }
 
     #[test]
@@ -2064,13 +2096,13 @@ mod tests {
         assert_eq!(nbrs.resolve(&a.addr, now), Some(42), "directed sends now resolve to a unicast");
 
         // Unsigned frames must not populate the table (can't verify the source).
-        let unsigned = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec()).wire();
+        let unsigned = Envelope::new(ty::DATA, ZERO_DEST, now, b"x".to_vec()).wire();
         assert_eq!(nbrs.snoop(&unsigned, 99u32, now), None);
 
         // Nor may a frame that merely *claims* to be signed. Setting the flag is
         // free, so the signature itself has to be checked — see the two forgery
         // tests below, which is where that is proven.
-        let mut liar = Envelope::new(ty::DATA, ZERO_DEST, now + 3600, b"x".to_vec());
+        let mut liar = Envelope::new(ty::DATA, ZERO_DEST, now, b"x".to_vec());
         liar.src = Src::Full(a.sk.verifying_key().to_bytes());
         liar.flags |= fl::SIGNED;
         liar.sig = Some([0u8; 64]);
@@ -2129,7 +2161,7 @@ mod tests {
             let mut p = Vec::with_capacity(17);
             p.push(RECEIPT_TAG);
             p.extend_from_slice(id);
-            Envelope::new(ty::DATA, a_addr, now + 3600, p)
+            Envelope::new(ty::DATA, a_addr, now, p)
         };
 
         // Mallory relayed the envelope, so she knows its id -- but she is not
@@ -2387,7 +2419,7 @@ mod tests {
         let dir = TmpDir::new("forged");
 
         // A plausible-looking file whose bytes are not what its name claims.
-        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now + 86400, b"not what it says".to_vec());
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, b"not what it says".to_vec());
         e.flags |= fl::FLOOD;
         let real = e.id();
         let mut lie = real;

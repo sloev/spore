@@ -259,7 +259,7 @@ class Spore {
    * travelling" from "expired, never delivered": the core has no separate
    * "gave up" event for an unacknowledged send. */
   defaultMessageExpirySecs() {
-    return this.ex.spore_default_message_expiry_secs();
+    return this.ex.spore_max_relay_age_secs();
   }
 
   /** Open a topic-sealed payload with the 32-byte key. null on failure. */

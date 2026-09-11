@@ -10,8 +10,8 @@ impl Node {
     /// Put an envelope in the store, holding it no further ahead than §2's
     /// horizon.
     ///
-    /// The clamp is on the *store's* copy of the expiry, never on the envelope:
-    /// `expiry` is inside the signature, so rewriting it would invalidate the
+    /// The clamp is on the *store's* copy of the created_at, never on the envelope:
+    /// `created_at` is inside the signature, so rewriting it would invalidate the
     /// frame we are about to serve to somebody else. What changes is only how
     /// long *this* node agrees to carry it — which is the node's own business,
     /// and is what §2's "stores clamp horizon to 30 d" has always said.
@@ -19,12 +19,18 @@ impl Node {
     /// Every path into the store goes through here, so this one `min` is the
     /// whole fix.
     pub(crate) fn store_put(&mut self, e: &Envelope, now: u32) {
-        let expiry = e.expiry.min(now.saturating_add(MAX_EXPIRY_HORIZON_SECS));
-        self.store.put(e.id(), e.wire(), expiry, e.stamp(), self.seq, e.dest);
+        // Stored as minted. The old code clamped a *deadline* forward so a
+        // far-future one could not pin the store; a birth time needs no such
+        // guard, because `is_post_dated` already refused anything post-dated
+        // and being *old* only ever makes an entry a better eviction candidate.
+        let created_at = e.created_at;
+        self.last_now = self.last_now.max(now);
+        self.store.put(e.id(), e.wire(), created_at, e.stamp(), self.seq, e.dest);
         self.seq += 1;
         self.enforce_budget();
     }
     pub(crate) fn enforce_budget(&mut self) {
+        let now = self.last_now;
         let mut total = self.store.bytes();
         if total <= self.max_store_bytes {
             return;
@@ -33,14 +39,27 @@ impl Node {
         // memory pressure never drops a chunk we're actively collecting and
         // stalls the fetch forever. Completed files are unpinned and evictable.
         let pinned = self.pinned_ids();
-        // evict order: lowest stamp -> largest -> oldest (smallest seq)
+        // Evict order (M12): **past this node's age policy first**, then lowest
+        // stamp, then largest, then oldest arrival.
+        //
+        // This is the only place `created_at` is consulted, and it is consulted
+        // only here — a node under no pressure never asks how old anything is.
+        // `max_relay_age` is therefore not a deadline but a *preference order*:
+        // raise it and old envelopes stop being the first thing thrown out, which
+        // is all a courier is.
+        let horizon = self.max_relay_age;
+        let stale = |s: &store::Stored| u8::from(now.saturating_sub(s.created_at) > horizon);
         while total > self.max_store_bytes {
             let victim = self
                 .store
                 .entries()
                 .filter(|(k, _)| !pinned.contains(*k))
                 .min_by(|a, b| {
-                    a.1.stamp.cmp(&b.1.stamp).then(b.1.len.cmp(&a.1.len)).then(a.1.seq.cmp(&b.1.seq))
+                    stale(b.1)
+                        .cmp(&stale(a.1))
+                        .then(a.1.stamp.cmp(&b.1.stamp))
+                        .then(b.1.len.cmp(&a.1.len))
+                        .then(a.1.seq.cmp(&b.1.seq))
                 })
                 .map(|(k, _)| *k);
             match victim {
@@ -88,7 +107,7 @@ impl Node {
 
     /// Originate a signed public (flooded) message on topic/broadcast `dest`.
     pub fn originate(&mut self, dest: Addr, payload: Vec<u8>, now: u32) -> Vec<Forward> {
-        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
+        let mut e = Envelope::new(ty::DATA, dest, now, payload);
         // Topics and public floods carry FLOOD; the relay uses this flag (not
         // structure) to tell multicast from unicast (§5).
         if dest == ZERO_DEST || self.topics.contains(&dest) {
@@ -124,7 +143,7 @@ impl Node {
         if data.len() > MAX_PAYLOAD_BYTES {
             return Err(TooLarge { len: data.len(), max: MAX_PAYLOAD_BYTES });
         }
-        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, data);
+        let mut e = Envelope::new(ty::DATA, dest, now, data);
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
         }
@@ -157,7 +176,7 @@ impl Node {
     /// Originate a unicast message that asks the recipient for a delivery
     /// receipt (§8). Tracks it for backoff resend until a receipt arrives.
     pub fn originate_ackreq(&mut self, dest: Addr, payload: Vec<u8>, now: u32) -> Vec<Forward> {
-        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
+        let mut e = Envelope::new(ty::DATA, dest, now, payload);
         e.flags |= fl::ACKREQ;
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             e.flags |= fl::FLOOD;
@@ -204,7 +223,7 @@ impl Node {
         } else {
             (plaintext.to_vec(), false, false)
         };
-        let mut e = Envelope::new(ty::DATA, dest, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
+        let mut e = Envelope::new(ty::DATA, dest, now, payload);
         e.flags |= fl::ACKREQ;
         if encrypted {
             e.flags |= fl::ENCRYPTED;
@@ -321,7 +340,7 @@ impl Node {
         OsRng.fill_bytes(&mut idb);
         let id = u64::from_be_bytes(idb);
         let payload = rpc::encode_request(id, &req);
-        let mut e = Envelope::new(ty::DATA, service, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
+        let mut e = Envelope::new(ty::DATA, service, now, payload);
         if service == ZERO_DEST || self.topics.contains(&service) {
             e.flags |= fl::FLOOD;
         }
@@ -344,7 +363,7 @@ impl Node {
     /// Reply to a request, routed back toward the requester.
     pub fn respond(&mut self, to: Addr, req_id: u64, resp: rpc::Response, now: u32) -> Vec<Forward> {
         let payload = rpc::encode_response(req_id, &resp);
-        let mut e = Envelope::new(ty::DATA, to, now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
+        let mut e = Envelope::new(ty::DATA, to, now, payload);
         e.sign(&self.sk);
         if self.paths.fresh(&to, now).is_none() {
             e.flags |= fl::FLOOD; // reverse path unknown -> flood to find it
@@ -406,7 +425,7 @@ impl Node {
         let mut payload = Vec::with_capacity(1 + event.len());
         payload.push(feed::FEED_TAG);
         payload.extend_from_slice(&event);
-        let mut e = Envelope::new(ty::DATA, topic_of(topic), now + DEFAULT_MESSAGE_EXPIRY_SECS, payload);
+        let mut e = Envelope::new(ty::DATA, topic_of(topic), now, payload);
         e.flags |= fl::FLOOD;
         e.sign(&self.sk);
         self.mark_seen(&e);

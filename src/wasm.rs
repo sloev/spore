@@ -771,7 +771,7 @@ pub unsafe extern "C" fn spore_node_acked(n: *mut Node, id: *const u8) -> u8 {
 }
 
 /// The default lifetime (seconds) `Node` gives a locally-originated `DATA`
-/// envelope — [`crate::DEFAULT_MESSAGE_EXPIRY_SECS`]. Needs no `Node`: it is a
+/// envelope — [`crate::DEFAULT_MAX_RELAY_AGE_SECS`]. Needs no `Node`: it is a
 /// build-time constant, not per-instance state.
 ///
 /// A UI reads this once rather than hardcoding "7 days" a second time, because
@@ -782,8 +782,8 @@ pub unsafe extern "C" fn spore_node_acked(n: *mut Node, id: *const u8) -> u8 {
 /// compare this constant against the message's own send time, which the UI
 /// already has.
 #[no_mangle]
-pub extern "C" fn spore_default_message_expiry_secs() -> u32 {
-    DEFAULT_MESSAGE_EXPIRY_SECS
+pub extern "C" fn spore_max_relay_age_secs() -> u32 {
+    DEFAULT_MAX_RELAY_AGE_SECS
 }
 
 /// Open a delivered DM from `sender`. Returns the plaintext packed into an i64,

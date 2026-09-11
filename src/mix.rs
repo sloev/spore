@@ -21,7 +21,7 @@ fn pad_to_class(v: &mut Vec<u8>) {
 /// Wrap `inner` for delivery through `hops` (first hop = outermost). Each
 /// `(addr, prekey)` is a mix that follows topic `mix`. Returns the outermost
 /// envelope to inject; `None` if `hops` is empty.
-pub fn onion_wrap(inner: &Envelope, hops: &[(Addr, [u8; 32])], expiry: u32) -> Option<Envelope> {
+pub fn onion_wrap(inner: &Envelope, hops: &[(Addr, [u8; 32])], created_at: u32) -> Option<Envelope> {
     if hops.is_empty() {
         return None;
     }
@@ -33,7 +33,7 @@ pub fn onion_wrap(inner: &Envelope, hops: &[(Addr, [u8; 32])], expiry: u32) -> O
         plain.extend_from_slice(&current);
         pad_to_class(&mut plain);
         let sealed = seal(&plain, prekey);
-        let mut layer = Envelope::new(ty::DATA, *addr, expiry, sealed);
+        let mut layer = Envelope::new(ty::DATA, *addr, created_at, sealed);
         // Unsigned (sender anonymity) and flooded so it reaches the mix.
         layer.flags |= fl::ENCRYPTED | fl::FLOOD;
         current = layer.wire();

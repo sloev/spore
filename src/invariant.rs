@@ -56,7 +56,7 @@ fn tight() -> Limits {
 
 /// A public envelope with a distinct id, as any stranger could mint.
 fn junk(seq: u32) -> Vec<u8> {
-    let mut e = Envelope::new(ty::DATA, ZERO_DEST, NOW + 3600, seq.to_be_bytes().to_vec());
+    let mut e = Envelope::new(ty::DATA, ZERO_DEST, NOW, seq.to_be_bytes().to_vec());
     e.flags |= fl::FLOOD;
     e.wire()
 }
@@ -777,7 +777,7 @@ fn a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher() {
     // --- the courier flies. No link, no session, no shared time base. ---------
     // A week later, in another country, and long past INTEREST_LEASE_SECS.
     // Two days out. The journey has a *deadline*: a file's chunks carry the
-    // publisher's expiry (`DEFAULT_MESSAGE_EXPIRY_SECS`, 7 days), so the whole
+    // publisher's created_at (`DEFAULT_MAX_RELAY_AGE_SECS`, 7 days), so the whole
     // round trip has to finish inside it. Sneakernet range is measured in time,
     // not distance, and this is the constant that sets it.
     let abroad = NOW + 2 * 86_400;
@@ -815,7 +815,7 @@ fn a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher() {
     assert!(courier.has_file(&magnet), "the courier carries it home");
 
     // --- and flies back. Another week; the publisher is still never involved. -
-    let home = abroad + 2 * 86_400; // four days total, inside the expiry
+    let home = abroad + 2 * 86_400; // four days total, inside the created_at
     for round in 0..24 {
         let t = home + round * 60;
         let want = alice.fetch_n(&magnet, 8);
@@ -834,46 +834,69 @@ fn a_want_crosses_an_ocean_on_a_courier_who_never_met_the_publisher() {
 }
 
 #[test]
-fn a_sneakernet_journey_has_a_deadline_and_it_is_the_publisher_s_expiry() {
-    // The limit on carrying a file by hand is **time, not distance**. Chunks are
-    // ordinary envelopes and carry the publisher's expiry, so a courier who takes
-    // longer than that arrives holding bytes the far end will no longer serve.
-    // Worth pinning: the failure is silent — the courier still holds the
-    // manifest, still knows the file exists, and simply never completes.
-    let mut publisher = Node::new("publisher", &[]);
-    let (magnet, published) = publisher.publish_file("atlas.bin", &pullable_file(), ZERO_DEST, NOW);
+fn how_long_a_journey_may_take_is_the_carrier_s_choice_not_the_publisher_s() {
+    // M12 replaced this test's subject. It used to assert that a sneakernet
+    // journey had a deadline and that the *publisher* set it — an envelope
+    // carried an expiry, so a message was universally dead at a moment its author
+    // chose, wherever it happened to be.
+    //
+    // An envelope now says only when it was born. Nothing expires; a node keeps
+    // what it was given until it runs out of room, and only then does age decide
+    // what goes. So "how long may this survive in transit" stops being a property
+    // of the message and becomes a property of whoever is carrying it — which is
+    // the whole of the courier idea, with no new envelope type and no new message.
+    //
+    // Two carriers, byte-identical inputs, differing in one setting. Identical
+    // inputs matter: stamp and size also rank in the eviction order, so the only
+    // way to attribute a difference to age is to hold everything else equal.
+    let ten_days = 10 * 86_400;
+    let old_ones: Vec<Vec<u8>> = (0..30u32)
+        .map(|i| {
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, NOW, vec![i as u8; 2000]);
+            e.flags |= fl::FLOOD;
+            e.wire()
+        })
+        .collect();
+    let new_ones: Vec<Vec<u8>> = (0..30u32)
+        .map(|i| {
+            let mut e = Envelope::new(ty::DATA, ZERO_DEST, NOW + ten_days, vec![i as u8 ^ 0xFF; 2000]);
+            e.flags |= fl::FLOOD;
+            e.wire()
+        })
+        .collect();
 
-    let mut holder = Node::new("holder", &[]);
-    for f in &published {
-        let wire = match f {
-            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
-        };
-        holder.on_rx(wire, 0, None, NOW);
-    }
-    for round in 0..24 {
-        let want = holder.fetch_n(&magnet, 8);
-        if want.is_empty() {
-            break;
+    // How many of the *old* envelopes survive a squeeze, at a given policy.
+    let survivors = |max_age: u32| -> usize {
+        let mut n = Node::new("carrier", &[]);
+        n.set_max_relay_age(max_age);
+        // Room for about half of what it is about to be given.
+        n.set_store_budget(30 * 2100);
+        for w in old_ones.iter().chain(new_ones.iter()) {
+            n.on_rx(w, 0, None, NOW + ten_days);
         }
-        meet(&mut holder, &mut publisher, want, NOW + round * 60);
-    }
-    assert!(holder.has_file(&magnet), "the holder has it while it is fresh");
-
-    // A courier who set out with the manifest and came back too late.
-    let mut courier = Node::new("courier", &[]);
-    let root = match &published[0] {
-        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+        old_ones
+            .iter()
+            .filter(|w| {
+                let (e, _) = Envelope::decode(w).unwrap();
+                n.has(&e.id())
+            })
+            .count()
     };
-    courier.on_rx(&root, 0, None, NOW);
-    let late = NOW + DEFAULT_MESSAGE_EXPIRY_SECS + 3600;
-    for round in 0..24 {
-        let want = courier.fetch_n(&magnet, 8);
-        if want.is_empty() {
-            break;
-        }
-        meet(&mut courier, &mut holder, want, late + round * 60);
-    }
-    assert!(!courier.has_file(&magnet), "past the expiry there is nothing left to fetch");
+
+    let tight = survivors(86_400); // will carry a day's worth
+    let courier = survivors(MAX_RELAY_AGE_SECS); // will carry a month's
+
+    // Measured: 1 of 30 against 15 of 30. Not zero, because eviction stops the
+    // moment the store is back inside its budget rather than draining a whole
+    // category — which is the right behaviour and worth not asserting away.
+    assert!(
+        tight <= 2,
+        "a carrier that only wants a day's worth throws the ten-day-old mail out first, kept {tight}"
+    );
+    assert!(
+        courier >= tight * 5,
+        "a courier that will carry a month keeps far more of it ({courier} against {tight})"
+    );
 }
 
 /// Set a courier hunting on Alice's behalf, and return what it was asked for.
@@ -914,7 +937,7 @@ fn an_adopted_interest_outlives_the_meeting_that_created_it() {
     );
 
     // But not past the object it is hunting for. Nothing will serve these chunks
-    // once the publisher's expiry has passed, so wanting them is pure cost.
+    // once the publisher's created_at has passed, so wanting them is pure cost.
     let too_late = NOW + MAX_INTEREST_LEASE_SECS + 3600;
     courier.on_rx(&Envelope::new(ty::WANT, ZERO_DEST, 0, vec![0u8; 16]).wire(), 0, None, too_late);
     assert_eq!(courier.open_interests(), 0, "an interest must not outlive the object");
@@ -1108,12 +1131,12 @@ fn a_file_published_twice_shares_every_chunk_with_itself() {
     // passed: a byte-identical file published twice had **0 of 16 envelopes** in
     // common, because a chunk's name was the hash of its whole envelope and that
     // envelope carried a random per-publish `file_id`, a topic derived from it,
-    // and a wall-clock expiry.
+    // and a wall-clock created_at.
     //
     // Chunks are now named by their **content** — the hash of `[CHUNK_TAG][bytes]`
     // and nothing else — so the same bytes get the same name from any publisher
     // at any time. The envelopes still differ, and should: an envelope is a
-    // message, with an expiry and a destination. What changed is that the file
+    // message, with an created_at and a destination. What changed is that the file
     // layer stopped confusing the two.
     let body = pullable_file();
 

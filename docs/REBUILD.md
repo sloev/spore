@@ -72,7 +72,7 @@ A public, unsigned DATA message to `"news"` carrying `"the dam holds"`:
 ver typ flags hops  expiry      dest              plen  payload
 01  00  10    10    6553f100    19fba0e995b9794f  000d  7468652064616d20686f6c6473
 
-full wire: 010010106553f10019fba0e995b9794f000d7468652064616d20686f6c6473
+full wire: 020010106553f10019fba0e995b9794f000d7468652064616d20686f6c6473
 ```
 
 (`flags=0x10` is FLOOD; `hops=0x10` is 16; `000d` is 13, the payload length.)
@@ -85,7 +85,7 @@ hashing is what keeps the ID stable while relays decrement the TTL. For the
 envelope above:
 
 ```
-id = 1ff3a7d10b117b007309f1164c3998f7
+id = b0862c14c3be84bc5df1bfa8ab5adacb
 ```
 
 The ID is used for dedup (drop an ID you've seen), for naming an envelope in
@@ -159,15 +159,9 @@ signature: daa7ab3bd3c46dda41fd7d95800b91e242f95e43185e4cd1f394bfda7b00cac8
 ## 5. Text armor — the paper/voice channel
 
 Any envelope has a text form that survives SMS, handwriting, a read-aloud phone
-call, or a photograph: `~S1.<base32(wire)>.<base32(SHA-256(wire)[..4])>~` using the
-RFC 4648 base32 alphabet (`A–Z2–7`), no padding. The trailing 4-byte checksum
-catches transcription errors. Type it into any node and the message enters the
-mesh.
-
-```
-~S1.AEABEEDFKPYQAGP3UDUZLOLZJ7VEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IU
-I3JCYAANORUGKIDEMFWSA2DPNRSHHWVHVM55HRDN3JA727MVQAFZDYSC7FPEGGC6JTI7HFF73J5QB
-SWIAZPMWTDDV5YRVISGFOKQVEZSCWRSGTDO62YU7RK5JFORPHG7HEDA.G23QRDA~
+call, or a photograph: `~S1.AIABEEDFKPYQAGP3UDUZLOLZJ7VEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3
+JCYAANORUGKIDEMFWSA2DPNRSHGMXDZK6UE2IVL4SHPBZ7QTI6GRRS3HSWK5H3OBNJSUHKPMNDZIPX
+K7RNX6BDM7LUHQAQO5YPVJBKQT2PLNGNBFTN632K2U5NVDPITABA.22DHXIY~
 ```
 
 ## Build it in tiers
