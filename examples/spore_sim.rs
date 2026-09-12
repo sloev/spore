@@ -367,6 +367,36 @@ struct Report {
     reached: usize,
     of: usize,
     m: Metrics,
+    /// What the scenario was actually set up as, captured from the `Sim` rather
+    /// than described by hand — so the diagram on the published page cannot drift
+    /// from the topology the numbers came from.
+    setup: Setup,
+}
+
+/// A scenario's topology and the switches that were on for it.
+#[derive(Default, Clone)]
+struct Setup {
+    nodes: usize,
+    /// `(a, b, mtu, loss_pct, latency_ms)`, in the order the world declared them.
+    links: Vec<(usize, usize, usize, u32, u64)>,
+    link_frag: bool,
+    forced_repair: usize,
+    /// One line of prose for the page: what this scenario is *for*.
+    about: &'static str,
+}
+
+impl Sim {
+    /// Snapshot the setup for reporting. Called by each scenario as it builds its
+    /// report, so the run and the picture have one source.
+    fn setup(&self, about: &'static str) -> Setup {
+        Setup {
+            nodes: self.world.nodes.len(),
+            links: self.world.links.iter().map(|l| (l.a, l.b, l.mtu, l.loss_pct, l.latency_ms)).collect(),
+            link_frag: self.link_frag.is_some(),
+            forced_repair: self.repair,
+            about,
+        }
+    }
 }
 
 impl Report {
@@ -409,6 +439,9 @@ fn line() -> Report {
     let reached = usize::from(!sim.seen_delivered[4].is_empty());
     let _ = &sim.m;
     Report {
+        setup: sim.setup(
+            "Control: five nodes in a line, one MTU, no loss. If this fails, nothing else means anything.",
+        ),
         name: "line".into(),
         note: "control: 5-node line, uniform MTU".to_string(),
         reached,
@@ -439,6 +472,7 @@ fn mixed_mtu() -> Report {
     sim.run(sim.now_ms + 120_000, Some(3));
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
     Report {
+        setup: sim.setup("A Wi-Fi island bridged to a LoRa hop with no per-hop splitting — the case the old design silently could not serve, kept as a red line rather than deleted."),
         name: "mixed-mtu".into(),
         note: "wifi island bridged to LoRa; M11-D must flip reached to 1".to_string(),
         reached,
@@ -470,6 +504,7 @@ fn mixed_mtu_clamped() -> Report {
     sim.run(sim.now_ms + 120_000, Some(3));
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
     Report {
+        setup: sim.setup("The same, with every node clamped to its own narrowest link: the fix that does not work, because the sender owns none of the narrow hop."),
         name: "mixed-mtu-clamped".into(),
         note: "each node clamped to its own narrowest link; sender still owns none of the narrow hop"
             .to_string(),
@@ -504,6 +539,7 @@ fn mixed_mtu_linkfrag() -> Report {
     sim.run(sim.now_ms + 120_000, Some(3));
     let reached = usize::from(!sim.seen_delivered[3].is_empty());
     Report {
+        setup: sim.setup("The same topology with link fragmentation on. The M11-D acceptance test."),
         name: "mixed-mtu-linkfrag".into(),
         note: "same topology and message, link fragmentation on".to_string(),
         reached,
@@ -524,9 +560,15 @@ fn mixed_mtu_linkfrag() -> Report {
 fn linkfrag_loss(loss_pct: u32, attempts: usize) -> Report {
     let mut arrived = 0usize;
     let mut m = Metrics::default();
+    // Every trial builds the same world, so one snapshot describes them all.
+    let mut captured = Setup::default();
     for trial in 0..attempts {
         let links = vec![Link { a: 0, b: 1, mtu: 237, loss_pct, latency_ms: 20 }];
         let mut sim = Sim::new(World::new(2, links), 0x10551 ^ trial as u64).with_link_fragmentation();
+        captured = sim.setup(
+            "A 900-byte envelope over a 237-byte radio, 200 trials. Five pieces, all of which must \
+             arrive, so a little frame loss costs a lot of envelopes.",
+        );
         sim.converge();
         sim.start_measuring();
         let dest = sim.world.nodes[1].addr;
@@ -551,7 +593,14 @@ fn linkfrag_loss(loss_pct: u32, attempts: usize) -> Report {
         10 => "900 B over a 237-byte link, 10% frame loss".to_string(),
         _ => "900 B over a 237-byte link, 20% frame loss".to_string(),
     };
-    Report { name: format!("linkfrag-loss-{loss_pct}pct"), note, reached: arrived, of: attempts, m }
+    Report {
+        setup: captured.clone(),
+        name: format!("linkfrag-loss-{loss_pct}pct"),
+        note,
+        reached: arrived,
+        of: attempts,
+        m,
+    }
 }
 
 /// The same measurement with `r` repair symbols per set — the erasure code, so
@@ -561,11 +610,15 @@ fn linkfrag_loss(loss_pct: u32, attempts: usize) -> Report {
 fn linkfrag_repair(loss_pct: u32, repair: usize, attempts: usize) -> Report {
     let mut arrived = 0usize;
     let mut m = Metrics::default();
+    // Every trial builds the same world, so one snapshot describes them all.
+    let mut captured = Setup::default();
     for trial in 0..attempts {
         let links = vec![Link { a: 0, b: 1, mtu: 237, loss_pct, latency_ms: 20 }];
         let mut sim = Sim::new(World::new(2, links), 0x10551 ^ trial as u64)
             .with_link_fragmentation()
             .with_repair(repair);
+        captured =
+            sim.setup("The same link with erasure repair symbols added, to measure what they actually buy.");
         sim.converge();
         sim.start_measuring();
         let dest = sim.world.nodes[1].addr;
@@ -581,6 +634,7 @@ fn linkfrag_repair(loss_pct: u32, repair: usize, attempts: usize) -> Report {
         m.dropped_loss += sim.m.dropped_loss;
     }
     Report {
+        setup: captured.clone(),
         name: format!("linkfrag-{loss_pct}pct-repair{repair}"),
         note: "900 B over a 237-byte link, erasure-coded repair".to_string(),
         reached: arrived,
@@ -621,7 +675,7 @@ fn lossy_mesh(loss_pct: u32) -> Report {
         10 => "100 nodes, 10% loss".to_string(),
         _ => "100 nodes, 50% loss".to_string(),
     };
-    Report { name: format!("lossy-mesh-{loss_pct}pct"), note, reached, of: N - 1, m: sim.m }
+    Report { setup: sim.setup("A hundred nodes in a random graph. Does a damped flood still reach everyone when links drop frames?"), name: format!("lossy-mesh-{loss_pct}pct"), note, reached, of: N - 1, m: sim.m }
 }
 
 /// **The M11-I case.** A file three hops away: the root has flooded, so every
@@ -682,7 +736,7 @@ fn file_multihop() -> Report {
         reached == 0 || cached > 2,
         "helper relays should hold what they passed on, got {cached} envelopes across the middle"
     );
-    Report { name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
+    Report { setup: sim.setup("A file three hops from its only seeder, with no chunk in any store between. The recursive-pull acceptance test."), name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
 }
 
 /// What a push buys, and what it costs the people who did not want it (M11-C).
@@ -739,6 +793,7 @@ fn push_threshold(chunks: usize, budget: usize) -> Report {
         assert!(rounds > 0, "and it has to be asked for");
     }
     Report {
+        setup: sim.setup("A publisher with four neighbours, one of whom wants the file. Weighs what a push saves the fetcher against what it costs everyone else."),
         name: format!("push-{chunks}chunk-budget{budget}"),
         note: format!(
             "{rounds} round trips for the one fetcher; {wasted} B sitting in three neighbours who never asked"
@@ -802,6 +857,7 @@ fn malicious_want(depth: u8) -> Report {
     // How far did one frame reach, and how many nodes took on an obligation?
     let holding = (0..N).filter(|i| sim.world.nodes[*i].open_interests() > 0).count();
     Report {
+        setup: sim.setup("One WANT forged with a deeper hop budget than policy allows, on a line longer than that policy. Measures how far a stranger can make a mesh hunt."),
         name: format!("malicious-want-depth{depth}"),
         note: format!(
             "one WANT claiming depth {depth}: {holding} of {N} nodes now hold an interest nobody can serve"
@@ -827,7 +883,7 @@ fn malicious_want(depth: u8) -> Report {
 ///   * **link drops** — the fetcher cannot say so, but its neighbour can tell.
 fn fetch_abandoned() -> Report {
     // How many interests are still open across the relays, after each ending.
-    fn open_after(ending: Ending) -> usize {
+    fn open_after(ending: Ending) -> (usize, Setup) {
         let links = (0..3).map(|i| Link { a: i, b: i + 1, mtu: 1400, loss_pct: 0, latency_ms: 10 }).collect();
         let mut sim = Sim::new(World::new(4, links), 0xCA7CE1).with_link_fragmentation();
         let now = sim.now_secs();
@@ -896,12 +952,14 @@ fn fetch_abandoned() -> Report {
                 sim.run(sim.now_ms + 30_000, None);
             }
         }
-        (1..3).map(|i| sim.world.nodes[i].open_interests()).sum()
+        let about = "A fetcher that stops wanting a file, three ways: it vanishes, it cancels, or its \
+                     link drops. Measures what each leaves behind.";
+        ((1..3).map(|i| sim.world.nodes[i].open_interests()).sum(), sim.setup(about))
     }
 
-    let vanished = open_after(Ending::Vanishes);
-    let cancelled = open_after(Ending::Cancels);
-    let dropped = open_after(Ending::LinkDrops);
+    let (vanished, setup) = open_after(Ending::Vanishes);
+    let (cancelled, _) = open_after(Ending::Cancels);
+    let (dropped, _) = open_after(Ending::LinkDrops);
 
     // The measurement that matters: saying so must beat saying nothing.
     assert!(
@@ -911,6 +969,7 @@ fn fetch_abandoned() -> Report {
     assert!(dropped < vanished, "a dropped link should too ({dropped} vs {vanished})");
     let reached = usize::from(cancelled == 0 && dropped == 0);
     Report {
+        setup,
         name: "fetch-abandoned".into(),
         note: format!(
             "interests still open across the relays — vanished: {vanished}, cancelled: {cancelled}, link dropped: {dropped}"
@@ -956,6 +1015,7 @@ fn partition() -> Report {
     sim.run(sim.now_ms + 180_000, Some(10));
     let reached = usize::from(!sim.seen_delivered[10].is_empty());
     Report {
+        setup: sim.setup("Two clusters joined by a single node, with loss. Does a partition heal through one bridge, and what does it cost?"),
         name: "partition".into(),
         note: "two 5-node clusters joined by one bridge, 5% loss".to_string(),
         reached,
@@ -990,6 +1050,8 @@ fn hop_limit(len: usize) -> Report {
     sim.run(sim.now_ms + 120_000, Some(len - 1));
     let reached = usize::from(!sim.seen_delivered[len - 1].is_empty());
     Report {
+        setup: sim
+            .setup("A line of n nodes and one message end to end. Measures how far flooding alone reaches."),
         name: format!("hop-limit-{len}"),
         note: if reached == 1 {
             "reached the far end"
@@ -1003,10 +1065,124 @@ fn hop_limit(len: usize) -> Report {
     }
 }
 
+// ------------------------------------------------------------------ markdown
+
+/// Render `docs/SIMULATIONS.md` from the run that just happened.
+///
+/// The page is generated rather than written because a hand-written one is a
+/// claim about numbers nobody re-checked — which is exactly the failure that put
+/// "one repair symbol takes 10% loss to 90%" in three documents for months when
+/// the real figure was 66%. Here the prose, the diagram and the measurement all
+/// come out of the same run, and CI fails if the committed page and a fresh run
+/// disagree.
+fn markdown(reports: &[Report]) -> String {
+    let mut out = String::new();
+    for line in [
+        "# Simulations\n",
+        "\n",
+        "*This page is generated:* `cargo run --release --example spore_sim -- markdown > docs/SIMULATIONS.md`.\n",
+        "CI fails if it is stale, so every number below came out of the run that wrote it.\n",
+        "\n",
+        "`examples/spore_sim.rs` drives the **real** crate — `Node::on_rx` and `Node::send`, exactly as a bridge\n",
+        "does — over a seeded event queue. What it measures is SPORE, not a model of SPORE. Every node is built\n",
+        "with `Node::from_seed`, every coin comes from one seeded LCG, and ties break on a monotonic sequence\n",
+        "number, so a run is reproducible from its seed and a metric that moves means the protocol moved.\n",
+        "\n",
+        "**The scenario that matters most is the one that fails.** `mixed-mtu` is reported rather than asserted\n",
+        "because it *is* a bug, and failing the build on a known bug teaches people to ignore the build. If it\n",
+        "ever flips to delivered, that is a result.\n",
+        "\n",
+        "Why generated at all: a hand-written page is a claim about numbers nobody re-checked. That is not\n",
+        "hypothetical here — \"one repair symbol takes 10% loss to 90%\" sat in three documents for months when\n",
+        "the measured figure was 66%, because the scenario behind it is reported rather than asserted and\n",
+        "nothing compared the prose to a run.\n",
+        "\n",
+    ] {
+        out.push_str(line);
+    }
+
+    out.push_str("## At a glance\n\n| scenario | result | what it measures |\n|---|---|---|\n");
+    for r in reports {
+        let pct = (100 * r.reached).checked_div(r.of).unwrap_or(0);
+        out.push_str(&format!(
+            "| [`{}`](#{}) | {} of {} ({}%) | {} |\n",
+            r.name,
+            r.name,
+            r.reached,
+            r.of,
+            pct,
+            r.setup.about.split('.').next().unwrap_or("").trim()
+        ));
+    }
+    out.push('\n');
+
+    for r in reports {
+        out.push_str(&format!("## {}\n\n{}\n\n", r.name, r.setup.about));
+        out.push_str(&topology(&r.setup));
+        out.push_str("| measured | |\n|---|---|\n");
+        out.push_str(&format!("| delivered | **{} of {}** |\n", r.reached, r.of));
+        out.push_str(&format!("| frames sent | {} |\n", r.m.frames_tx));
+        out.push_str(&format!("| bytes sent | {} |\n", r.m.bytes_tx));
+        out.push_str(&format!("| dropped, frame too big for the link | {} |\n", r.m.dropped_mtu));
+        out.push_str(&format!("| dropped by link loss | {} |\n", r.m.dropped_loss));
+        if let Some(ms) = r.m.first_delivery_ms {
+            out.push_str(&format!("| first delivery | {ms} ms |\n"));
+        }
+        if r.m.duplicate_delivered > 0 {
+            out.push_str(&format!("| duplicate deliveries | {} |\n", r.m.duplicate_delivered));
+        }
+        out.push_str(&format!("\n{}\n\n", r.note));
+    }
+    out
+}
+
+/// A mermaid picture of one scenario's world, from the links it actually had.
+fn topology(s: &Setup) -> String {
+    let mut o = String::new();
+    let switches = match (s.link_frag, s.forced_repair) {
+        (true, 0) => " · link fragmentation on".to_string(),
+        (true, r) => format!(" · link fragmentation on · {r} forced repair symbols"),
+        (false, 0) => " · no link fragmentation".to_string(),
+        (false, r) => format!(" · no link fragmentation · {r} forced repair symbols"),
+    };
+    o.push_str(&format!("**{} nodes, {} links**{}\n\n", s.nodes, s.links.len(), switches));
+
+    // Past a dozen nodes a drawing is worse than a sentence: the interesting
+    // thing about a hundred-node random graph is that it is one, not its shape.
+    if s.nodes > 12 {
+        let lossy = s.links.iter().filter(|l| l.3 > 0).count();
+        o.push_str(&format!(
+            "*Not drawn: {} nodes in a random graph, {} of {} links dropping frames. The shape is not the\n             point — that it is arbitrary is.*\n\n",
+            s.nodes,
+            lossy,
+            s.links.len()
+        ));
+        return o;
+    }
+    o.push_str("```mermaid\nflowchart LR\n");
+    for i in 0..s.nodes {
+        o.push_str(&format!("  n{i}([\"node {i}\"])\n"));
+    }
+    for (a, b, mtu, loss, latency) in &s.links {
+        let mut label = format!("{mtu} B");
+        if *loss > 0 {
+            label.push_str(&format!(", {loss}% loss"));
+        }
+        label.push_str(&format!(", {latency} ms"));
+        o.push_str(&format!("  n{a} ---|\"{label}\"| n{b}\n"));
+    }
+    o.push_str("```\n\n");
+    o
+}
+
 // --------------------------------------------------------------------- main
 
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "smoke".into());
+    // `markdown` runs the whole smoke suite and prints the page instead of JSON,
+    // so the published numbers and the asserted ones are the same numbers.
+    let as_markdown = which == "markdown";
+    let which = if as_markdown { "smoke".to_string() } else { which };
     let reports: Vec<Report> = match which.as_str() {
         "line" => vec![line()],
         "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped(), mixed_mtu_linkfrag()],
@@ -1061,11 +1237,15 @@ fn main() {
         ],
     };
 
-    println!("[");
-    for (i, r) in reports.iter().enumerate() {
-        println!("{}{}", r.json(), if i + 1 < reports.len() { "," } else { "" });
+    if as_markdown {
+        print!("{}", markdown(&reports));
+    } else {
+        println!("[");
+        for (i, r) in reports.iter().enumerate() {
+            println!("{}{}", r.json(), if i + 1 < reports.len() { "," } else { "" });
+        }
+        println!("]");
     }
-    println!("]");
 
     // Regression thresholds. Only on the scenarios whose behaviour is known
     // good — `mixed-mtu` is *reported*, not asserted, because it is the bug and
