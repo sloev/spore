@@ -27,12 +27,12 @@ license = "Unlicense"
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-ed25519-dalek = "=2.1.1"
+ed25519-dalek = "3"
 crypto_box = "0.9"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-chacha20poly1305 = "0.10"
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
 sha2 = "0.10"
-blake2 = "0.10"
+blake2 = { version = "0.11", default-features = false }
 getrandom = "0.2"
 base64ct = "=1.8.3"
 # `zeroize` is bumped to 1.x (≥1.9) to satisfy the optional iroh bridge's
@@ -73,3 +73,15 @@ libc = "0.2"
 
 [profile.release]
 opt-level = 2
+
+# Optimise the curve arithmetic even in debug builds.
+#
+# `curve25519-dalek` 5 is dramatically slower unoptimised than 4 was: the
+# signature-heavy robustness tests went from 18s to 151s on the same machine,
+# which turns `cargo test` from something you run constantly into something you
+# avoid. Nothing else about the debug build changes — this is one dependency, and
+# it is one that has no reason to be stepped through.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.test.package.curve25519-dalek]
+opt-level = 3

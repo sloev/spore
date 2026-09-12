@@ -22,10 +22,10 @@
 //! so a record only opens for the exact pair that negotiated it.
 
 use crate::Addr;
-use blake2::digest::{Update as _, VariableOutput};
-use blake2::Blake2bVar;
+use blake2::digest::consts::U64;
+use blake2::{Blake2b, Digest as _};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use chacha20poly1305::ChaCha20Poly1305;
 use std::collections::HashMap;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -559,15 +559,14 @@ fn derive(
     responder: &Addr,
     medium: &Medium,
 ) -> ([u8; 32], [u8; 32]) {
-    let mut h = Blake2bVar::new(64).unwrap();
+    let mut h = Blake2b::<U64>::new();
     h.update(shared);
     h.update(b"spore-direct-v1");
     h.update(pipe_id);
     h.update(initiator);
     h.update(responder);
     h.update(medium.as_str().as_bytes());
-    let mut out = [0u8; 64];
-    h.finalize_variable(&mut out).unwrap();
+    let out: [u8; 64] = h.finalize().into();
     let mut a = [0u8; 32];
     let mut b = [0u8; 32];
     a.copy_from_slice(&out[..32]);
@@ -781,8 +780,8 @@ impl<P: DatagramPort> Pipe<P> {
         header.push(typ as u8);
         put_u16(&mut header, seq);
         header.extend_from_slice(&self.pipe_id[..4]);
-        let ct = ChaCha20Poly1305::new(Key::from_slice(&self.tx_key))
-            .encrypt(Nonce::from_slice(&nonce(seq)), Payload { msg: payload, aad: &header })
+        let ct = ChaCha20Poly1305::new(&self.tx_key.into())
+            .encrypt(&(nonce(seq)).into(), Payload { msg: payload, aad: &header })
             .map_err(|_| std::io::Error::other("seal failed"))?;
         let mut frame = header;
         frame.extend_from_slice(&ct);
@@ -816,8 +815,8 @@ impl<P: DatagramPort> Pipe<P> {
             return None; // not our pipe
         }
         let seq = u16::from_be_bytes([header[2], header[3]]);
-        let pt = ChaCha20Poly1305::new(Key::from_slice(&self.rx_key))
-            .decrypt(Nonce::from_slice(&nonce(seq)), Payload { msg: ct, aad: header })
+        let pt = ChaCha20Poly1305::new(&self.rx_key.into())
+            .decrypt(&(nonce(seq)).into(), Payload { msg: ct, aad: header })
             .ok()?;
         Some((typ, pt))
     }
