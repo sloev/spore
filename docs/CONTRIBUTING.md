@@ -6,7 +6,7 @@ any feature idea. [Dev guide](DEV_GUIDE.md) is the map of where
 everything lives and which doc answers which question. This doc is the rules
 once you know where you're going: freeze, CI gates, branches, releases.
 
-The **SPORE v1 wire format** and the crate's **public API shape** are frozen. The
+The **SPORE wire format** (currently `ver 0x02`) and the crate's **public API shape** are frozen. The
 crate and the shipped distribution are versioned separately and are still `0.x` —
 early, and honest about it. Freezing the wire at v1 while the software is at 0.x is
 not a contradiction: the protocol is what peers and reimplementations depend on, and

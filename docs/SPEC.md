@@ -1,4 +1,4 @@
-# SPORE v1 — the technical reference
+# SPORE v2 — the technical reference
 
 One document: **the wire format** (normative, frozen), **the application layer**
 built on it (conventions, no relay support required), and **where the core runs**
@@ -14,7 +14,7 @@ claim could not be checked against anything.
 
 | Part | Contains | Status | A peer that implements it |
 |---|---|---|---|
-| **I — Wire** | §§1–3 | Frozen v1 | is wire-compatible |
+| **I — Wire** | §§1–3 | Frozen at `ver 0x02` | is wire-compatible |
 | **II — Relay** | §§4–6, bindings | Frozen behaviour; local constants MAY vary | is a SPORE router |
 | **III — Endpoint profiles and local policy** | §§7–11, application layer | Versioned per profile; relays ignore | talks to other endpoints |
 | **IV — Host contract** | runtime contract, where the core runs | Architecture, not wire | can embed the crate |
@@ -67,7 +67,24 @@ both.
 
 ---
 
-# Part I — Wire (frozen v1)
+# Part I — Wire (frozen at `ver 0x02`)
+
+**Three kinds of rule, and which is which.** The audit that prompted this table
+was right that the distinction was implied rather than stated, and that a reader
+could not tell whether an unpinned behaviour was extensible or merely undocumented.
+
+| | changes how? | what says so |
+|---|---|---|
+| **Frozen** — §1, §2, the file layer's content id | a `ver` bump, which is a hard fork | `reference/vectors.json`, and CI refuses to edit it |
+| **Normative but versioned** — §3 link framing, INV/WANT payloads, file-layer tags | may change with a minor release; both ends of one link, or one fetch, must agree | this document, and the tests named beside each |
+| **Local policy** — `max_relay_age`, push budget, repair sizing, interest lease, every `Limits` field | freely, per node, with no coordination at all | each node's own configuration |
+
+The third row is the one that keeps growing, and deliberately: every time a
+decision moves from the wire into a node's own hands — how long to carry
+something, how much repair to send, how big a file to push — the protocol gets
+smaller and the implementations get more room. A reader who finds a number in
+this document and cannot tell which row it is in should treat that as a
+documentation bug.
 
 **What "frozen" covers, exactly.** `reference/vectors.json` is the compatibility
 surface, and CI refuses to change it. It pins the seed → public key → address
