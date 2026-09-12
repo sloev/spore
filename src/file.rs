@@ -265,6 +265,26 @@ impl Manifest {
             o += 16;
             chunk_ids.push(c);
         }
+        // **A leaf cannot cover more than its chunks hold** (M11-N). Every chunk
+        // but the last is exactly `CHUNK_BYTES`, so the arithmetic is exact at
+        // depth 0 and this is the one place `total_len` can be checked against
+        // something rather than believed.
+        //
+        // It is not cosmetic. Assembly compares bytes written against this
+        // number, so a manifest claiming more than its chunks could ever deliver
+        // is a file that can never complete — and an incomplete file reserves
+        // pinned store (M12-A) and keeps an interest alive (M11-P). One forged
+        // field otherwise buys a permanent resident.
+        //
+        // Interior nodes are not checkable here: their `total_len` covers a
+        // subtree whose shape is not in this payload. They inherit the bound
+        // transitively, because every leaf beneath them is checked on arrival.
+        if depth == 0 {
+            let ceiling = (count as u64).saturating_mul(CHUNK_BYTES as u64);
+            if total_len > ceiling {
+                return None;
+            }
+        }
         Some(Manifest { file_id, chunk_size, count, total_len, name, chunk_ids, depth, hdr_id })
     }
 }
