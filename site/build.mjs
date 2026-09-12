@@ -53,6 +53,7 @@ const pages = [
   ['docs/DIRECT.md', 'direct.html', null],
   ['docs/ROADMAP.md', 'roadmap.html', null],
   ['docs/SIMULATIONS.md', 'simulations.html', null],
+  ['docs/STATE_MACHINES.md', 'state-machines.html', null],
   ['docs/SECURITY.md', 'security-policy.html', null],
   ['docs/THREAT_MODEL.md', 'threat-model.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
@@ -106,6 +107,7 @@ const titles = new Map([
   ['security-policy.html', 'SPORE — reporting a vulnerability'],
   ['roadmap.html', 'SPORE — engineering roadmap'],
   ['simulations.html', 'SPORE — simulations'],
+  ['state-machines.html', 'SPORE — state machines'],
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
   ['direct.html', 'SPORE — Direct: low-latency E2E pipes'],
@@ -144,6 +146,7 @@ const descriptions = new Map([
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
   ['rebuild.html', 'Reimplementing SPORE from scratch in another language, with worked byte-for-byte examples.'],
   ['simulations.html', 'Every SPORE scenario the simulator runs, what each one is for, and the numbers from the last run — generated, not written.'],
+  ['state-machines.html', 'The ratchet and the mix, drawn from the transitions they actually take — recorded by the tests, not drawn by hand.'],
 ]);
 
 // "Web node" (the live demo) sits between the picker and the technical hub —
