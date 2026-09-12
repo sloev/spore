@@ -68,9 +68,7 @@ pub fn topic_seal(msg: &[u8], psk: &[u8; 32]) -> Vec<u8> {
     use chacha20poly1305::XChaCha20Poly1305;
     let mut nonce = [0u8; 24];
     crate::fill_random(&mut nonce);
-    let ct = XChaCha20Poly1305::new(&(*psk).into())
-        .encrypt(&(nonce).into(), msg)
-        .expect("topic seal");
+    let ct = XChaCha20Poly1305::new(&(*psk).into()).encrypt(&(nonce).into(), msg).expect("topic seal");
     let mut out = Vec::with_capacity(24 + ct.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
@@ -109,9 +107,7 @@ pub(crate) fn chunk_seal(plain: &[u8], key: &[u8; 32], index: u32) -> Vec<u8> {
     use chacha20poly1305::XChaCha20Poly1305;
     let mut nonce = [0u8; 24];
     nonce[20..].copy_from_slice(&index.to_be_bytes());
-    XChaCha20Poly1305::new(&(*key).into())
-        .encrypt(&(nonce).into(), plain)
-        .expect("chunk seal")
+    XChaCha20Poly1305::new(&(*key).into()).encrypt(&(nonce).into(), plain).expect("chunk seal")
 }
 
 /// Open one chunk of a sealed file. `None` if the key or index is wrong, or the
