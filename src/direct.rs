@@ -26,8 +26,6 @@ use blake2::digest::{Update as _, VariableOutput};
 use blake2::Blake2bVar;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use std::collections::HashMap;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -891,7 +889,7 @@ impl Signalling {
         now: u32,
     ) -> (Vec<u8>, [u8; 16]) {
         let mut pipe_id = [0u8; 16];
-        OsRng.fill_bytes(&mut pipe_id);
+        crate::fill_random(&mut pipe_id);
         let (bytes, pending) = build_offer(self.me, to, pipe_id, need, candidates);
         self.pending.insert(pipe_id, (pending, now));
         (bytes, pipe_id)

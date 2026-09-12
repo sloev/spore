@@ -33,7 +33,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
 sha2 = "0.10"
 blake2 = "0.10"
-rand = "0.8"
+getrandom = "0.2"
 base64ct = "=1.8.3"
 # `zeroize` is bumped to 1.x (≥1.9) to satisfy the optional iroh bridge's
 # `iroh-base`, which pulls it into the *core* build via chacha20poly1305/crypto_box.
@@ -58,9 +58,10 @@ tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net", 
 # `Minimal`/`N0` presets install on the endpoint builder — no direct rustls dep here.
 bridge-iroh = ["dep:iroh", "dep:tokio", "dep:bytes"]
 
-# On the web (wasm32) OsRng needs a randomness source. We use getrandom's
-# `custom` backend and route it to a JS import (`spore_fill_random`) so the wasm
-# stays wasm-bindgen-free and instantiable with plain WebAssembly. See src/wasm.rs.
+# On the web (wasm32) the randomness has to come from somewhere: `getrandom`'s
+# `custom` backend, routed to a JS import (`spore_fill_random`) so the wasm stays
+# wasm-bindgen-free and instantiable with plain WebAssembly. See src/wasm.rs.
+# Everywhere else the default backend is the OS. Same crate, same call, one seam.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["custom"] }
 

@@ -364,7 +364,7 @@ impl Node {
     /// `take_response`.
     pub fn request(&mut self, service: Addr, req: rpc::Request, now: u32) -> (u64, Vec<Forward>) {
         let mut idb = [0u8; 8];
-        OsRng.fill_bytes(&mut idb);
+        crate::fill_random(&mut idb);
         let id = u64::from_be_bytes(idb);
         let payload = rpc::encode_request(id, &req);
         let mut e = Envelope::new(ty::DATA, service, now, payload);

@@ -111,7 +111,7 @@ unsafe fn arr8(ptr: *const u8) -> Addr {
 pub unsafe extern "C" fn spore_keypair(out_sk: *mut u8, out_pk: *mut u8) {
     guard((), || {
         let mut seed = [0u8; 32];
-        OsRng.fill_bytes(&mut seed);
+        crate::fill_random(&mut seed);
         let sk = SigningKey::from_bytes(&seed);
         let pk = sk.verifying_key().to_bytes();
         std::ptr::copy_nonoverlapping(seed.as_ptr(), out_sk, 32);

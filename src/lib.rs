@@ -14,8 +14,31 @@ use std::collections::{HashMap, HashSet};
 use blake2::digest::{Update as _, VariableOutput};
 use blake2::Blake2bVar;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rand::rngs::OsRng;
-use rand::RngCore;
+/// Fill `buf` with randomness from the host (M1).
+///
+/// **The crate's only source of entropy**, and deliberately the whole of its
+/// randomness API. Every caller wanted exactly this — `rand` was here only ever
+/// as `crate::fill_random(&mut buf)`, never as a generator handed to a crypto
+/// crate, never for a distribution or a shuffle — so `getrandom` was already
+/// doing the work with `rand` wrapped around it.
+///
+/// Dropping the wrapper removes a whole class of problem rather than a
+/// dependency. `rand` 0.9 carries `rand_core` 0.9 while `ed25519-dalek` 2 and
+/// `crypto_box` 0.9 carry `rand_core` 0.6, and a bump to either side puts two
+/// incompatible `rand_core`s in one build — which is exactly why the dependabot
+/// bump could not compile. With no `rand` in the tree the versions cannot
+/// disagree, and the migration is not deferred, it is unnecessary.
+///
+/// `getrandom` is also where the browser's randomness already comes from
+/// (`src/wasm.rs` routes it to a JS import), so this is the same seam every
+/// target was using underneath.
+///
+/// Panics if the host has no entropy, which is not a condition any caller here
+/// could sensibly continue past: every use is a key, a nonce, or an identifier
+/// that must not be guessable.
+pub(crate) fn fill_random(buf: &mut [u8]) {
+    getrandom::getrandom(buf).expect("the host must provide randomness");
+}
 use sha2::{Digest, Sha256};
 
 // ---------------------------------------------------------------------------
@@ -135,7 +158,7 @@ impl Prekey {
 
     fn fresh(born: u32) -> Self {
         let mut s = [0u8; 32];
-        OsRng.fill_bytes(&mut s);
+        crate::fill_random(&mut s);
         Prekey::from_secret(s, born)
     }
 }
@@ -948,7 +971,7 @@ mod tests {
 
     fn keypair() -> SigningKey {
         let mut s = [0u8; 32];
-        OsRng.fill_bytes(&mut s);
+        crate::fill_random(&mut s);
         SigningKey::from_bytes(&s)
     }
 

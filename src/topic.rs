@@ -158,7 +158,7 @@ pub fn key_id(key: &[u8; 32]) -> [u8; 4] {
 /// the group or how to find its own box — everyone tries every box.
 pub fn contribute(current: &[u8; 32], member_prekeys: &[[u8; 32]]) -> ([u8; 32], Vec<u8>) {
     let mut c = [0u8; 32];
-    OsRng.fill_bytes(&mut c);
+    crate::fill_random(&mut c);
 
     let n = member_prekeys.len().min(MAX_MEMBERS);
     let mut out = Vec::with_capacity(3 + n * BOX_LEN);

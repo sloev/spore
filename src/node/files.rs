@@ -60,7 +60,7 @@ impl Node {
         let count = bytes.len().div_ceil(chunk_size).max(1);
         let created_at = now;
         let mut file_id = [0u8; 16];
-        OsRng.fill_bytes(&mut file_id);
+        crate::fill_random(&mut file_id);
         // Chunks ride a per-file topic. That scopes *delivery* — only a node
         // following the topic hands one to its app — and it was long claimed
         // here to scope carriage too. It does not: forwarding does not consult
@@ -532,7 +532,7 @@ impl Node {
     ) -> Option<(Id, Vec<Forward>)> {
         let pk = self.peer_prekey(&dest)?;
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        crate::fill_random(&mut key);
 
         // Header (sealed to the recipient): the file key, then the real name.
         let nb = name.as_bytes();

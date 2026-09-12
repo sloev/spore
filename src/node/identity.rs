@@ -9,7 +9,7 @@ use crate::*;
 impl Node {
     pub fn new(petname: &str, topics: &[&str]) -> Self {
         let mut seed = [0u8; 32];
-        OsRng.fill_bytes(&mut seed);
+        crate::fill_random(&mut seed);
         Self::from_seed(petname, topics, &seed)
     }
 
