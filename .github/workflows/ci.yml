@@ -49,6 +49,13 @@ jobs:
       - name: Docs/code in sync — no documented value may drift from the code
         if: runner.os == 'Linux'
         run: python3 scripts/check_docs_sync.py
+      # New `unsafe` should be a reviewable event, not something that lands
+      # unnoticed. The snapshot names every site by file and enclosing symbol, so
+      # the diff a reviewer sees *is* the list of new places that can cause
+      # undefined behaviour.
+      - name: Unsafe inventory unchanged
+        if: runner.os == 'Linux'
+        run: python3 scripts/unsafe_snapshot.py --check
       # android/jni is its own workspace (so the root build ignores it), which
       # means the checks above never reach it. Lint it here on Linux; the Android
       # cross-build in android.yml only proves it compiles for the device.
