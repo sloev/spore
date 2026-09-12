@@ -55,7 +55,7 @@ impl Node {
         e.flags |= fl::FLOOD;
         e.hops = hops;
         e.sign(&self.sk);
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         // A HELLO is link-local and immediately superseded by the next one, so it
         // is not worth a store slot or an INV entry; a flooded ANNOUNCE is.
         if hops > 0 {
@@ -130,9 +130,26 @@ impl Node {
 
     // ---- receive (the entire router, §5) --------------------------------
 
-    pub(crate) fn mark_seen(&mut self, e: &Envelope) {
-        let retain = e.created_at.max(0u32.wrapping_add(SEEN_MIN_SECS)); // >= created_at
-        self.seen.insert(e.id(), retain);
+    /// Remember an id we originated, so our own traffic coming back is a
+    /// duplicate rather than news.
+    ///
+    /// **Takes `now`**, because the retention floor is measured from when we are
+    /// rather than from anything in the envelope. It used to compute
+    /// `created_at.max(SEEN_MIN_SECS)`, which looks like a floor and is not one:
+    /// `created_at` is a unix timestamp and `SEEN_MIN_SECS` is thirty days in
+    /// seconds, so the larger was always the timestamp and the `max` never did
+    /// anything. The retention simply *was* `created_at`.
+    ///
+    /// That was wrong-but-survivable while `created_at` meant expiry — a week
+    /// out, so the entry lived a week instead of thirty days. Under M12 it means
+    /// *birth*, so the entry was retained until `now` and the next sweep dropped
+    /// it. A node forgot its own traffic, and a neighbour flooding it back made
+    /// it new again: stored again, delivered again, re-flooded again.
+    ///
+    /// `ingest` has always used `now + SEEN_MIN_SECS` on the receive path. These
+    /// are the same rule and now say so in the same way.
+    pub(crate) fn mark_seen(&mut self, e: &Envelope, now: u32) {
+        self.seen.insert(e.id(), now.saturating_add(SEEN_MIN_SECS));
     }
 
     pub fn on_rx(&mut self, raw: &[u8], iface: Iface, nbr: Option<Addr>, now: u32) -> Rx {
@@ -387,7 +404,7 @@ impl Node {
                     let mut ack = Envelope::new(ty::DATA, addr_of(pk), e.created_at, p);
                     ack.flags |= fl::FLOOD; // receipts flood and teach reverse paths
                     ack.sign(&self.sk);
-                    self.mark_seen(&ack);
+                    self.mark_seen(&ack, now);
                     self.store_put(&ack, now);
                     // NO_IFACE, not `iface`: this receipt is an envelope *this*
                     // node originates, and every other origination in the crate

@@ -1706,3 +1706,71 @@ fn a_forged_length_cannot_make_progress_read_backwards() {
         assert!(total >= have, "progress must not read {have} of {total}");
     }
 }
+
+#[test]
+fn a_node_does_not_re_accept_its_own_message_after_a_sweep() {
+    // The two dedup paths disagreed about the retention floor, and M12 turned
+    // that from untidy into a real hole.
+    //
+    // `ingest` remembers a received id for `now + SEEN_MIN_SECS`. `mark_seen` —
+    // the *origination* path, used by all fifteen send paths — computed
+    // `created_at.max(SEEN_MIN_SECS)`, and since `created_at` is a unix timestamp
+    // it is always the larger, so the `max` never did anything and the retention
+    // simply *was* `created_at`. That was wrong-but-survivable while `created_at`
+    // meant expiry (a week out); under M12 it means *birth*, so the entry is
+    // retained until now and the next sweep drops it.
+    //
+    // The consequence is a node that forgets its own traffic: when a neighbour
+    // floods the message back, it is new again — stored again, delivered again,
+    // re-flooded again.
+    let now = NOW;
+    let mut a = Node::new("a", &[]);
+    let f = a.send(ZERO_DEST, b"mine".to_vec(), now).expect("under the ceiling");
+    let wire = match &f[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    let (e, _) = Envelope::decode(&wire).expect("our own envelope");
+    assert!(a.seen.contains_key(&e.id()), "it remembers having sent it");
+
+    // Time passes and a sweep runs, as it does on any traffic at all.
+    let later = now + SWEEP_INTERVAL_SECS + 1;
+    a.enforce_bounds(later);
+    assert!(a.seen.contains_key(&e.id()), "and still remembers it after a sweep");
+
+    // A neighbour floods it back, as a neighbour will.
+    let rx = a.on_rx(&wire, 0, None, later);
+    assert!(rx.forwards.is_empty(), "our own message must not be re-flooded");
+    assert!(rx.delivered.is_empty(), "nor delivered to us a second time");
+}
+
+#[test]
+fn both_dedup_paths_agree_on_the_retention_floor() {
+    // There are two ways an id enters the dedup set — `mark_seen` when we
+    // originate, `ingest` when we receive — and they disagreed for as long as
+    // both have existed. Disagreement is the whole bug class here: one of them
+    // was enforcing the floor and the other only appeared to, and nothing
+    // compared them.
+    let now = NOW;
+
+    let mut sender = Node::new("sender", &[]);
+    let f = sender.send(ZERO_DEST, b"same bytes".to_vec(), now).expect("under the ceiling");
+    let wire = match &f[0] {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    let (e, _) = Envelope::decode(&wire).expect("an envelope");
+
+    let mut receiver = Node::new("receiver", &[]);
+    receiver.on_rx(&wire, 0, None, now);
+
+    assert_eq!(
+        sender.seen.get(&e.id()),
+        receiver.seen.get(&e.id()),
+        "the same envelope at the same instant must be remembered for the same length of time, \
+         whether this node wrote it or heard it"
+    );
+    assert_eq!(
+        sender.seen.get(&e.id()).copied(),
+        Some(now + SEEN_MIN_SECS),
+        "and that length is the §11 floor, measured from now"
+    );
+}

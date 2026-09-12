@@ -3186,8 +3186,14 @@ mod tests {
         assert_ne!(n.prekey_pub, after_boot, "a due rotation happens with no traffic at all");
 
         // And the dedup set is pruned on the same schedule.
+        //
+        // Marked as seen a full retention window ago, so it is genuinely due. It
+        // used to be enough to mark it at `t0`: `mark_seen` derived retention
+        // from the envelope's own timestamp, so an entry expired the moment it
+        // was made. That was the bug, not the setup — see
+        // `a_node_does_not_re_accept_its_own_message_after_a_sweep`.
         let stale = Envelope::new(ty::DATA, [9u8; 8], t0 + 10, b"old".to_vec());
-        n.mark_seen(&stale);
+        n.mark_seen(&stale, t0.saturating_sub(SEEN_MIN_SECS + 1));
         assert!(!n.seen.is_empty());
         let _ = n.tick(t0 + PREKEY_PERIOD_SECS + SWEEP_INTERVAL_SECS + 100);
         assert!(n.seen.is_empty(), "expired dedup entries are swept by the timer");
