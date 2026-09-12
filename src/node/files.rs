@@ -717,7 +717,13 @@ impl Node {
                 let estimate = if m.chunk_size == 0 {
                     m.count
                 } else {
-                    m.total_len.div_ceil(m.chunk_size as u64) as u32
+                    // Saturating, not truncating (M11-N). `as u32` wrapped, so an
+                    // interior node claiming an absurd `total_len` — the one
+                    // depth at which it cannot be checked on arrival — reported a
+                    // *small* number of parts rather than a large one, and a
+                    // progress bar that reads 40 of 3 is worse than one that
+                    // reads 40 of a great many.
+                    m.total_len.div_ceil(m.chunk_size as u64).min(u32::MAX as u64) as u32
                 };
                 let mut have = 0u32;
                 let mut leaves = 0u32;

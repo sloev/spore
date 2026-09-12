@@ -587,6 +587,10 @@ operator set a budget, and a peer may fill it but never exceed it.
 | Dedup table | `MAX_SEEN`, evicting nearest-to-forgetting first |
 | Custody store | `max_store_bytes`; adoption additionally by `MAX_ADOPT_BYTES` |
 | In-progress fetches | at most half the store, stalest transfer dropped first (M12-A) |
+| Manifest parts | `count` must be backed by the payload's own bytes, checked before allocating |
+| Tree depth | `MAX_DEPTH` = 4, and a child is read only at exactly `parent.depth - 1` |
+| Chunk size | `CHUNK_BYTES`, and structurally an envelope — `MAX_PAYLOAD_BYTES` |
+| File length | a leaf's `total_len` ≤ `count × CHUNK_BYTES`, refused on decode |
 | Peer prekeys, busy bytes, names, sessions | `MAX_PEERS` on each |
 | Learned paths | `MAX_PEERS`, plus a time purge |
 | File manifests | `MAX_MANIFESTS` |
@@ -1161,6 +1165,30 @@ deliver → forward.
   predecessor. Appending shares everything. Content-*defined* boundaries would
   fix the insert case at the cost of variable-length chunks and losing the offset
   property; the choice here is static.
+- **Every field a stranger can set has a ceiling** (M11-N), and the interesting
+  part is which of them needed one. `count` was already checked against the bytes
+  that follow, so a manifest cannot make a decoder reserve for parts it did not
+  send. Depth was already capped at `MAX_DEPTH`, and a child is read only if it
+  decodes at exactly `parent.depth - 1` — so a tree cannot walk sideways, and
+  cannot walk in circles at all, since naming a cycle would require a manifest to
+  contain its own hash.
+
+  `total_len` was the one taken on trust. At depth 0 it is exactly checkable —
+  every chunk but the last is `CHUNK_BYTES` — so a leaf claiming more than its
+  chunks could hold is now refused. That is not cosmetic: assembly compares bytes
+  written against it, so a file claiming more than it can ever deliver is a file
+  that is *permanently incomplete*, and an incomplete file reserves pinned store
+  (M12-A) and keeps an adopted interest alive (M11-P). One forged field otherwise
+  bought a permanent resident.
+
+  Interior nodes cannot be checked on arrival — the subtree their `total_len`
+  covers is not in the payload — and inherit the bound transitively instead,
+  because every leaf beneath them is checked as it arrives.
+
+  **What a relay does with an oversized envelope is split it, not drop it.** That
+  is worth stating because the obvious ceiling to add here would be "relays drop
+  what is too big", and it is precisely the M11-D bug: a relay's own frame size
+  is not a property of the envelope crossing it.
 - **Content ids, not envelope ids** (M11-M). A manifest names the **content id**
   of each part: the first 16 bytes of SHA-256 over the part's payload, and
   nothing else. This is deliberately *not* the envelope id, which hashes the

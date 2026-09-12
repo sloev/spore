@@ -1584,3 +1584,125 @@ fn dropping_what_it_cannot_relay_would_break_the_file_layer() {
     assert!(n.holds_named(&file::content_id(&ce.payload)), "it kept a chunk it can never relay");
     assert!(!n.missing(&magnet, 9999).is_empty(), "and knows what else to ask for");
 }
+
+/// Build a manifest payload by hand, the way a hostile peer would.
+fn forged_manifest(tag: u8, depth: u8, count: u32, total_len: u64, ids: &[Id]) -> Vec<u8> {
+    let mut p = vec![tag];
+    if tag != file::MANIFEST_TAG {
+        p.push(depth);
+    }
+    if tag == file::SEALED_TAG {
+        p.extend_from_slice(&[0xAB; 16]); // hdr id
+    }
+    p.extend_from_slice(&[0xCD; 16]); // file id
+    p.extend_from_slice(&(file::CHUNK_BYTES as u32).to_be_bytes());
+    p.extend_from_slice(&count.to_be_bytes());
+    p.extend_from_slice(&total_len.to_be_bytes());
+    p.extend_from_slice(&0u16.to_be_bytes()); // name len
+    for id in ids {
+        p.extend_from_slice(id);
+    }
+    p
+}
+
+#[test]
+fn a_manifest_cannot_name_more_parts_than_it_carries() {
+    // The allocation an attacker would reach for first: claim a count far larger
+    // than the bytes that follow, and make the decoder reserve for it.
+    let huge = forged_manifest(file::MANIFEST_TAG, 0, u32::MAX, 1024, &[[1u8; 16]]);
+    assert!(file::Manifest::decode(&huge).is_none(), "a count the payload cannot back is refused");
+
+    // And the honest shape still decodes.
+    let ok = forged_manifest(file::MANIFEST_TAG, 0, 1, 4096, &[[1u8; 16]]);
+    let m = file::Manifest::decode(&ok).expect("a well-formed manifest");
+    assert_eq!(m.chunk_ids.len(), 1);
+}
+
+#[test]
+fn a_tree_cannot_be_deeper_than_the_stated_ceiling() {
+    // Depth bounds the recursion `walk_tree` will do, so it is the one field that
+    // turns a small payload into unbounded work if left unchecked.
+    for d in [file::MAX_DEPTH + 1, 200, u8::MAX] {
+        let deep = forged_manifest(file::TREE_TAG, d, 1, 4096, &[[1u8; 16]]);
+        assert!(file::Manifest::decode(&deep).is_none(), "depth {d} is past the ceiling");
+    }
+    // Depth 0 belongs to the leaf tag; a tree claiming it is malformed.
+    let zero = forged_manifest(file::TREE_TAG, 0, 1, 4096, &[[1u8; 16]]);
+    assert!(file::Manifest::decode(&zero).is_none(), "a tree at depth 0 is refused");
+}
+
+#[test]
+fn a_tree_cannot_be_made_to_walk_in_circles() {
+    // Infinite recursion is the cheapest thing to ask a tree-walker for, and two
+    // separate things refuse it here.
+    //
+    // The first is not a check at all. A parent names its children by the hash of
+    // their bytes, so a manifest that named *itself* would have to contain its own
+    // hash — and a cycle of any length has the same problem. Content addressing
+    // makes the shape unconstructible rather than merely illegal, which is the
+    // strongest form this can take, and it is worth knowing that is where the
+    // guarantee lives before relying on anything weaker.
+    let m = forged_manifest(file::TREE_TAG, 2, 1, 4096, &[[7u8; 16]]);
+    assert_ne!(file::content_id(&m), m[m.len() - 16..], "a manifest cannot name itself");
+
+    // The second is the belt: a child is read only if it decodes at exactly
+    // `parent.depth - 1`. So even a tree that somehow pointed sideways — same
+    // depth, not shallower — is not descended into, and the walk is bounded by
+    // `MAX_DEPTH` regardless of what the ids turn out to be.
+    let mut n = Node::new("victim", &[]);
+    let sideways = forged_manifest(file::TREE_TAG, 2, 1, 4096, &[[7u8; 16]]);
+    let sideways_id = file::content_id(&sideways);
+    let mut child = Envelope::new(ty::DATA, ZERO_DEST, NOW, sideways.clone());
+    child.flags |= fl::FLOOD;
+    child.hops = 0;
+    n.on_rx(&child.wire(), 0, None, NOW);
+
+    // A parent at the *same* depth as its child: the child is held, and still
+    // must not be walked into.
+    let parent = forged_manifest(file::TREE_TAG, 2, 1, 4096, &[sideways_id]);
+    let held = file::Manifest::decode(&parent).expect("it decodes");
+    let mut seen = 0;
+    n.walk_tree(&held, &mut |_, depth, _| {
+        seen += 1;
+        assert!(depth <= file::MAX_DEPTH, "the walk stays inside the ceiling");
+        true
+    });
+    assert_eq!(seen, 1, "it reported the child and refused to descend, rather than looping");
+}
+
+#[test]
+fn a_leaf_manifest_cannot_claim_more_bytes_than_its_chunks_could_hold() {
+    // `total_len` is the one number in a manifest nothing checked. At depth 0 it
+    // is exactly checkable — every chunk but the last is `CHUNK_BYTES`, so a leaf
+    // naming n chunks cannot cover more than n × CHUNK_BYTES — and a lie there is
+    // not harmless: assembly compares bytes written against it, so a file that
+    // claims more than it can ever deliver is a file that is *permanently
+    // incomplete*, and an incomplete file is one that reserves pinned store.
+    let ids = [[1u8; 16], [2u8; 16]];
+    let honest = forged_manifest(file::MANIFEST_TAG, 0, 2, 2 * file::CHUNK_BYTES as u64, &ids);
+    assert!(file::Manifest::decode(&honest).is_some(), "two full chunks is exactly allowed");
+
+    let absurd = forged_manifest(file::MANIFEST_TAG, 0, 2, u64::MAX, &ids);
+    assert!(file::Manifest::decode(&absurd).is_none(), "u64::MAX over two chunks is refused");
+
+    let overclaim = forged_manifest(file::MANIFEST_TAG, 0, 2, 2 * file::CHUNK_BYTES as u64 + 1, &ids);
+    assert!(file::Manifest::decode(&overclaim).is_none(), "one byte past what the chunks hold is refused");
+}
+
+#[test]
+fn a_forged_length_cannot_make_progress_read_backwards() {
+    // Interior nodes are the one depth where `total_len` cannot be checked on
+    // arrival, because the subtree it covers is not in the payload. What it must
+    // not do is produce a *smaller* number than the parts already held, which is
+    // what truncating to `u32` did: 40 of 3.
+    let mut n = Node::new("victim", &[]);
+    let forged = forged_manifest(file::TREE_TAG, 1, 1, u64::MAX, &[[9u8; 16]]);
+    let mut e = Envelope::new(ty::DATA, ZERO_DEST, NOW, forged);
+    e.flags |= fl::FLOOD;
+    e.sign(&n.sk);
+    n.on_rx(&e.wire(), 0, None, NOW);
+
+    for (_, _, _, have, total) in n.files() {
+        assert!(total >= have, "progress must not read {have} of {total}");
+    }
+}
