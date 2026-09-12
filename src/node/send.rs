@@ -146,7 +146,7 @@ impl Node {
             e.flags |= fl::FLOOD;
             e.sign(&self.sk);
         }
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }
@@ -195,7 +195,7 @@ impl Node {
         // The size ceiling is `plen`: 65 535 payload bytes, checked by the
         // envelope encoder rather than by a fragment count. Larger objects are
         // the file layer's job.
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         Ok(self.forward_intents(&e, NO_IFACE, now))
     }
@@ -214,7 +214,7 @@ impl Node {
             e.sign(&self.sk);
         }
         let id = e.id();
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now), dest });
         self.forward_intents(&e, NO_IFACE, now)
@@ -265,7 +265,7 @@ impl Node {
             e.sign(&self.sk);
         }
         let id = e.id();
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         self.pending.insert(id, Pending { wire: e.wire(), backoff: congestion::Backoff::new(now), dest });
         (id, self.forward_intents(&e, NO_IFACE, now), encrypted)
@@ -377,7 +377,7 @@ impl Node {
             e.sign(&self.sk);
         }
         self.rpc_pending.insert(id);
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         (id, self.forward_intents(&e, NO_IFACE, now))
     }
@@ -396,7 +396,7 @@ impl Node {
             e.flags |= fl::FLOOD; // reverse path unknown -> flood to find it
             e.sign(&self.sk);
         }
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }
@@ -455,7 +455,7 @@ impl Node {
         let mut e = Envelope::new(ty::DATA, topic_of(topic), now, payload);
         e.flags |= fl::FLOOD;
         e.sign(&self.sk);
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.store_put(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }

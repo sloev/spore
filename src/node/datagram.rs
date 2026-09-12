@@ -35,7 +35,7 @@ impl Node {
         e.sign(&self.sk);
         // Dedup our own copy off the flood, but don't clog the store with
         // ephemeral session traffic.
-        self.mark_seen(&e);
+        self.mark_seen(&e, now);
         self.forward_intents(&e, NO_IFACE, now)
     }
 

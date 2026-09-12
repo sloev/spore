@@ -172,7 +172,7 @@ impl Node {
         let adopted = self.store.set_spill_dir(dir, now)?;
         // We held these before, so we have already relayed them — don't flood
         // them again just because the process restarted.
-        Ok(self.absorb_adopted(adopted))
+        Ok(self.absorb_adopted(adopted, now))
     }
 
     /// Spill to storage that is not a filesystem — the same contract as
@@ -184,17 +184,17 @@ impl Node {
     /// the hash of its content. Returns how many envelopes were adopted.
     pub fn set_spill_backend(&mut self, backend: Box<dyn store::SpillBackend>, now: u32) -> usize {
         let adopted = self.store.set_spill_backend(backend, now);
-        self.absorb_adopted(adopted)
+        self.absorb_adopted(adopted, now)
     }
 
     /// Re-learn what a set of adopted wires implies: we held them before, so we
     /// have already relayed them, and any manifest among them should resume the
     /// transfer a restart interrupted.
-    fn absorb_adopted(&mut self, adopted: Vec<Vec<u8>>) -> usize {
+    fn absorb_adopted(&mut self, adopted: Vec<Vec<u8>>, now: u32) -> usize {
         let n = adopted.len();
         for wire in adopted {
             let Ok((e, _)) = Envelope::decode(&wire) else { continue };
-            self.mark_seen(&e);
+            self.mark_seen(&e, now);
             if e.typ == ty::DATA
                 && matches!(
                     e.payload.first(),

@@ -122,7 +122,7 @@ impl Node {
             // Named by **content**, not by envelope. This is the whole change:
             // the same bytes get the same name from any publisher, at any time.
             level.push((file::content_id(&ce.payload), (end - start) as u64));
-            self.mark_seen(&ce);
+            self.mark_seen(&ce, now);
             self.store_put(&ce, now);
         }
 
@@ -134,7 +134,7 @@ impl Node {
             he.flags |= fl::FLOOD;
             he.hops = 0; // link-local, like a chunk
             hdr_id = he.id();
-            self.mark_seen(&he);
+            self.mark_seen(&he, now);
             self.store_put(&he, now);
         }
 
@@ -166,7 +166,7 @@ impl Node {
                 let mut ne = Envelope::new(ty::DATA, ft, created_at, node.encode());
                 ne.flags |= fl::FLOOD;
                 next.push((file::content_id(&ne.payload), covered));
-                self.mark_seen(&ne);
+                self.mark_seen(&ne, now);
                 self.store_put(&ne, now);
             }
             level = next;
@@ -191,7 +191,7 @@ impl Node {
         let magnet = me.id();
         self.manifests.insert(magnet, manifest);
         self.index_named(&magnet, &magnet, now);
-        self.mark_seen(&me);
+        self.mark_seen(&me, now);
         self.store_put(&me, now);
         let mut forwards = self.forward_intents(&me, NO_IFACE, now);
 
