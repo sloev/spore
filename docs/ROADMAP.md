@@ -755,7 +755,6 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | Task | Status | Notes |
 |---|---|---|
 | M11-B `spore-sim`: scale, mobility, adversaries | ⬜ | The engine and the first scenarios ship in `examples/spore_sim.rs` (deterministic, seeded, JSON metrics, thresholds in CI, mixed-MTU as a first-class case). Still owed: 1k/10k nodes, mobility, malicious nodes, asymmetric links, tiny stores, and a nightly stress run separate from the PR smoke suite. Also the per-platform regression thresholds M1's benchmark row was folded in for |
-| M11-C Adapt repair to observed loss | ⬜ | The push half is done — see below. What remains is `default_repair`, which sends a flat quarter of the set regardless of what the link is actually losing. A link at 0% loss pays 25% overhead for nothing; one at 30% is under-protected. The bridge already sees its own delivery failures, so the input exists; what is missing is somewhere to keep a per-link estimate and the measurement that says the adaptation beats the flat fraction. `linkfrag-*-repair*` is the harness |
 
 **The push threshold, measured (M11-C).** A push exists to remove a round trip,
 and the round trip is removed only if the receiver is left with nothing to ask

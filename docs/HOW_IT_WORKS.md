@@ -270,8 +270,9 @@ can send none.</p>
 <h3 class="text-h5">A message on a link that drops one frame in ten</h3>
 <p class="text-muted">A 900-byte envelope over a 237-byte radio is five pieces,
 and all five have to arrive — so a link losing 10% of frames loses closer to half
-of messages. Adding one repair piece takes that from 54% delivered to 90%; two
-take it to 96%.</p>
+of messages. Adding one repair piece takes that from 54% delivered to 66%, two to
+88%, and four to nearly all of them. How many go out is decided by what the link
+is actually losing rather than by a fixed fraction, so a clean link sends none.</p>
 <p class="text-muted">Repair, rather than asking again, because asking needs a
 way back. A one-way radio has none, and on a shared channel a complaint collides
 with the traffic it is complaining about.</p>
