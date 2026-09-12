@@ -572,6 +572,7 @@ operator set a budget, and a peer may fill it but never exceed it.
 |---|---|
 | Dedup table | `MAX_SEEN`, evicting nearest-to-forgetting first |
 | Custody store | `max_store_bytes`; adoption additionally by `MAX_ADOPT_BYTES` |
+| In-progress fetches | at most half the store, stalest transfer dropped first (M12-A) |
 | Peer prekeys, busy bytes, names, sessions | `MAX_PEERS` on each |
 | Learned paths | `MAX_PEERS`, plus a time purge |
 | File manifests | `MAX_MANIFESTS` |

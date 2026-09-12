@@ -76,13 +76,19 @@ impl Node {
     /// chunks of every file we hold a manifest for but haven't completed yet.
     fn pinned_ids(&self) -> HashSet<Id> {
         let mut pinned = HashSet::new();
+        // In-progress fetches get a *bounded* share (M12-A). Collected per file
+        // first, with how recently each one gained a part, so that when the share
+        // runs out it is the stalest transfers that lose their protection rather
+        // than whichever the map happened to yield first.
+        let mut candidates: Vec<(u64, usize, Vec<Id>)> = Vec::new();
         for (magnet, m) in &self.manifests {
             // Keep a file if it's still being assembled, or if it's explicitly
             // pinned (a seed-vault holding the bootstrap bundle forever).
-            if self.has_file(magnet) && !self.pinned.contains(magnet) {
+            let explicit = self.pinned.contains(magnet);
+            if self.has_file(magnet) && !explicit {
                 continue;
             }
-            pinned.insert(*magnet);
+            let mut ids = vec![*magnet];
             // Interior manifests are pinned alongside the chunks: evicting one
             // mid-fetch would hide its whole subtree and stall the transfer with
             // no way to name what went missing.
@@ -95,12 +101,33 @@ impl Node {
                     // the content, and the raw id for objects with no file-layer
                     // tag — a sealed header is named by envelope id.
                     if let Some(envelope) = self.store.by_content(id) {
-                        pinned.insert(envelope);
+                        ids.push(envelope);
                     }
-                    pinned.insert(*id);
+                    ids.push(*id);
                 }
                 true
             });
+            // An explicit pin is a local decision and is not rationed.
+            if explicit {
+                pinned.extend(ids);
+                continue;
+            }
+            let recency = ids.iter().filter_map(|i| self.store.meta(i)).map(|s| s.seq).max().unwrap_or(0);
+            let bytes: usize = ids.iter().filter_map(|i| self.store.meta(i)).map(|s| s.len).sum();
+            candidates.push((recency, bytes, ids));
+        }
+
+        // Most recently progressed first: a transfer in flight keeps its
+        // protection, one that stalled loses it once the share is spent.
+        candidates.sort_unstable_by_key(|c| std::cmp::Reverse(c.0));
+        let share = self.max_store_bytes / PINNED_STORE_DENOMINATOR * PINNED_STORE_NUMERATOR;
+        let mut spent = 0usize;
+        for (_, bytes, ids) in candidates {
+            if spent.saturating_add(bytes) > share {
+                continue; // this fetch is on its own; eviction may reclaim it
+            }
+            spent += bytes;
+            pinned.extend(ids);
         }
         pinned
     }

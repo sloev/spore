@@ -84,6 +84,24 @@ pub const PATH_PURGE_SECS: u32 = 7 * 24 * 3600;
 /// floor would drop an envelope while still refusing to re-accept it.
 pub const MAX_RELAY_AGE_SECS: u32 = 30 * 24 * 3600;
 
+/// The share of the store that in-progress fetches may reserve (M12-A).
+///
+/// `pinned_ids` protects the parts of a file that is not complete, so memory
+/// pressure cannot drop a chunk out from under a fetch in flight. Nothing
+/// un-pinned a fetch that had *stopped* progressing, and eviction refuses to
+/// touch a pin — so a node that started fetches it could not finish held their
+/// parts for as long as it remembered the manifests. Measured: eight abandoned
+/// fetches held 728 kB against a 64 kB budget, and it scales with the number of
+/// publishers who walk away. A flaky link is enough; nothing hostile is needed.
+///
+/// Half the store, and *explicit* pins (a seed vault) are outside it — those are
+/// a local choice, and it is remote-caused reservation the invariant bounds. When
+/// the share is full the fetches that progressed least recently lose their
+/// protection first, so a transfer actually in flight keeps it and one that
+/// stalled a week ago does not.
+pub const PINNED_STORE_NUMERATOR: usize = 1;
+pub const PINNED_STORE_DENOMINATOR: usize = 2;
+
 /// How often a node mints a fresh prekey (§7). One day.
 pub const PREKEY_PERIOD_SECS: u32 = 24 * 3600;
 
@@ -1449,10 +1467,17 @@ mod tests {
         let chunk0_id = Envelope::decode(&chunk_wires[0]).unwrap().0.id();
         let in_store = |n: &Node, id: &Id| n.store_wires().iter().any(|(k, _)| k == id);
 
-        // Receiver with a tiny store budget learns the manifest and one chunk,
+        // Receiver with a small store budget learns the manifest and one chunk,
         // leaving the file in-progress.
+        //
+        // Small, but not smaller than the thing it is trying to hold. This used
+        // to be 2000 bytes — under half a chunk — and passed only because the pin
+        // was unbounded, so an in-progress fetch could hold a store arbitrarily
+        // far above its own budget. M12-A bounds the pin to a share of the
+        // budget, which means a node that cannot afford one chunk cannot fetch
+        // one, and that is the honest answer rather than a regression.
         let mut rx = Node::new("rx", &[]);
-        rx.set_store_budget(2000);
+        rx.set_store_budget(32 * 1024);
         rx.on_rx(&manifest_wire, 0, None, now);
         rx.on_rx(&chunk_wires[0], 0, None, now);
 
