@@ -755,7 +755,28 @@ Conflating them is how the fountain-versus-torrent confusion started.
 | Task | Status | Notes |
 |---|---|---|
 | M11-B `spore-sim`: scale, mobility, adversaries | ⬜ | The engine and the first scenarios ship in `examples/spore_sim.rs` (deterministic, seeded, JSON metrics, thresholds in CI, mixed-MTU as a first-class case). Still owed: 1k/10k nodes, mobility, malicious nodes, asymmetric links, tiny stores, and a nightly stress run separate from the PR smoke suite. Also the per-platform regression thresholds M1's benchmark row was folded in for |
-| M11-C The push threshold | ⬜ | The fountain half is done: repair symbols ship in `src/linkfrag.rs`, every bridge sends them, and `default_repair` is a quarter of the set (min 1). Measured over 200 trials of a 900-byte envelope on a 237-byte link — 5% loss 79%→97%, 10% 54%→90%, 20% 36%→67% with one repair symbol, and 96% at 10% with two, against the 70% repetition managed for the same redundancy. What remains is the **push-N threshold**, which needs M11-E to exist before anything can be pushed, and **adapting repair to observed loss** rather than sending a flat fraction |
+| M11-C Adapt repair to observed loss | ⬜ | The push half is done — see below. What remains is `default_repair`, which sends a flat quarter of the set regardless of what the link is actually losing. A link at 0% loss pays 25% overhead for nothing; one at 30% is under-protected. The bridge already sees its own delivery failures, so the input exists; what is missing is somewhere to keep a per-link estimate and the measurement that says the adaptation beats the flat fraction. `linkfrag-*-repair*` is the harness |
+
+**The push threshold, measured (M11-C).** A push exists to remove a round trip,
+and the round trip is removed only if the receiver is left with nothing to ask
+for — so the question was never "how many chunks to push" but "how large a file
+is worth pushing whole". The cost is airtime spent at *every* neighbour, wanted
+or not; the saving accrues only to the ones who wanted the file.
+
+| file | budget | fetcher round trips | forced on 3 uninterested neighbours |
+|---|---|---|---|
+| 2 chunks | 2 — pushes whole | **0** | 25 kB |
+| 10 chunks | 2 — pushes nothing | 2 | 942 B |
+| 10 chunks | 16 — pushes whole | **0** | 124 kB |
+
+So a partial push was the worst of the three: it spent the full airtime and still
+left a round trip. Push is now all-or-nothing, and `DEFAULT_PUSH_CHUNKS` is **2**
+rather than 8 — eight was chosen when a chunk *was* the link's frame, so eight of
+them was ~10 kB on Wi-Fi and ~1.4 kB on LoRa. M11-M made a chunk a protocol-fixed
+4096 bytes, so eight became 32 kB on every medium and the scaling argument the
+number rested on no longer held. `push-*` in `spore-sim` is the standing
+measurement.
+
 
 | M11-O2 Link fragmentation in the browser node | ⬜ | The JS transports in `web/transports/` have no `bridge::driver` equivalent, so a browser node neither splits what its link cannot carry nor reassembles what arrives split. **Narrower than first recorded**: BLE, serial and Reticulum are KISS *byte streams*, which de-frame any size, and WebSocket/WebRTC/WebTransport have no meaningful cap — so the browser moves files fine over most of what it speaks. What it cannot do is bridge to a **datagram link with a device-enforced cap**, principally Meshtastic at 237 bytes, where M11-M's 4 KiB chunks are now rejected firmware-side with nothing on the JS side to split them. `src/linkfrag.rs` is already in the wasm blob, so the work is exposing split/reassemble across the ABI and calling it from the datagram transports, not reimplementing it |
 | M11-O A one-way push profile (#256.1, narrowed) | ⬜ | Erasure-coded symbols streamed with no back-channel, for the case pull cannot serve at all: a simplex link, where there is no WANT and no HAVE. Its own budget, never the default path, and explicitly *not* a replacement for chunk/WANT — content-addressed chunks are what make caching, dedup and the recursive-pull authorisation gate work |

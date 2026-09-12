@@ -205,10 +205,29 @@ impl Node {
         // Local policy, not a wire rule. The receiver's behaviour is identical
         // either way: it ignores what it already holds and WANTs the rest, so
         // sender and receiver never have to agree on the number and `0` is a
-        // legal setting. Counted in *chunks* rather than bytes so it scales with
-        // the link — eight chunks is ~10 kB at a 1400-byte MTU and ~1.4 kB over
-        // LoRa, where a byte threshold would push 10 kB onto a radio and call it
-        // small.
+        // legal setting.
+        //
+        // **All or nothing** (M11-C). A push is only worth its airtime when it
+        // covers the *whole* file, because the round trip it exists to remove is
+        // removed only if the receiver has nothing left to ask for. Measured, on
+        // a 1400-byte link:
+        //
+        //   2 chunks, push 4:   8 kB published, 0 round trips   <- earns it
+        //  10 chunks, push 8:  33 kB published, 1 round trip    <- 2 became 1
+        //  50 chunks, push 8:  34 kB published, 6 round trips   <- 8 became 6
+        //
+        // The cost is paid at *every* neighbour, wanted or not; the saving only
+        // accrues to neighbours who wanted the file. A partial push is therefore
+        // the worst of both — it spends the full airtime and still leaves the
+        // round trip — so a file larger than the budget now pushes nothing.
+        //
+        // This also retires the reasoning the old `8` rested on: "counted in
+        // chunks so it scales with the link". It did, while a chunk *was* the
+        // link's frame. M11-M made chunks a protocol-fixed 4096 bytes, so eight
+        // of them is 32 kB on every medium, and counting in chunks scales with
+        // nothing. The count is now a cap on how large a file may be pushed
+        // whole, which is a question about airtime, and the default is set from
+        // bytes rather than inherited.
         //
         // Only for a public file. A sealed one is addressed to a single
         // recipient, and pushing its chunks at everyone is the opposite of what
@@ -224,11 +243,11 @@ impl Node {
             }
         }
 
-        if key.is_none() && self.push_chunks > 0 {
-            for (id, _) in level.iter().take(self.push_chunks) {
-                if depth > 0 {
-                    break; // a tree's root names interiors, not chunks worth pushing
-                }
+        // `depth == 0` is now part of the same rule rather than a special case: a
+        // tree's root names interiors, so a push from it could never cover the
+        // whole file, and "cover the whole file or send nothing" already says so.
+        if key.is_none() && depth == 0 && level.len() <= self.push_chunks {
+            for (id, _) in level.iter() {
                 // `named_wire`, not `store.wire`: `level` holds **content** ids
                 // now (M11-M), and looking them up as envelope ids silently
                 // pushed nothing — every small file would have quietly gone back

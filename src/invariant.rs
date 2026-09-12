@@ -1562,15 +1562,33 @@ fn dropping_what_it_cannot_relay_would_break_the_file_layer() {
     let mut publisher = Node::new("publisher", &[]);
     let (magnet, published) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
 
-    let chunk = published
-        .iter()
-        .map(|f| match f {
+    // Fetched rather than pushed: since M11-C a publisher only pushes a file it
+    // can cover whole, and this one is far past that. Pulling is how a chunk
+    // normally arrives anyway, which makes this the more representative path.
+    let mut fetcher = Node::new("fetcher", &[]);
+    for f in &published {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        fetcher.on_rx(wire, 0, None, NOW);
+    }
+    let chunk = {
+        let want = fetcher.fetch_n(&magnet, 1);
+        let w = match &want[0] {
             Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
-        })
-        .find(|w| {
-            Envelope::decode(w).map(|(e, _)| e.payload.first() == Some(&file::CHUNK_TAG)).unwrap_or(false)
-        })
-        .expect("the publisher pushes some chunks with the root");
+        };
+        publisher
+            .on_rx(&w, 0, None, NOW)
+            .forwards
+            .iter()
+            .map(|f| match f {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+            })
+            .find(|w| {
+                Envelope::decode(w).map(|(e, _)| e.payload.first() == Some(&file::CHUNK_TAG)).unwrap_or(false)
+            })
+            .expect("the publisher serves a chunk when asked")
+    };
     let (ce, _) = Envelope::decode(&chunk).unwrap();
     assert_eq!(ce.hops, 0, "a chunk is born link-local");
 
@@ -1581,6 +1599,8 @@ fn dropping_what_it_cannot_relay_would_break_the_file_layer() {
         };
         n.on_rx(wire, 0, None, NOW);
     }
+    let rx = n.on_rx(&chunk, 0, None, NOW);
+    assert!(rx.forwards.is_empty(), "and it is not relayed, having no hops to spend");
     assert!(n.holds_named(&file::content_id(&ce.payload)), "it kept a chunk it can never relay");
     assert!(!n.missing(&magnet, 9999).is_empty(), "and knows what else to ask for");
 }
@@ -1772,5 +1792,91 @@ fn both_dedup_paths_agree_on_the_retention_floor() {
         sender.seen.get(&e.id()).copied(),
         Some(now + SEEN_MIN_SECS),
         "and that length is the §11 floor, measured from now"
+    );
+}
+
+/// Publish `chunks` chunks with a given push budget; report `(bytes published,
+/// round trips the fetcher then needed)`.
+fn push_cost(chunks: usize, budget: usize) -> (usize, u32) {
+    let mut p = Node::new("p", &[]);
+    p.set_push_chunks(budget);
+    let body: Vec<u8> =
+        (0..chunks * file::CHUNK_BYTES / 4).map(|i| i as u32).flat_map(|i| i.to_be_bytes()).collect();
+    let (magnet, fwds) = p.publish_file("f.bin", &body, ZERO_DEST, NOW);
+
+    let mut f = Node::new("f", &[]);
+    let mut published = 0;
+    for fw in &fwds {
+        let w = match fw {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        published += w.len();
+        f.on_rx(w, 0, None, NOW);
+    }
+    let mut rounds = 0;
+    for r in 0..40u32 {
+        let want = f.fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        rounds += 1;
+        for fw in &want {
+            let w = match fw {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            for sf in p.on_rx(w, 0, None, NOW + r * 60).forwards {
+                let sw = match &sf {
+                    Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+                };
+                f.on_rx(sw, 0, None, NOW + r * 60);
+            }
+        }
+    }
+    assert!(f.has_file(&magnet), "the fetcher completes either way");
+    (published, rounds)
+}
+
+#[test]
+fn a_push_that_cannot_cover_the_file_is_not_worth_its_airtime() {
+    // M11-C's threshold, and the measurement that sets it. A push exists to
+    // remove a round trip, and the round trip is removed only if the receiver is
+    // left with nothing to ask for. So the question is not "how many chunks to
+    // push" but "how large a file is worth pushing whole".
+    //
+    // The asymmetry is what decides it: the airtime is spent at *every*
+    // neighbour, wanted or not, while the saving accrues only to the ones who
+    // wanted the file.
+
+    // Inside the budget: the whole file goes, and the fetcher asks for nothing.
+    let (bytes_small, rounds_small) = push_cost(2, 4);
+    assert_eq!(rounds_small, 0, "a file inside the budget costs no round trip at all");
+    assert!(bytes_small > 2 * file::CHUNK_BYTES, "because the whole thing was pushed: {bytes_small}B");
+
+    // Past the budget: nothing is pushed, and the publish is just the manifest.
+    let (bytes_big, rounds_big) = push_cost(10, 4);
+    assert!(rounds_big > 0, "it has to be asked for");
+    assert!(
+        bytes_big < file::CHUNK_BYTES,
+        "but publishing costs a manifest, not 33 kB of chunks nobody asked for: {bytes_big}B"
+    );
+
+    // And the old behaviour — push a prefix and leave the rest — was the worst of
+    // both: it spent the airtime *and* left a round trip. Same file, a budget
+    // that cannot cover it, so the prefix is refused rather than sent.
+    let (bytes_partial, rounds_partial) = push_cost(10, 8);
+    assert_eq!(bytes_partial, bytes_big, "a budget under the file size pushes nothing, whatever its value");
+    assert_eq!(rounds_partial, rounds_big);
+}
+
+#[test]
+fn the_default_push_budget_is_set_from_bytes_not_inherited() {
+    // `DEFAULT_PUSH_CHUNKS` was 8, chosen when a chunk *was* the link's frame, so
+    // eight of them was ~10 kB on Wi-Fi and ~1.4 kB on LoRa. M11-M made a chunk a
+    // protocol-fixed 4096 bytes, so eight became 32 kB on every medium and the
+    // reasoning stopped holding. The ceiling that matters is bytes.
+    let ceiling = DEFAULT_PUSH_CHUNKS * file::CHUNK_BYTES;
+    assert!(
+        ceiling <= 8 * 1024,
+        "the most a publisher may put on the air unsolicited is {ceiling}B, which should be small"
     );
 }
