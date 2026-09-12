@@ -12,7 +12,7 @@
 //! `decode` is the front door for every hostile byte the project will ever see.
 //! It is the most-fuzzed function here (`fuzz/fuzz_targets/envelope_decode.rs`)
 //! and it must return `Err` rather than panic on anything at all — see the
-//! reproductions in `docs/SECURITY_FINDINGS.md`.
+//! reproductions in the fuzz corpus and in `git log --grep='^S-'`.
 
 use crate::*;
 

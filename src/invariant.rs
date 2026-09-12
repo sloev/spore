@@ -1402,3 +1402,109 @@ fn a_chunk_larger_than_a_frame_still_crosses_it() {
     let (e, _) = Envelope::decode(&rebuilt).expect("a chunk envelope");
     assert_eq!(file::content_id(&e.payload), first, "and it is still the same named content");
 }
+
+#[test]
+fn abandoned_fetches_cannot_hold_a_store_hostage() {
+    // M12-A. `pinned_ids` protects the parts of a file that is *not* complete, so
+    // that memory pressure cannot drop a chunk out from under a fetch in flight.
+    // Nothing ever un-pinned a fetch that had stopped making progress, and
+    // `enforce_budget` breaks out rather than evict a pin.
+    //
+    // One abandoned file is survivable. Several are not: each one's held parts
+    // are pinned for as long as the manifest is remembered, so a node that starts
+    // fetches it cannot finish ends up holding them all, whatever its budget says.
+    // That is the resource invariant's second clause failing on its own terms —
+    // the allowance is supposed to be bounded and local, and this one was neither,
+    // since the bound is set by how many publishers walk away.
+    let budget = 64 * 1024;
+    let mut n = Node::new("victim", &[]);
+    n.set_store_budget(budget);
+
+    // Eight publishers, each of whom hands over a manifest and a few parts and is
+    // never heard from again. Nothing here is hostile; a flaky link does it too.
+    for f in 0..8u32 {
+        let mut publisher = Node::from_seed("publisher", &[], &[f as u8; 32]);
+        let body: Vec<u8> =
+            (0..25_000u32).map(|i| i.wrapping_add(f * 1_000_000)).flat_map(|i| i.to_be_bytes()).collect();
+        let (magnet, published) = publisher.publish_file("gone.bin", &body, ZERO_DEST, NOW);
+        for fw in &published {
+            let wire = match fw {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            n.on_rx(wire, 0, None, NOW);
+        }
+        // Two rounds only: enough to hold real parts, not enough to complete.
+        for round in 0..2 {
+            let want = n.fetch_n(&magnet, 8);
+            if want.is_empty() {
+                break;
+            }
+            meet(&mut n, &mut publisher, want, NOW + round * 60);
+        }
+        assert!(!n.has_file(&magnet), "file {f} is deliberately left unfinished");
+    }
+
+    assert!(
+        n.store_bytes() <= budget * 2,
+        "eight abandoned fetches hold {} bytes against a {budget}-byte budget",
+        n.store_bytes()
+    );
+}
+
+#[test]
+fn the_fetch_still_moving_is_the_one_that_keeps_its_pin() {
+    // The other half of M12-A's bound. Rationing the pin is only correct if what
+    // it drops is the stalled transfer and what it keeps is the live one —
+    // otherwise it trades an unbounded store for fetches that can never finish.
+    //
+    // Two files, one budget, room for about one of them. The stalled fetch came
+    // first; the live one is still gaining parts.
+    let budget = 96 * 1024;
+    let mut n = Node::new("victim", &[]);
+    n.set_store_budget(budget);
+
+    let started = |n: &mut Node, seed: u8, rounds: u32| -> Id {
+        let mut publisher = Node::from_seed("publisher", &[], &[seed; 32]);
+        let body: Vec<u8> = (0..40_000u32)
+            .map(|i| i.wrapping_add(seed as u32 * 7_000_000))
+            .flat_map(|i| i.to_be_bytes())
+            .collect();
+        let (magnet, published) = publisher.publish_file("f.bin", &body, ZERO_DEST, NOW);
+        for fw in &published {
+            let wire = match fw {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            n.on_rx(wire, 0, None, NOW);
+        }
+        for round in 0..rounds {
+            let want = n.fetch_n(&magnet, 4);
+            if want.is_empty() {
+                break;
+            }
+            meet(n, &mut publisher, want, NOW + round * 60);
+        }
+        magnet
+    };
+
+    let stalled = started(&mut n, 1, 1);
+    let live = started(&mut n, 2, 3);
+    assert!(!n.has_file(&stalled) && !n.has_file(&live), "both are mid-flight");
+
+    // Squeeze. Only one of them can keep its protection.
+    let later = NOW + 3600;
+    for i in 0..60u32 {
+        let mut e = Envelope::new(ty::DATA, ZERO_DEST, later, vec![i as u8; 4000]);
+        e.flags |= fl::FLOOD;
+        n.on_rx(&e.wire(), 0, None, later);
+    }
+
+    let held = |m: &Id| n.missing(m, 9999).len();
+    assert!(
+        held(&live) <= held(&stalled),
+        "the transfer still gaining parts should keep at least as much as the one that stopped: \
+         live is missing {}, stalled {}",
+        held(&live),
+        held(&stalled)
+    );
+    assert!(n.store_bytes() <= budget * 2, "and the store stays near its budget: {}", n.store_bytes());
+}

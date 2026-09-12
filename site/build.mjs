@@ -53,7 +53,6 @@ const pages = [
   ['docs/DIRECT.md', 'direct.html', null],
   ['docs/ROADMAP.md', 'roadmap.html', null],
   ['docs/SECURITY.md', 'security-policy.html', null],
-  ['docs/SECURITY_FINDINGS.md', 'security.html', null],
   ['docs/THREAT_MODEL.md', 'threat-model.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],
   ['android/TESTING.md', 'testing.html', null],
@@ -104,7 +103,6 @@ const DESC_DEFAULT =
 const titles = new Map([
   ['index.html', 'SPORE — messages that still get through'],
   ['security-policy.html', 'SPORE — reporting a vulnerability'],
-  ['security.html', 'SPORE — security findings'],
   ['roadmap.html', 'SPORE — engineering roadmap'],
   ['hardware.html', 'SPORE — hardware verification'],
   ['testing.html', 'SPORE — Android device tests'],
@@ -141,7 +139,6 @@ const descriptions = new Map([
   ['how-it-works.html', 'Addressing, store-and-forward delivery, pluggable bridges, and privacy by default — the mechanism, briefly.'],
   ['developer.html', 'The wire format, every bridge, the reimplementation guide, and everything else with real technical depth.'],
   ['bridges.html', 'Every link SPORE speaks — internet, folder, serial, Bluetooth, audio, radio — and which have been verified on real hardware.'],
-  ['security.html', 'The SPORE findings register: what was found, how it was reproduced, what was changed, and what is still open.'],
   ['continuity.html', 'How one surviving copy of SPORE — a file, a clone, a printed sheet — rebuilds the whole system with no server and no network.'],
   ['rebuild.html', 'Reimplementing SPORE from scratch in another language, with worked byte-for-byte examples.'],
 ]);
@@ -385,7 +382,7 @@ function anchorHeadings(html) {
 
 // Pages long enough that a reader needs a map before they scan them — the bridge
 // reference alone is ~70 tables under one H1.
-const TOC_PAGES = new Set(['spec.html', 'bridges.html', 'security.html', 'roadmap.html']);
+const TOC_PAGES = new Set(['spec.html', 'bridges.html', 'roadmap.html']);
 
 // Contents list built from the page's own top-level (H2) headings — no separate
 // outline to keep in sync, since it is generated from whatever anchorHeadings

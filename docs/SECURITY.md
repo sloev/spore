@@ -18,11 +18,11 @@ so expect a reply in days rather than hours.
 2. A reproduction. A failing test or a byte sequence beats a description of a code
    path, because several plausible readings of this code have turned out to be
    already handled — see [Investigated and not a
-   finding](SECURITY_FINDINGS.md#investigated-and-not-a-finding).
+   finding: several reports have been investigated and closed that way, and the reasoning is in the commit that closed each one.
 3. Which file and function.
 
 Every accepted finding is written up in
-[`docs/SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) with its reproduction,
+the commit that fixes it, with its reproduction,
 root cause, patch, and the test that keeps it fixed. You are welcome to be
 credited there or not, as you prefer.
 
@@ -75,9 +75,10 @@ Report these only if you can show something *worse* than what is written here.
   hub used to deadlock that thread silently. It now panics naming the bug instead
   (per-hub, per-thread guard), which is a diagnosable failure rather than a hang,
   but the underlying call shape is still not supported.
-- **The remaining still-open items** are listed at the end of
-  [`docs/SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md). They are carried
-  deliberately and are not secrets.
+- **The remaining still-open items** are rows in
+  [Milestone 1 of the roadmap](ROADMAP.md). They are carried deliberately and are
+  not secrets — an unfixed weakness that nobody has written down is the only kind
+  worth hiding.
 
 ## Supported versions
 

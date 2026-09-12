@@ -428,7 +428,7 @@ jobs:
           hardware (every 🧪 in
           [BRIDGES.md](https://github.com/sloev/spore/blob/master/docs/BRIDGES.md)),
           and the **Still open** section of
-          [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
+          [The threat model](https://sloev.github.io/spore/threat-model.html) lists
           what is known and unfixed. Builds are debug-signed until a release keystore
           is configured, so Android will warn about an unknown developer.
 
@@ -497,7 +497,7 @@ jobs:
             hardware (every 🧪 in
             [BRIDGES.md](https://github.com/sloev/spore/blob/master/docs/BRIDGES.md)),
             and the **Still open** section of
-            [SECURITY_FINDINGS.md](https://sloev.github.io/spore/security.html) lists
+            [The threat model](https://sloev.github.io/spore/threat-model.html) lists
             what is known and unfixed. Builds are debug-signed until a release
             keystore is configured, so Android will warn about an unknown developer.
 

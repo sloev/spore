@@ -14,14 +14,14 @@ of perfect security, which this project's Honesty contract
 ([`MISSION.md`](MISSION.md)) does not permit.
 
 Every claim below links to a [`SPEC.md`](SPEC.md) section or a
-[`SECURITY_FINDINGS.md`](SECURITY_FINDINGS.md) ID. Where the honest answer is
+the security findings (now in `git log`) ID. Where the honest answer is
 "partially" or "not at all," that is what it says — this is a document about
 where the edges are, not a marketing page.
 
 **Why this exists now.** An external threat-model catalogue, written against
 SPORE's public site rather than its spec, raised questions this project had
 already answered in code — and one it had not
-([S-032](SECURITY_FINDINGS.md#s-032), found by checking the catalogue's
+(`S-032`, found by checking the catalogue's
 "receipt spoofing" item against `src/node/ingest.rs`). That is the argument
 for this document existing: the answers were real but undiscoverable, and in
 one case checking the question against the code found a live bug.
@@ -79,12 +79,12 @@ is honest.
 
 | Attack | Mitigation | Reference |
 |---|---|---|
-| Forge a delivery receipt to fake "delivered" | Receipt must carry a verified signature from the actual destination | [S-032](SECURITY_FINDINGS.md#s-032) |
-| Reflect/amplify via WANT | Per-interface token bucket on gossip service | [S-012](SECURITY_FINDINGS.md#s-012) |
+| Forge a delivery receipt to fake "delivered" | Receipt must carry a verified signature from the actual destination | `S-032` |
+| Reflect/amplify via WANT | Per-interface token bucket on gossip service | `S-012` |
 | Claim a deeper WANT than policy allows, so one frame makes the *whole* mesh adopt an interest | Incoming depth is clamped to `DEFAULT_WANT_DEPTH`; asking for less is honoured, asking for more degrades to local policy | M11-L — measured: a forged depth reached 23 of 24 nodes against an honest 8 |
-| Bypass congestion control with a low-effort flood | Stamp (proof-of-work) threshold gate | [S-003](SECURITY_FINDINGS.md#s-003) |
-| Forge a path-table entry to redirect unicast | Relays verify a signature before binding a path to it | [S-002](SECURITY_FINDINGS.md#s-002) |
-| Flood ten different growable tables | Bounded, with deliberate eviction order (expired → lowest stamp → largest → oldest) | [S-013](SECURITY_FINDINGS.md#s-013) |
+| Bypass congestion control with a low-effort flood | Stamp (proof-of-work) threshold gate | `S-003` |
+| Forge a path-table entry to redirect unicast | Relays verify a signature before binding a path to it | `S-002` |
+| Flood ten different growable tables | Bounded, with deliberate eviction order (expired → lowest stamp → largest → oldest) | `S-013` |
 | Exhaust an MCU node's heap with desktop-sized ceilings | Every table ceiling derivable from a runtime's actual memory budget | audit [#189](https://github.com/sloev/spore/issues/189) rec. 2, `Limits::for_budget` |
 | Tamper with spilled/cached bytes | An entry read back is re-verified against its content-derived ID; a mismatch reads as "not held" | SPEC runtime contract + §6 (store) |
 
@@ -174,16 +174,16 @@ of the ordinary findings register.
 
 | Attack | Mitigation | Reference |
 |---|---|---|
-| Storage exhaustion (unbounded growth of any table) | Every growable table capped, with eviction order | [S-013](SECURITY_FINDINGS.md#s-013), [S-006](SECURITY_FINDINGS.md#s-006), [S-016](SECURITY_FINDINGS.md#s-016), [S-017](SECURITY_FINDINGS.md#s-017) |
+| Storage exhaustion (unbounded growth of any table) | Every growable table capped, with eviction order | `S-013`, `S-006`, `S-016`, `S-017` |
 | Storage exhaustion (fragment reassembly, count bounded but not bytes) | Byte budget across all incomplete fountain sets, not just a count cap | audit #189 F-3 |
 | Storage exhaustion (unsigned traffic exempt from source quota) | Quota applies regardless of signature presence | audit #189 F-2 |
-| CPU exhaustion (audio demod rescans its whole buffer every call) | Scan cursor makes cost proportional to new samples, not buffer size | [S-031](SECURITY_FINDINGS.md#s-031) |
-| CPU exhaustion (integer overflow reachable from the wire) | Checked arithmetic on the affected path | [S-019](SECURITY_FINDINGS.md#s-019) |
-| Battery exhaustion (aggressive beaconing) | Trickle timer (5→80 min, doubling on silence) instead of a fixed short interval | [S-023](SECURITY_FINDINGS.md#s-023) |
-| Bandwidth exhaustion (reflection/amplification) | Per-interface WANT service budget | [S-012](SECURITY_FINDINGS.md#s-012) |
+| CPU exhaustion (audio demod rescans its whole buffer every call) | Scan cursor makes cost proportional to new samples, not buffer size | `S-031` |
+| CPU exhaustion (integer overflow reachable from the wire) | Checked arithmetic on the affected path | `S-019` |
+| Battery exhaustion (aggressive beaconing) | Trickle timer (5→80 min, doubling on silence) instead of a fixed short interval | `S-023` |
+| Bandwidth exhaustion (reflection/amplification) | Per-interface WANT service budget | `S-012` |
 | Bandwidth exhaustion (relayed traffic crowding a link) | Token bucket at 10% of interface capacity | SPEC §5.4a |
 | Every table sized for a desktop, shipped on a 226 KB-heap MCU | `Limits::for_budget` scales every ceiling from one number, with floors so a table never trims to zero | audit #189 rec. 2 |
-| Third party's traffic filling a node's quota | Per-source, per-topic quotas | SPEC §10, [S-004](SECURITY_FINDINGS.md#s-004) |
+| Third party's traffic filling a node's quota | Per-source, per-topic quotas | SPEC §10, `S-004` |
 | Spam (unlimited low-cost envelope minting) | Stamp: proof-of-work priority, unforgeable on every medium; unsigned mail rides last | SPEC §10 |
 
 **Residual risk — stamp raises cost, it does not cap it.** Proof-of-work
@@ -261,7 +261,7 @@ around, not a failure mode to defend against.
 `radio_codecs`, `seal_open`) exercise every wire-facing decoder against
 malformed, truncated, and adversarial input. `robustness.rs` runs targeted
 arbitrary-bytes tests against the live receive path — the mechanism that
-found [S-001](SECURITY_FINDINGS.md#s-001) (a zero-count fragment causing a
+found `S-001` (a zero-count fragment causing a
 division-by-zero panic) before it shipped. No `unwrap`/`expect`/indexing
 panic is reachable from untrusted input on `ingest`/`fountain`/`session`/
 `file`/`armor` (audited, per #189's "what is already solid").
@@ -280,9 +280,9 @@ vectors (`reference/vectors.json`) mean anyone can independently reimplement
 and cross-check against the wire, not trust any single maintainer's binary.
 Public-domain licensing (`LICENSE`) removes the legal kill switch a
 corporate license could hold. Five release-integrity findings on record
-([S-021](SECURITY_FINDINGS.md#s-021),
-[S-025](SECURITY_FINDINGS.md#s-025)/[026](SECURITY_FINDINGS.md#s-026)/
-[029](SECURITY_FINDINGS.md#s-029)/[030](SECURITY_FINDINGS.md#s-030)) are
+(`S-021`,
+`S-025`/`S-026`/
+`S-029`/`S-030`) are
 evidence this specific class — the release pipeline itself as an attack
 surface — has been checked, not assumed clean.
 
@@ -352,7 +352,7 @@ plainly rather than left for a user to discover by reading source.
 |---|---|
 | Content confidentiality (sealed/ratcheted traffic) | Real — §7 |
 | Content confidentiality (open groups, microblog) | Not attempted, on purpose — public by design |
-| Sender authenticity | Real — Ed25519 signatures, verified before any trust decision (§2, [S-002](SECURITY_FINDINGS.md#s-002)) |
+| Sender authenticity | Real — Ed25519 signatures, verified before any trust decision (§2, `S-002`) |
 | Replay resistance | Real — content-addressed IDs + dedup (§5), envelope expiry |
 | Resource-exhaustion resistance | Real, and runtime-scalable — chapter 4, `Limits::for_budget` |
 | Malicious-relay availability attack | Bounded by redundancy, not eliminated — universal to store-and-forward, chapter 2 |
