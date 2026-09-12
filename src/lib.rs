@@ -265,18 +265,31 @@ pub const DEFAULT_PARTIAL_BUDGET: usize = 4 * 1024 * 1024;
 /// beside an infallible `id` would leave the same silent truncation in the half
 /// that matters more.
 pub const MAX_PAYLOAD_BYTES: usize = u16::MAX as usize;
-
-/// Chunks sent alongside a manifest when a file is published (M11-E).
+/// The largest file, in chunks, that a publisher will push **whole** alongside
+/// its manifest (M11-C).
 ///
-/// Eight, which is ~10 kB at a 1400-byte MTU and ~1.4 kB over LoRa. Counted in
-/// chunks rather than bytes precisely so it scales with the link: a byte
-/// threshold would push 10 kB onto a radio and call it small.
+/// Not "how many chunks to push" — how big a file may be to be pushed at all. A
+/// push exists to remove a round trip, and the round trip is only removed if the
+/// receiver is left with nothing to ask for, so a partial push spends the full
+/// airtime and saves nothing. Measured on a 1400-byte link:
 ///
-/// **Local policy, not a wire rule.** The receiver ignores what it already holds
-/// and WANTs the rest either way, so the two ends never need to agree and `0`
-/// — pure pull — is a legal setting for a node that would rather not spend the
-/// airtime. Set it with [`Node::set_push_chunks`].
-pub const DEFAULT_PUSH_CHUNKS: usize = 8;
+/// | file | pushed | round trips |
+/// |---|---|---|
+/// | 2 chunks, budget 4 | 8 kB | **0** |
+/// | 10 chunks, budget 8 | 33 kB | 1, down from 2 |
+/// | 50 chunks, budget 8 | 34 kB | 6, down from 8 |
+///
+/// The cost falls on every neighbour, wanted or not; the saving accrues only to
+/// the ones who wanted the file.
+///
+/// **Two, not eight.** Eight was chosen when a chunk was the link's own frame, so
+/// eight of them was ~10 kB on Wi-Fi and ~1.4 kB on LoRa — it scaled. M11-M made
+/// a chunk a protocol-fixed 4096 bytes, so eight is 32 kB on every medium and the
+/// scaling argument no longer holds. Two keeps the unsolicited ceiling at 8 kB,
+/// which is what a small file — a note, an avatar, a config — actually is.
+///
+/// Set it with [`Node::set_push_chunks`]; `0` disables pushing entirely.
+pub const DEFAULT_PUSH_CHUNKS: usize = 2;
 
 /// Ids that a manifest we hold names, remembered so a neighbour's WANT for one
 /// of them can be answered by fetching it (M11-I).
@@ -1656,15 +1669,21 @@ mod tests {
         // than one round is expected now: a tree resolves top-down, so the
         // interior nodes have to arrive before the chunks beneath them can be
         // named at all.
-        for _ in 0..12 {
+        // The clock advances: the per-interface gossip budget refills with time,
+        // and this used to lean on the publisher pushing eight chunks for free to
+        // stay inside a single burst. Since M11-C it pushes a file whole or not at
+        // all, so everything here is pulled, which is a fairer test of the pull
+        // path anyway.
+        for round in 0..12u32 {
+            let t = now + round * 60;
             let want = b.fetch_n(&magnet, 4);
             if want.is_empty() {
                 break;
             }
             for f in &want {
-                let rx = a.on_rx(&fwd_bytes(f), 0, Some(b.addr), now);
+                let rx = a.on_rx(&fwd_bytes(f), 0, Some(b.addr), t);
                 for cf in rx.forwards {
-                    b.on_rx(&fwd_bytes(&cf), 0, Some(a.addr), now);
+                    b.on_rx(&fwd_bytes(&cf), 0, Some(a.addr), t);
                 }
             }
         }

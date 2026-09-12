@@ -282,9 +282,19 @@ impl Sim {
     }
 
     /// Run until the queue drains or the clock passes `until_ms`.
+    /// Deliver everything due by `until_ms`, then **advance the clock to it**.
+    ///
+    /// The advance is the part that was missing. `now_ms` was only ever set from
+    /// a job's timestamp, so once the queue drained the clock stopped — and a
+    /// scenario asking to "run for another 30 seconds" got only as far as the
+    /// last packet in flight. Anything rate-limited was then measured against a
+    /// budget that never refilled: a fetch would stall forever and look like a
+    /// protocol failure rather than a simulator one. Time passing is exactly what
+    /// these scenarios are trying to model.
     fn run(&mut self, until_ms: u64, watch: Option<usize>) {
         while let Some(Reverse(job)) = self.queue.pop() {
             if job.at_ms > until_ms {
+                self.queue.push(Reverse(job)); // not due yet — put it back
                 break;
             }
             self.now_ms = job.at_ms;
@@ -313,6 +323,7 @@ impl Sim {
             }
             self.emit(job.node, rx.forwards);
         }
+        self.now_ms = self.now_ms.max(until_ms);
     }
 
     /// Let every node announce and the announces settle, so paths and prekeys
@@ -674,6 +685,70 @@ fn file_multihop() -> Report {
     Report { name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
 }
 
+/// What a push buys, and what it costs the people who did not want it (M11-C).
+///
+/// The asymmetry is the whole question. A pushed chunk is airtime spent at every
+/// neighbour whether they wanted the file or not; the round trip it saves is
+/// saved only for the ones who did. So the scenario is a publisher with several
+/// neighbours of whom exactly one is fetching — which is the ordinary case, not
+/// an adversarial one.
+///
+/// Reported at two file sizes, either side of the push budget, so the threshold
+/// is visible rather than asserted.
+fn push_threshold(chunks: usize, budget: usize) -> Report {
+    // A publisher and four neighbours; one of them wants the file.
+    let links = (1..5).map(|i| Link { a: 0, b: i, mtu: 1400, loss_pct: 0, latency_ms: 10 }).collect();
+    // With link fragmentation: chunks are a protocol-fixed 4096 bytes (M11-M) and
+    // so are larger than this link's frame. Without it every chunk is simply
+    // dropped and the scenario measures nothing.
+    let mut sim = Sim::new(World::new(5, links), 0x9057).with_link_fragmentation();
+    sim.world.nodes[0].set_push_chunks(budget);
+    let now = sim.now_secs();
+    let bytes: Vec<u8> =
+        (0..chunks * spore::file::CHUNK_BYTES / 4).map(|i| i as u32).flat_map(|i| i.to_be_bytes()).collect();
+
+    sim.start_measuring();
+    let (magnet, fwds) = sim.world.nodes[0].publish_file("f.bin", &bytes, ZERO_DEST, now);
+    sim.emit(0, fwds);
+    sim.run(sim.now_ms + 60_000, None);
+
+    // Node 4 is the only one that wants it. Count the rounds it needs.
+    let mut rounds = 0;
+    for r in 0..40 {
+        let want = sim.world.nodes[4].fetch_n(&magnet, 8);
+        if want.is_empty() {
+            break;
+        }
+        rounds += 1;
+        sim.emit(4, want);
+        sim.run(sim.now_ms + 30_000, None);
+        let _ = r;
+    }
+    let got = usize::from(sim.world.nodes[4].has_file(&magnet));
+    // What the three uninterested neighbours were made to receive.
+    let wasted: usize = (1..4).map(|i| sim.world.nodes[i].store_bytes()).sum();
+
+    // The threshold itself: a push is all-or-nothing (M11-C).
+    if chunks <= budget {
+        assert_eq!(rounds, 0, "a file inside the budget must cost the fetcher no round trip");
+    } else {
+        assert!(
+            wasted < spore::file::CHUNK_BYTES * 3,
+            "a file past the budget must push no chunks at all — three uninterested neighbours              are holding {wasted} B, which is more than manifests"
+        );
+        assert!(rounds > 0, "and it has to be asked for");
+    }
+    Report {
+        name: format!("push-{chunks}chunk-budget{budget}"),
+        note: format!(
+            "{rounds} round trips for the one fetcher; {wasted} B sitting in three neighbours who never asked"
+        ),
+        reached: got,
+        of: 1,
+        m: sim.m,
+    }
+}
+
 /// What does one forged WANT cost a mesh? (M11-L)
 ///
 /// Recursive pull's amplification story was *reasoned*: a node adopts only ids a
@@ -952,6 +1027,7 @@ fn main() {
         ],
         "partition" => vec![partition()],
         "files" => vec![file_multihop(), fetch_abandoned()],
+        "push" => vec![push_threshold(2, 2), push_threshold(10, 2), push_threshold(10, 16)],
         "malicious" => vec![malicious_want(DEFAULT_WANT_DEPTH), malicious_want(255)],
         "hop-limit" => vec![hop_limit(8), hop_limit(17), hop_limit(19)],
         _ => vec![
@@ -964,6 +1040,9 @@ fn main() {
             partition(),
             file_multihop(),
             fetch_abandoned(),
+            // M11-C: the push threshold, either side of the budget.
+            push_threshold(2, 2),
+            push_threshold(10, 2),
             // The fragment-loss cliff, kept in the smoke suite as a standing
             // record: only the clean case is asserted, because the rest are
             // probabilities and a threshold on a coin flip is a flaky build.
