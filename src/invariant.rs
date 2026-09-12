@@ -1508,3 +1508,79 @@ fn the_fetch_still_moving_is_the_one_that_keeps_its_pin() {
     );
     assert!(n.store_bytes() <= budget * 2, "and the store stays near its budget: {}", n.store_bytes());
 }
+
+#[test]
+fn a_spent_hop_budget_stops_the_push_and_nothing_else() {
+    // "Why carry something you will not relay?" Because relaying is only one of
+    // the things a node does with what it holds, and it is the only one `hops`
+    // governs.
+    //
+    // `hops` bounds **push**: how far one send can travel unasked, which is the
+    // amplification an attacker would use. It says nothing about **pull**, which
+    // is bounded by demand instead — somebody has to ask, every single step.
+    // Carrying is what keeps the second one possible after the first has stopped,
+    // and it is the whole of store-and-forward.
+    let now = NOW;
+    let origin = Node::new("origin", &[]);
+    let mut b = Node::new("b", &[]);
+    let mut c = Node::new("c", &[]);
+
+    let mut e = Envelope::new(ty::DATA, ZERO_DEST, now, b"spent".to_vec());
+    e.flags |= fl::FLOOD;
+    e.hops = 0; // arrived having used its whole budget
+    e.sign(&origin.sk);
+    let id = e.id();
+
+    let rx = b.on_rx(&e.wire(), 0, None, now);
+    assert!(rx.forwards.is_empty(), "it is not pushed any further");
+    assert_eq!(rx.delivered.len(), 1, "but it is still delivered here — this node is a destination");
+    assert!(b.has(&id), "and still carried");
+
+    // And still handed on, when somebody asks. One hop per meeting, each one
+    // requiring a WANT — so this is not the flood continuing under another name.
+    let inv = b.build_inv(&HashSet::new());
+    for f in c.on_rx(&inv, 0, None, now).forwards {
+        let w = match &f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+        };
+        for sf in b.on_rx(&w, 0, None, now).forwards {
+            let sw = match &sf {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+            };
+            c.on_rx(&sw, 0, None, now);
+        }
+    }
+    assert!(c.has(&id), "a spent hop budget does not put an envelope beyond reach, only beyond the flood");
+}
+
+#[test]
+fn dropping_what_it_cannot_relay_would_break_the_file_layer() {
+    // The same property from the other end, and the reason it is not merely
+    // defensible but required: a chunk is *minted* at hops 0 (M11-J), so it is
+    // never relayed by anyone. If "cannot relay" meant "discard", no node would
+    // ever hold a chunk it did not publish, and the file layer would not exist.
+    let mut publisher = Node::new("publisher", &[]);
+    let (magnet, published) = publisher.publish_file("f.bin", &pullable_file(), ZERO_DEST, NOW);
+
+    let chunk = published
+        .iter()
+        .map(|f| match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+        })
+        .find(|w| {
+            Envelope::decode(w).map(|(e, _)| e.payload.first() == Some(&file::CHUNK_TAG)).unwrap_or(false)
+        })
+        .expect("the publisher pushes some chunks with the root");
+    let (ce, _) = Envelope::decode(&chunk).unwrap();
+    assert_eq!(ce.hops, 0, "a chunk is born link-local");
+
+    let mut n = Node::new("n", &[]);
+    for f in &published {
+        let wire = match f {
+            Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+        };
+        n.on_rx(wire, 0, None, NOW);
+    }
+    assert!(n.holds_named(&file::content_id(&ce.payload)), "it kept a chunk it can never relay");
+    assert!(!n.missing(&magnet, 9999).is_empty(), "and knows what else to ask for");
+}

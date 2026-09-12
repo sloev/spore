@@ -279,7 +279,7 @@ flowchart TB
   MINE -->|no| STORE
   DELIVER --> STORE["store: keep it until the room is needed"]
   STORE --> HOPS{"hops > 0?"}
-  HOPS -->|no| STOP["carry, but do not relay"]
+  HOPS -->|no| STOP["carry, but do not push. still delivered, still served on WANT"]
   HOPS -->|yes| FWD["decrement hops · forward on every other interface, inside the per-interface token bucket"]
 ```
 
@@ -308,6 +308,20 @@ victims. Between them an envelope's age is nobody's business.
    Learn paths (§4).
 2. dest ∈ {my addresses, followed topics, 0×8} → deliver (verify/decrypt per
    flags).
+**`hops` bounds push, not reach.** A spent hop budget stops an envelope being
+*relayed* — sent onward unasked — and stops nothing else. The node still delivers
+it if it is a destination, still holds it, still lists it in an INV, and still
+serves it to a neighbour that WANTs it. That is deliberate and it is what
+store-and-forward *is*: the flood is bounded because one send must not buy
+unbounded transmission, while pull is bounded by demand instead, since every
+further step requires somebody to ask for it.
+
+So an envelope at `hops = 0` is not beyond reach, only beyond the flood. It is
+also the normal state of a file chunk, which is minted at `hops = 0` (§8) and
+therefore never relayed by anyone — a node that discarded what it could not relay
+would never hold a chunk it had not published itself, and there would be no file
+layer.
+
 3. Store it. Nothing expires; entries leave only when the room is needed, and
    only then is age consulted. Evict: past this node's `max_relay_age` → lowest
    stamp → largest → oldest arrival. TX
