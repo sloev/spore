@@ -1,0 +1,81 @@
+# Every `unsafe` in src/, keyed on file and enclosing symbol.
+# Regenerate: python3 scripts/unsafe_snapshot.py > audits/unsafe-snapshot.txt
+#
+# A new line here is a new place that can cause undefined behaviour. It is
+# meant to be reviewed, not re-blessed.
+#
+# totals: block=8, extern-decl=61, unsafe-fn=4
+
+src/bridge/icmp.rs	block	run
+src/ffi.rs	block	ffi_message_and_seal_roundtrip
+src/ffi.rs	block	null_pointers_return_failure_instead_of_unwinding
+src/ffi.rs	extern-decl	spore_addr_of
+src/ffi.rs	extern-decl	spore_armor_unwrap
+src/ffi.rs	extern-decl	spore_armor_wrap
+src/ffi.rs	extern-decl	spore_bytes_free
+src/ffi.rs	extern-decl	spore_keypair
+src/ffi.rs	extern-decl	spore_message_id
+src/ffi.rs	extern-decl	spore_message_new
+src/ffi.rs	extern-decl	spore_message_payload
+src/ffi.rs	extern-decl	spore_message_verify
+src/ffi.rs	extern-decl	spore_node_file_bytes
+src/ffi.rs	extern-decl	spore_node_file_name
+src/ffi.rs	extern-decl	spore_node_poll_feed
+src/ffi.rs	extern-decl	spore_node_publish
+src/ffi.rs	extern-decl	spore_node_publish_file
+src/ffi.rs	extern-decl	spore_open
+src/ffi.rs	extern-decl	spore_prekey
+src/ffi.rs	extern-decl	spore_seal
+src/ffi.rs	extern-decl	spore_topic_of
+src/ffi.rs	extern-decl	spore_topic_open
+src/ffi.rs	extern-decl	spore_topic_seal
+src/ffi.rs	unsafe-fn	arr32
+src/ffi.rs	unsafe-fn	arr8
+src/ffi.rs	unsafe-fn	slice
+src/wasm.rs	block	get
+src/wasm.rs	block	ids
+src/wasm.rs	block	put
+src/wasm.rs	block	remove
+src/wasm.rs	block	wasm_getrandom
+src/wasm.rs	extern-decl	spore_env_flags
+src/wasm.rs	extern-decl	spore_env_payload
+src/wasm.rs	extern-decl	spore_env_src
+src/wasm.rs	extern-decl	spore_env_verify
+src/wasm.rs	extern-decl	spore_free
+src/wasm.rs	extern-decl	spore_group_invite_decode
+src/wasm.rs	extern-decl	spore_group_invite_encode
+src/wasm.rs	extern-decl	spore_node_acked
+src/wasm.rs	extern-decl	spore_node_addr
+src/wasm.rs	extern-decl	spore_node_announce
+src/wasm.rs	extern-decl	spore_node_fetch_file
+src/wasm.rs	extern-decl	spore_node_file_bytes
+src/wasm.rs	extern-decl	spore_node_file_name
+src/wasm.rs	extern-decl	spore_node_files
+src/wasm.rs	extern-decl	spore_node_free
+src/wasm.rs	extern-decl	spore_node_list_files
+src/wasm.rs	extern-decl	spore_node_new_seeded
+src/wasm.rs	extern-decl	spore_node_open_dm
+src/wasm.rs	extern-decl	spore_node_peers
+src/wasm.rs	extern-decl	spore_node_pending_interests
+src/wasm.rs	extern-decl	spore_node_pending_interests_len
+src/wasm.rs	extern-decl	spore_node_petname
+src/wasm.rs	extern-decl	spore_node_poll_feed
+src/wasm.rs	extern-decl	spore_node_prekey_ring
+src/wasm.rs	extern-decl	spore_node_prekey_ring_len
+src/wasm.rs	extern-decl	spore_node_publish
+src/wasm.rs	extern-decl	spore_node_publish_file
+src/wasm.rs	extern-decl	spore_node_recv
+src/wasm.rs	extern-decl	spore_node_restore_pending_interests
+src/wasm.rs	extern-decl	spore_node_restore_prekey_ring
+src/wasm.rs	extern-decl	spore_node_seed
+src/wasm.rs	extern-decl	spore_node_send
+src/wasm.rs	extern-decl	spore_node_send_direct
+src/wasm.rs	extern-decl	spore_node_send_direct_sealed
+src/wasm.rs	extern-decl	spore_node_set_petname
+src/wasm.rs	extern-decl	spore_node_subscribe
+src/wasm.rs	extern-decl	spore_node_topics
+src/wasm.rs	extern-decl	spore_node_unsubscribe
+src/wasm.rs	extern-decl	spore_node_use_js_store
+src/wasm.rs	extern-decl	spore_topic_open
+src/wasm.rs	extern-decl	spore_topic_seal
+src/wasm.rs	unsafe-fn	take_packed

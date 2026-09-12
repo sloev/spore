@@ -37,7 +37,7 @@ branches, releases). Read those once; this one is a lookup table.
 | `tests/` | `api_freeze.rs` — what makes the freeze mechanical rather than a promise. |
 | `examples/` | `gen_vectors.rs` (generates `reference/vectors.json`), `worked.rs` (backs `REBUILD.md`), `direct_loopback.rs`, `gen_fuzz_seeds.rs`. |
 | `fuzz/` | `cargo-fuzz` targets, corpus and seeds. Parsers are fuzzed, not only unit-tested. |
-| `scripts/` | `check_docs_sync.py` (fails CI if `REBUILD.md` drifts from the vectors), `make-offline-bundle.sh`. |
+| `scripts/` | `check_docs_sync.py` (fails CI if `REBUILD.md` drifts from the vectors), `unsafe_snapshot.py` (fails CI if the `unsafe` inventory moved), `make-offline-bundle.sh`. |
 | `tools/` | Helpers outside the crate and CI — currently `reticulum_companion.py`. |
 | `.github/workflows/` | `ci.yml` (the gate) and `pr-guard.yml` (refuses PRs touching frozen files without `allow-frozen-change`). Both are themselves frozen. |
 
@@ -163,6 +163,7 @@ which part:
 | Design tokens | `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` after HARDBRUT upstream moves; `python3 design/generate.py` after that or after changing `tokens.json`'s Android sizing table. CI fails on drift in any of these. |
 | Fuzz | `cargo fuzz run <target>` from `fuzz/` (nightly + `cargo-fuzz`). |
 | Vectors | `cargo run --example gen_vectors > reference/vectors.json`, then `python3 reference/test_t0.py` and `python3 scripts/check_docs_sync.py`. |
+| Added or moved an `unsafe` | `python3 scripts/unsafe_snapshot.py > audits/unsafe-snapshot.txt`, and expect the diff to be read. A line there is a place that can cause undefined behaviour; the snapshot exists so adding one is a decision somebody saw. |
 
 ## Conventions
 
