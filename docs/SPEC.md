@@ -541,7 +541,7 @@ state. A relay keeps three tables an attacker would like to choose the contents 
 
 All three once accepted the `SIGNED` **flag** as proof — one bit chosen by whoever
 wrote the frame — so all three were forgeable with a copied public key and 64 zero
-bytes ([S-002](SECURITY_FINDINGS.md#s-002), [S-004](SECURITY_FINDINGS.md#s-004)).
+bytes (`S-002`, `S-004`).
 The rule is therefore narrower than "relays verify" and wider than "relays never
 verify":
 
@@ -735,7 +735,7 @@ Recipient floods a signed DATA to src, payload = `0x06` + orig ID. ACKs also
 teach reverse paths. A receipt **MUST** be verified as signed by the destination
 it claims to come from: the ID it references is public (it rides in every INV),
 so accepting on payload shape alone lets any stranger forge "delivered"
-([S-032](SECURITY_FINDINGS.md#s-032)).
+(`S-032`).
 
 The sender re-floods an unacked message on the §5.4d backoff — flooding is route
 discovery, so a resend can find a path a blackhole was hiding — and gives up

@@ -15,7 +15,7 @@ branches, releases). Read those once; this one is a lookup table.
 | Work on the docs site | `site/build.mjs` + `site/home.md` |
 | Work on the browser node / wasm | `web/README.md`, `src/wasm.rs` |
 | Check what's shipped vs planned | `git log`, the [releases](https://github.com/sloev/spore/releases), and `docs/ROADMAP.md` — see [Status](#status) |
-| Check a security question | `docs/SECURITY_FINDINGS.md`; `docs/SECURITY.md` to report one |
+| Check a security question | `docs/THREAT_MODEL.md`; `docs/SECURITY.md` to report one |
 | Verify a 🧪 claim | `docs/HARDWARE.md`, `android/TESTING.md` |
 | Add a language binding | `bindings/spec.json` → `bindings/generate.py`; never hand-edit output |
 | Change a colour | Edit upstream `supernihil/hardbrut`, then `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` → `python3 design/generate.py` (Android) |
@@ -77,12 +77,12 @@ Exactly two places record state, and they answer different questions:
 Check both: a PR can be merged while part of its original scope stays open.
 
 Do **not** add a third status table, an unlinked TODO, or a doc claiming
-something neither agrees with. `docs/SECURITY_FINDINGS.md` is full of findings
+something neither agrees with. `git log --grep='^S-'` is full of findings
 of exactly that shape — claims with no implementation behind them — and this
 project treats that as a bug class.
 
 Two docs carry a narrow slice of state and MUST NOT be duplicated elsewhere:
-`docs/SECURITY_FINDINGS.md` (findings register) and `docs/HARDWARE.md` +
+`docs/THREAT_MODEL.md` (what is defended, and how) and `docs/HARDWARE.md` +
 `android/TESTING.md` (device evidence — 🧪 means verified in code, not on
 hardware).
 
@@ -242,6 +242,6 @@ members.
 | `docs/CONTINUITY.md` | SPORE as a seed; what survives, and what guarantees it |
 | `docs/APPS.md` | What to install |
 | `docs/ROADMAP.md` | The engineering plan |
-| `docs/SECURITY_FINDINGS.md` / `docs/SECURITY.md` | Findings register / how to report |
+| `docs/THREAT_MODEL.md` / `docs/SECURITY.md` | What is defended / how to report |
 | `docs/HARDWARE.md` / `android/TESTING.md` | Device evidence |
 | `docs/CONTRIBUTING.md` | Freeze rules, CI, branches, releases |
