@@ -27,7 +27,13 @@ const MAX_SKIPPED_KEYS: usize = 4 * MAX_SKIP as usize;
 
 /// A fresh X25519 keypair as `(secret, public)` raw bytes.
 pub fn keypair() -> ([u8; 32], [u8; 32]) {
-    let s = StaticSecret::random_from_rng(OsRng);
+    // Bytes, not a generator. This was the one place the crate handed an RNG
+    // object to a crypto crate, and it is what tied our `rand` version to
+    // x25519-dalek's `rand_core`. `StaticSecret::from` takes the same 32 bytes
+    // and asks nothing about where they came from.
+    let mut sb = [0u8; 32];
+    crate::fill_random(&mut sb);
+    let s = StaticSecret::from(sb);
     let p = PublicKey::from(&s);
     (s.to_bytes(), p.to_bytes())
 }

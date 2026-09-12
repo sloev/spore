@@ -47,7 +47,7 @@ pub fn seal(msg: &[u8], recip_prekey: &[u8; 32]) -> Vec<u8> {
     use crypto_box::aead::{generic_array::GenericArray, Aead};
     use crypto_box::{PublicKey, SalsaBox, SecretKey};
     let mut sb = [0u8; 32];
-    OsRng.fill_bytes(&mut sb);
+    crate::fill_random(&mut sb);
     let eph = SecretKey::from(sb);
     let eph_pub = eph.public_key();
     let their = PublicKey::from(*recip_prekey);
@@ -66,7 +66,7 @@ pub fn topic_seal(msg: &[u8], psk: &[u8; 32]) -> Vec<u8> {
     use chacha20poly1305::aead::{Aead, KeyInit};
     use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
     let mut nonce = [0u8; 24];
-    OsRng.fill_bytes(&mut nonce);
+    crate::fill_random(&mut nonce);
     let ct = XChaCha20Poly1305::new(Key::from_slice(psk))
         .encrypt(XNonce::from_slice(&nonce), msg)
         .expect("topic seal");
@@ -121,7 +121,7 @@ pub(crate) fn chunk_open(ct: &[u8], key: &[u8; 32], index: u32) -> Option<Vec<u8
 /// (X25519, the same kind a `Node` rotates in its ANNOUNCE).
 pub fn prekey_keypair() -> ([u8; 32], [u8; 32]) {
     let mut b = [0u8; 32];
-    OsRng.fill_bytes(&mut b);
+    crate::fill_random(&mut b);
     let sec = crypto_box::SecretKey::from(b);
     let pubk = *sec.public_key().as_bytes();
     (b, pubk)

@@ -43,7 +43,7 @@ fn be16(b: &[u8]) -> u16 {
 /// Build a binding request and the transaction id to match its response against.
 pub fn request() -> (Vec<u8>, Txn) {
     let mut txn = [0u8; 12];
-    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut txn);
+    crate::fill_random(&mut txn);
     (request_with(&txn), txn)
 }
 
