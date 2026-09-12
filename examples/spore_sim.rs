@@ -892,6 +892,12 @@ fn partition() -> Report {
 /// How far an envelope actually travels. A line of `len` nodes, one DM end to
 /// end, no loss — so the only thing that can stop it is the hop budget.
 ///
+/// **This measures push, which is all `hops` governs.** No gossip runs here, so a
+/// node that stops relaying is the end of the line. On a real mesh it would not
+/// be: the far end's neighbour holds the envelope, offers it in an INV, and hands
+/// it over to anyone who WANTs it — one hop per meeting, each one asked for. A
+/// spent hop budget puts an envelope beyond the flood, not beyond reach.
+///
 /// Worth measuring rather than asserting from the constant: `hops: 16` is the
 /// *initial* value and §5 decrements per relay, so the reachable diameter is a
 /// property of the forwarding rules, not of the number alone. A protocol change
@@ -910,8 +916,12 @@ fn hop_limit(len: usize) -> Report {
     let reached = usize::from(!sim.seen_delivered[len - 1].is_empty());
     Report {
         name: format!("hop-limit-{len}"),
-        note: if reached == 1 { "reached the far end" } else { "hop budget exhausted before the far end" }
-            .to_string(),
+        note: if reached == 1 {
+            "reached the far end"
+        } else {
+            "hop budget exhausted before the far end — by flooding. pull would still get there"
+        }
+        .to_string(),
         reached,
         of: 1,
         m: sim.m,
