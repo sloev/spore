@@ -34,12 +34,13 @@ use crate::*;
 // ---------------------------------------------------------------------------
 
 pub(crate) fn seal_nonce(eph_pub: &[u8; 32], recip_pub: &[u8; 32]) -> [u8; 24] {
-    let mut h = Blake2bVar::new(24).unwrap();
+    // The output size is a *type* in blake2 0.11, not a runtime argument, so the
+    // two `unwrap`s this used to need are gone: a 24-byte digest that could fail
+    // to be 24 bytes was never a real possibility, only an unexpressed one.
+    let mut h = Blake2b::<U24>::new();
     h.update(eph_pub);
     h.update(recip_pub);
-    let mut n = [0u8; 24];
-    h.finalize_variable(&mut n).unwrap();
-    n
+    h.finalize().into()
 }
 
 /// Anonymous sealed box: output = ephemeral_pubkey(32) ‖ ciphertext.
@@ -64,12 +65,10 @@ pub fn seal(msg: &[u8], recip_prekey: &[u8; 32]) -> Vec<u8> {
 /// the topic shares the key; rotate it by flooding a `KEYROT` signed by the old.
 pub fn topic_seal(msg: &[u8], psk: &[u8; 32]) -> Vec<u8> {
     use chacha20poly1305::aead::{Aead, KeyInit};
-    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    use chacha20poly1305::XChaCha20Poly1305;
     let mut nonce = [0u8; 24];
     crate::fill_random(&mut nonce);
-    let ct = XChaCha20Poly1305::new(Key::from_slice(psk))
-        .encrypt(XNonce::from_slice(&nonce), msg)
-        .expect("topic seal");
+    let ct = XChaCha20Poly1305::new(&(*psk).into()).encrypt(&(nonce).into(), msg).expect("topic seal");
     let mut out = Vec::with_capacity(24 + ct.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
@@ -79,11 +78,17 @@ pub fn topic_seal(msg: &[u8], psk: &[u8; 32]) -> Vec<u8> {
 /// Open an encrypted-topic payload; `None` if the key is wrong or it's corrupt.
 pub fn topic_open(ct: &[u8], psk: &[u8; 32]) -> Option<Vec<u8>> {
     use chacha20poly1305::aead::{Aead, KeyInit};
-    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    use chacha20poly1305::XChaCha20Poly1305;
     if ct.len() < 24 {
         return None;
     }
-    XChaCha20Poly1305::new(Key::from_slice(psk)).decrypt(XNonce::from_slice(&ct[..24]), &ct[24..]).ok()
+    // The nonce is a slice off the wire, so unlike every other conversion here it
+    // genuinely can fail — the length check above is what makes it not. Kept
+    // explicit rather than unwrapped, since the whole point of 0.11 replacing
+    // `from_slice` with `TryFrom` is that a wrong length should be a value, not a
+    // panic.
+    let nonce: [u8; 24] = ct[..24].try_into().ok()?;
+    XChaCha20Poly1305::new(&(*psk).into()).decrypt(&nonce.into(), &ct[24..]).ok()
 }
 
 /// The manifest name a [`Node::publish_file_sealed`] file advertises. The real
@@ -99,22 +104,20 @@ pub const SEALED_FILE_NAME: &str = "sealed";
 /// lets a sealed chunk keep riding the same frame an unsealed one does.
 pub(crate) fn chunk_seal(plain: &[u8], key: &[u8; 32], index: u32) -> Vec<u8> {
     use chacha20poly1305::aead::{Aead, KeyInit};
-    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    use chacha20poly1305::XChaCha20Poly1305;
     let mut nonce = [0u8; 24];
     nonce[20..].copy_from_slice(&index.to_be_bytes());
-    XChaCha20Poly1305::new(Key::from_slice(key))
-        .encrypt(XNonce::from_slice(&nonce), plain)
-        .expect("chunk seal")
+    XChaCha20Poly1305::new(&(*key).into()).encrypt(&(nonce).into(), plain).expect("chunk seal")
 }
 
 /// Open one chunk of a sealed file. `None` if the key or index is wrong, or the
 /// bytes were tampered with — the tag makes every chunk self-checking.
 pub(crate) fn chunk_open(ct: &[u8], key: &[u8; 32], index: u32) -> Option<Vec<u8>> {
     use chacha20poly1305::aead::{Aead, KeyInit};
-    use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    use chacha20poly1305::XChaCha20Poly1305;
     let mut nonce = [0u8; 24];
     nonce[20..].copy_from_slice(&index.to_be_bytes());
-    XChaCha20Poly1305::new(Key::from_slice(key)).decrypt(XNonce::from_slice(&nonce), ct).ok()
+    XChaCha20Poly1305::new(&(*key).into()).decrypt(&(nonce).into(), ct).ok()
 }
 
 /// Fresh encryption **prekey** keypair `(secret, public)` for `seal`/`open_sealed`

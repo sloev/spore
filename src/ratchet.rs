@@ -1,6 +1,6 @@
 use super::*;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use chacha20poly1305::ChaCha20Poly1305;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
@@ -44,12 +44,11 @@ fn dh(sec: &[u8; 32], pubk: &[u8; 32]) -> [u8; 32] {
 
 // Root KDF: (new_root, chain_key) = BLAKE2b(root ‖ dh_out).
 fn kdf_rk(rk: &[u8; 32], dh_out: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let mut h = Blake2bVar::new(64).unwrap();
+    let mut h = Blake2b::<U64>::new();
     h.update(rk);
     h.update(dh_out);
     h.update(b"spore-ratchet-rk");
-    let mut out = [0u8; 64];
-    h.finalize_variable(&mut out).unwrap();
+    let out: [u8; 64] = h.finalize().into();
     let mut nrk = [0u8; 32];
     let mut ck = [0u8; 32];
     nrk.copy_from_slice(&out[..32]);
@@ -63,12 +62,10 @@ fn kdf_ck(ck: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (nck, mk)
 }
 fn blake2_32(ck: &[u8; 32], tag: u8) -> [u8; 32] {
-    let mut h = Blake2bVar::new(32).unwrap();
+    let mut h = Blake2b::<U32>::new();
     h.update(ck);
-    h.update(&[tag]);
-    let mut o = [0u8; 32];
-    h.finalize_variable(&mut o).unwrap();
-    o
+    h.update([tag]);
+    h.finalize().into()
 }
 fn nonce_bytes(n: u16) -> [u8; 12] {
     let mut nb = [0u8; 12];
@@ -198,8 +195,8 @@ impl Ratchet {
         header.extend_from_slice(&n.to_be_bytes());
         header.extend_from_slice(&self.pn.to_be_bytes());
 
-        let ct = ChaCha20Poly1305::new(Key::from_slice(&mk))
-            .encrypt(Nonce::from_slice(&nonce_bytes(n)), Payload { msg: plaintext, aad: &header })
+        let ct = ChaCha20Poly1305::new(&mk.into())
+            .encrypt(&(nonce_bytes(n)).into(), Payload { msg: plaintext, aad: &header })
             .expect("aead encrypt");
         let mut out = header;
         out.extend_from_slice(&ct);
@@ -257,8 +254,8 @@ impl Ratchet {
     }
 
     fn open(mk: &[u8; 32], n: u16, header: &[u8], ct: &[u8]) -> Option<Vec<u8>> {
-        ChaCha20Poly1305::new(Key::from_slice(mk))
-            .decrypt(Nonce::from_slice(&nonce_bytes(n)), Payload { msg: ct, aad: header })
+        ChaCha20Poly1305::new(&(*mk).into())
+            .decrypt(&(nonce_bytes(n)).into(), Payload { msg: ct, aad: header })
             .ok()
     }
 
