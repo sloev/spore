@@ -122,7 +122,17 @@ pub fn run_datagram<T: DatagramTransport>(
                 // wide link pays nothing for this being here.
                 Some(m) if bytes.len() > m => {
                     set_id = set_id.wrapping_add(1);
-                    for piece in linkfrag::split_for_link(&bytes, m, set_id) {
+                    // Sized from what this link has been *observed* to lose
+                    // (M11-C), measured on our own receive direction by the same
+                    // reassembler above. A datagram link has no back-channel, so
+                    // there is nowhere else the number could come from; the
+                    // assumption is that a radio loses both ways alike, and it is
+                    // stated on `Reassembler::seen` rather than hidden here.
+                    //
+                    // `None` until enough frames have been seen to mean
+                    // anything, which falls back to the flat default.
+                    let loss = frag.loss_pct();
+                    for piece in linkfrag::split_for_link_at_loss(&bytes, m, set_id, loss) {
                         t.send(to.as_ref(), &piece)?;
                     }
                 }

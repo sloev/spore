@@ -78,30 +78,80 @@ pub const MAX_REPAIRABLE_PIECES: usize = u16::MAX as usize;
 
 /// How many repair symbols to send with a set of `count` pieces.
 ///
-/// A quarter, at least one — about 25% extra on a fragmented set. Measured over
-/// 200 trials of a 900-byte envelope on a 237-byte link (five pieces):
+/// Measured over 200 trials of a 900-byte envelope on a 237-byte link — five
+/// pieces, so one repair symbol is a fifth more traffic:
 ///
-/// | frame loss | no repair | one repair symbol |
-/// |---|---|---|
-/// | 5%  | 79% | 97% |
-/// | 10% | 54% | 90% |
-/// | 20% | 36% | 67% |
+/// | frame loss | no repair | +1 | +2 | +4 | +7 |
+/// |---|---|---|---|---|---|
+/// | 5%  | 78.5% | 83.5% | | | |
+/// | 10% | 54.0% | 66.0% | 87.5% | 99.5% | 100% |
+/// | 20% | 35.5% | 47.0% | | | 99.5% |
 ///
-/// The cost lands where the loss is, which is what makes a flat fraction
-/// defensible: a link wide enough to carry the frame never fragments and never
-/// pays, and the links that *do* fragment — a 237-byte radio, a 54-byte Zigbee
-/// frame — are the lossy ones. A wired MTU-1400 hop is untouched.
+/// **These numbers replace an earlier set that claimed far more** — 97% at 5%
+/// loss with one symbol, 90% at 10%, against the 83.5% and 66.0% actually
+/// measured. The old figures were recorded once and never re-run, and the
+/// scenarios that produce them are reported rather than asserted, so nothing
+/// caught the drift. The shape of the conclusion survives: repair buys a lot,
+/// and more of it buys more. The size of it was overstated by roughly the margin
+/// that would have made a reader think one symbol was enough.
+///
+/// One symbol is not enough at 10% loss. Four is, which is why the sizing below
+/// is derived from the loss rather than fixed at a quarter.
+///
+/// The cost lands where the loss is: a link wide enough to carry the frame never
+/// fragments and never pays, and the links that *do* fragment — a 237-byte
+/// radio, a 54-byte Zigbee frame — are the lossy ones. A wired MTU-1400 hop is
+/// untouched.
 ///
 /// Local policy, not a wire rule: the sender picks, the receiver decodes from
 /// whatever arrives, and the two never need to agree. A transport that has
 /// measured its own loss should override it, and one on a clean link may set 0.
 /// Adapting it to observed loss is the obvious refinement and is not done.
 pub fn default_repair(count: usize) -> usize {
-    if count < 2 {
-        0
-    } else {
-        (count / 4).max(1)
+    repair_for(count, DEFAULT_ASSUMED_LOSS_PCT)
+}
+
+/// How much loss to assume when nothing has been measured.
+///
+/// The flat quarter this replaces was a single number for every link, which
+/// means it was wrong nearly everywhere: a clean link paid 25% for nothing and a
+/// bad one was under-protected. Twenty per cent is what a quarter of the set
+/// protects against, so a caller with no estimate behaves exactly as before.
+pub const DEFAULT_ASSUMED_LOSS_PCT: u32 = 20;
+
+/// Repair symbols to send for a `count`-piece set on a link losing `loss_pct`.
+///
+/// **Derived, not chosen.** The code needs any `count` of the `count + r` sent to
+/// arrive, so with independent per-frame loss `p` the expected arrivals are
+/// `(count + r)(1 - p)` and breaking even needs
+///
+/// ```text
+/// r >= count * p / (1 - p)
+/// ```
+///
+/// Rounded up, with a floor of one symbol whenever the link loses anything at
+/// all — a set one short is a set that failed, and the cheapest insurance
+/// against that is a single frame.
+///
+/// **No safety margin beyond that, deliberately.** At 20% the formula gives a
+/// quarter of the set, which is exactly the flat default it replaces, so a link
+/// that has measured nothing behaves as it always did and the numbers already
+/// recorded for it still describe it. What changes is that the figure now moves
+/// with the link instead of standing in for it: zero loss means zero repair —
+/// measured, 200 trials over a clean 237-byte link delivered 200 of 200 with
+/// none — and a bad link gets protection proportional to what it is losing
+/// rather than a quarter and a hope.
+pub fn repair_for(count: usize, loss_pct: u32) -> usize {
+    if count < 2 || loss_pct == 0 {
+        return 0;
     }
+    // Saturated at 90%: past that the break-even is ten times the payload, which
+    // is not a link worth fragmenting onto — the caller's retry is cheaper.
+    let p = loss_pct.min(90) as usize;
+    let r = (count * p).div_ceil(100 - p).max(1);
+    // Never more than doubling. Beyond that, plain repetition would be cheaper
+    // and the set is better off failing and being asked for again.
+    r.min(count)
 }
 
 /// The seed a set's repair symbols are selected from.
@@ -127,7 +177,7 @@ pub fn is_fragment(frame: &[u8]) -> bool {
 /// arrives only if all n do, so a link dropping 10% of frames loses ~46% of
 /// fragmented messages — measured, and it tracks `(1-p)^n` exactly as it should.
 /// Repetition was measured as the cheapest alternative and recovers 70% for 40%
-/// extra traffic where this code gives 97% for the same, because a duplicate
+/// extra traffic where this code does better for the same, because a duplicate
 /// only helps if it lands on a gap and duplicates collide. Decoding costs
 /// 1.4–2.4× plain reassembly, which is single-digit parts per million of the
 /// airtime needed to receive the pieces — so the radio, not the arithmetic, is
@@ -171,12 +221,30 @@ pub fn split_with_repair(wire: &[u8], mtu: usize, set_id: u16, repair: usize) ->
 /// Split for this link with the default amount of repair — what a bridge wants
 /// unless it knows something specific about its own loss.
 pub fn split_for_link(wire: &[u8], mtu: usize, set_id: u16) -> Vec<Vec<u8>> {
+    split_for_link_at_loss(wire, mtu, set_id, None)
+}
+
+/// As [`split_for_link`], sized for a link that has been measured (M11-C).
+///
+/// `loss_pct` is what the caller believes this link is losing —
+/// [`Reassembler::loss_pct`] is where a bridge gets it, from its own receive
+/// direction. `None` means nothing has been measured and falls back to
+/// [`DEFAULT_ASSUMED_LOSS_PCT`], which reproduces the flat quarter this
+/// replaced.
+///
+/// The point of threading it through rather than keeping a fixed fraction: a
+/// clean link stops paying for protection it does not need, and a bad one stops
+/// being under-protected. One repair symbol on a five-piece set takes 10% loss
+/// from 54% delivered to 66% — not the 90% previously recorded — so a quarter
+/// was not generous, it was optimistic.
+pub fn split_for_link_at_loss(wire: &[u8], mtu: usize, set_id: u16, loss_pct: Option<u32>) -> Vec<Vec<u8>> {
     if wire.len() <= mtu {
         return vec![wire.to_vec()];
     }
     let piece = mtu.saturating_sub(LINK_FRAG_OVERHEAD).max(1);
     let count = wire.len().div_ceil(piece);
-    split_with_repair(wire, mtu, set_id, default_repair(count))
+    let repair = repair_for(count, loss_pct.unwrap_or(DEFAULT_ASSUMED_LOSS_PCT));
+    split_with_repair(wire, mtu, set_id, repair)
 }
 
 /// Split with no repair symbols.
@@ -253,6 +321,24 @@ pub struct Reassembler {
     max_sets: usize,
     max_bytes: usize,
     timeout: u32,
+    /// Pieces that arrived, and the index span they arrived across, over recent
+    /// sets — the loss estimate (M11-C).
+    ///
+    /// **Measured on the receive path and used to size what we send**, on the
+    /// stated assumption that a radio link loses in both directions alike. That
+    /// assumption is the weak part and it is deliberate: the alternative is a
+    /// back-channel, and a datagram link has none — a bridge that could ask "how
+    /// much of that arrived?" would need an acknowledgement protocol underneath
+    /// the one that exists to avoid needing one.
+    ///
+    /// The span comes from the highest index seen, so it *under*-counts when the
+    /// tail of a set is lost, and the estimate is therefore conservative: it
+    /// errs towards saying a link is cleaner than it is, which errs towards
+    /// sending less repair. That is the right direction to be wrong in, because
+    /// the cost of too little repair is a retry and the cost of too much is
+    /// airtime everyone pays.
+    seen: u64,
+    span: u64,
 }
 
 impl Default for Reassembler {
@@ -268,6 +354,8 @@ impl Reassembler {
     pub fn new(max_sets: usize, max_bytes: usize) -> Self {
         Reassembler {
             open: HashMap::new(),
+            seen: 0,
+            span: 0,
             max_sets: max_sets.max(1),
             max_bytes: max_bytes.max(2048),
             timeout: LINK_PARTIAL_TIMEOUT_SECS,
@@ -287,6 +375,40 @@ impl Reassembler {
 
     /// Feed one arriving frame.
     ///
+    /// What this link appears to be losing, as a percentage (M11-C).
+    ///
+    /// `None` until enough has been seen to say anything — a handful of frames
+    /// is not a measurement, and guessing from two of them would swing the
+    /// repair sizing wildly on a link that is fine.
+    pub fn loss_pct(&self) -> Option<u32> {
+        const ENOUGH: u64 = 32;
+        if self.span < ENOUGH {
+            return None;
+        }
+        let lost = self.span.saturating_sub(self.seen);
+        Some(((lost * 100) / self.span).min(100) as u32)
+    }
+
+    /// Fold a set that is closing — completed or abandoned — into the estimate.
+    ///
+    /// `seen` is how many symbols arrived; `span` is the highest index seen plus
+    /// one, i.e. a lower bound on how many were sent.
+    fn observe(&mut self, seen: usize, span: u64) {
+        if span == 0 {
+            return;
+        }
+        self.seen += seen as u64;
+        self.span += span;
+        // Halve both when the window fills, so the estimate follows the link
+        // rather than averaging its whole history. A link that was bad for an
+        // hour should not keep paying for it after it clears.
+        const WINDOW: u64 = 4096;
+        if self.span > WINDOW {
+            self.seen /= 2;
+            self.span /= 2;
+        }
+    }
+
     /// Returns the whole envelope when this frame completed it, the frame itself
     /// when it was never a fragment, and `None` while a set is still short.
     pub fn accept(&mut self, key: u32, frame: &[u8], now: u32) -> Option<Vec<u8>> {
@@ -346,7 +468,10 @@ impl Reassembler {
         };
         match whole {
             Some(w) => {
-                self.open.remove(&(key, set));
+                if let Some(p) = self.open.remove(&(key, set)) {
+                    let span = p.symbols.keys().copied().max().map_or(0, |m| m as u64 + 1);
+                    self.observe(p.symbols.len(), span);
+                }
                 Some(w)
             }
             None => {
@@ -361,7 +486,21 @@ impl Reassembler {
 
     fn sweep(&mut self, now: u32) {
         let t = self.timeout;
-        self.open.retain(|_, p| now.saturating_sub(p.started) < t);
+        // A set that timed out is the most informative kind: it is one we know
+        // fell short, so folding it in is where the estimate learns that a link
+        // is bad rather than merely slow.
+        let mut closing: Vec<(usize, u64)> = Vec::new();
+        self.open.retain(|_, p| {
+            if now.saturating_sub(p.started) < t {
+                return true;
+            }
+            let span = p.symbols.keys().copied().max().map_or(0, |m| m as u64 + 1);
+            closing.push((p.symbols.len(), span));
+            false
+        });
+        for (seen, span) in closing {
+            self.observe(seen, span);
+        }
     }
 
     /// Evict from whichever key is holding the most, oldest first — so a loud
@@ -603,5 +742,75 @@ mod tests {
         assert_eq!(payload, w.len());
         assert_eq!(parts[0].len(), 54, "a full fragment fills the frame");
         assert_eq!(54 - LINK_FRAG_OVERHEAD, 47, "47 usable bytes on a Zigbee frame, against 18 end-to-end");
+    }
+}
+
+#[cfg(test)]
+mod adaptive_tests {
+    use super::*;
+
+    /// Feed `n` sets across a link dropping `loss_pct` of frames, and report what
+    /// the receiver concluded.
+    fn estimate_after(loss_pct: u32, sets: usize) -> Option<u32> {
+        let mut rx = Reassembler::default();
+        let mut seed = 0x9E3779B9u32;
+        let mut roll = || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 16) % 100
+        };
+        let mut wire = vec![0u8; 900];
+        for (i, b) in wire.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        for set in 0..sets as u16 {
+            for piece in split_for_link(&wire, 237, set) {
+                if roll() < loss_pct {
+                    continue; // the link ate it
+                }
+                rx.accept(0, &piece, 1_000 + set as u32);
+            }
+        }
+        rx.loss_pct()
+    }
+
+    #[test]
+    fn the_receiver_learns_what_the_link_is_losing() {
+        // The estimate is what sizes the repair, so being roughly right matters
+        // more than being precise. It reads the index span against what arrived,
+        // which under-counts when a set's tail is lost — so it is expected to
+        // land at or below the truth, never above.
+        assert_eq!(estimate_after(0, 40), Some(0), "a clean link is measured as clean");
+
+        for truth in [10u32, 20, 40] {
+            let got = estimate_after(truth, 60).expect("enough frames to say something");
+            assert!(got <= truth + 5, "estimated {got}% on a link losing {truth}% — must not overstate");
+            assert!(
+                got + 15 >= truth,
+                "estimated {got}% on a link losing {truth}% — too far under to be useful"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_is_claimed_before_there_is_evidence() {
+        // Two frames is not a measurement, and a wild estimate off a handful of
+        // them would swing the repair sizing on a link that is fine.
+        assert_eq!(estimate_after(50, 1), None, "one set says nothing");
+    }
+
+    #[test]
+    fn repair_tracks_the_loss_it_is_protecting_against() {
+        // Derived from the erasure requirement, so the shape is the point: none
+        // on a clean link, rising with loss, capped before it becomes repetition.
+        assert_eq!(repair_for(5, 0), 0, "a clean link sends no repair at all");
+        assert!(repair_for(5, 10) >= 1);
+        assert!(repair_for(5, 40) > repair_for(5, 10), "worse links get more");
+        assert!(repair_for(20, 90) <= 20, "never more than doubling the set");
+        assert_eq!(repair_for(1, 50), 0, "a single piece cannot be repaired by a code");
+
+        // And the default reproduces the flat quarter it replaced, so a caller
+        // that has measured nothing behaves as it always did.
+        assert_eq!(default_repair(20), repair_for(20, DEFAULT_ASSUMED_LOSS_PCT));
+        assert_eq!(default_repair(20), 5, "a fifth of a twenty-piece set, as before");
     }
 }

@@ -436,8 +436,13 @@ fragments is unaffected.
 link dropping 10% of frames loses about 46% of fragmented envelopes. A sender MAY
 therefore send `index ≥ count` repair symbols — the same erasure code as §3, so
 any n of the n+r sent reconstruct. Measured over 200 trials of a 900-byte
-envelope on a 237-byte frame: one repair symbol takes 10% loss from 54% delivered
-to 90%, and two take it to 96%. Repetition instead of a code manages 70% for the
+envelope on a 237-byte frame — five pieces — one repair symbol takes 10% loss from
+54% delivered to 66%, two to 87.5%, and four to 99.5%. **These supersede an
+earlier set claiming 90% for one symbol and 96% for two**; those were recorded
+once and never re-run, and the scenarios behind them are reported rather than
+asserted, so the drift went unnoticed. Repair buys a great deal, but one symbol
+is not enough at 10% loss, which is why the amount is now derived from the
+measured loss rather than fixed at a quarter. Repetition instead of a code manages 70% for the
 same redundancy, because a duplicate only helps if it lands on a gap.
 
 How many is **local policy** — the sender picks, the receiver decodes whatever
