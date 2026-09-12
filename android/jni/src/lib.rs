@@ -857,23 +857,20 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeAcked(
         JNI_FALSE
     }
 }
-
-/// The default lifetime (seconds) `Node` gives a locally-originated `DATA`
-/// envelope — [`spore::DEFAULT_MESSAGE_EXPIRY_SECS`]. No `ptr`: it is a build
-/// constant, not per-instance state, the same shape as
-/// `nativeSuggestedBulkBudget`.
+/// How old an envelope may be and still be relayed by this node (M12).
 ///
-/// The core has no "gave up" event for an unacknowledged send — §5.4d's
-/// resend backoff exhausts in minutes and silently drops its `Pending` entry
-/// either way, long before the envelope itself expires. Comparing this value
-/// against a message's own send time is the only honest way for the UI to
-/// tell "still travelling" from "expired, never delivered."
+/// Renamed from `nativeDefaultMessageExpirySecs`, because the thing it reports
+/// changed: an envelope no longer carries a deadline the sender chose, it carries
+/// the moment it was minted, and how long that is worth carrying is this node's
+/// decision. The UI still uses it the same way — compare it against a message's
+/// own send time to tell "still travelling" from "nobody kept it this long" —
+/// but it is now a statement about us rather than about the message.
 #[no_mangle]
-pub extern "system" fn Java_org_spore_node_SporeNative_nativeDefaultMessageExpirySecs(
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeMaxRelayAgeSecs(
     _env: JNIEnv,
     _class: JClass,
 ) -> jlong {
-    spore::DEFAULT_MESSAGE_EXPIRY_SECS as jlong
+    spore::DEFAULT_MAX_RELAY_AGE_SECS as jlong
 }
 
 /// Resend ACKREQ messages whose backoff elapsed without a receipt (§5.6).

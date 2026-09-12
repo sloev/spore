@@ -38,7 +38,7 @@ pub(crate) struct Stored {
     body: Body,
     /// Wire length, kept separately so accounting never has to touch the bytes.
     pub len: usize,
-    pub expiry: u32,
+    pub created_at: u32,
     pub stamp: u8,
     pub seq: u64,
     pub dest: Addr,
@@ -48,7 +48,7 @@ pub(crate) struct Store {
     map: HashMap<Id, Stored>,
     /// **Content id → envelope id**, for file-layer objects only (M11-M).
     ///
-    /// An envelope's id is the hash of the whole envelope, so it covers `expiry`
+    /// An envelope's id is the hash of the whole envelope, so it covers `created_at`
     /// and `dest` — which is right for a *message*, and wrong for *bytes*. The
     /// same chunk published twice is two different envelopes, and before this
     /// index existed a file published twice shared nothing with itself.
@@ -122,7 +122,7 @@ pub const MAX_ADOPT_BYTES: u64 = 1024 * 1024;
 ///
 /// A backend moves dumb bytes and nothing else. It never decides what is valid:
 /// every check that matters — the id matching its content, the wire being
-/// exactly one envelope, expiry — stays in [`Store`], because a backend is by
+/// exactly one envelope, created_at — stays in [`Store`], because a backend is by
 /// definition a place *other things can also write*. A filesystem directory can
 /// be edited by a backup tool; browser storage can be edited by the page. So the
 /// rule is the same either way: bytes coming back in are re-verified against the
@@ -291,7 +291,7 @@ impl Store {
         }
     }
 
-    pub fn put(&mut self, id: Id, wire: Vec<u8>, expiry: u32, stamp: u8, seq: u64, dest: Addr) {
+    pub fn put(&mut self, id: Id, wire: Vec<u8>, created_at: u32, stamp: u8, seq: u64, dest: Addr) {
         if self.map.contains_key(&id) {
             return; // same envelope id, same bytes, nothing to do
         }
@@ -309,7 +309,7 @@ impl Store {
         if let Some(backend) = &mut self.spill {
             backend.put(&id, &wire);
         }
-        self.map.insert(id, Stored { body: Body::Mem(wire), len, expiry, stamp, seq, dest });
+        self.map.insert(id, Stored { body: Body::Mem(wire), len, created_at, stamp, seq, dest });
         self.mem_bytes += len;
         self.total_bytes += len;
         self.shed();
@@ -414,8 +414,18 @@ impl Store {
                 continue;
             };
             // The id must match the content, the wire must be exactly one
-            // envelope, and it must not already have expired.
-            if n != wire.len() || e.id() != id || e.expiry <= now {
+            // envelope, and it must not be post-dated (M12).
+            //
+            // This used to read `created_at <= now` and mean "already expired".
+            // Under M12 that is inverted — every honestly-written entry is in the
+            // past — so adopting on it would have discarded the entire spill
+            // directory on restart. Age is not grounds for discarding here at
+            // all: what is on disk is what this node chose to keep, and eviction
+            // is where that choice gets revisited.
+            if n != wire.len()
+                || e.id() != id
+                || e.created_at > now.saturating_add(crate::MAX_CLOCK_SKEW_SECS)
+            {
                 discard.push(id);
                 continue;
             }
@@ -429,7 +439,14 @@ impl Store {
             }
             self.map.insert(
                 id,
-                Stored { body: Body::Evicted, len, expiry: e.expiry, stamp: e.stamp(), seq, dest: e.dest },
+                Stored {
+                    body: Body::Evicted,
+                    len,
+                    created_at: e.created_at,
+                    stamp: e.stamp(),
+                    seq,
+                    dest: e.dest,
+                },
             );
             self.total_bytes += len;
             seq += 1;
@@ -474,8 +491,8 @@ mod tests {
         }
     }
 
-    fn env_wire(payload: &[u8], expiry: u32) -> (Id, Vec<u8>) {
-        let e = Envelope::new(ty::DATA, [0u8; 8], expiry, payload.to_vec());
+    fn env_wire(payload: &[u8], created_at: u32) -> (Id, Vec<u8>) {
+        let e = Envelope::new(ty::DATA, [0u8; 8], created_at, payload.to_vec());
         (e.id(), e.wire())
     }
 
@@ -499,8 +516,8 @@ mod tests {
         // The C-ST4 property must not depend on the backend being a filesystem:
         // an id is the hash of its bytes, so a backend that hands back something
         // else is caught and the entry discarded rather than served on.
-        let (good_id, good) = env_wire(b"genuine", 9_000);
-        let (tampered_id, _) = env_wire(b"claimed", 9_000);
+        let (good_id, good) = env_wire(b"genuine", 100);
+        let (tampered_id, _) = env_wire(b"claimed", 100);
 
         let mut backend = MemSpill::default();
         backend.put(&good_id, &good);
@@ -509,7 +526,7 @@ mod tests {
         backend.put(&tampered_id, b"not what this id says it is");
 
         let mut s = Store::new();
-        let adopted = s.set_spill_backend(Box::new(backend), 1);
+        let adopted = s.set_spill_backend(Box::new(backend), 500);
 
         assert_eq!(adopted.len(), 1, "only the entry whose id matches its bytes is adopted");
         assert_eq!(adopted[0], good);
@@ -519,15 +536,23 @@ mod tests {
     }
 
     #[test]
-    fn adoption_drops_expired_entries() {
-        let (id, wire) = env_wire(b"stale", 100);
+    fn adoption_drops_post_dated_entries() {
+        // M12 inverted this test. It used to check that an *expired* entry was
+        // not adopted; there is no expiry now, and age is never grounds for
+        // discarding — what is on disk is what this node chose to keep. What is
+        // still refused is an entry claiming to be from the future, because that
+        // is the one thing no honest writer produces.
+        let (old_id, old_wire) = env_wire(b"stale", 100);
+        let (future_id, future_wire) = env_wire(b"post-dated", 9_000_000);
         let mut backend = MemSpill::default();
-        backend.put(&id, &wire);
+        backend.put(&old_id, &old_wire);
+        backend.put(&future_id, &future_wire);
 
         let mut s = Store::new();
-        let adopted = s.set_spill_backend(Box::new(backend), 500); // now > expiry
-        assert!(adopted.is_empty(), "an expired entry is not adopted");
-        assert!(!s.contains(&id));
+        let adopted = s.set_spill_backend(Box::new(backend), 500);
+        assert_eq!(adopted.len(), 1, "the old entry is adopted, the post-dated one is not");
+        assert!(s.contains(&old_id), "age is an eviction question, not an admission one");
+        assert!(!s.contains(&future_id));
     }
 
     #[test]
@@ -570,7 +595,7 @@ mod tests {
         let e = Envelope::new(ty::DATA, [9u8; 8], 1_000_000, b"north pier at midnight".to_vec());
         let wire = e.wire();
         let id = e.id();
-        store.put(id, wire.clone(), e.expiry, e.stamp(), 0, e.dest);
+        store.put(id, wire.clone(), e.created_at, e.stamp(), 0, e.dest);
         store.set_mem_budget(0); // force eviction to Body::Evicted
         assert!(matches!(store.map.get(&id).unwrap().body, Body::Evicted), "must be spilled");
 

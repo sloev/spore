@@ -19,7 +19,7 @@ There is nothing to sign up for and nothing a company can suspend.</p>
 pass them on when they meet another node, so a message still arrives after
 you've been offline.</p>
 <p class="text-muted">Nobody plans the route. A node drops anything it has
-already seen, keeps the rest until it expires, and passes each one on with a
+already seen, keeps the rest until it needs the room, and passes each one on with a
 hop count one lower — so copies spread outward and die out instead of looping.
 Sending is how routes are found: the first copy to arrive teaches everyone
 along the way which direction the sender lies in, and replies come back that
@@ -114,9 +114,9 @@ flowchart TB
     CH["chunks: 4096 B each, named by the hash of their bytes"]
   end
   subgraph ROUTER["router: 60 lines, knows nothing about files"]
-    ENV["envelope: to, from, expiry, payload, signature"]
+    ENV["envelope: to, from, when it was written, payload, signature"]
     DEDUP["seen it? drop it"]
-    STORE["hold until expiry"]
+    STORE["hold it; age only matters when the room runs out"]
     FLOOD["pass on, one hop fewer"]
   end
   subgraph LINK["links: one hop each, any medium"]
@@ -181,7 +181,7 @@ request to search the mesh on a stranger's behalf.</p>
 wants unwind: you tell your neighbour you have stopped, it stops, and it tells
 the next one. A neighbour that watches you walk out of range does the same
 without being told. Only a node that vanishes with no warning at all leaves
-anything behind, and that expires on its own — which is deliberate, because on a
+anything behind, and that lapses on its own — which is deliberate, because on a
 sneakernet the person carrying the file really might be fifteen minutes away.</p>
 </div></div>
 
@@ -202,6 +202,23 @@ names the pieces, the pieces match, so it hands them over.</li>
 her original question — asked to an empty room two weeks earlier — is finally
 answered by a neighbour.</li>
 </ol>
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Alice
+  participant C as a courier
+  participant B as a stranger, abroad
+  Note over A,B: the index flooded everywhere. the pieces did not.
+  A->>A: asks the room. nobody here has a byte of it
+  A->>C: hands over the index (and, if it is standing there, the request)
+  Note over C: no link, no session, no shared clock
+  C->>B: says what it is looking for
+  B->>C: the pieces. B never met Alice and never heard her ask
+  Note over C: no link, no session, no shared clock
+  C->>A: answers a question asked a fortnight ago
+```
+
 <p class="text-muted"><strong>What actually travelled was the index, not the
 question.</strong> A request in SPORE is a one-hop thing: it is spoken to whoever
 is present, answered or not, and forgotten. It cannot be saved to a USB key
@@ -217,16 +234,25 @@ abroad answers a question asked on another continent by someone who left. The
 courier never wanted the file and never learns who did — it remembers
 <em>what</em> was asked, not <em>who</em> asked, which is also why the memory is
 safe to write to a disk that might be read later.</p>
+<p class="text-muted"><strong>Being a courier is a setting, not a job.</strong>
+Every node keeps what it is handed until it runs out of room, and only then does
+it ask how old anything is. A node willing to carry a month of history simply
+keeps things its neighbours have already thrown out, and hands them to whoever it
+meets. Nothing in the message knows it is being couriered, and nothing on the wire
+tells you which nodes are doing it.</p>
+
 <p class="text-muted">It keeps that promise for as long as the file could still
 turn up, and not a second longer. The pieces die on the publisher's schedule, so
 a want that outlived them would be a search for bytes nobody will serve — the
 kind of standing request that costs every node it touches and helps no one.</p>
 <p class="text-muted">Nobody in this story needed a route, an account, or the
 publisher, who may have been offline throughout. What the journey <em>does</em>
-need is to finish in time: pieces carry the publisher's expiry — a week, by
-default — so sneakernet range is measured in <strong>days, not distance</strong>.
-Fly too slowly and the courier arrives holding an index for a file the far end
-will no longer serve.</p>
+need is for somebody along the way to still be holding the pieces. Nothing
+expires, but nothing is kept forever either: a node discards its oldest cargo
+when it runs out of room, so sneakernet range is measured in
+<strong>how much the people on the route are willing to carry</strong>, not in
+distance. Travel slowly enough and the courier arrives holding an index for a
+file nobody kept.</p>
 </div></div>
 
 <div class="card"><div class="card-body">

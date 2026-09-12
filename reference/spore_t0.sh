@@ -43,11 +43,11 @@ byte() { printf %s "${wire:$(( $1 * 2 )):2}"; }   # byte at index -> 2 hex chars
 slice() { printf %s "${wire:$(( $1 * 2 )):$(( $2 * 2 ))}"; }  # from,len (bytes)
 
 ver=$(byte 0); typ=$(byte 1); flags=$(byte 2); hops=$(byte 3)
-[ "$ver" = "01" ] || { echo "not a SPORE v1 envelope (ver=$ver)" >&2; exit 1; }
+[ "$ver" = "02" ] || { echo "not a SPORE v2 envelope (ver=$ver)" >&2; exit 1; }
 fl=$(( 16#$flags ))
 signed=$(( fl & 2 )); src8=$(( fl & 32 ))
 
-expiry=$(( 16#$(slice 4 4) ))
+created_at=$(( 16#$(slice 4 4) ))
 dest=$(slice 8 8)
 off=16
 pubkey=""
@@ -66,7 +66,7 @@ typename() { case "$1" in 00) echo DATA;; 01) echo INV;; 02) echo WANT;; 03) ech
 echo "type    : $(typename "$typ")"
 echo "flags   : 0x$flags"
 echo "hops    : $(( 16#$hops ))"
-echo "expiry  : $expiry"
+echo "created : $created_at"
 echo "dest    : $dest"
 if [ -n "$pubkey" ]; then
   echo "src key : $pubkey"

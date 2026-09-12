@@ -20,7 +20,20 @@ use crate::*;
 // §2 Envelope — the only object
 // ---------------------------------------------------------------------------
 
-pub const VER: u8 = 0x01;
+/// Wire version. **0x02 as of M12.**
+///
+/// The header did not change shape — the four bytes at offset 4 are still four
+/// bytes at offset 4 — but they changed *meaning*, from a deadline the sender
+/// chose to the time the envelope was born. A layout-compatible, semantics-
+/// incompatible change is exactly the case a version byte exists for.
+///
+/// Left at 0x01 the two builds would still have refused each other, but only by
+/// accident and only for some values: a v1 envelope's `expiry` read as a birth
+/// time lands in the future and is rejected, and a v2 envelope's birth time read
+/// as a deadline lands in the past and looks expired. Both directions fail
+/// closed, which is lucky rather than designed. A version bump says so on
+/// purpose, and says it in the first byte instead of several fields later.
+pub const VER: u8 = 0x02;
 
 pub mod ty {
     pub const DATA: u8 = 0;
@@ -67,7 +80,7 @@ pub struct Envelope {
     pub typ: u8,
     pub flags: u8,
     pub hops: u8,
-    pub expiry: u32,
+    pub created_at: u32,
     pub dest: Addr,
     pub src: Src,
     pub payload: Vec<u8>,
@@ -82,8 +95,8 @@ pub enum Err {
 }
 
 impl Envelope {
-    pub fn new(typ: u8, dest: Addr, expiry: u32, payload: Vec<u8>) -> Self {
-        Envelope { typ, flags: 0, hops: 16, expiry, dest, src: Src::None, payload, sig: None }
+    pub fn new(typ: u8, dest: Addr, created_at: u32, payload: Vec<u8>) -> Self {
+        Envelope { typ, flags: 0, hops: 16, created_at, dest, src: Src::None, payload, sig: None }
     }
 
     /// Header + src + plen + payload (no signature). `zero_hops` for the
@@ -94,7 +107,7 @@ impl Envelope {
         b.push(self.typ);
         b.push(self.flags);
         b.push(if zero_hops { 0 } else { self.hops });
-        b.extend_from_slice(&self.expiry.to_be_bytes());
+        b.extend_from_slice(&self.created_at.to_be_bytes());
         b.extend_from_slice(&self.dest);
         match &self.src {
             Src::None => {}
@@ -235,7 +248,7 @@ impl Envelope {
         let typ = buf[1];
         let flags = buf[2];
         let hops = buf[3];
-        let expiry = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+        let created_at = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
         let mut dest = [0u8; 8];
         dest.copy_from_slice(&buf[8..16]);
         let mut off = 16;
@@ -278,6 +291,6 @@ impl Envelope {
         } else {
             None
         };
-        Ok((Envelope { typ, flags, hops, expiry, dest, src, payload, sig }, off))
+        Ok((Envelope { typ, flags, hops, created_at, dest, src, payload, sig }, off))
     }
 }

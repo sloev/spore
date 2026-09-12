@@ -17,13 +17,13 @@ fn main() {
     let pk = sk.verifying_key().to_bytes();
     let addr = addr_of(&pk);
     let topic = topic_of("news");
-    let expiry: u32 = 1_700_000_000;
+    let created_at: u32 = 1_700_000_000;
     let payload = b"the dam holds".to_vec();
 
-    let mut unsigned = Envelope::new(ty::DATA, topic, expiry, payload.clone());
+    let mut unsigned = Envelope::new(ty::DATA, topic, created_at, payload.clone());
     unsigned.flags |= fl::FLOOD;
 
-    let mut signed = Envelope::new(ty::DATA, topic, expiry, payload);
+    let mut signed = Envelope::new(ty::DATA, topic, created_at, payload);
     signed.flags |= fl::FLOOD;
     signed.sign(&sk);
 

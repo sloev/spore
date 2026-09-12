@@ -27,7 +27,7 @@ Part IV is how the core is embedded, and changes nothing on the wire.
 
 ## 0. The whole protocol in one breath
 
-A SPORE message is a **signed postcard**: to, from, expiry, payload, signature.
+A SPORE message is a **signed postcard**: to, from, when it was written, payload, signature.
 Its SHA-256 fingerprint is its identity. Every node keeps postcards it hasn't
 seen, hands copies to anyone it meets who wants them, and drops duplicates and
 expired mail. That alone is a working planetary network. Of the four hard
@@ -35,6 +35,22 @@ features — forward secrecy, fragmentation, congestion control, anonymity — o
 congestion control touches the router. Forward secrecy and anonymity live inside
 payloads; fragmentation lives *below* the router, in the bridge, where a hop that
 cannot carry a frame splits it and the far end puts it back.
+
+```mermaid
+flowchart TB
+  subgraph T0["T0 carry — about 60 lines. a working network on its own"]
+    A["parse"] --> B["dedup"] --> C["store"] --> D["deliver"] --> E["damped flood"]
+  end
+  subgraph T1["T1 sync — plus about 80"]
+    F["ANNOUNCE"] --> G["INV / WANT"] --> H["watermarks"]
+  end
+  subgraph T2["T2 route — plus about 100"]
+    I["paths"] --> J["directed unicast"] --> K["custody"]
+  end
+  T0 --> T1 --> T2
+  LF["link fragmentation sits *under* all three: a property of a link, not of the router"]
+  LF -.-> T0
+```
 
 **Tiers** (all interoperate): **T0 carry** ≈60 lines: parse, dedup, store,
 deliver, damped flood · **T1 sync** +≈80: ANNOUNCE/INV/WANT, watermarks ·
@@ -82,11 +98,11 @@ keys by QR/paper/voice. Petnames are local.
 
 ```mermaid
 packet-beta
-0-7: "ver = 0x01"
+0-7: "ver = 0x02"
 8-15: "type"
 16-23: "flags"
 24-31: "hops"
-32-63: "expiry (u32, unix seconds)"
+32-63: "created_at (u32, unix seconds)"
 64-127: "dest (8 B) — address | topic | 0x00×8 = public"
 128-383: "src — present only if SIGNED: 32-B pubkey, or 8 B if SRC8"
 384-399: "plen (u16)"
@@ -98,12 +114,12 @@ The fixed part is the first 16 bytes. Everything after `dest` is conditional:
 
 ```
 off len field
-0   1   ver    = 0x01  (exact match to decode; see "Versioning and unknown bits")
+0   1   ver    = 0x02  (exact match to decode; see "Versioning and unknown bits")
 1   1   type   0=DATA 1=INV 2=WANT 3=ANNOUNCE
 2   1   flags  b0 ENCRYPTED b1 SIGNED b2 FRAGMENT b3 ACKREQ b4 FLOOD b5 SRC8
                b6 RATCHET (0x40, §7)   b7 CANCEL (0x80, on WANT: §8)
 3   1   hops   remaining relays (default 16; relays clamp incoming to ≤ 16)
-4   4   expiry unix seconds u32 (stores clamp horizon to 30 d)
+4   4   created_at unix seconds u32 — when it was minted, not when it dies
 8   8   dest   address | topic | 0x00×8 = public
 -- if SIGNED: src = 32-B pubkey, or 8-B address if SRC8 --
     2   plen   u16
@@ -127,7 +143,14 @@ packet-beta
 ```
 
 **Versioning and unknown bits.** `ver` is an exact match: a decoder MUST reject
-any `ver != 0x01` rather than guess, so v2 is a hard fork and not a negotiation.
+any `ver != 0x02` rather than guess, so a version change is a hard fork and not a
+negotiation. **0x02 is that fork.** The header kept its shape — the four bytes at
+offset 4 are still four bytes at offset 4 — and changed their meaning, from a
+deadline the sender chose to the moment the envelope was minted. Left at 0x01 the
+two builds would still have refused each other, but by accident: a v1 `expiry`
+read as a birth time lands in the future, and a v2 birth time read as a deadline
+looks long expired. Both directions fail closed, which is luck rather than
+design.
 **Flags are the extension point instead.** Bits defined in v1 MUST be interpreted
 as named; a bit a node does not understand MUST be ignored, MUST be forwarded
 unchanged, and MUST NOT cause a drop. That rule is the agility hatch, and it has
@@ -179,7 +202,7 @@ path. The payload shape described here is the historical end-to-end one.
 
 payload = `[orig_id:16][index:2][count:2][chunk]`; all chunks equal size (pad the
 original; the envelope self-delimits). Fragments were ordinary envelopes (own
-IDs, same dest/expiry).
+IDs, same dest/created_at).
 
 - **index < count**: plain chunk *index* of the original envelope's bytes.
 - **index ≥ count**: **repair chunk** = XOR of the data chunks selected by the
@@ -245,26 +268,49 @@ flowchart TB
   RX["frame arrives on an interface"] --> FRAG{"starts 0xF6?"}
   FRAG -->|yes| REASM["link reassembly (Part II — the router never sees a piece)"]
   REASM -->|"set complete"| DEC
-  FRAG -->|no| DEC["decode envelope ver must be 0x01"]
+  FRAG -->|no| DEC["decode envelope: ver must be 0x02"]
   DEC --> CTRL{"type"}
   CTRL -->|"INV / WANT"| CONSUME["answer from the store, or adopt an interest. hops=0 · unsigned · consumed · never stored · never relayed"]
-  CTRL -->|"DATA / ANNOUNCE"| SEEN{"id seen, or expired?"}
-  SEEN -->|yes| DROP["drop"]
+  CTRL -->|"DATA / ANNOUNCE"| SEEN{"id seen, or created_at in the future?"}
+  SEEN -->|yes| DROP["drop. note: being *old* is not a reason to be here"]
   SEEN -->|no| MARK["remember the id · learn paths"]
   MARK --> MINE{"dest is mine, a topic I follow, or public?"}
   MINE -->|yes| DELIVER["deliver to the app (verify / decrypt per flags)"]
   MINE -->|no| STORE
-  DELIVER --> STORE["store until expiry"]
+  DELIVER --> STORE["store: keep it until the room is needed"]
   STORE --> HOPS{"hops > 0?"}
   HOPS -->|no| STOP["carry, but do not relay"]
   HOPS -->|yes| FWD["decrement hops · forward on every other interface, inside the per-interface token bucket"]
 ```
 
-1. Envelope arrives: ID seen or expired → drop. Add ID (keep ≥ until expiry).
+```mermaid
+flowchart LR
+  MINT["minted: created_at = now"] --> ARR["arrives at a node"]
+  ARR --> CHK{"created_at greater than now plus MAX_CLOCK_SKEW_SECS?"}
+  CHK -->|yes| REJ["refused. the only normative check on created_at"]
+  CHK -->|no| KEEP["kept, whatever its age"]
+  KEEP --> FULL{"is the store full?"}
+  FULL -->|no| IDLE["nothing asks how old it is"]
+  IDLE --> FULL
+  FULL -->|yes| RANK["eviction ranks it: past this node's max_relay_age first,
+    then lowest stamp, then largest, then oldest arrival"]
+  RANK --> GONE["evicted"]
+  RANK --> STAY["survives this round"]
+  STAY --> FULL
+```
+
+The only two moments `created_at` is read are the two boxes above: once on
+arrival, to refuse the future, and once under memory pressure, to order the
+victims. Between them an envelope's age is nobody's business.
+
+1. Envelope arrives: ID seen, or `created_at` more than `MAX_CLOCK_SKEW_SECS`
+   ahead of our clock → drop. **Age is not checked here.** Add ID.
    Learn paths (§4).
 2. dest ∈ {my addresses, followed topics, 0×8} → deliver (verify/decrypt per
    flags).
-3. Store until expiry. Evict: expired → lowest stamp → largest → oldest. TX
+3. Store it. Nothing expires; entries leave only when the room is needed, and
+   only then is age consulted. Evict: past this node's `max_relay_age` → lowest
+   stamp → largest → oldest arrival. TX
    order: local origin, then stamp, then FIFO.
 4. **Congestion control**, four rules: **(a)** token bucket — a node MUST rate
    limit what it relays per interface, and SHOULD default to ≈10% of that
@@ -294,8 +340,13 @@ flowchart TB
    discovery; replies teach reverse paths and heal blackholes. A receipt is the
    only delivery signal: overhearing your own envelope rebroadcast means the mesh
    took it, not that anyone received it, and MUST NOT clear a pending resend.
-7. Untrusted clock? Relay regardless of expiry; age by dwell, drop after 7 local
-   days.
+7. A wrong clock misjudges rule 1, and that is accepted rather than solved: a
+   clock far in the past rejects current traffic, one far in the future accepts
+   anything. It is the same failure such a node already has for every other
+   time-based decision, and both alternatives are worse — trusting the sender
+   puts the decision back with the attacker, and a "my clock is unreliable" flag
+   is a switch the platforms that most need it are least likely to set. Fix the
+   clock.
 
 ```
 def on_rx(e, iface, nbr):
@@ -396,6 +447,16 @@ upstream of one.
 
 ## Bindings — SPORE on everything
 
+```mermaid
+flowchart LR
+  R["the router: one wire format, unchanged"] --- BR["a bridge per medium"]
+  BR --> S1["1. message pipe"] --> M1["UDP, BLE, LoRa, Meshtastic, iroh"]
+  BR --> S2["2. byte stream"] --> M2["TCP, serial, Bluetooth RFCOMM, Tor, I2P"]
+  BR --> S3["3. text channel"] --> M3["email, SMS, IRC, paper, voice"]
+  BR --> S4["4. shared bus"] --> M4["packet radio, CB, half-duplex RF"]
+  BR --> S5["5. shared store"] --> M5["a folder, a USB stick, S3, copyparty"]
+```
+
 **Every medium on Earth has one of five shapes.** Bind by shape; the router never
 changes. This section is normative for the *shapes*; the per-medium parameter tables
 (frequencies, port numbers, UUIDs, MTUs, firmware caveats) are the manual,
@@ -487,7 +548,7 @@ verify":
 > **Verify before binding trust state; do not verify to forward.**
 
 The cost is bounded on purpose: one verify per newly-seen signed envelope, reused
-across all three tables and run only *after* dedup and expiry, so replays and stale
+across all three tables and run only *after* dedup and the post-dating check, so replays and stale
 mail are dropped before any crypto. On an ESP32 relaying LoRa that is a real
 per-envelope cost, accepted knowingly — a relay that can be told a false address is
 worse than a relay that is slower.
@@ -509,7 +570,7 @@ operator set a budget, and a peer may fill it but never exceed it.
 
 | Path a stranger can push on | What bounds it |
 |---|---|
-| Dedup table | `MAX_SEEN`, evicting nearest-expiry first |
+| Dedup table | `MAX_SEEN`, evicting nearest-to-forgetting first |
 | Custody store | `max_store_bytes`; adoption additionally by `MAX_ADOPT_BYTES` |
 | Peer prekeys, busy bytes, names, sessions | `MAX_PEERS` on each |
 | Learned paths | `MAX_PEERS`, plus a time purge |
@@ -518,13 +579,46 @@ operator set a budget, and a peer may fill it but never exceed it.
 | Undrained RPC and feed inboxes | `MAX_INBOX`, oldest dropped first |
 | Fragment reassembly | set count, byte budget, a timeout, and a per-interface share |
 | Answering INV/WANT | `MAX_IDS_PER_GOSSIP` per request and a token bucket per link |
-| Relaying | per-source quota, per-interface budget, hop count, expiry |
+| Relaying | per-source quota, per-interface budget, hop count |
 
 Three of these are the general form, and an implementation should be able to
-point at all three: an object's **lifetime** (the signed `expiry`, which a store
-may clamp down but never extend), a **transfer allowance** (a bounded request, or
-a lease), and a **transport budget** (the token bucket and backpressure of §5.4).
-Transmit only while all three still hold.
+point at all three: an object's **welcome** (this node's `max_relay_age` against
+the envelope's `created_at` — a local opinion, consulted only when the store is
+full), a **transfer allowance** (a bounded request, or a lease), and a **transport
+budget** (the token bucket and backpressure of §5.4). Transmit only while all
+three still hold.
+
+The first of those used to be the sender's to set, and moving it is the point of
+M12. A sender wrote a deadline and every relay honoured it, which let a stranger
+reserve a week of somebody else's storage — precisely what the invariant above
+forbids everywhere else. An envelope now states a fact about itself (when it was
+minted) and each node decides what to do about it.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Alice's phone
+  participant P as a phone in the crowd
+  participant C as a courier
+  participant B as Bob
+  Note over A,B: nobody negotiates any of this. one node has a larger number.
+  A->>P: envelope, minted today
+  Note right of P: max_relay_age one day. the store fills, and this is the oldest thing in it
+  P--xP: evicted after a few days
+  A->>C: the same envelope
+  Note right of C: max_relay_age thirty days. its store fills too, but this is not old to it
+  C->>C: carried, out of range, for a fortnight
+  C->>B: still holding it
+  Note over A,B: the envelope never knew it was being couriered
+```
+
+**A courier is a setting, not a feature.** Because age is a local preference
+rather than a wire property, a node that raises `max_relay_age` simply keeps old
+envelopes when others have thrown theirs out, and hands them on to whoever it
+meets. Nothing new is negotiated, no envelope knows it is being couriered, and a
+node that does this is not distinguishable on the wire from one that does not.
+Measured: at one day's tolerance a carrier under storage pressure kept 1 of 30
+ten-day-old envelopes; at a month's, 15 of 30.
 
 Two rules that are easy to get wrong, and were:
 
@@ -539,6 +633,22 @@ Two rules that are easy to get wrong, and were:
 # Part III — Endpoint profiles and local policy
 
 ## 7. Crypto & forward secrecy
+
+```mermaid
+flowchart TB
+  M["a message for one recipient"] --> K{"do we have a ratchet session with them?"}
+  K -->|no| PK{"have we heard their ANNOUNCE?"}
+  PK -->|yes| SEAL["one-shot seal to their newest prekey. zero per-message state"]
+  PK -->|no| CLEAR["send in the clear, and say so in the UI.<br/>silence would be worse than honesty"]
+  K -->|yes| RAT["ratchet: ENCRYPTED + RATCHET (b6)"]
+  SEAL --> BOOT["both sides having each other's prekey is itself the handshake:<br/>a static-static DH gives both the same root, with no round trip"]
+  BOOT --> RAT
+  RAT --> FS["forward secrecy: a key that opened yesterday's mail cannot open today's"]
+```
+
+The path a message takes through this depends only on what the sender already
+knows about the recipient, and never on a negotiation — there is nowhere to hold
+one.
 
 - **Sign:** Ed25519 (§2).
 - **Seal (baseline, one shot):** libsodium `crypto_box_seal` to the recipient's
@@ -681,7 +791,7 @@ get.
 
 ## 11. Defaults
 
-hops 16 · expiry 7 d · MTU 1400 · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h ·
+hops 16 · default max relay age 7 d · MTU 1400 · HELLO 5→80 min Trickle · ANNOUNCE flood ≤ 1/h ·
 path fresh 3 h · seen-set ≥ 30 d received · prekey mint 24 h, offline window 7 d ·
 relay airtime rate-limited, ≈10% default · payload UTF-8. T0 ≈ 60 lines; full T2
 ≈ 400 with libsodium.
@@ -694,7 +804,7 @@ recursion depth 8.
 **Known limits, on purpose:** no stream semantics; **an envelope is at most
 65 535 payload bytes**, because `plen` is a `u16` — larger objects ride the file
 layer (§6), bounded by storage and by what each link agrees to carry rather than
-by a fragment count; no permanence (expiry is a feature); mix-mode anonymity
+by a fragment count; no permanence (nodes discard their oldest cargo, by design); mix-mode anonymity
 needs flowing decoys to beat a *global* observer; ratchet state is per-device —
 give each device its own key.
 
@@ -713,7 +823,7 @@ analysis, with a residual-risk line on every row, is
 |---|---|---|
 | Read the content | seal / ratchet / topic PSK | §7 |
 | Forge a sender | Ed25519 over the envelope, hops zeroed | §2 |
-| Replay an old frame | content-addressed ID + seen-set + expiry | §5.1 |
+| Replay an old frame | content-addressed ID + seen-set; a re-offered old frame is accepted but ranks first for eviction | §5.1 |
 | Forge a path or neighbour binding | verify the signature *before* binding trust state | §4, Part II |
 | Forge "delivered" | receipt must be signed by the destination | §8 |
 | Flood cheaply | stamp PoW, per-source quotas | §10 |
@@ -890,17 +1000,37 @@ so total traffic is linear in the nodes reached, not exponential in the paths to
 them. That is the pending-interest-table argument, and it is what makes depth 8
 safe on a node with several links.
 
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Adopted: a neighbour WANTs an id we lack,<br/>and a manifest we hold names it
+  Adopted --> Adopted: another neighbour wants it too,<br/>so it joins the waiter list and we stay quiet
+  Adopted --> Served: the object arrives
+  Served --> [*]: handed to every waiter, then forgotten
+  Adopted --> Retired: last waiter cancels, or its link drops
+  Retired --> [*]: cancel emitted onward, unwinding the path demand took
+  Adopted --> Lapsed: deadline passes
+  Lapsed --> [*]: the backstop, for a waiter that could not say goodbye
+  Adopted --> Restated: persisted, carried, and spoken somewhere new
+  Restated --> Adopted
+```
+
+Five ways out and only one of them is the timer. *Served* is the ordinary case;
+*Retired* is M11-K and is the fast one; *Lapsed* is the backstop; *Restated* is
+M11-P, the interest that survived a journey.
+
 *The lease is scoped to the object, not to a timer* (M11-P). An adopted interest
-lives until the expiry of the manifest that named the id — clamped into
+lives as long as this node would still be carrying the manifest that named the
+id — its `created_at` plus our own `max_relay_age`, clamped into
 `[now + 900 s, now + 7 days]` — because the chunks being hunted for die with the
-publisher's expiry, and an interest that outlives them is hunting for bytes
+the same pressure as everything else, and an interest that outlives them is hunting for bytes
 nobody will serve. A fixed short lease made adopted interest an **online-only**
 mechanism inside a store-and-forward protocol: a courier who takes a day to reach
 the next mesh had forgotten what it was carrying long before arriving.
 
 Lengthening a remote-caused commitment is safe only because three bounds hold it,
 and an implementation MUST keep all three: the deadline is read from a *signed*
-manifest whose expiry the asker does not control and the store already clamps;
+manifest whose birth time the asker does not control, and by a policy that is ours and not theirs;
 the number of simultaneous interests is capped locally; and cancel retires one as
 soon as its last waiter leaves.
 
@@ -1019,7 +1149,7 @@ deliver → forward.
 - **Content ids, not envelope ids** (M11-M). A manifest names the **content id**
   of each part: the first 16 bytes of SHA-256 over the part's payload, and
   nothing else. This is deliberately *not* the envelope id, which hashes the
-  whole envelope and so covers `expiry` and `dest` — right for a message, wrong
+  whole envelope and so covers `created_at` and `dest` — right for a message, wrong
   for bytes. Conflating them meant a byte-identical file published twice shared
   **zero of sixteen** envelopes with itself, because a chunk carried a random
   per-publish `file_id`. A chunk payload is therefore `[CHUNK_TAG][bytes]` with
@@ -1123,7 +1253,7 @@ that carried it — the store *is* the cache, INV/WANT *is* the cache-fill.
 ## Feeds — pub/sub over topics
 
 A feed is just a topic: publish a tagged event (`0x05`), subscribers get
-everything. Retention is message expiry, and a late joiner backfills history from
+everything. Retention is whatever the nodes on hand are willing to carry, and a late joiner backfills history from
 any peer's store via INV/WANT. No special infrastructure — a feed is emergent from
 topics plus the store-and-sync the router already does. It is the signed-gossip
 model behind Nostr, minus the JSON, the dedicated relays and the always-on
@@ -1215,14 +1345,14 @@ whatever runs it, and gets them wrong silently if it does not ask.
   mix padding and decoys, and CSMA backoff. **Prekey secrets MUST be random and
   MUST NOT be derivable from the identity seed** (§7.2).
 - **Time.** Expiry is wall-clock unix seconds. A node with no trusted clock MUST
-  NOT drop on expiry: it relays regardless, ages by dwell, and drops after 7
+  NOT infer age from a clock it does not have: it relays regardless, ages by dwell, and drops after 7
   local days (§5.7). Time is supplied per call, never read by the protocol.
-- **Custody.** Received envelopes are held until expiry and served on WANT (§6).
+- **Custody.** Received envelopes are held until the room is needed and served on WANT (§6).
   The bytes may live anywhere — memory, disk, flash, remote store. Custody is
   untrusted storage: **an entry read back MUST be re-verified against its ID
   before it is served**, and a mismatch MUST read as "not held" so the mesh
   re-fetches. An ID is the hash of its bytes, so this is always checkable.
-- **Scheduling.** Four duties MUST run on a timer, not only on arrival: expiry
+- **Scheduling.** Four duties MUST run on a timer, not only on arrival: the
   sweep, prekey rotation (§7.2), Trickle beacons (§5.4b), and ACKREQ resend
   backoff (§5.4d). **A node driven only by inbound traffic stalls all four** — it
   stops pruning, stops advancing forward secrecy, and never retries. Three are

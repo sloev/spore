@@ -23,10 +23,10 @@ const SEED: [u8; 32] = [7u8; 32];
 const PUBKEY: &str = "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c";
 const ADDR: &str = "fe812c12f3ab4ce6";
 const TOPIC_NEWS: &str = "19fba0e995b9794f";
-const UNSIGNED_WIRE: &str = "010010106553f10019fba0e995b9794f000d7468652064616d20686f6c6473";
-const UNSIGNED_ID: &str = "1ff3a7d10b117b007309f1164c3998f7";
-const SIGNED_WIRE: &str = "010012106553f10019fba0e995b9794fea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c000d7468652064616d20686f6c6473daa7ab3bd3c46dda41fd7d95800b91e242f95e43185e4cd1f394bfda7b00cac8065ecb4c63af711aa2462b950a933215a3234c6ef6b14fc55d495d179cdf3906";
-const SIGNED_ID: &str = "460865a659a4a9bd3bcd0728c5f18d5e";
+const UNSIGNED_WIRE: &str = "020010106553f10019fba0e995b9794f000d7468652064616d20686f6c6473";
+const UNSIGNED_ID: &str = "b0862c14c3be84bc5df1bfa8ab5adacb";
+const SIGNED_WIRE: &str = "020012106553f10019fba0e995b9794fea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c000d7468652064616d20686f6c647332e3cabd4269155f2477873f84d1e34632d9e56574fb705a9950ea7b1a3ca1f757e2dbf82367d743c0107770faa42a84f4f5b4cd0966df6f4ad53ada8de89802";
+const SIGNED_ID: &str = "36a89b143679d20640a6b9cd4d8e4f12";
 
 #[test]
 fn wire_format_and_identity_are_frozen() {
@@ -109,7 +109,9 @@ fn crypto_primitives_are_frozen() {
 
 #[test]
 fn constants_are_frozen() {
-    assert_eq!(VER, 0x01);
+    // M12: the header kept its shape and changed the meaning of `created_at`,
+    // which is precisely what a version byte is for.
+    assert_eq!(VER, 0x02);
     assert_eq!((ty::DATA, ty::INV, ty::WANT, ty::ANNOUNCE), (0, 1, 2, 3));
     assert_eq!(fl::ENCRYPTED, 1);
     assert_eq!(fl::SIGNED, 2);

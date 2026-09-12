@@ -72,7 +72,7 @@ fn nonce_bytes(n: u16) -> [u8; 12] {
 
 /// A cached message key for an out-of-order position, with the time it was
 /// banked so [`Ratchet::purge_skipped`] can expire it. Zeroized on drop, so a key
-/// dropped by expiry, by the count bound, or by the whole ratchet going away does
+/// dropped by created_at, by the count bound, or by the whole ratchet going away does
 /// not linger in freed memory.
 struct SkippedKey {
     key: [u8; 32],
@@ -258,7 +258,7 @@ impl Ratchet {
 
     // Cache message keys for positions self.nr .. until in the current
     // receiving chain (so their out-of-order messages still open later). `now`
-    // stamps each banked key for age-based expiry in `purge_skipped`.
+    // stamps each banked key for age-based created_at in `purge_skipped`.
     fn skip(&mut self, until: u16, now: u32) -> Option<()> {
         if until > self.nr.saturating_add(MAX_SKIP) {
             return None; // absurd gap: refuse

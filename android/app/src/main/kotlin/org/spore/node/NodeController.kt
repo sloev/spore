@@ -97,7 +97,7 @@ object NodeController {
     // A build constant, so read once rather than crossing the JNI boundary on
     // every bubble's recomposition. `by lazy` also means it's never touched
     // before the native library is loaded.
-    private val defaultMessageExpiryMs: Long by lazy { SporeNative.nativeDefaultMessageExpirySecs() * 1000 }
+    private val maxRelayAgeMs: Long by lazy { SporeNative.nativeMaxRelayAgeSecs() * 1000 }
 
     /** True once a message's own lifetime has passed with no receipt, ever —
      * distinct from "still trying," which the core has no event for at all.
@@ -105,7 +105,7 @@ object NodeController {
      * `Pending` entry either way, long before the envelope itself expires, so
      * this is the only honest way to tell "gave up" from "still travelling." */
     fun messageExpired(m: Msg): Boolean =
-        m.mine && m.id != null && !m.delivered && System.currentTimeMillis() > m.ts + defaultMessageExpiryMs
+        m.mine && m.id != null && !m.delivered && System.currentTimeMillis() > m.ts + maxRelayAgeMs
 
     val messages = MutableStateFlow<List<Msg>>(emptyList())
     val posts = MutableStateFlow<List<Post>>(emptyList())

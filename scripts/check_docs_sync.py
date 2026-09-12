@@ -77,6 +77,21 @@ for f in scan:
             errors.append(f'{rel}:{i}: "{m.group(0)}" — say "form" (dgram/stream/store) or '
                           f'"service pattern"; "shape" is the five Page-2 medium bindings')
 
+# A ```mermaid fence directly after an HTML block is swallowed: `marked` treats
+# the run as raw HTML, so the diagram ships as literal text with no error
+# anywhere. It has to be separated by a blank line. This bit twice while adding
+# the diagrams, and both times the only symptom was a page that looked wrong.
+for f in glob.glob(os.path.join(root, "docs", "*.md")):
+    lines = open(f, encoding="utf-8").read().split("\n")
+    for i, ln in enumerate(lines):
+        if ln.strip() != "```mermaid" or i == 0:
+            continue
+        prev = lines[i - 1].rstrip()
+        if prev.endswith(">"):
+            rel = os.path.relpath(f, root)
+            errors.append(f"{rel}:{i + 1}: a mermaid fence directly after an HTML block is "
+                          f"rendered as literal text — put a blank line between them")
+
 # Chunk ⇄ fragment: two layers, and conflating them is what caused M11-M.
 #   chunk    = file layer, content-addressed, a static CHUNK_BYTES everywhere
 #   fragment = link layer, one hop's MTU, carries any envelope across that hop

@@ -294,10 +294,10 @@ int main(int argc,char**argv){
     } else {
         wlen=unhex(clean,wire,sizeof wire);
     }
-    if(wlen<16||wire[0]!=0x01){ fprintf(stderr,"not a SPORE v1 envelope\n"); return 1; }
+    if(wlen<16||wire[0]!=0x02){ fprintf(stderr,"not a SPORE v2 envelope\n"); return 1; }
 
     uint8_t typ=wire[1],flags=wire[2],hops=wire[3];
-    uint32_t expiry=(uint32_t)wire[4]<<24|(uint32_t)wire[5]<<16|(uint32_t)wire[6]<<8|wire[7];
+    uint32_t created_at=(uint32_t)wire[4]<<24|(uint32_t)wire[5]<<16|(uint32_t)wire[6]<<8|wire[7];
     size_t off=16; const uint8_t *pk=NULL;
     if(flags&2){ if(flags&32) off+=8; else { pk=wire+off; off+=32; } }
     size_t plen=(size_t)wire[off]<<8|wire[off+1]; off+=2;
@@ -310,7 +310,7 @@ int main(int argc,char**argv){
     printf("type    : %s\n",tn);
     printf("flags   : 0x%02x\n",flags);
     printf("hops    : %u\n",hops);
-    printf("expiry  : %u\n",expiry);
+    printf("created : %u\n",created_at);
     printf("dest    : "); hexdump(wire+8,8); printf("\n");
     if(pk){ uint8_t a[32]; sha256_hash(pk,32,a);
         printf("src key : "); hexdump(pk,32); printf("\n");

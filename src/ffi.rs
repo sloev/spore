@@ -353,13 +353,13 @@ pub unsafe extern "C" fn spore_armor_unwrap(text: *const u8, text_len: usize) ->
 pub unsafe extern "C" fn spore_message_new(
     sk: *const u8,
     dest: *const u8,
-    expiry: u32,
+    created_at: u32,
     payload: *const u8,
     payload_len: usize,
 ) -> SporeBytes {
     guard(SporeBytes::null(), || {
         let sk = SigningKey::from_bytes(&arr32(sk));
-        let mut e = Envelope::new(ty::DATA, arr8(dest), expiry, slice(payload, payload_len).to_vec());
+        let mut e = Envelope::new(ty::DATA, arr8(dest), created_at, slice(payload, payload_len).to_vec());
         e.sign(&sk);
         SporeBytes::from_vec(e.wire())
     })

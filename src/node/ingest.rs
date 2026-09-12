@@ -51,7 +51,7 @@ impl Node {
         }
         p.push(0); // np: we advertise no distant paths in this reference build
         p.extend_from_slice(self.petname.as_bytes());
-        let mut e = Envelope::new(ty::ANNOUNCE, ZERO_DEST, now + 3600, p);
+        let mut e = Envelope::new(ty::ANNOUNCE, ZERO_DEST, now, p);
         e.flags |= fl::FLOOD;
         e.hops = hops;
         e.sign(&self.sk);
@@ -131,7 +131,7 @@ impl Node {
     // ---- receive (the entire router, §5) --------------------------------
 
     pub(crate) fn mark_seen(&mut self, e: &Envelope) {
-        let retain = e.expiry.max(0u32.wrapping_add(SEEN_MIN_SECS)); // >= expiry
+        let retain = e.created_at.max(0u32.wrapping_add(SEEN_MIN_SECS)); // >= created_at
         self.seen.insert(e.id(), retain);
     }
 
@@ -237,15 +237,22 @@ impl Node {
     /// propagate on their own, so the giant reassembled copy must not re-flood.
     fn ingest(&mut self, e: &Envelope, iface: Iface, nbr: Option<Addr>, now: u32, allow_forward: bool) -> Rx {
         let id = e.id();
-        if self.seen.contains_key(&id) || e.expiry < now {
-            return Rx::default(); // duplicate or expired -> drop
+        // Duplicate, or claiming to be from the future (M12). **Age is not
+        // checked here.** An envelope is never turned away for being old: a node
+        // keeps what it is given until it runs out of room, and only then does
+        // age decide what goes. That is what makes a courier a matter of having
+        // a big store rather than of having permission — and it means an old
+        // envelope arriving at a node with space is carried on, which is the
+        // whole of the store-and-forward promise.
+        if self.seen.contains_key(&id) || self.is_post_dated(e, now) {
+            return Rx::default();
         }
-        // Retain the id for at least the §11 floor, and never past the §2 store
-        // horizon: holding an *id* longer than we hold its *bytes* is backwards,
-        // and `MAX_SEEN` evicts nearest-expiry first — so an unclamped
-        // far-future expiry would make junk the last thing evicted and let a
-        // flood of it pin the dedup table. Both bounds are the same 30 days.
-        let retain = e.expiry.clamp(now + SEEN_MIN_SECS, now + MAX_EXPIRY_HORIZON_SECS);
+        self.last_now = self.last_now.max(now);
+        // Retain the id for the §11 floor. This used to be derived from the
+        // envelope's own deadline; with `created_at` there is no deadline to
+        // derive from, and the floor was the effective value anyway — both ends
+        // of the old clamp were the same thirty days.
+        let retain = now.saturating_add(SEEN_MIN_SECS);
         self.seen.insert(id, retain);
         self.enforce_bounds(now);
 
@@ -256,7 +263,7 @@ impl Node {
         // same reason `Neighbors::snoop` does it: the flag is attacker-chosen, so
         // a forgery carrying a victim's public key would bind that victim's
         // address to whatever interface the forgery arrived on. The cheap checks
-        // (dedup, expiry) have already run above, so a verify only happens for a
+        // (dedup, created_at) have already run above, so a verify only happens for a
         // frame that is new and still live — and it happens once, here, for both
         // the path table and the quota attribution below.
         let verified_src = match &e.src {
@@ -281,9 +288,9 @@ impl Node {
         // An unsigned envelope is the *most* unattributable of the three, so it
         // shares that same bucket rather than skipping the quota entirely, which
         // is what it used to do (audit F-2, #189). The old reasoning was that
-        // "dedup/expiry already bound them", and it does not hold: dedup is keyed
+        // "dedup/created_at already bound them", and it does not hold: dedup is keyed
         // on content id and an attacker varies content for free — a different
-        // byte is a different id, every time — while expiry bounds lifetime, not
+        // byte is a different id, every time — while created_at bounds lifetime, not
         // rate or volume. Nothing SPORE sends is unsigned (every path in
         // `node::send` signs), so this paces foreign unsigned traffic without
         // touching anything this node originates.
@@ -377,7 +384,7 @@ impl Node {
                     let mut p = Vec::with_capacity(17);
                     p.push(RECEIPT_TAG);
                     p.extend_from_slice(&e.id());
-                    let mut ack = Envelope::new(ty::DATA, addr_of(pk), e.expiry, p);
+                    let mut ack = Envelope::new(ty::DATA, addr_of(pk), e.created_at, p);
                     ack.flags |= fl::FLOOD; // receipts flood and teach reverse paths
                     ack.sign(&self.sk);
                     self.mark_seen(&ack);

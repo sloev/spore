@@ -108,7 +108,11 @@ def ed25519_verify(signature, message, public_key):
 # --------------------------------------------------------------------------
 # SPORE envelope (see docs/REBUILD.md and docs/SPEC.md).
 # --------------------------------------------------------------------------
-VER = 0x01
+# M12: the four bytes at offset 4 stopped being a deadline the sender chose and
+# became the moment the envelope was minted. Same layout, different meaning, so
+# the version byte says so — a v1 decoder reading a v2 envelope would take a
+# birth time for a deadline and call every message long expired.
+VER = 0x02
 F_ENCRYPTED, F_SIGNED, F_FRAGMENT, F_ACKREQ, F_FLOOD, F_SRC8 = 1, 2, 4, 8, 16, 32
 TYPES = {0: "DATA", 1: "INV", 2: "WANT", 3: "ANNOUNCE"}
 _B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
@@ -137,7 +141,7 @@ def parse(wire):
     if len(wire) < 16 or wire[0] != VER:
         raise ValueError("not a SPORE v1 envelope")
     typ, flags, hops = wire[1], wire[2], wire[3]
-    expiry = int.from_bytes(wire[4:8], "big")
+    created_at = int.from_bytes(wire[4:8], "big")
     dest = wire[8:16]
     off = 16
     src = pubkey = None
@@ -150,7 +154,7 @@ def parse(wire):
     payload = wire[off:off + plen]; off += plen
     sig = wire[off:off + 64] if flags & F_SIGNED else None
     return {
-        "typ": typ, "flags": flags, "hops": hops, "expiry": expiry,
+        "typ": typ, "flags": flags, "hops": hops, "created_at": created_at,
         "dest": dest, "src": src, "pubkey": pubkey, "payload": payload, "sig": sig,
     }
 
@@ -211,7 +215,7 @@ def main():
     print(f"type    : {TYPES.get(e['typ'], e['typ'])}")
     print(f"flags   : 0x{fl:02x} [{' '.join(names)}]")
     print(f"hops    : {e['hops']}")
-    print(f"expiry  : {e['expiry']}")
+    print(f"created : {e['created_at']}")
     print(f"dest    : {e['dest'].hex()}")
     if e["pubkey"]:
         print(f"src key : {e['pubkey'].hex()}")

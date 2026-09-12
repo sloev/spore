@@ -239,7 +239,7 @@ object SporeNative {
     /** Seconds a locally-originated message lives before it expires unread.
      * No `ptr` — a build constant, not per-instance state. See
      * [NodeController.messageExpired] for why the UI needs this at all. */
-    external fun nativeDefaultMessageExpirySecs(): Long
+    external fun nativeMaxRelayAgeSecs(): Long
 
     /** Resend ACKREQ messages whose backoff elapsed without a receipt. */
     external fun nativeResendUnacked(ptr: Long)

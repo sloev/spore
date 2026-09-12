@@ -58,7 +58,7 @@ impl Node {
         // frame.
         let chunk_size = file::CHUNK_BYTES;
         let count = bytes.len().div_ceil(chunk_size).max(1);
-        let expiry = now + 7 * 86400;
+        let created_at = now;
         let mut file_id = [0u8; 16];
         OsRng.fill_bytes(&mut file_id);
         // Chunks ride a per-file topic. That scopes *delivery* — only a node
@@ -100,7 +100,7 @@ impl Node {
                 level.push((cid, (end - start) as u64));
                 continue;
             }
-            let mut ce = Envelope::new(ty::DATA, ft, expiry, payload);
+            let mut ce = Envelope::new(ty::DATA, ft, created_at, payload);
             ce.flags |= fl::FLOOD;
             // **Link-local (M11-J).** A chunk travels one hop, to whoever asked
             // for it, and stops there.
@@ -130,7 +130,7 @@ impl Node {
         // ciphertext already — only the recipient's prekey opens it — so it is
         // no more exposed here than it was inside the root.
         if !sealed_hdr.is_empty() {
-            let mut he = Envelope::new(ty::DATA, ft, expiry, sealed_hdr.clone());
+            let mut he = Envelope::new(ty::DATA, ft, created_at, sealed_hdr.clone());
             he.flags |= fl::FLOOD;
             he.hops = 0; // link-local, like a chunk
             hdr_id = he.id();
@@ -163,7 +163,7 @@ impl Node {
                     depth,
                     hdr_id: [0u8; 16],
                 };
-                let mut ne = Envelope::new(ty::DATA, ft, expiry, node.encode());
+                let mut ne = Envelope::new(ty::DATA, ft, created_at, node.encode());
                 ne.flags |= fl::FLOOD;
                 next.push((file::content_id(&ne.payload), covered));
                 self.mark_seen(&ne);
@@ -183,7 +183,7 @@ impl Node {
             depth,
             hdr_id,
         };
-        let mut me = Envelope::new(ty::DATA, dest, expiry, manifest.encode());
+        let mut me = Envelope::new(ty::DATA, dest, created_at, manifest.encode());
         if dest == ZERO_DEST || self.topics.contains(&dest) {
             me.flags |= fl::FLOOD;
         }
@@ -456,7 +456,7 @@ impl Node {
     }
 
     /// Every complete file we hold, as `(name, magnet)`, newest manifest per name
-    /// winning (by envelope expiry).
+    /// winning (by envelope created_at).
     ///
     /// Names, not bytes. [`Node::complete_files`] assembles every file at once,
     /// which on a disk-backed store means pulling the whole store into RAM — an
@@ -470,7 +470,7 @@ impl Node {
             if !self.has_file(magnet) {
                 continue;
             }
-            let exp = self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0);
+            let exp = self.store.meta(magnet).map(|s| s.created_at).unwrap_or(0);
             best.entry(m.name.clone())
                 .and_modify(|(id, e)| {
                     if exp > *e {
@@ -484,7 +484,7 @@ impl Node {
     }
 
     /// Every complete file we hold, as `(name, bytes)`, newest manifest per name
-    /// winning (by envelope expiry).
+    /// winning (by envelope created_at).
     ///
     /// Assembles every file into memory at once. Prefer
     /// [`Node::complete_file_names`] plus [`Node::write_file_to`] when the result
@@ -496,7 +496,7 @@ impl Node {
             if !self.has_file(magnet) {
                 continue;
             }
-            let exp = self.store.meta(magnet).map(|s| s.expiry).unwrap_or(0);
+            let exp = self.store.meta(magnet).map(|s| s.created_at).unwrap_or(0);
             best.entry(m.name.clone())
                 .and_modify(|(id, e)| {
                     if exp > *e {
