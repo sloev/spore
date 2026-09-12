@@ -25,6 +25,7 @@ nothing compared the prose to a run.
 | [`mixed-mtu`](#mixed-mtu) | 0 of 1 (0%) | A Wi-Fi island bridged to a LoRa hop with no per-hop splitting — the case the old design silently could not serve, kept as a red line rather than deleted |
 | [`mixed-mtu-clamped`](#mixed-mtu-clamped) | 0 of 1 (0%) | The same, with every node clamped to its own narrowest link: the fix that does not work, because the sender owns none of the narrow hop |
 | [`mixed-mtu-linkfrag`](#mixed-mtu-linkfrag) | 1 of 1 (100%) | The same topology with link fragmentation on |
+| [`mtu-staircase`](#mtu-staircase) | 1 of 1 (100%) | One envelope down a staircase of MTUs — 1400, 237, 54, 1400, 137 — with no node told what the rest of the path is made of |
 | [`lossy-mesh-0pct`](#lossy-mesh-0pct) | 99 of 99 (100%) | A hundred nodes in a random graph |
 | [`lossy-mesh-10pct`](#lossy-mesh-10pct) | 99 of 99 (100%) | A hundred nodes in a random graph |
 | [`partition`](#partition) | 1 of 1 (100%) | Two clusters joined by a single node, with loss |
@@ -154,6 +155,38 @@ flowchart LR
 | first delivery | 130 ms |
 
 same topology and message, link fragmentation on
+
+## mtu-staircase
+
+One envelope down a staircase of MTUs — 1400, 237, 54, 1400, 137 — with no node told what the rest of the path is made of. Delivery must not depend on the order the links come in.
+
+**6 nodes, 5 links** · link fragmentation on
+
+```mermaid
+flowchart LR
+  n0(["node 0"])
+  n1(["node 1"])
+  n2(["node 2"])
+  n3(["node 3"])
+  n4(["node 4"])
+  n5(["node 5"])
+  n0 ---|"1400 B, 5 ms"| n1
+  n1 ---|"237 B, 5 ms"| n2
+  n2 ---|"54 B, 5 ms"| n3
+  n3 ---|"1400 B, 5 ms"| n4
+  n4 ---|"137 B, 5 ms"| n5
+```
+
+| measured | |
+|---|---|
+| delivered | **1 of 1** |
+| frames sent | 37 |
+| bytes sent | 5294 |
+| dropped, frame too big for the link | 0 |
+| dropped by link loss | 0 |
+| first delivery | 25 ms |
+
+crossed five links of five different widths, splitting and reassembling at each
 
 ## lossy-mesh-0pct
 

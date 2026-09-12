@@ -739,6 +739,55 @@ fn file_multihop() -> Report {
     Report { setup: sim.setup("A file three hops from its only seeder, with no chunk in any store between. The recursive-pull acceptance test."), name: "file-multihop".into(), note, reached, of: 1, m: sim.m }
 }
 
+/// One envelope across an arbitrary staircase of MTUs (#278).
+///
+/// `mixed-mtu-linkfrag` proves the fix on one path: wide, wide, narrow. The
+/// audit's point is that this is the wrong shape of guarantee — a legal envelope
+/// must not become undeliverable because of the *sequence* of links it happens to
+/// meet, and a single example does not say that.
+///
+/// So: widen, narrow, narrower, widen again, narrow again. Each hop splits for
+/// itself and reassembles at its own far end, and no node is told what the rest
+/// of the path is made of. The envelope must arrive byte-for-byte.
+fn mtu_staircase() -> Report {
+    // 1400 -> 237 -> 54 -> 1400 -> 137. The widening hops matter as much as the
+    // narrowing ones: a reassembled envelope has to be forwardable again.
+    let mtus = [1400usize, 237, 54, 1400, 137];
+    let links = mtus
+        .iter()
+        .enumerate()
+        .map(|(i, m)| Link { a: i, b: i + 1, mtu: *m, loss_pct: 0, latency_ms: 5 })
+        .collect();
+    let mut sim = Sim::new(World::new(mtus.len() + 1, links), 0x0005_7A15).with_link_fragmentation();
+    sim.converge();
+    sim.start_measuring();
+
+    let dest = sim.world.nodes[mtus.len()].addr;
+    let now = sim.now_secs();
+    let payload: Vec<u8> = (0..900u32).map(|i| (i ^ (i >> 3)) as u8).collect();
+    let f = sim.world.nodes[0].send(dest, payload.clone(), now).expect("well under the ceiling");
+    sim.emit(0, f);
+    sim.run(sim.now_ms + 600_000, Some(mtus.len()));
+
+    let arrived = sim.seen_delivered[mtus.len()].len();
+    let reached = usize::from(arrived > 0);
+    Report {
+        setup: sim.setup(
+            "One envelope down a staircase of MTUs — 1400, 237, 54, 1400, 137 — with no node told what \
+             the rest of the path is made of. Delivery must not depend on the order the links come in.",
+        ),
+        name: "mtu-staircase".into(),
+        note: if reached == 1 {
+            "crossed five links of five different widths, splitting and reassembling at each".into()
+        } else {
+            "an envelope became undeliverable because of the sequence of links it met".into()
+        },
+        reached,
+        of: 1,
+        m: sim.m,
+    }
+}
+
 /// What a push buys, and what it costs the people who did not want it (M11-C).
 ///
 /// The asymmetry is the whole question. A pushed chunk is airtime spent at every
@@ -1185,7 +1234,7 @@ fn main() {
     let which = if as_markdown { "smoke".to_string() } else { which };
     let reports: Vec<Report> = match which.as_str() {
         "line" => vec![line()],
-        "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped(), mixed_mtu_linkfrag()],
+        "mixed-mtu" => vec![mixed_mtu(), mixed_mtu_clamped(), mixed_mtu_linkfrag(), mtu_staircase()],
         "lossy" => vec![lossy_mesh(0), lossy_mesh(10), lossy_mesh(50)],
         "linkfrag-loss" => vec![
             linkfrag_loss(0, 200),
@@ -1211,6 +1260,7 @@ fn main() {
             mixed_mtu(),
             mixed_mtu_clamped(),
             mixed_mtu_linkfrag(),
+            mtu_staircase(),
             lossy_mesh(0),
             lossy_mesh(10),
             partition(),
@@ -1258,8 +1308,8 @@ fn main() {
             // The M11-D acceptance test: with link fragmentation the narrow hop
             // is no longer fatal, and if that ever stops being true it is a
             // regression rather than a known bug.
-            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" | "file-multihop"
-            | "fetch-abandoned" | "linkfrag-loss-0pct" => {
+            "line" | "partition" | "hop-limit-17" | "mixed-mtu-linkfrag" | "mtu-staircase"
+            | "file-multihop" | "fetch-abandoned" | "linkfrag-loss-0pct" => {
                 if r.reached != r.of {
                     bad.push(format!("{}: reached {} of {}", r.name, r.reached, r.of));
                 }
