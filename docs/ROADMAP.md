@@ -194,6 +194,8 @@ Nothing here is load-bearing for a credible node.
 | Private group `key_id` divergence badge | ⬜ todo | Warn on mismatch in a sealed group chat; never claim roster consensus |
 | Boot receiver (optional, default off) | ⬜ todo | |
 | Sound + particles behind a setting, default off | ⬜ todo | Gated by the hard rule above: motion static under reduced motion, sound and particle bursts off until the user enables them |
+| Listen-before-talk on sub-GHz (#182) | ⬜ | The single largest practical win available on radio, and it costs code rather than money: ETSI EN 300 220 replaces the 10% duty cycle with LBT+AFA, so implementing it properly is a **10× airtime multiplier** on the same hardware. It is also the same work whichever part is chosen, which is why #182's radio survey concluded with it rather than with a chip. `bridge::csma` already does listen-before-talk for shared buses; this is the sub-GHz regulatory version of the same idea, with the dwell and backoff the standard actually requires |
+| Audio modem: measure the symbol error rate before coding (#179) | ⬜ | The audio bridge is the one place SPORE owns the raw channel end to end — everything else rides a PHY that already does bit-level FEC, so damage reaches us as erasures and the fountain handles it. Audio is 16-FSK with a CRC and nothing underneath, so one bad symbol discards a frame of up to ~4 kB and the only recovery is to send it again. **Measure first**: the right answer differs completely between "occasional isolated symbol errors" (interleaving plus a shorter frame) and "bursts" (Reed-Solomon over the 4-bit alphabet), and it may be neither — a link that either works or does not, with little margin between, is best documented rather than coded around. Not urgent: it works at the ~30 cm `HARDWARE.md` describes. This is about how it degrades past that |
 | SNR-weighted contention window on shared media | ⬜ todo | Today `Csma::schedule` waits a **random** 1–5× airtime before a flood and cancels if the id is overheard (§5.5); there is no signal-quality input anywhere in `src/`. [Meshtastic](https://meshtastic.org/docs/overview/mesh-algo/) instead gives the node that heard a frame *weakest* the **shortest** delay, so the most distant node rebroadcasts first and each hop covers the most ground, with nearer nodes then cancelling. That is a strict improvement to a mechanism SPORE already has: `schedule()` already takes the delay as a parameter, so only the delay computation and one signal-quality argument change — no wire change, pure local policy. The input is already in hand where it matters first: `esp32/src/radio.rs` reads `pkt.rx_ctrl` for `sig_len()`, and RSSI is a sibling field in that same struct (M8/E2) |
 | A node that carries its own traffic but relays nothing (a "companion" profile) | ⬜ todo | `set_bulk_budget`/`register_limited` cap *other people's file chunks* only; messages, announces, receipts and manifests always pass, so there is no way to say "do not relay for others" — the case for a phone on battery, or a node on a metered link. [MeshCore](https://github.com/meshcore-dev/MeshCore) ships this as a fixed `Companion` role that never repeats, which it argues also keeps bad paths out of the routing table. For SPORE it must be **local policy, not a protocol role** — a relay budget of zero, chosen by the operator and invisible on the wire — because M8's locked rule is that gateway behaviour is emergent and "if a gateway role ever needs writing, something has gone wrong." Needs an honest UI: a node that relays nothing is a worse citizen, and should say so rather than look identical to one that does |
 | Beacon duty-cycle measurement | ⬜ todo | HARDWARE.md procedure |
@@ -201,6 +203,20 @@ Nothing here is load-bearing for a credible node.
 | Hardware matrix pass (backup exclusion + migration + 7-day FS) | ⬜ todo | Needs a device; `android/TESTING.md` checklist exists |
 
 ---
+
+**Sub-GHz radio: decided (#182).** Stay with the **E22-900M30S** (SX1262).
+30 dBm out of the box at $5.50–7, Rust drivers exist, and SPORE already speaks to
+that silicon through the Meshtastic and RNode bridges — so a day-one test peer
+against deployed Meshtastic and Reticulum networks costs nothing. The CC1200 is
+the better *radio* (four times the bandwidth, hardware LBT, 7 dB better
+sensitivity) and the worse *project decision*: no cheap ready-made 1 W module, no
+Rust driver, no existing bridge to inherit. Revisit only if this radio has to
+carry file transfers rather than be the edge. Wi-Fi HaLow is the right answer in
+the US (902–928, no duty cycle, 1 W) and the wrong one in the EU, where it
+inherits the same SRD regime at $20–40.
+
+Whichever part: **listen-before-talk is worth more than the chip choice**, and is
+tracked in Milestone 5.
 
 ## Milestone 8 — Embedded ESP32 runtime (raw-802.11 relay)
 
@@ -289,6 +305,7 @@ design task; what is missing is the firmware side of each.
 | Task | Status | Notes |
 |---|---|---|
 | `esp_wifi_80211_tx` injection wired as `DatagramTransport::send`, RX as `::recv`, driven through `run_datagram` (E2) | 🧪 written, not run | `esp32/src/radio.rs` (ESP-IDF glue) over `bridge::ieee80211` (the codec, portable and CI-tested, shared with E2d). Promiscuous RX filtered to management frames in hardware, then `ieee80211::parse` → bounded queue → `recv`. Builds clean; **nothing has been transmitted or received on air** |
+| ESP-NOW as a second air binding (#204) | ⬜ | From reading `zh_network`: ESP-NOW is a *supported* connectionless 802.11 API — no association, no IP stack, invisible to Wi-Fi scanners — where our E2 plan is monitor-mode injection via `esp_wifi_80211_tx`. That makes it the lower-risk half of the same capability and a useful fallback if injection proves brittle on some chips or IDF versions. It is an ordinary **message pipe** (shape 1) with a ~218-byte MDU, so it needs a bridge and nothing else: link fragmentation already handles the narrow frame, and a 218-byte MDU is wider than Zigbee's 54, which is already supported. What `zh_network` does *beyond* the transport is not for us — it keeps per-node routing tables and transitive topology, which is exactly the thing SPEC §4 declines ("path learning is local and non-transitive"), and it documents no dedup or delivery semantics at all, where SPORE has both |
 | Solo TX-shape test: an external monitor-mode sniffer confirms the injected frame's shape (E2) | ⬜ todo | Proves the injection path without needing a second SPORE node |
 | Device-pair relay: two boards exchange a real envelope over the air (E2) | ⬜ todo | 🧪 until this run happens |
 | Linux daemon raw-802.11 bridge: monitor mode + injection over `nl80211`, same frame format as the board (E2d) | ⬜ todo | The other end of the same air interface, so a laptop relays with the boards rather than only talking to them over a tether. Shares the frame layout and `Envelope::probe` filter with the ESP path — one wire format, two implementations. Needs a card whose driver supports monitor + injection (`iw list` → "monitor" and "AP/VLAN"), which is a hardware constraint, not a code one |
