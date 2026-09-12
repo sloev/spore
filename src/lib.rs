@@ -11,8 +11,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use blake2::digest::consts::{U24, U32, U64};
-use blake2::{Blake2b, Digest as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 /// Fill `buf` with randomness from the host (M1).
 ///

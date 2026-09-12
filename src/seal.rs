@@ -26,6 +26,8 @@
 //! and the `seal_open` fuzz target both hammer.
 
 use crate::*;
+use blake2::digest::consts::U24;
+use blake2::Blake2b;
 
 // ---------------------------------------------------------------------------
 // §7 Crypto — seal to a recipient prekey (libsodium crypto_box_seal shape).

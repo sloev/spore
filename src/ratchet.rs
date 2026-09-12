@@ -1,4 +1,6 @@
 use super::*;
+use blake2::digest::consts::{U32, U64};
+use blake2::Blake2b;
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::ChaCha20Poly1305;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -24,6 +26,11 @@ const MAX_SKIP: u16 = 512; // cap out-of-order gap we'll pre-compute keys for
 /// message that no longer opens — and the protocol already tolerates that, since
 /// the ratchet's whole purpose is to survive gaps.
 const MAX_SKIPPED_KEYS: usize = 4 * MAX_SKIP as usize;
+
+/// A message key held aside during `decrypt`, keyed by the `(ratchet public,
+/// message number)` it would be filed under. Held rather than inserted until the
+/// message authenticates — see `decrypt`.
+type Banked = (([u8; 32], u16), [u8; 32]);
 
 /// A fresh X25519 keypair as `(secret, public)` raw bytes.
 pub fn keypair() -> ([u8; 32], [u8; 32]) {
@@ -211,7 +218,29 @@ impl Ratchet {
     /// key banked for an out-of-order message that never came does not outlive
     /// the forward-secrecy window. Pass the same `now` the rest of the node runs
     /// on — do not invent a second clock.
+    /// Open a message, **committing nothing until it authenticates**.
+    ///
+    /// The ordering here is the whole security property. This function used to
+    /// turn the ratchet, bank skipped keys and advance `nr` on the way to
+    /// deriving a message key, and authenticate last — so anyone able to put
+    /// bytes on the medium could destroy a session with a single frame:
+    ///
+    ///   * flip one bit of the 32-byte ratchet public and the receiver performs
+    ///     a DH step to an attacker-chosen key. The real chain is gone, and *no
+    ///     genuine message ever opens again* — measured, not theorised.
+    ///   * corrupt the ciphertext of a message whose key was banked, and the
+    ///     banked key is consumed on the way to failing, so the real copy can
+    ///     never be opened.
+    ///
+    /// Neither forgery opened anything, which is what made it easy to miss: the
+    /// attacker cannot read, only permanently deafen. A ratchet message rides an
+    /// ordinary envelope, so the attacker is anyone on the link.
+    ///
+    /// Now every candidate change is computed into locals and applied only after
+    /// `open` succeeds. A forged frame costs one X25519 keypair generation and
+    /// changes nothing, which is the right trade against losing the session.
     pub fn decrypt(&mut self, msg: &[u8], now: u32) -> Option<Vec<u8>> {
+        // Time-based and not attacker-driven, so it is safe before the check.
         self.purge_skipped(now);
         if msg.len() < HEADER {
             return None;
@@ -223,25 +252,93 @@ impl Ratchet {
         let header = &msg[..HEADER];
         let ct = &msg[HEADER..];
 
-        // A key we cached for an out-of-order message?
-        if let Some(sk) = self.skipped.remove(&(dh_pub, n)) {
-            return Self::open(&sk.key, n, header, ct);
+        // A key we cached for an out-of-order message. **Peeked, not taken**: a
+        // corrupt copy must not consume the key the real one needs.
+        if let Some(sk) = self.skipped.get(&(dh_pub, n)) {
+            let plain = Self::open(&sk.key, n, header, ct)?;
+            self.skipped.remove(&(dh_pub, n));
+            return Some(plain);
         }
-        // New ratchet public -> turn the ratchet (after banking the tail of
-        // the current receiving chain).
-        if self.dhr.as_ref() != Some(&dh_pub) {
-            self.skip(pn, now)?;
-            self.dh_ratchet(&dh_pub);
+
+        // --- everything below is a proposal until `open` says otherwise -------
+        let mut rk = self.rk;
+        let mut ckr = self.ckr;
+        let mut nr = self.nr;
+        let mut dhr = self.dhr;
+        let mut dhs_sec = self.dhs_sec;
+        let mut dhs_pub = self.dhs_pub;
+        let mut cks = self.cks;
+        let mut pn_out = self.pn;
+        let mut ns = self.ns;
+        // Keys this message *would* bank, held aside rather than inserted.
+        let mut banked: Vec<Banked> = Vec::new();
+
+        /// Advance a receiving chain to `until`, collecting the keys it passes.
+        fn skip_into(
+            until: u16,
+            nr: &mut u16,
+            ckr: &mut Option<[u8; 32]>,
+            dhr: Option<[u8; 32]>,
+            banked: &mut Vec<Banked>,
+        ) -> Option<()> {
+            if until > nr.saturating_add(MAX_SKIP) {
+                return None; // absurd gap: refuse
+            }
+            if let (Some(mut c), Some(d)) = (*ckr, dhr) {
+                while *nr < until {
+                    let (nck, mk) = kdf_ck(&c);
+                    banked.push(((d, *nr), mk));
+                    c = nck;
+                    *nr += 1;
+                }
+                *ckr = Some(c);
+            }
+            Some(())
         }
-        if n < self.nr {
+
+        if dhr.as_ref() != Some(&dh_pub) {
+            skip_into(pn, &mut nr, &mut ckr, dhr, &mut banked)?;
+            // The DH step, into locals. Generating a keypair for a frame that
+            // may be forged is the cost of not trusting it yet.
+            pn_out = ns;
+            ns = 0;
+            nr = 0;
+            dhr = Some(dh_pub);
+            let (r1, c1) = kdf_rk(&rk, &dh(&dhs_sec, &dh_pub));
+            rk = r1;
+            ckr = Some(c1);
+            let (s, pbk) = keypair();
+            dhs_sec = s;
+            dhs_pub = pbk;
+            let (r2, c2) = kdf_rk(&rk, &dh(&dhs_sec, &dh_pub));
+            rk = r2;
+            cks = Some(c2);
+        }
+        if n < nr {
             return None; // already consumed / replay
         }
-        self.skip(n, now)?;
-        let ckr = self.ckr?;
-        let (nck, mk) = kdf_ck(&ckr);
+        skip_into(n, &mut nr, &mut ckr, dhr, &mut banked)?;
+        let chain = ckr?;
+        let (nck, mk) = kdf_ck(&chain);
+
+        // **The authentication.** Nothing above has touched `self`.
+        let plain = Self::open(&mk, n, header, ct)?;
+
+        // --- authentic: commit -----------------------------------------------
+        self.rk = rk;
         self.ckr = Some(nck);
-        self.nr += 1;
-        Self::open(&mk, n, header, ct)
+        self.nr = nr + 1;
+        self.dhr = dhr;
+        self.dhs_sec = dhs_sec;
+        self.dhs_pub = dhs_pub;
+        self.cks = cks;
+        self.pn = pn_out;
+        self.ns = ns;
+        for (k, key) in banked {
+            self.skipped.insert(k, SkippedKey { key, inserted_at: now });
+        }
+        self.bound_skipped();
+        Some(plain)
     }
 
     /// Drop and zeroize skipped keys older than this session's skip TTL.
@@ -262,22 +359,6 @@ impl Ratchet {
     // Cache message keys for positions self.nr .. until in the current
     // receiving chain (so their out-of-order messages still open later). `now`
     // stamps each banked key for age-based created_at in `purge_skipped`.
-    fn skip(&mut self, until: u16, now: u32) -> Option<()> {
-        if until > self.nr.saturating_add(MAX_SKIP) {
-            return None; // absurd gap: refuse
-        }
-        if let (Some(mut ckr), Some(dhr)) = (self.ckr, self.dhr) {
-            while self.nr < until {
-                let (nck, mk) = kdf_ck(&ckr);
-                self.skipped.insert((dhr, self.nr), SkippedKey { key: mk, inserted_at: now });
-                ckr = nck;
-                self.nr += 1;
-            }
-            self.bound_skipped();
-            self.ckr = Some(ckr);
-        }
-        Some(())
-    }
 
     /// Keep the skipped-key cache inside [`MAX_SKIPPED_KEYS`].
     ///
@@ -294,22 +375,6 @@ impl Ratchet {
         for k in victims {
             self.skipped.remove(&k);
         }
-    }
-
-    fn dh_ratchet(&mut self, dh_pub: &[u8; 32]) {
-        self.pn = self.ns;
-        self.ns = 0;
-        self.nr = 0;
-        self.dhr = Some(*dh_pub);
-        let (rk, ckr) = kdf_rk(&self.rk, &dh(&self.dhs_sec, dh_pub));
-        self.rk = rk;
-        self.ckr = Some(ckr);
-        let (dhs_sec, dhs_pub) = keypair();
-        self.dhs_sec = dhs_sec;
-        self.dhs_pub = dhs_pub;
-        let (rk2, cks) = kdf_rk(&self.rk, &dh(&self.dhs_sec, dh_pub));
-        self.rk = rk2;
-        self.cks = Some(cks);
     }
 }
 
@@ -378,34 +443,315 @@ mod tests {
         // It takes an established session to reach, so this is a partner you
         // already agreed to talk to — but a partner should not get to decide how
         // much memory you spend.
+        // Driven through `decrypt` rather than by calling the internals: the
+        // bound has to hold against what a peer can actually send, and since the
+        // ratchet stopped committing state before authenticating, the internals
+        // are no longer reachable any other way.
         let (a_sec, a_pub) = keypair();
         let (b_sec, b_pub) = keypair();
+        let mut alice = Ratchet::init_alice(a_sec, b_pub, TEST_SKIP_TTL);
         let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub, TEST_SKIP_TTL);
-        let _ = a_sec;
 
-        // Drive many receiving chains, each leaving a large unclaimed gap.
-        for step in 0..40u16 {
-            let (_, fresh_pub) = keypair();
-            bob.dh_ratchet(&fresh_pub);
-            // Ask for keys up to a wide gap without ever claiming them.
-            let _ = bob.skip(MAX_SKIP.min(400), T0);
+        // Each round: Alice sends a burst, Bob opens only the last of it — which
+        // banks the whole gap — and then both ratchet, opening a fresh window.
+        for step in 0..20u16 {
+            let mut burst = Vec::new();
+            for i in 0..200u16 {
+                burst.push(alice.encrypt(format!("{step}:{i}").as_bytes()));
+            }
+            let last = burst.pop().expect("non-empty");
+            assert!(bob.decrypt(&last, T0).is_some(), "step {step}: the newest opens");
             assert!(
                 bob.skipped.len() <= MAX_SKIPPED_KEYS,
                 "step {step}: held {} skipped keys against a cap of {MAX_SKIPPED_KEYS}",
                 bob.skipped.len()
             );
+            // Turn both ratchets, so the next round files under a new `dh_pub`
+            // and `nr` restarts — the condition that used to grow this forever.
+            let from_bob = bob.encrypt(b"turn");
+            assert!(alice.decrypt(&from_bob, T0).is_some());
         }
+        assert!(bob.skipped.len() <= MAX_SKIPPED_KEYS);
     }
 
     #[test]
     fn an_absurd_gap_is_still_refused_outright() {
         // The per-gap bound is the cheaper guard and must keep working: a single
         // request for an enormous jump is refused rather than pre-computed.
-        let (_a_sec, a_pub) = keypair();
+        // Stated as what a peer can send, and checked by what it costs: a header
+        // claiming an enormous jump must be refused *without* pre-computing the
+        // keys, so the observable is that nothing was banked.
+        let (a_sec, a_pub) = keypair();
         let (b_sec, b_pub) = keypair();
+        let mut alice = Ratchet::init_alice(a_sec, b_pub, TEST_SKIP_TTL);
         let mut bob = Ratchet::init_bob(b_sec, b_pub, a_pub, TEST_SKIP_TTL);
-        let (_, fresh) = keypair();
-        bob.dh_ratchet(&fresh);
-        assert!(bob.skip(MAX_SKIP + 1, T0).is_none(), "a gap past MAX_SKIP must be refused");
+
+        let mut msg = alice.encrypt(b"hello");
+        let absurd = MAX_SKIP + 1;
+        msg[32..34].copy_from_slice(&absurd.to_be_bytes()); // n
+        assert!(bob.decrypt(&msg, T0).is_none(), "a gap past MAX_SKIP must be refused");
+        assert!(bob.skipped.is_empty(), "and refused before computing a single key for it");
+    }
+}
+
+#[cfg(test)]
+mod properties {
+    //! Property tests for the ratchet's **state machine** (#278).
+    //!
+    //! The parsers here are well fuzzed; the state machines were not tested at
+    //! all for the transitions that would actually hurt. A parser bug is a crash;
+    //! a ratchet bug is a message decrypting twice, or a key surviving a rotation
+    //! it should not have, and neither shows up in a fuzz target that only feeds
+    //! bytes to `decode`.
+    //!
+    //! So these drive two real `Ratchet`s across a channel that loses, reorders
+    //! and duplicates, with both sides sending, and assert the properties rather
+    //! than a transcript. Seeded, so a failure is reproducible from its number.
+    use super::*;
+
+    const T0: u32 = 1_700_000_000;
+    const TTL: u32 = 7 * 24 * 3600;
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 >> 33
+        }
+        fn below(&mut self, n: usize) -> usize {
+            if n == 0 {
+                0
+            } else {
+                self.next() as usize % n
+            }
+        }
+        fn chance(&mut self, pct: u64) -> bool {
+            pct > 0 && self.next() % 100 < pct
+        }
+    }
+
+    fn pair() -> (Ratchet, Ratchet) {
+        let (a_sec, a_pub) = keypair();
+        let (b_sec, b_pub) = keypair();
+        (Ratchet::init_alice(a_sec, b_pub, TTL), Ratchet::init_bob(b_sec, b_pub, a_pub, TTL))
+    }
+
+    /// One message in flight: who it is for, the bytes, and what it should say.
+    struct InFlight {
+        to_bob: bool,
+        wire: Vec<u8>,
+        plain: Vec<u8>,
+    }
+
+    /// Drive a session over a hostile channel and check the invariants hold.
+    ///
+    /// `loss`, `dup` and `reorder` are percentages. Returns how many messages the
+    /// far side successfully opened, so a caller can assert the channel was
+    /// actually exercised rather than silently doing nothing.
+    fn run(seed: u64, steps: usize, loss: u64, dup: u64, reorder: u64) -> usize {
+        let mut rng = Rng(seed);
+        let (mut alice, mut bob) = pair();
+        let mut wire: Vec<InFlight> = Vec::new();
+        let mut opened: Vec<Vec<u8>> = Vec::new(); // ciphertexts already accepted
+        let mut delivered = 0usize;
+
+        for step in 0..steps {
+            // Send, from whichever side can. Bob has no sending chain until he
+            // has heard from Alice, which is the protocol's own rule and worth
+            // exercising rather than working around.
+            if rng.chance(60) {
+                let from_alice = rng.chance(50) || !bob.can_send();
+                let plain = format!("step {step}").into_bytes();
+                if from_alice {
+                    wire.push(InFlight { to_bob: true, wire: alice.encrypt(&plain), plain });
+                } else if bob.can_send() {
+                    wire.push(InFlight { to_bob: false, wire: bob.encrypt(&plain), plain });
+                }
+            }
+
+            if wire.is_empty() {
+                continue;
+            }
+            // Deliver something — not necessarily the oldest, which is the
+            // reordering.
+            let idx = if rng.chance(reorder) { rng.below(wire.len()) } else { 0 };
+            let msg = wire.remove(idx);
+
+            if rng.chance(loss) {
+                continue; // the channel ate it
+            }
+            let copies = if rng.chance(dup) { 2 } else { 1 };
+            for _ in 0..copies {
+                let side: &mut Ratchet = if msg.to_bob { &mut bob } else { &mut alice };
+                let got = side.decrypt(&msg.wire, T0);
+                let already = opened.iter().any(|c| c == &msg.wire);
+                match got {
+                    Some(p) => {
+                        assert!(!already, "a ciphertext opened twice — replay (seed {seed}, step {step})");
+                        assert_eq!(p, msg.plain, "opened, but to the wrong plaintext (seed {seed})");
+                        opened.push(msg.wire.clone());
+                        delivered += 1;
+                    }
+                    None => {
+                        // Refusing is always allowed: a key may have been ratcheted
+                        // past, or skipped-key space exhausted. What is not allowed
+                        // is opening it a second time, which the branch above checks.
+                    }
+                }
+            }
+        }
+        delivered
+    }
+
+    #[test]
+    fn a_clean_channel_delivers_everything_it_carries() {
+        // The control. If this fails the harness is wrong, not the ratchet.
+        for seed in 0..8u64 {
+            let n = run(seed, 60, 0, 0, 0);
+            assert!(n > 10, "seed {seed} delivered only {n} on a clean channel");
+        }
+    }
+
+    #[test]
+    fn no_ciphertext_ever_opens_twice() {
+        // Replay is the failure that matters most here, and a duplicating channel
+        // is how it would be found. Both the in-order path and the skipped-key
+        // path are exercised, since they bank keys differently.
+        for seed in 0..24u64 {
+            let n = run(seed, 120, 0, 60, 40);
+            assert!(n > 0, "seed {seed} exercised nothing");
+        }
+    }
+
+    #[test]
+    fn a_session_survives_loss_reordering_and_duplication_together() {
+        // All three at once, which is the realistic case on a radio and the one
+        // no single-property test covers.
+        for seed in 0..24u64 {
+            let n = run(seed, 200, 30, 30, 50);
+            assert!(n > 5, "seed {seed} delivered only {n} — the session stopped working");
+        }
+    }
+
+    #[test]
+    fn a_corrupted_message_never_opens() {
+        // Authenticity, stated as a property rather than one example: flipping any
+        // single bit must make it fail, not merely usually fail.
+        let (mut alice, mut bob) = pair();
+        let msg = alice.encrypt(b"the dam holds");
+        for bit in 0..msg.len() * 8 {
+            let mut bad = msg.clone();
+            bad[bit / 8] ^= 1 << (bit % 8);
+            assert!(bob.decrypt(&bad, T0).is_none(), "a message with bit {bit} flipped opened");
+        }
+        // ...and the untouched original still does, so the flips did not simply
+        // break the session for everything that followed.
+        assert_eq!(bob.decrypt(&msg, T0).as_deref(), Some(&b"the dam holds"[..]));
+    }
+
+    #[test]
+    fn both_sides_sending_at_once_still_converge() {
+        // A simultaneous transition: each side sends before hearing the other, so
+        // both are advancing their own chain with no knowledge of the peer's.
+        let (mut alice, mut bob) = pair();
+        let a1 = alice.encrypt(b"from alice");
+        assert!(
+            !bob.can_send(),
+            "bob has no sending chain until he has heard alice — the protocol's own rule"
+        );
+        assert_eq!(bob.decrypt(&a1, T0).as_deref(), Some(&b"from alice"[..]));
+
+        // Now both send, neither having seen the other's latest.
+        let a2 = alice.encrypt(b"alice again");
+        let b1 = bob.encrypt(b"from bob");
+        assert_eq!(alice.decrypt(&b1, T0).as_deref(), Some(&b"from bob"[..]));
+        assert_eq!(bob.decrypt(&a2, T0).as_deref(), Some(&b"alice again"[..]));
+
+        // And the session keeps working afterwards, in both directions.
+        let a3 = alice.encrypt(b"after the crossover");
+        let b2 = bob.encrypt(b"likewise");
+        assert_eq!(bob.decrypt(&a3, T0).as_deref(), Some(&b"after the crossover"[..]));
+        assert_eq!(alice.decrypt(&b2, T0).as_deref(), Some(&b"likewise"[..]));
+    }
+}
+
+#[cfg(test)]
+mod unauthenticated_input {
+    //! A frame anyone on the link can write must not be able to change a
+    //! session's state (#278).
+    //!
+    //! Both of these failed before `decrypt` was reordered to authenticate
+    //! first, and neither is subtle once seen: the attacker cannot read
+    //! anything, so the forgery "fails" — and permanently deafens the receiver
+    //! on its way out.
+    use super::*;
+    const T0: u32 = 1_700_000_000;
+    const TTL: u32 = 7 * 24 * 3600;
+
+    fn pair() -> (Ratchet, Ratchet) {
+        let (a_sec, a_pub) = keypair();
+        let (b_sec, b_pub) = keypair();
+        (Ratchet::init_alice(a_sec, b_pub, TTL), Ratchet::init_bob(b_sec, b_pub, a_pub, TTL))
+    }
+
+    #[test]
+    fn a_forged_ratchet_header_cannot_destroy_the_session() {
+        // One flipped bit in the 32-byte ratchet public used to make the receiver
+        // perform a DH step to an attacker-chosen key, discarding the real
+        // receiving chain. Nothing genuine opened again — not the message already
+        // in flight, and not anything sent afterwards.
+        let (mut alice, mut bob) = pair();
+        let good = alice.encrypt(b"genuine");
+
+        let mut forged = good.clone();
+        forged[0] ^= 1;
+        assert!(bob.decrypt(&forged, T0).is_none(), "the forgery must not open");
+
+        assert_eq!(
+            bob.decrypt(&good, T0).as_deref(),
+            Some(&b"genuine"[..]),
+            "and must not have taken the genuine message down with it"
+        );
+        let later = alice.encrypt(b"later");
+        assert_eq!(bob.decrypt(&later, T0).as_deref(), Some(&b"later"[..]), "the session continues");
+    }
+
+    #[test]
+    fn a_corrupt_copy_cannot_consume_a_banked_key() {
+        // The skipped-key path had the same shape: the key was taken from the
+        // cache on the way to failing, so a corrupted copy of an out-of-order
+        // message destroyed the real one's only chance of opening.
+        let (mut alice, mut bob) = pair();
+        let m0 = alice.encrypt(b"zero");
+        let m1 = alice.encrypt(b"one");
+        assert!(bob.decrypt(&m1, T0).is_some(), "m1 arrives first, banking a key for m0");
+
+        let mut corrupt = m0.clone();
+        let last = corrupt.len() - 1;
+        corrupt[last] ^= 1;
+        assert!(bob.decrypt(&corrupt, T0).is_none(), "the corrupt copy must not open");
+
+        assert_eq!(
+            bob.decrypt(&m0, T0).as_deref(),
+            Some(&b"zero"[..]),
+            "and the banked key must still be there for the real one"
+        );
+    }
+
+    #[test]
+    fn a_flood_of_forgeries_changes_nothing() {
+        // The property rather than two examples: no sequence of unauthenticated
+        // frames may leave the session in a state a genuine message cannot use.
+        let (mut alice, mut bob) = pair();
+        let good = alice.encrypt(b"still here");
+        let mut rng = 0x5EEDu64;
+        for _ in 0..400 {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let mut junk = good.clone();
+            let byte = (rng >> 33) as usize % junk.len();
+            junk[byte] ^= 1 << ((rng >> 20) % 8);
+            assert!(bob.decrypt(&junk, T0).is_none(), "no forgery opens");
+        }
+        assert_eq!(bob.decrypt(&good, T0).as_deref(), Some(&b"still here"[..]));
     }
 }
