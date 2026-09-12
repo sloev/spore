@@ -59,6 +59,16 @@ jobs:
       # The published simulation results are generated from a real run. A
       # hand-maintained page is a claim about numbers nobody re-checked, and this
       # repo has already shipped one of those for months.
+      # The state diagrams are recorded from the machines actually running, so a
+      # transition the code can no longer take disappears from the page. Same
+      # reason as the simulation results: a hand-drawn diagram is a claim nobody
+      # re-checks, and this repo has shipped a stale one before.
+      - name: State machine diagrams in sync
+        if: runner.os == 'Linux'
+        run: |
+          cargo run --release --example state_machines > docs/STATE_MACHINES.md
+          git diff --exit-code docs/STATE_MACHINES.md \
+            || (echo "docs/STATE_MACHINES.md is stale — run: cargo run --release --example state_machines > docs/STATE_MACHINES.md"; exit 1)
       - name: Simulation results in sync
         if: runner.os == 'Linux'
         run: |
