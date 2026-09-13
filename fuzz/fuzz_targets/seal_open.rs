@@ -3,6 +3,8 @@
 //! Opening is the side an attacker controls the input to: they choose the
 //! ciphertext, we choose the key. Failure must be a `None`, never a panic on a
 //! truncated nonce or a length read out of the buffer.
+//!
+//! fuzz-covers: seal / open, topic key schedule
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use spore::*;

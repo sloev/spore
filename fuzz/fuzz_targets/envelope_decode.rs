@@ -3,6 +3,8 @@
 //! Decoding must reject anything it dislikes without indexing past the buffer or
 //! trusting a length it just read. Anything that *does* decode must then survive
 //! the accessors a relay calls on it before deciding what to do.
+//!
+//! fuzz-covers: envelope parser
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use spore::*;

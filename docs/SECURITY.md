@@ -63,6 +63,14 @@ treated as real findings rather than documentation nits:
 
 Report these only if you can show something *worse* than what is written here.
 
+**Start with [the security maturity matrix](SECURITY_MATRIX.md)**, which is
+generated from the tree and says per component what has actually been fuzzed,
+property-tested, reviewed and run on hardware. It exists because "the parser is
+audited" and "the protocol is audited" are very different claims and a reader
+with only the first cannot tell them apart. Its most important cell is the
+**independently reviewed** column, which is empty for every component: nobody
+outside this repository has audited any of this.
+
 - **Hardware-unverified bridges.** Anything marked 🧪 in
   [`docs/BRIDGES.md`](BRIDGES.md) has tested codecs and an untested hardware
   loop. Radio, BLE and audio paths are template-grade until someone runs the

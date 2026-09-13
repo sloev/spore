@@ -54,6 +54,7 @@ const pages = [
   ['docs/ROADMAP.md', 'roadmap.html', null],
   ['docs/SIMULATIONS.md', 'simulations.html', null],
   ['docs/STATE_MACHINES.md', 'state-machines.html', null],
+  ['docs/SECURITY_MATRIX.md', 'security-matrix.html', null],
   ['docs/SECURITY.md', 'security-policy.html', null],
   ['docs/THREAT_MODEL.md', 'threat-model.html', null],
   ['docs/HARDWARE.md', 'hardware.html', null],

@@ -3,6 +3,8 @@
 //!
 //! `KissStream` keeps state across reads, so it is fed incrementally here — that
 //! is how a real bridge uses it, and where a length bound is most easily lost.
+//!
+//! fuzz-covers: armor + KISS framing, envelope parser
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use spore::*;

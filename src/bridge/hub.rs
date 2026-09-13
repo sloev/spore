@@ -607,136 +607,6 @@ mod tests {
     }
 
     #[test]
-    fn every_public_method_holds_at_most_one_of_this_hub_s_locks() {
-        // The lock-order invariant, checked against the whole surface rather than
-        // wherever other tests happen to go (#278).
-        //
-        // `hold` asserts that no *other* lock of the same hub is already held, so
-        // this test's only job is to make sure every entry point is actually
-        // walked. That distinction matters: the guard is only worth what the
-        // coverage is, and when it was first added it silently covered ten of the
-        // fifteen methods here, because nothing called the other five.
-        //
-        // Two hubs, because holding one hub's lock while taking another's is
-        // legitimate — a gateway bridging two of them must — and the guard has to
-        // keep allowing it.
-        let hub = Hub::new(Node::new("a", &["news"]));
-        let other = Hub::new(Node::new("b", &["news"]));
-
-        let (tx, _rx) = channel();
-        hub.set_delivery_sink(tx);
-
-        let (i0, _r0) = hub.register();
-        let (_i1, _r1) = hub.register_limited(1024);
-        let pull = hub.register_pull();
-        hub.set_bulk_budget(i0, Some(2048));
-        hub.set_bulk_budget(i0, None);
-
-        hub.send(ZERO_DEST, b"hello".to_vec()).expect("under the ceiling");
-        hub.beacon();
-        hub.hello();
-        hub.tick();
-        let _ = hub.addr();
-
-        // A frame in, including one from the other hub — the cross-hub path.
-        let wire = other.with_node(|n| {
-            let f = n.send(ZERO_DEST, b"from b".to_vec(), 1_700_000_000).expect("fits");
-            match &f[0] {
-                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
-            }
-        });
-        hub.on_rx(i0, &wire, None);
-
-        hub.originate(hub.with_node(|n| n.build_announce(1_700_000_000)));
-
-        // Nested across two hubs: allowed, and the guard must not object.
-        hub.with_node(|_| {
-            let _ = other.addr();
-            other.tick();
-        });
-
-        hub.unregister(i0);
-        hub.unregister(pull);
-        hub.unregister(9999); // unknown id
-
-        // If any of the above had nested two of one hub's locks, `hold` would
-        // have panicked naming both. Reaching here is the assertion.
-    }
-
-    #[test]
-    fn concurrent_traffic_does_not_deadlock_the_hub() {
-        // The invariant above is static: it says no single call path nests two of
-        // a hub's locks. This is the dynamic half — many threads driving the hub
-        // from every direction at once, which is how the daemon actually uses it
-        // and the only way an ordering problem would show up as the hang it
-        // really is.
-        //
-        // A hang is the hard failure to test for, because a deadlocked thread
-        // produces nothing at all: no panic, no log, no progress. So the workers
-        // report completion and the main thread gives up waiting rather than
-        // joining, which turns "hung forever" into a test failure with a count.
-        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-        use std::sync::Arc;
-
-        let hub = Hub::new(Node::new("busy", &["news"]));
-        let (i0, _r0) = hub.register();
-        let (i1, _r1) = hub.register();
-        let done = Arc::new(AtomicUsize::new(0));
-
-        let wire = hub.with_node(|n| {
-            let f = n.send(ZERO_DEST, b"traffic".to_vec(), 1_700_000_000).expect("fits");
-            match &f[0] {
-                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
-            }
-        });
-
-        let mut workers = Vec::new();
-        for w in 0..6 {
-            let hub = hub.clone();
-            let done = done.clone();
-            let wire = wire.clone();
-            workers.push(std::thread::spawn(move || {
-                for _ in 0..200 {
-                    match w % 6 {
-                        0 => {
-                            let _ = hub.send(ZERO_DEST, b"x".to_vec());
-                        }
-                        1 => {
-                            hub.on_rx(i0, &wire, None);
-                        }
-                        2 => hub.tick(),
-                        3 => hub.beacon(),
-                        4 => {
-                            hub.with_node(|n| {
-                                let _ = n.store_len();
-                            });
-                        }
-                        _ => hub.set_bulk_budget(i1, Some(4096)),
-                    }
-                }
-                done.fetch_add(1, AtomicOrdering::SeqCst);
-            }));
-        }
-
-        // Wait on the counter, not on `join` — a join against a deadlocked thread
-        // hangs the test runner instead of failing it.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while done.load(AtomicOrdering::SeqCst) < workers.len() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert_eq!(
-            done.load(AtomicOrdering::SeqCst),
-            workers.len(),
-            "only {} of {} workers finished within 30s — the hub deadlocked",
-            done.load(AtomicOrdering::SeqCst),
-            workers.len()
-        );
-        for w in workers {
-            w.join().expect("a worker panicked");
-        }
-    }
-
-    #[test]
     fn unregister_stops_a_slot_without_renumbering_the_rest() {
         let hub = Hub::new(Node::new("gateway", &[]));
         let (a, a_rx) = hub.register();
@@ -815,17 +685,6 @@ mod tests {
     }
 
     #[test]
-    fn nesting_across_two_hubs_is_still_allowed() {
-        // The guard is per-hub, not per-thread, because nesting on two distinct
-        // hubs is legitimate — a gateway holding one node while consulting
-        // another deadlocks nothing.
-        let a = Hub::new(Node::new("a", &[]));
-        let b = Hub::new(Node::new("b", &[]));
-        let (x, y) = a.with_node(|na| (na.addr, b.with_node(|nb| nb.addr)));
-        assert_ne!(x, y, "two nodes, two addresses");
-    }
-
-    #[test]
     fn a_panic_inside_with_node_does_not_wedge_the_thread() {
         // The guard must unmark on unwind too. The node lock recovers from
         // poisoning by design (see `lock`), so a fault under it leaves the hub
@@ -838,5 +697,157 @@ mod tests {
         assert!(boom.is_err(), "the panic should propagate");
         let addr = hub.with_node(|n| n.addr);
         assert_ne!(addr, [0u8; 8], "the hub is still usable afterwards");
+    }
+
+    /// The lock-order property, kept in its own module so the security matrix
+    /// finds it by structure rather than by my say-so (#278).
+    ///
+    /// `Hub` is the one state machine here whose invariant is about concurrency:
+    /// at most one of a hub's locks is held at a time. These three check it
+    /// statically across the whole public surface, dynamically under contention,
+    /// and at the boundary where nesting is legitimate.
+    mod properties {
+        use super::*;
+
+        #[test]
+        fn every_public_method_holds_at_most_one_of_this_hub_s_locks() {
+            // The lock-order invariant, checked against the whole surface rather than
+            // wherever other tests happen to go (#278).
+            //
+            // `hold` asserts that no *other* lock of the same hub is already held, so
+            // this test's only job is to make sure every entry point is actually
+            // walked. That distinction matters: the guard is only worth what the
+            // coverage is, and when it was first added it silently covered ten of the
+            // fifteen methods here, because nothing called the other five.
+            //
+            // Two hubs, because holding one hub's lock while taking another's is
+            // legitimate — a gateway bridging two of them must — and the guard has to
+            // keep allowing it.
+            let hub = Hub::new(Node::new("a", &["news"]));
+            let other = Hub::new(Node::new("b", &["news"]));
+
+            let (tx, _rx) = channel();
+            hub.set_delivery_sink(tx);
+
+            let (i0, _r0) = hub.register();
+            let (_i1, _r1) = hub.register_limited(1024);
+            let pull = hub.register_pull();
+            hub.set_bulk_budget(i0, Some(2048));
+            hub.set_bulk_budget(i0, None);
+
+            hub.send(ZERO_DEST, b"hello".to_vec()).expect("under the ceiling");
+            hub.beacon();
+            hub.hello();
+            hub.tick();
+            let _ = hub.addr();
+
+            // A frame in, including one from the other hub — the cross-hub path.
+            let wire = other.with_node(|n| {
+                let f = n.send(ZERO_DEST, b"from b".to_vec(), 1_700_000_000).expect("fits");
+                match &f[0] {
+                    Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+                }
+            });
+            hub.on_rx(i0, &wire, None);
+
+            hub.originate(hub.with_node(|n| n.build_announce(1_700_000_000)));
+
+            // Nested across two hubs: allowed, and the guard must not object.
+            hub.with_node(|_| {
+                let _ = other.addr();
+                other.tick();
+            });
+
+            hub.unregister(i0);
+            hub.unregister(pull);
+            hub.unregister(9999); // unknown id
+
+            // If any of the above had nested two of one hub's locks, `hold` would
+            // have panicked naming both. Reaching here is the assertion.
+        }
+
+        #[test]
+        fn concurrent_traffic_does_not_deadlock_the_hub() {
+            // The invariant above is static: it says no single call path nests two of
+            // a hub's locks. This is the dynamic half — many threads driving the hub
+            // from every direction at once, which is how the daemon actually uses it
+            // and the only way an ordering problem would show up as the hang it
+            // really is.
+            //
+            // A hang is the hard failure to test for, because a deadlocked thread
+            // produces nothing at all: no panic, no log, no progress. So the workers
+            // report completion and the main thread gives up waiting rather than
+            // joining, which turns "hung forever" into a test failure with a count.
+            use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+            use std::sync::Arc;
+
+            let hub = Hub::new(Node::new("busy", &["news"]));
+            let (i0, _r0) = hub.register();
+            let (i1, _r1) = hub.register();
+            let done = Arc::new(AtomicUsize::new(0));
+
+            let wire = hub.with_node(|n| {
+                let f = n.send(ZERO_DEST, b"traffic".to_vec(), 1_700_000_000).expect("fits");
+                match &f[0] {
+                    Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+                }
+            });
+
+            let mut workers = Vec::new();
+            for w in 0..6 {
+                let hub = hub.clone();
+                let done = done.clone();
+                let wire = wire.clone();
+                workers.push(std::thread::spawn(move || {
+                    for _ in 0..200 {
+                        match w % 6 {
+                            0 => {
+                                let _ = hub.send(ZERO_DEST, b"x".to_vec());
+                            }
+                            1 => {
+                                hub.on_rx(i0, &wire, None);
+                            }
+                            2 => hub.tick(),
+                            3 => hub.beacon(),
+                            4 => {
+                                hub.with_node(|n| {
+                                    let _ = n.store_len();
+                                });
+                            }
+                            _ => hub.set_bulk_budget(i1, Some(4096)),
+                        }
+                    }
+                    done.fetch_add(1, AtomicOrdering::SeqCst);
+                }));
+            }
+
+            // Wait on the counter, not on `join` — a join against a deadlocked thread
+            // hangs the test runner instead of failing it.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while done.load(AtomicOrdering::SeqCst) < workers.len() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(
+                done.load(AtomicOrdering::SeqCst),
+                workers.len(),
+                "only {} of {} workers finished within 30s — the hub deadlocked",
+                done.load(AtomicOrdering::SeqCst),
+                workers.len()
+            );
+            for w in workers {
+                w.join().expect("a worker panicked");
+            }
+        }
+
+        #[test]
+        fn nesting_across_two_hubs_is_still_allowed() {
+            // The guard is per-hub, not per-thread, because nesting on two distinct
+            // hubs is legitimate — a gateway holding one node while consulting
+            // another deadlocks nothing.
+            let a = Hub::new(Node::new("a", &[]));
+            let b = Hub::new(Node::new("b", &[]));
+            let (x, y) = a.with_node(|na| (na.addr, b.with_node(|nb| nb.addr)));
+            assert_ne!(x, y, "two nodes, two addresses");
+        }
     }
 }

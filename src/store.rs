@@ -634,3 +634,212 @@ mod tests {
         assert!(known.len() <= MAX_KNOWN_FILENAMES, "held {}", known.len());
     }
 }
+
+#[cfg(test)]
+mod properties {
+    //! Property tests for the store's accounting and eviction (#278).
+    //!
+    //! The security matrix had this component at neither fuzzed nor
+    //! property-tested, which for the one table an attacker attacks *by filling
+    //! it* was the worst remaining gap on the page. M12-A was here: in-progress
+    //! fetches pinned 728 kB against a 64 kB budget because the pins were not
+    //! counted against anything.
+    //!
+    //! The invariant under test is the project's central claim, stated per-store:
+    //! no sequence of inserts a stranger can cause may leave the store holding
+    //! more memory than its budget, and no sequence may make the accounting
+    //! disagree with what is actually held. A store whose `bytes()` drifts from
+    //! its contents is worse than one that is simply full — every bound built on
+    //! top of it is then computed from a number that is wrong.
+    use super::*;
+
+    /// Deterministic pseudo-randomness, so a failure is reproducible from the
+    /// seed printed in the panic rather than from a lucky rerun.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            // xorshift64*: enough mixing for test input, no dependency.
+            let mut x = self.0;
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            self.0 = x;
+            x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn upto(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    /// A real envelope of roughly `len` payload bytes, and its true id.
+    fn env(len: usize, created_at: u32) -> (Id, Vec<u8>) {
+        let e = Envelope::new(ty::DATA, ZERO_DEST, created_at, vec![0x5A; len]);
+        (e.id(), e.wire())
+    }
+
+    #[derive(Default)]
+    struct MemBackend {
+        blobs: HashMap<Id, Vec<u8>>,
+    }
+
+    impl SpillBackend for MemBackend {
+        fn put(&mut self, id: &Id, wire: &[u8]) {
+            self.blobs.insert(*id, wire.to_vec());
+        }
+
+        fn get(&self, id: &Id) -> Option<Vec<u8>> {
+            self.blobs.get(id).cloned()
+        }
+
+        fn remove(&mut self, id: &Id) {
+            self.blobs.remove(id);
+        }
+
+        fn ids(&self) -> Vec<Id> {
+            self.blobs.keys().copied().collect()
+        }
+    }
+
+    #[test]
+    fn memory_never_exceeds_the_budget_under_any_sequence_of_puts() {
+        // The bound a spilling store actually promises. Sizes are mixed on
+        // purpose: `shed` evicts coldest-then-largest, so a stream of one size
+        // never exercises the tie-breaks that decide *what* goes.
+        for seed in 1..=24u64 {
+            let mut rng = Rng(seed);
+            let mut s = Store::new();
+            s.set_spill_backend(Box::new(MemBackend::default()), 1_000);
+            let budget = 4_096;
+            s.set_mem_budget(budget);
+
+            for i in 0..120u64 {
+                let len = [1usize, 40, 300, 1200, 3000][rng.upto(5)];
+                let (id, wire) = env(len, 1_000 + i as u32);
+                s.put(id, wire, 1_000 + i as u32, rng.upto(256) as u8, i, ZERO_DEST);
+                // `mem_bytes`, not `bytes()`. The budget bounds what is resident;
+                // `bytes()` is memory *and* spill together, and is deliberately
+                // allowed to grow past it — that is what spilling is for. Getting
+                // this wrong was the first draft of this test, and it is the same
+                // confusion a caller would make from outside, since only the sum
+                // is public.
+                assert!(
+                    s.mem_bytes <= budget,
+                    "seed {seed}, put {i}: {} bytes resident against a {budget} budget",
+                    s.mem_bytes
+                );
+                assert!(s.bytes() >= s.mem_bytes, "the total can never be less than the resident part of it");
+            }
+        }
+    }
+
+    #[test]
+    fn a_store_with_nowhere_to_spill_keeps_everything_and_that_is_deliberate() {
+        // `shed` returns early with no backend, so the memory budget is *not* a
+        // bound on a store that cannot read anything back. Asserted rather than
+        // left implicit, because it looks exactly like the bug above: the number
+        // to check in that configuration is the node's entry cap, not this one.
+        let mut s = Store::new();
+        s.set_mem_budget(64);
+        for i in 0..20u64 {
+            let (id, wire) = env(200, 1_000 + i as u32);
+            s.put(id, wire, 1_000 + i as u32, 0, i, ZERO_DEST);
+        }
+        assert_eq!(s.len(), 20, "nothing may be silently dropped when it cannot be re-read");
+        assert!(s.mem_bytes > 64, "and the budget is knowingly exceeded rather than enforced by loss");
+    }
+
+    #[test]
+    fn accounting_matches_what_is_actually_held_after_puts_and_removes() {
+        // A leak here is how a store fills while reporting itself empty — every
+        // bound above it is then computed from a wrong number, which is a worse
+        // failure than being full.
+        for seed in 100..=116u64 {
+            let mut rng = Rng(seed);
+            let mut s = Store::new();
+            s.set_spill_backend(Box::new(MemBackend::default()), 1_000);
+            s.set_mem_budget(8_192);
+            let mut live: Vec<Id> = Vec::new();
+
+            for i in 0..150u64 {
+                if !live.is_empty() && rng.upto(3) == 0 {
+                    let victim = live.remove(rng.upto(live.len()));
+                    s.remove(&victim);
+                    assert!(!s.contains(&victim), "removed and still present");
+                    assert!(s.wire(&victim).is_none(), "removed and still readable");
+                } else {
+                    let (id, wire) = env([10usize, 100, 900][rng.upto(3)], 1_000 + i as u32);
+                    s.put(id, wire, 1_000 + i as u32, rng.upto(256) as u8, i, ZERO_DEST);
+                    if !live.contains(&id) {
+                        live.push(id);
+                    }
+                }
+
+                assert_eq!(s.len(), live.len(), "seed {seed}, step {i}: entry count drifted");
+                // Both counters, against the entries themselves. `mem_bytes` is
+                // what is resident; `total_bytes` is everything held, spilled or
+                // not. Either one drifting is a silent bound failure above.
+                let resident: usize =
+                    s.entries().filter(|(_, st)| matches!(st.body, Body::Mem(_))).map(|(_, st)| st.len).sum();
+                let held: usize = s.entries().map(|(_, st)| st.len).sum();
+                assert_eq!(s.mem_bytes, resident, "seed {seed}, step {i}: resident accounting drifted");
+                assert_eq!(s.bytes(), held, "seed {seed}, step {i}: total accounting drifted");
+            }
+        }
+    }
+
+    #[test]
+    fn everything_still_held_reads_back_byte_identical_whether_or_not_it_spilled() {
+        // Eviction moves bytes, it does not lose them. If a spilled entry cannot
+        // be read back the store has quietly become a cache, and custody — which
+        // is the one promise a relay makes — is no longer true.
+        let mut rng = Rng(7);
+        let mut s = Store::new();
+        s.set_spill_backend(Box::new(MemBackend::default()), 1_000);
+        s.set_mem_budget(2_048);
+        let mut expect: Vec<(Id, Vec<u8>)> = Vec::new();
+
+        for i in 0..60u64 {
+            let (id, wire) = env([20usize, 400, 1500][rng.upto(3)], 1_000 + i as u32);
+            s.put(id, wire.clone(), 1_000 + i as u32, rng.upto(256) as u8, i, ZERO_DEST);
+            expect.push((id, wire));
+        }
+
+        let mut spilled = 0;
+        for (id, wire) in &expect {
+            assert_eq!(s.wire(id).as_ref(), Some(wire), "an entry did not read back intact");
+            if matches!(s.meta(id).map(|m| &m.body), Some(Body::Evicted)) {
+                spilled += 1;
+            }
+        }
+        assert!(spilled > 0, "the budget was never tight enough to spill anything, so this proved nothing");
+    }
+
+    #[test]
+    fn the_content_index_never_outlives_the_envelope_it_names() {
+        // `by_content` is a second index over the same entries, so it is a second
+        // place the store can be wrong. A stale content id resolves a WANT to an
+        // envelope that is gone, and the asker is told "held" and then served
+        // nothing.
+        let mut s = Store::new();
+        let payload = {
+            let mut v = vec![file::CHUNK_TAG];
+            v.extend_from_slice(b"the dam holds");
+            v
+        };
+        let cid = file::content_id(&payload);
+        let e = Envelope::new(ty::DATA, ZERO_DEST, 1_000, payload);
+        let id = e.id();
+        s.put(id, e.wire(), 1_000, 0, 0, ZERO_DEST);
+
+        assert_eq!(s.by_content(&cid), Some(id), "the content index must find it");
+        assert!(s.has_content(&cid));
+        assert!(s.wire_by_content(&cid).is_some());
+
+        s.remove(&id);
+        assert_eq!(s.by_content(&cid), None, "a removed envelope must leave no content entry behind");
+        assert!(!s.has_content(&cid));
+        assert!(s.wire_by_content(&cid).is_none());
+    }
+}
