@@ -207,7 +207,9 @@ function applyHash() {
     screen,
     chatOpen,
     pane: chatOpen ? 'detail' : defaultPaneFor(screen),
-    chatDraft: chatOpen === state.chatOpen ? state.chatDraft : '',
+    // Drafts are kept per conversation now (G4), so switching away and back
+    // returns what you had typed instead of discarding it.
+    chatDraft: chatOpen ? draftFor('chat', chatOpen) : '',
     newConvoOpen: false,
     newConvoError: null,
     // Leaving a screen closes what was floating over it; a sheet that outlived
@@ -219,12 +221,39 @@ function applyHash() {
   });
 }
 
+// ---------------------------------------------------------------- drafts
+//
+// Unsent text lives in the Rust draft store (G4), so it survives switching
+// conversations and reloading. Both helpers are deliberately forgiving: they run
+// on every keystroke and before the node has booted, and a composer that threw
+// because the communicator was not ready yet would be worse than one that simply
+// does not remember.
+
+function draftFor(scope, addrHex) {
+  if (!addrHex || !client || !client.communicator) return '';
+  try { return client.communicator.draftGet(scope, addrHex); } catch { return ''; }
+}
+
+function saveDraft(scope, addrHex, text) {
+  if (!addrHex || !client || !client.communicator) return;
+  try {
+    client.communicator.draftSet(scope, addrHex, text, Math.floor(Date.now() / 1000));
+  } catch { /* a draft is a convenience; never let it break the composer */ }
+  // Not persisted on every keystroke: `save()` serialises every store, and
+  // doing that per character would be the most expensive thing the app does.
+  // Drafts reach storage on the next ordinary save — sending, following a feed,
+  // editing a contact — and on `pagehide`, wired in `boot`.
+}
+
 // ----------------------------------------------------------------- chat
 
 const chatActions = {
   select: (addr) => openChat(addr),
 
-  setDraft: (v) => { state.chatDraft = v; }, // no re-render: see renderComposer
+  setDraft: (v) => {
+    state.chatDraft = v; // no re-render: see renderComposer
+    saveDraft('chat', state.chatOpen, v);
+  },
 
   send: () => guard(async () => {
     const body = state.chatDraft.trim();
@@ -233,6 +262,7 @@ const chatActions = {
     const envelope = client.sendDirect(state.chatOpen, new TextEncoder().encode(body));
     threads.send({ ...envelope, body });
     await threads.save();
+    saveDraft('chat', state.chatOpen, '');
     setState({ chatDraft: '', sending: false });
   }),
 
@@ -361,9 +391,12 @@ const blogsActions = {
     setState({ openTopic: null, topicList: topicRows() });
   },
 
-  open: (topicHex) => setState({ openTopic: topicHex, postDraft: '' }),
+  open: (topicHex) => setState({ openTopic: topicHex, postDraft: draftFor('topic', topicHex) }),
   close: () => setState({ openTopic: null }),
-  setDraft: (v) => { state.postDraft = v; },
+  setDraft: (v) => {
+    state.postDraft = v;
+    saveDraft('topic', state.openTopic, v);
+  },
 
   post: (topicHex, body) => {
     const name = topics.nameFor(topicHex);
@@ -378,6 +411,7 @@ const blogsActions = {
       // it would vanish until someone else relayed it back.
       topics.receive({ topicHex, from: state.identity ? state.identity.addrHex : null, body, at: Math.floor(Date.now() / 1000) });
       topics.save();
+      saveDraft('topic', topicHex, '');
       setState({ posting: false, postDraft: '', topicList: topicRows() });
     } catch (err) {
       setState({ posting: false, followError: String((err && err.message) || err) });
@@ -905,6 +939,15 @@ export async function boot(container) {
   if (!state.keepHistory) threads.storage = null;
 
   window.addEventListener('hashchange', () => { if (!state.onboarding) applyHash(); });
+
+  // Drafts are written to the store on every keystroke but only serialised to
+  // the host on an ordinary save, so a tab closed mid-sentence would otherwise
+  // lose it. `pagehide` rather than `beforeunload`: the latter is unreliable on
+  // mobile, where a tab is usually discarded rather than closed, and mobile is
+  // where someone is most likely to be interrupted mid-message.
+  window.addEventListener('pagehide', () => {
+    try { threads.save(); } catch { /* a closing tab is not a place for error handling */ }
+  });
 
   if (hasSeed) {
     const identity = await client.init(wasmSource());
