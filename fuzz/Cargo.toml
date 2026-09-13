@@ -56,3 +56,9 @@ name = "radio_codecs"
 path = "fuzz_targets/radio_codecs.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "linkfrag_reassembly"
+path = "fuzz_targets/linkfrag_reassembly.rs"
+test = false
+doc = false

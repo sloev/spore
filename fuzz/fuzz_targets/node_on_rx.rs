@@ -4,6 +4,8 @@
 //! accounting, path learning, reassembly and delivery in a single pass over
 //! bytes a stranger chose. It is the highest-value target here: a panic in any
 //! of those stages is a remotely triggered node death.
+//!
+//! fuzz-covers: node ingest / forwarding, envelope parser
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use spore::*;

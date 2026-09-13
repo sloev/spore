@@ -9,6 +9,8 @@
 //! quietly retains everything it is fed is a resource-exhaustion bug that no
 //! panic-only harness can see, so this asserts the framer stays bounded and that
 //! every frame it emits is within the declared maximum.
+//!
+//! fuzz-covers: radio codecs
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use spore::bridge::meshtastic::{self, StreamFramer, STREAM_MAX_LEN};

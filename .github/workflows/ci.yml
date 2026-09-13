@@ -68,6 +68,22 @@ jobs:
       - name: Unsafe inventory unchanged
         if: runner.os == 'Linux'
         run: python3 scripts/unsafe_snapshot.py --check
+      # The maturity table is generated from the tree, so a deleted fuzz target
+      # or a renamed test module removes its own tick here. A hand-written table
+      # fails the other way: it keeps claiming coverage that no longer exists.
+      - name: Security maturity matrix in sync
+        if: runner.os == 'Linux'
+        run: python3 scripts/security_matrix.py --check
+      # Seeds are generated from the real encoders, so they go stale silently when
+      # a format changes: the `ver` bump to 0x02 left every committed seed carrying
+      # an 0x01 envelope, and the fuzzer spent its budget mutating past a version
+      # byte we could simply have handed it.
+      - name: Fuzz seeds in sync with the encoders
+        if: runner.os == 'Linux'
+        run: |
+          cargo run --example gen_fuzz_seeds
+          git diff --exit-code fuzz/seeds \
+            || (echo "fuzz/seeds is stale — run: cargo run --example gen_fuzz_seeds"; exit 1)
       # The published simulation results are generated from a real run. A
       # hand-maintained page is a claim about numbers nobody re-checked, and this
       # repo has already shipped one of those for months.

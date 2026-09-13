@@ -28,6 +28,10 @@ jobs:
           - armor_and_framing
           - seal_open
           - radio_codecs
+          # Added after the security matrix showed link reassembly had no
+          # adversarial input at all — `fragment_reassembly` covers the fountain,
+          # which is a different module with a different header.
+          - linkfrag_reassembly
     steps:
       - uses: actions/checkout@v7
       # libFuzzer needs nightly; this is the only place the project uses it.

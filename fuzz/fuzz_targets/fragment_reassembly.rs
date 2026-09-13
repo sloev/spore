@@ -4,6 +4,8 @@
 //! The count and index bytes come straight off the wire. A zero count once
 //! reached `idx % count` in the selector and took the process with it; this
 //! target exists so the next one of those is found here rather than in the field.
+//!
+//! fuzz-covers: fountain reassembly, node ingest / forwarding
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use spore::*;
