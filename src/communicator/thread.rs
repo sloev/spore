@@ -311,7 +311,7 @@ impl ThreadStore {
     /// silently wiping it would be worse, because the bytes may be the only copy
     /// of a conversation and a future build may know how to read them.
     pub fn decode(bytes: &[u8]) -> Option<ThreadStore> {
-        let mut c = Cursor { b: bytes, i: 0 };
+        let mut c = super::Cursor::new(bytes);
         if c.u8()? != ENCODING_VERSION {
             return None;
         }
@@ -360,7 +360,7 @@ impl ThreadStore {
         // Trailing bytes mean this is not what it claims to be. Refusing is the
         // conservative read: a shorter-than-expected parse that "worked" would
         // silently drop whatever followed.
-        if c.i != bytes.len() {
+        if !c.at_end() {
             return None;
         }
         Some(s)
@@ -392,58 +392,6 @@ fn status_of(c: u8) -> Option<MessageStatus> {
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
     out.extend_from_slice(&v.to_be_bytes());
-}
-
-/// A bounds-checked reader. Every read is fallible, so a truncated blob returns
-/// `None` rather than panicking on a slice — the host's storage is the one input
-/// here that is neither signed nor verified.
-struct Cursor<'a> {
-    b: &'a [u8],
-    i: usize,
-}
-
-impl<'a> Cursor<'a> {
-    fn remaining(&self) -> usize {
-        self.b.len() - self.i
-    }
-
-    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
-        let end = self.i.checked_add(n)?;
-        let out = self.b.get(self.i..end)?;
-        self.i = end;
-        Some(out)
-    }
-
-    fn u8(&mut self) -> Option<u8> {
-        Some(self.take(1)?[0])
-    }
-
-    fn bool(&mut self) -> Option<bool> {
-        match self.u8()? {
-            0 => Some(false),
-            1 => Some(true),
-            _ => None,
-        }
-    }
-
-    fn u32(&mut self) -> Option<u32> {
-        let b = self.take(4)?;
-        Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-    }
-
-    fn addr(&mut self) -> Option<Addr> {
-        let b = self.take(8)?;
-        let mut a = [0u8; 8];
-        a.copy_from_slice(b);
-        Some(a)
-    }
-
-    fn id(&mut self) -> Option<crate::Id> {
-        let b = self.take(16)?;
-        let mut id = [0u8; 16];
-        id.copy_from_slice(b);
-        Some(id)
-    }
 }
 
 /// How a thread renders: a sticky day divider, and consecutive messages from one
