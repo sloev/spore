@@ -42,8 +42,13 @@
 //! not by limitation: portability of the *kernel* is the win, and the application
 //! layer goes where there is a user.
 
+pub mod contact;
 pub mod thread;
 
+mod cursor;
+pub(crate) use cursor::Cursor;
+
+pub use contact::{contact_rows, Contact, ContactRow, ContactStore, PeerSeen, View};
 pub use thread::{MessageStatus, ThreadStore};
 
 #[cfg(test)]
