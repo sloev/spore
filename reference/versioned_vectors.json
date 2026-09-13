@@ -1,0 +1,69 @@
+{
+  "link_framing": {
+    "magic": "f6",
+    "overhead": 7,
+    "frame": "020000106553f10019fba0e995b9794f0064000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60616263",
+    "split_mtu_40": {
+      "set_id": 4660,
+      "pieces": ["f6123400000004020000106553f10019fba0e995b9794f0064000102030405060708090a0b0c0d0e", "f61234000100040f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", "f6123400020004303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f50", "f61234000300045152535455565758595a5b5c5d5e5f60616263"],
+      "count": 4
+    },
+    "split_mtu_4096_fits_whole": {
+      "pieces": ["020000106553f10019fba0e995b9794f0064000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60616263"],
+      "note": "a frame that fits is returned unchanged and unwrapped"
+    },
+    "kiss": {
+      "frame": "01c0db02",
+      "encoded": "c00001dbdcdbdd02c0",
+      "note": "FEND C0 -> DB DC, FESC DB -> DB DD; leading C0 00 is FEND + command"
+    }
+  },
+  "gossip": {
+    "ty_inv": 1, "ty_want": 2, "fl_cancel": 128,
+    "max_ids_per_gossip": 64,
+    "inv": { "ids": ["a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"], "wire": "020100100000000000000000000000000020a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2" },
+    "want": { "ids": ["a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"], "wire": "020200100000000000000000000000000010a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2" },
+    "want_with_depth": { "ids": ["a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"], "depth": 3, "wire": "020200100000000000000000000000000011a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a203", "note": "odd payload length: the trailing byte is remaining depth, and the receiver clamps it to its own default" },
+    "cancel": { "ids": ["a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"], "wire": "020280100000000000000000000000000010a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2", "note": "WANT + CANCEL, never a depth byte, so the length stays even" },
+    "cancel_all": { "ids": [], "wire": "020280100000000000000000000000000000", "note": "empty payload is the wildcard: retire every interest this peer placed" }
+  },
+  "file_layer": {
+    "tags": { "manifest": "01", "chunk": "07", "tree": "08", "sealed": "09" },
+    "chunk_bytes": 4096, "max_depth": 4,
+    "leaf": {
+      "depth": 0, "count": 2, "total_len": 5000,
+      "chunk_size": 4096, "name": "dam.txt",
+      "chunk_ids": ["c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1", "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2"],
+      "encoded": "01b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b000001000000000020000000000001388000764616d2e747874c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+      "content_id": "73a45d700b509acaaa0739f44436ca90",
+      "note": "MANIFEST_TAG, no depth byte: a depth-0 manifest encodes exactly as it did before trees existed"
+    },
+    "tree": {
+      "depth": 1, "count": 2, "total_len": 9000000,
+      "chunk_size": 4096, "name": "big.bin",
+      "chunk_ids": ["d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2"],
+      "encoded": "0801b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b00000100000000002000000000089544000076269672e62696ed1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+      "content_id": "fcd199aedd02709b0c8810fea666c01a",
+      "note": "TREE_TAG carries a depth byte; chunk_ids name sub-manifests, not chunks"
+    },
+    "sealed": {
+      "depth": 0, "count": 2, "total_len": 5000,
+      "chunk_size": 4096, "name": "",
+      "chunk_ids": ["c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1", "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2"],
+      "encoded": "0900e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0000010000000000200000000000013880000c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+      "content_id": "ccc120ae81ff11d789c7915773ffeb9c",
+      "note": "SEALED_TAG carries depth and a 16-byte hdr_id naming the header envelope; name is empty and total_len is the plaintext length"
+    }
+  },
+  "forwarding": [
+    { "input": "DATA, FLOOD, hops=4, unseen", "state": "topic followed", "observed": "deliver x1 + Flood{except: 0}", "why": "the ordinary path: deliver locally and relay on every interface but the one it arrived on" },
+    { "input": "the same DATA a second time", "state": "id already seen", "observed": "nothing", "why": "dedup is by envelope id with hops zeroed, so one message arriving by two paths is one message" },
+    { "input": "DATA, FLOOD, hops=0", "state": "topic followed", "observed": "deliver x1", "why": "hops counts down and forwarding stops at zero; the frame is still for us, it just stops here" },
+    { "input": "DATA addressed elsewhere, hops=4", "state": "dest is neither ours nor a topic we follow", "observed": "Flood{except: 0}", "why": "custody: unicast we cannot read is carried anyway, which is what makes the mesh a courier" },
+    { "input": "INV listing an id we lack", "state": "empty store", "observed": "Directed{iface: 0}", "why": "INV and WANT are per-link, hops=0, consumed on receipt: never stored, never deduped, never relayed" },
+    { "input": "WANT for an id we hold", "state": "that envelope in the store", "observed": "Directed{iface: 0}", "why": "answered on the link it arrived on rather than flooded, because exactly one peer asked" },
+    { "input": "WANT for an id we lack", "state": "empty store", "observed": "nothing", "why": "nothing to serve; the node may adopt an interest and ask onward, which is not a reply to this link" },
+    { "input": "DATA with created_at far in the future", "state": "beyond MAX_CLOCK_SKEW_SECS", "observed": "nothing", "why": "post-dated frames are refused at admission: one would otherwise outrank every honest envelope at eviction" },
+    { "input": "DATA whose payload was altered after signing", "state": "signature no longer verifies", "observed": "deliver x1 + Flood{except: 0}", "why": "relayed and delivered anyway, and that is the rule rather than a gap: SPEC section 5 says verify before binding trust state, do not verify to forward. A relay moves bytes it cannot read. What the bad signature costs the sender is attribution - the envelope binds no path, names no neighbour, and reaches the app flagged for the app to check - so a second implementation that drops it here is not stricter, it is broken, because it would also drop every envelope it merely lacks the key for" }
+  ]
+}

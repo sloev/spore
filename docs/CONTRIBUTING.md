@@ -115,6 +115,7 @@ cargo fmt --all --check
 cargo clippy --all-targets           # with RUSTFLAGS="-D warnings"
 cargo test --all-targets
 cargo run --example gen_vectors > reference/vectors.json && git diff --exit-code reference/vectors.json
+cargo run --example gen_versioned_vectors > reference/versioned_vectors.json && git diff --exit-code reference/versioned_vectors.json
 python3 reference/test_t0.py
 python3 scripts/check_docs_sync.py
 cargo build --release --lib --target wasm32-unknown-unknown && node web/test.mjs

@@ -33,9 +33,9 @@ branches, releases). Read those once; this one is a lookup table.
 | `web/` | The browser stack: wasm core, one JS transport per medium (`web/transports/`), `hardbrut-import.mjs`/`hardbrut-sync.mjs` (vendors HARDBRUT's real CSS at build time, used by the Pages site and Android), `vendor/hardbrut3/` (the standalone's own HARDBRUT/3 vendor, M10-D), and `build-standalone.mjs`, which inlines everything into one self-contained node. Zero network requests, verified by CI. |
 | `site/` | The Pages generator (`build.mjs`, HARDBRUT classes only, no hand-authored CSS) and `site/seed/` (printable paper-seed tooling). |
 | `android/` | `android/jni/` is an additive Rust crate exposing an opaque-handle C ABI to Kotlin — checkable with plain `cargo check`. `android/app/…/node/` is the Kotlin app, which needs the SDK/NDK. |
-| `reference/` | Dependency-free Tier-0 decoders (pure Python, no crypto libs) plus `vectors.json`, the generated cross-language vectors everything is checked against. |
+| `reference/` | Dependency-free Tier-0 decoders (pure Python, no crypto libs) plus `vectors.json`, the generated cross-language vectors everything is checked against. `spore_t1.py` and `versioned_vectors.json` cover the tier above the envelope — link framing, INV/WANT, manifests, forwarding. |
 | `tests/` | `api_freeze.rs` — what makes the freeze mechanical rather than a promise. |
-| `examples/` | `gen_vectors.rs` (generates `reference/vectors.json`), `worked.rs` (backs `REBUILD.md`), `direct_loopback.rs`, `gen_fuzz_seeds.rs`. |
+| `examples/` | `gen_vectors.rs` (generates `reference/vectors.json`), `gen_versioned_vectors.rs` (generates `reference/versioned_vectors.json`), `worked.rs` (backs `REBUILD.md`), `direct_loopback.rs`, `gen_fuzz_seeds.rs`, `state_machines.rs`. |
 | `fuzz/` | `cargo-fuzz` targets, corpus and seeds. Parsers are fuzzed, not only unit-tested. |
 | `scripts/` | `check_docs_sync.py` (fails CI if `REBUILD.md` drifts from the vectors), `unsafe_snapshot.py` (fails CI if the `unsafe` inventory moved), `make-offline-bundle.sh`. |
 | `tools/` | Helpers outside the crate and CI — currently `reticulum_companion.py`. |
@@ -162,7 +162,7 @@ which part:
 | C ABI / bindings | `python3 bindings/generate.py` after changing `spec.json`. Never hand-edit `bindings/{python,go,node}/`. |
 | Design tokens | `node web/hardbrut-sync.mjs && python3 android/hardbrut-sync.py` after HARDBRUT upstream moves; `python3 design/generate.py` after that or after changing `tokens.json`'s Android sizing table. CI fails on drift in any of these. |
 | Fuzz | `cargo fuzz run <target>` from `fuzz/` (nightly + `cargo-fuzz`). |
-| Vectors | `cargo run --example gen_vectors > reference/vectors.json`, then `python3 reference/test_t0.py` and `python3 scripts/check_docs_sync.py`. |
+| Vectors | `cargo run --example gen_vectors > reference/vectors.json` and `cargo run --example gen_versioned_vectors > reference/versioned_vectors.json`, then `python3 reference/test_t0.py`, `python3 reference/test_t1.py` and `python3 scripts/check_docs_sync.py`. |
 | Added or moved an `unsafe` | `python3 scripts/unsafe_snapshot.py > audits/unsafe-snapshot.txt`, and expect the diff to be read. A line there is a place that can cause undefined behaviour; the snapshot exists so adding one is a decision somebody saw. |
 
 ## Conventions

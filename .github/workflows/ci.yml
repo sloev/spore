@@ -46,6 +46,18 @@ jobs:
           git diff --exit-code reference/vectors.json \
             || (echo "reference/vectors.json is stale — run: cargo run --example gen_vectors > reference/vectors.json"; exit 1)
           python3 reference/test_t0.py
+      # The tier below §1/§2: link framing, INV/WANT, the file layer's manifest
+      # encodings, and the forwarding decisions. Same regeneration check, a
+      # different file, and deliberately so — `vectors.json` is frozen and the
+      # freeze guard refuses to edit it, while this one may change with a minor
+      # release so long as both ends of one link agree. Two promises, two files.
+      - name: T1 reference decoder — versioned vectors in sync + conformance
+        if: runner.os == 'Linux'
+        run: |
+          cargo run --example gen_versioned_vectors > reference/versioned_vectors.json
+          git diff --exit-code reference/versioned_vectors.json \
+            || (echo "reference/versioned_vectors.json is stale — run: cargo run --example gen_versioned_vectors > reference/versioned_vectors.json"; exit 1)
+          python3 reference/test_t1.py
       - name: Docs/code in sync — no documented value may drift from the code
         if: runner.os == 'Linux'
         run: python3 scripts/check_docs_sync.py
