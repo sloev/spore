@@ -1,37 +1,31 @@
-// TopicStore (M10-D) — followed feeds, their names, and the posts that arrive.
+// TopicStore — followed feeds, their names, and the posts that arrive.
 //
-// The fourth of the six domain stores. It exists because of one fact about the
-// wire: a topic address is `topic_of(name)`, a hash, so **a name cannot be
-// recovered from an address**. A FeedEvent arrives carrying a 16-hex topic and
-// nothing else, and the only way to show "ridge-weather" instead of
-// `4f2a…` is to have written the name down when the user typed it.
+// **This is now a shim.** The store is `src/communicator/topic.rs`.
 //
-// So membership and naming live in different places on purpose, and the split is
-// load-bearing rather than tidy:
+// It exists because of one fact about the wire: a topic address is
+// `topic_of(name)`, a hash, so **a name cannot be recovered from an address**. A
+// post arrives carrying eight bytes of topic and nothing else, and the only way
+// to show "ridge-weather" rather than `4f2a…` is to have written the name down
+// when the user typed it.
 //
-//   the kernel  owns which topics are followed — it is what goes out in ANNOUNCE
-//   this store  owns what they are called here, and what has been received
-//
-// Asking the kernel for membership (`client.subscriptions()`) and this store for
-// names means a drifted local list shows up as a topic with no name, which is
-// visibly odd, rather than as a UI confidently claiming a subscription the node
-// does not have.
-//
-// Posts are kept per topic and capped. A feed is public, floods, and anyone may
-// publish to it, so unbounded retention is a remote party choosing how much
-// memory this tab uses.
-
-/** Posts retained per topic. A feed is public and anyone may publish to it. */
-const MAX_POSTS = 200;
+// Membership and naming stay in different places, and that split is
+// load-bearing: the kernel owns which topics are followed — it is what goes out
+// in ANNOUNCE — and this store owns what they are called here. Asking each for
+// its own half means a drifted local list shows up as a topic with no name,
+// which is visibly odd and true, rather than as a UI confidently claiming a
+// subscription the node does not have.
 
 export class TopicStore {
-  constructor({ storage, key = 'spore.topics' } = {}) {
+  constructor({ storage, comm, key = 'spore.topics' } = {}) {
     this.storage = storage || null;
     this.key = key;
-    /** @type {Map<string, string>} topicHex -> the name the user typed */
-    this.names = new Map();
-    /** @type {Map<string, Array<{from: string|null, body: string, at: number}>>} */
-    this.posts = new Map();
+    this._comm = comm || (() => null);
+  }
+
+  get comm() {
+    const c = this._comm();
+    if (!c) throw new Error('TopicStore used before the communicator existed');
+    return c;
   }
 
   // ------------------------------------------------------------- persistence
@@ -40,80 +34,83 @@ export class TopicStore {
     if (!this.storage) return;
     const raw = await this.storage.get(this.key);
     if (!raw) return;
-    try {
-      const blob = JSON.parse(raw) || {};
-      for (const [hex, name] of Object.entries(blob.names || {})) {
-        if (typeof name === 'string') this.names.set(hex, name);
-      }
-      for (const [hex, list] of Object.entries(blob.posts || {})) {
-        if (Array.isArray(list)) this.posts.set(hex, list.slice(-MAX_POSTS));
-      }
-    } catch {
-      // Corrupt blob: start empty this session and leave it on disk, exactly as
-      // ContactStore does. Losing a session of posts beats destroying the names
-      // the user typed because one parse failed.
-    }
+    this.comm.load(fromBase64(raw));
   }
 
   async save() {
     if (!this.storage) return;
-    await this.storage.set(this.key, JSON.stringify({
-      names: Object.fromEntries(this.names),
-      posts: Object.fromEntries(this.posts),
-    }));
+    await this.storage.set(this.key, toBase64(this.comm.save()));
   }
 
   // ------------------------------------------------------------------ naming
 
   /** Remember what a topic is called here. */
   remember(topicHex, name) {
-    if (topicHex && name) this.names.set(topicHex, name);
+    if (topicHex && name) this.comm.topicRemember(topicHex, name);
   }
 
   /** Forget a topic entirely — its name and everything received on it. */
   forget(topicHex) {
-    this.names.delete(topicHex);
-    this.posts.delete(topicHex);
+    this.comm.topicForget(topicHex);
   }
 
   /**
    * The name this user gave a topic, or `null`.
    *
-   * Deliberately does not invent one. A topic followed on another device, or
-   * one whose name was lost, has no name here, and a screen showing the bare
-   * address is telling the truth about that.
+   * Deliberately does not invent one. A topic followed on another device, or one
+   * whose name was lost, has no name here, and a screen showing the bare address
+   * is telling the truth about that.
    */
   nameFor(topicHex) {
-    return this.names.get(topicHex) || null;
+    return this.comm.topicNames().get(topicHex) || null;
+  }
+
+  /** `topicHex -> name`, for every topic the user has named. */
+  get names() {
+    return this.comm.topicNames();
   }
 
   // ------------------------------------------------------------------- posts
 
   /**
-   * File an arriving FeedEvent. Returns true if it was kept.
+   * File an arriving post.
    *
    * `from` may be null: a feed post is flooded and need not be signed, so the
-   * sender is only recorded when the core authenticated one. It is never
+   * sender is recorded only when the core authenticated one. It is never
    * inferred, for the same reason ThreadStore refuses to file an unauthenticated
    * message under a claimed sender.
    */
   receive({ topicHex, from, body, at }) {
     if (!topicHex) return false;
-    const list = this.posts.get(topicHex) || [];
-    list.push({ from: from || null, body, at: at || Math.floor(Date.now() / 1000) });
-    if (list.length > MAX_POSTS) list.splice(0, list.length - MAX_POSTS);
-    this.posts.set(topicHex, list);
+    this.comm.topicReceive({ topicHex, from: from || null, body, at });
     return true;
   }
 
   /** Posts on a topic, oldest first. */
   postsOn(topicHex) {
-    return this.posts.get(topicHex) || [];
+    return this.comm.topicPosts(topicHex);
   }
 
   /** The most recent post on a topic, or null. */
   latestOn(topicHex) {
-    const list = this.posts.get(topicHex);
-    return list && list.length ? list[list.length - 1] : null;
+    const list = this.postsOn(topicHex);
+    return list.length ? list[list.length - 1] : null;
+  }
+}
+
+function toBase64(bytes) {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function fromBase64(s) {
+  try {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return new Uint8Array(0);
   }
 }

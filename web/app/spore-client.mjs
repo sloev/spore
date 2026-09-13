@@ -148,12 +148,11 @@ export class SporeClient {
 
     if (!restored) await this.storage.set(K_SEED, hex(this.node.seed()));
 
-    // The application layer (M10). It lives in Rust behind one command ABI, and
-    // it is created here because this is the first moment both halves exist: the
-    // wasm exports it calls through, and the node whose peer table answers
-    // contact rows. The stores reach it through a thunk, since they are
-    // constructed before `init` runs.
-    this.communicator = new Communicator(this.spore.ex, this.node.ptr);
+    // The application layer (M10). It lives in Rust behind one command ABI and
+    // is created here, the first moment the wasm exports it calls through exist.
+    // The stores reach it through a thunk, since they are constructed before
+    // `init` runs.
+    this.communicator = new Communicator(this.spore.ex);
 
     // The seed restores the identity but NOT the prekey secrets — those are
     // random, and that is exactly what makes deleting them mean something
