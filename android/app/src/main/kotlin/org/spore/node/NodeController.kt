@@ -325,7 +325,6 @@ object NodeController {
     fun start(ctx: Context) {
         if (ptr != 0L) return
         appCtx = ctx.applicationContext
-        Petnames.init(ctx)
         val prefs = secretPrefs(ctx)
         val seedB64 = prefs.getString("seed", null)
         val seed = seedB64?.let { Base64.decode(it, Base64.NO_WRAP) }
@@ -348,6 +347,10 @@ object NodeController {
             }
         }
         saveRing(prefs)
+        // After `nativeNew`, because the address book now lives behind the node's
+        // handle (M10): it has exactly the node's lifetime, and a second handle
+        // would be a second thing to leak or free twice.
+        Petnames.init(ctx, ptr)
         address.value = SporeNative.nativeAddr(ptr).toHex()
         // The core defaults to a desktop-ish 10 MB held entirely in memory.
         // Since manifests became trees this budget — not the wire format — is
