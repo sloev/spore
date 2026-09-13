@@ -60,6 +60,11 @@ pub const CMD_THREAD_MARK_READ: u8 = 0x04;
 pub const CMD_THREAD_MESSAGES: u8 = 0x05;
 pub const CMD_THREAD_CONVERSATIONS: u8 = 0x06;
 pub const CMD_THREAD_TOTAL_UNREAD: u8 = 0x07;
+/// How many envelopes arrived that could not be attributed to anyone.
+///
+/// Surfaced rather than merely counted: a node quietly discarding mail it cannot
+/// attribute looks identical, from the outside, to a node nobody is writing to.
+pub const CMD_THREAD_UNAUTHENTICATED: u8 = 0x08;
 
 pub const CMD_CONTACT_SET_LABEL: u8 = 0x10;
 pub const CMD_CONTACT_SET_FOLLOWING: u8 = 0x11;
@@ -178,6 +183,10 @@ impl Communicator {
             CMD_THREAD_TOTAL_UNREAD => {
                 end(&c)?;
                 w.u32(self.threads.total_unread() as u32);
+            }
+            CMD_THREAD_UNAUTHENTICATED => {
+                end(&c)?;
+                w.u32(self.threads.unauthenticated_count() as u32);
             }
 
             // -- contacts ---------------------------------------------------
@@ -510,6 +519,16 @@ mod tests {
     }
 
     #[test]
+    fn unauthenticated_mail_is_counted_and_reportable() {
+        let mut c = Communicator::new();
+        let mut w = cmd(CMD_THREAD_RECEIVE);
+        w.u8(0).string("spoofed").bool(false).u32(10);
+        c.call(&w.into_vec(), &[]);
+        let r = c.call(&cmd(CMD_THREAD_UNAUTHENTICATED).into_vec(), &[]);
+        assert_eq!(Cursor::new(ok(&r)).u32().unwrap(), 1);
+    }
+
+    #[test]
     fn command_tags_are_unique() {
         // These cross a version boundary: a page cached last week talks to a
         // module built today. Two commands sharing a tag would mean one silently
@@ -522,6 +541,7 @@ mod tests {
             CMD_THREAD_MESSAGES,
             CMD_THREAD_CONVERSATIONS,
             CMD_THREAD_TOTAL_UNREAD,
+            CMD_THREAD_UNAUTHENTICATED,
             CMD_CONTACT_SET_LABEL,
             CMD_CONTACT_SET_FOLLOWING,
             CMD_CONTACT_SET_BLOCKED,

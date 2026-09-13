@@ -24,6 +24,7 @@
 // script and breaks it. The build's self-check catches that, but not wrapping
 // is cheaper than being caught.
 import { loadSpore, Hub, FLAG_ENCRYPTED, FLAG_RATCHET, ZERO_DEST, localStorageSpillStore, memorySpillStore } from '../spore.mjs';
+import { Communicator } from './communicator.mjs';
 import { BROWSER_TRANSPORTS } from './transports.mjs';
 
 /** Storage keys. Deliberately the same strings the pre-M10 node used, so an
@@ -110,6 +111,7 @@ export class SporeClient {
     this.adoptedOnStart = 0;
     this.transports = transports;
     this.spore = null;
+    this.communicator = null;
     this.node = null;
     this.hub = null;
     this.identity = null;
@@ -145,6 +147,13 @@ export class SporeClient {
     this.node = this.spore.newNode(restored ? unhex(savedSeed) : null);
 
     if (!restored) await this.storage.set(K_SEED, hex(this.node.seed()));
+
+    // The application layer (M10). It lives in Rust behind one command ABI, and
+    // it is created here because this is the first moment both halves exist: the
+    // wasm exports it calls through, and the node whose peer table answers
+    // contact rows. The stores reach it through a thunk, since they are
+    // constructed before `init` runs.
+    this.communicator = new Communicator(this.spore.ex, this.node.ptr);
 
     // The seed restores the identity but NOT the prekey secrets — those are
     // random, and that is exactly what makes deleting them mean something

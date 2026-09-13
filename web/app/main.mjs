@@ -841,7 +841,7 @@ export async function boot(container) {
   root = container;
   const storage = localStorageAdapter();
   client = new SporeClient({ storage });
-  threads = new ThreadStore({ storage });
+  threads = new ThreadStore({ storage, comm: () => client.communicator });
   contacts = new ContactStore({ storage });
   topics = new TopicStore({ storage });
 
