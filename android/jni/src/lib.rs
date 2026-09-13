@@ -48,6 +48,15 @@ struct Runtime {
     // running two different versions of the same protocol. `None` until enabled:
     // a node that cannot say where it is has no candidate to offer.
     direct: Mutex<Option<spore::direct::UdpRunner>>,
+    // The application layer (M10). Conversations, contacts, topics and drafts
+    // live in the core behind one command ABI, so this phone and the browser
+    // node run the *same* store rather than two implementations that agree by
+    // coincidence. `Petnames.kt` is the 34 lines this is here to retire.
+    //
+    // Behind the Runtime's handle rather than a handle of its own: it has
+    // exactly the node's lifetime, and a second handle would be a second thing
+    // Kotlin could leak or free twice.
+    comm: Mutex<spore::communicator::Communicator>,
 }
 
 /// Most completed demod frames to hold before dropping the oldest. A frame is one
@@ -120,6 +129,7 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeNew(
         demod: Mutex::new(spore::bridge::audio::Demod::new()),
         demod_out: Mutex::new(VecDeque::new()),
         direct: Mutex::new(None),
+        comm: Mutex::new(spore::communicator::Communicator::new()),
     })) as jlong;
     if let Ok(mut set) = live().lock() {
         set.insert(ptr);
@@ -1628,4 +1638,41 @@ pub extern "system" fn Java_org_spore_node_SporeNative_nativeDirectStatus(
     };
     let s = format!("{} · {pipes} pipe(s), {pending} offer(s) pending{how}", run.advertise());
     env.new_string(s).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+// -- the application layer: one command ABI (M10-C) ---------------------------
+//
+// One JNI method, not thirty. This file already exports sixty-four, `wasm.rs`
+// thirty-four and `ffi.rs` twenty — three overlapping subsets of one kernel,
+// with the communicator then written a fourth time in Kotlin. Commands are
+// bytes, so an application feature adds behaviour here without adding a symbol,
+// and the Kotlin side gets exactly what the browser gets.
+
+/// Run one communicator command. Returns the response bytes, or null if the
+/// handle is dead.
+///
+/// A malformed command comes back as a one-byte error response rather than a
+/// crash, so a Kotlin caller that has drifted from the core gets an answer
+/// instead of taking the process down.
+///
+/// # Safety
+/// Called by the JVM with a handle from `nativeNew`.
+#[no_mangle]
+pub extern "system" fn Java_org_spore_node_SporeNative_nativeCommCall(
+    env: JNIEnv,
+    _class: JClass,
+    ptr: jlong,
+    cmd: JByteArray,
+) -> jbyteArray {
+    let Some(r) = rt(ptr) else {
+        return std::ptr::null_mut();
+    };
+    let Ok(bytes) = env.convert_byte_array(&cmd) else {
+        return std::ptr::null_mut();
+    };
+    let Ok(mut c) = r.comm.lock() else {
+        return std::ptr::null_mut();
+    };
+    let out = c.call(&bytes);
+    env.byte_array_from_slice(&out).map(|o| o.into_raw()).unwrap_or(std::ptr::null_mut())
 }

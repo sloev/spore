@@ -78,6 +78,13 @@ jobs:
       # The maturity table is generated from the tree, so a deleted fuzz target
       # or a renamed test module removes its own tick here. A hand-written table
       # fails the other way: it keeps claiming coverage that no longer exists.
+      # A Kotlin `external fun` with no JNI symbol behind it compiles, links, and
+      # throws UnsatisfiedLinkError the first time it is called — on a device,
+      # which CI does not have. A text check catches the typo in a millisecond.
+      - name: JNI symbols match their Kotlin declarations
+        if: runner.os == 'Linux'
+        run: python3 scripts/check_jni_symbols.py
+
       - name: Security maturity matrix in sync
         if: runner.os == 'Linux'
         run: python3 scripts/security_matrix.py --check
