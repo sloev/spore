@@ -150,7 +150,95 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Lock, and in test builds record that this thread is holding it (#278).
+///
+/// **The invariant is "never hold two at once", and nothing checked it.** Every
+/// method that needs both the node and the outbound table scopes the first guard
+/// and lets it drop before taking the second — which is what keeps them
+/// deadlock-free, and which was a comment rather than a property. A single future
+/// edit that nests them inverts an order somewhere and hangs the daemon, and the
+/// symptom is a thread parked on a lock with no error anywhere.
+///
+/// So in `cfg(test)` the guard is wrapped and the thread's held set is tracked.
+/// One lock at a time is not merely *an* ordering that works, it is the ordering
+/// that cannot be got wrong: with at most one held, there is no pair to invert.
+///
+/// **Per hub, not per thread.** Holding one hub's lock while taking another's is
+/// legitimate and already tested — two hubs are two independent mutexes, and a
+/// gateway that bridges between them has to touch both. The deadlock this guards
+/// is two threads disagreeing about the order of *the same* hub's locks, so the
+/// held set is keyed by hub.
+///
+/// Release builds pay nothing — `Held` is a newtype over the guard and the
+/// tracking is compiled out.
+struct Held<'a, T> {
+    inner: MutexGuard<'a, T>,
+    #[cfg(test)]
+    key: (usize, &'static str),
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Names of the hub locks this thread holds right now.
+    static HELD: std::cell::RefCell<Vec<(usize, &'static str)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Take one of `hub`'s locks, asserting this thread holds none of that hub's others.
+fn hold<'a, T>(m: &'a Mutex<T>, _hub: usize, _name: &'static str) -> Held<'a, T> {
+    #[cfg(test)]
+    HELD.with(|h| {
+        let held = h.borrow();
+        let same: Vec<&'static str> = held.iter().filter(|(k, _)| *k == _hub).map(|(_, n)| *n).collect();
+        assert!(
+            same.is_empty(),
+            "taking this hub's `{_name}` lock while already holding its {same:?}. \
+             Hub methods must hold one of a hub's locks at a time: scope the first guard and let \
+             it drop before taking the second. Two held at once is a lock *order*, and an order \
+             is a thing a later edit can invert — which deadlocks with no error anywhere."
+        );
+    });
+    let inner = lock(m);
+    #[cfg(test)]
+    HELD.with(|h| h.borrow_mut().push((_hub, _name)));
+    Held {
+        inner,
+        #[cfg(test)]
+        key: (_hub, _name),
+    }
+}
+
+impl<T> Drop for Held<'_, T> {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        HELD.with(|h| {
+            let mut held = h.borrow_mut();
+            if let Some(i) = held.iter().rposition(|k| *k == self.key) {
+                held.remove(i);
+            }
+        });
+    }
+}
+
+impl<T> std::ops::Deref for Held<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+impl<T> std::ops::DerefMut for Held<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+}
+
 impl Hub {
+    /// This hub's identity, for the lock tracker. Its address is stable for as
+    /// long as it lives, which is exactly the lifetime the question is about.
+    fn id(&self) -> usize {
+        self as *const Hub as usize
+    }
+
     pub fn new(node: Node) -> Shared {
         Arc::new(Hub { node: Mutex::new(node), out: Mutex::new(Vec::new()), deliver: Mutex::new(None) })
     }
@@ -159,7 +247,7 @@ impl Hub {
     /// to this node (addressed to us, or on a topic we follow). Embedders — the
     /// Android app, bindings — drain the paired `Receiver`. Replaces any prior sink.
     pub fn set_delivery_sink(&self, tx: Sender<Vec<u8>>) {
-        *lock(&self.deliver) = Some(tx);
+        *hold(&self.deliver, self.id(), "deliver") = Some(tx);
     }
 
     /// Originate a signed app message to `dest` (all-zero = public) and flood it
@@ -174,7 +262,7 @@ impl Hub {
     /// available.
     pub fn send(&self, dest: Addr, data: Vec<u8>) -> Result<(), crate::TooLarge> {
         let forwards = {
-            let mut n = lock(&self.node);
+            let mut n = hold(&self.node, self.id(), "node");
             n.send(dest, data, now())?
         };
         self.dispatch(forwards);
@@ -185,7 +273,7 @@ impl Hub {
     /// forwards it must transmit.
     pub fn register(&self) -> (Iface, Receiver<Forward>) {
         let (tx, rx) = channel();
-        let mut o = lock(&self.out);
+        let mut o = hold(&self.out, self.id(), "out");
         let iface = o.len() as Iface;
         o.push(Slot { tx: Some(tx), bulk: None });
         (iface, rx)
@@ -204,7 +292,7 @@ impl Hub {
     /// whoever wants them asks again and any other path answers.
     pub fn register_limited(&self, bulk_bytes_per_sec: u32) -> (Iface, Receiver<Forward>) {
         let (tx, rx) = channel();
-        let mut o = lock(&self.out);
+        let mut o = hold(&self.out, self.id(), "out");
         let iface = o.len() as Iface;
         o.push(Slot {
             tx: Some(tx),
@@ -216,7 +304,7 @@ impl Hub {
     /// Change what an interface will carry after the fact. `None` lifts the
     /// limit entirely.
     pub fn set_bulk_budget(&self, iface: Iface, bytes_per_sec: Option<u32>) {
-        let mut o = lock(&self.out);
+        let mut o = hold(&self.out, self.id(), "out");
         if let Some(slot) = o.get_mut(iface as usize) {
             slot.bulk = bytes_per_sec.map(|per_sec| Budget { per_sec, allowance: 0, last: now() });
         }
@@ -241,7 +329,7 @@ impl Hub {
     /// along the path the demand originally took.
     pub fn unregister(&self, iface: Iface) {
         {
-            let mut o = lock(&self.out);
+            let mut o = hold(&self.out, self.id(), "out");
             match o.get_mut(iface as usize) {
                 Some(slot) => {
                     slot.tx = None;
@@ -264,7 +352,7 @@ impl Hub {
              which needs the node lock, and that lock is not reentrant. Unregister \
              the interface after the closure returns."
         );
-        let unwind = lock(&self.node).forget_interests_on(iface);
+        let unwind = hold(&self.node, self.id(), "node").forget_interests_on(iface);
         if !unwind.is_empty() {
             self.dispatch(unwind);
         }
@@ -273,7 +361,7 @@ impl Hub {
     /// Register a pull-only interface (an HTTP bag / server that answers requests
     /// from the shared store and never has anything pushed to it).
     pub fn register_pull(&self) -> Iface {
-        let mut o = lock(&self.out);
+        let mut o = hold(&self.out, self.id(), "out");
         let iface = o.len() as Iface;
         o.push(Slot { tx: None, bulk: None });
         iface
@@ -283,11 +371,11 @@ impl Hub {
     /// interfaces. Returns the envelopes delivered locally (for logging).
     pub fn on_rx(&self, iface: Iface, bytes: &[u8], nbr: Option<Addr>) -> Vec<Envelope> {
         let rx = {
-            let mut n = lock(&self.node);
+            let mut n = hold(&self.node, self.id(), "node");
             n.on_rx(bytes, iface, nbr, now())
         };
         self.dispatch(rx.forwards);
-        if let Some(tx) = lock(&self.deliver).as_ref() {
+        if let Some(tx) = hold(&self.deliver, self.id(), "deliver").as_ref() {
             for e in &rx.delivered {
                 let _ = tx.send(e.wire());
             }
@@ -308,7 +396,7 @@ impl Hub {
     /// [`Hub::hello`].
     pub fn beacon(&self) {
         let forwards = {
-            let mut n = lock(&self.node);
+            let mut n = hold(&self.node, self.id(), "node");
             n.build_announce(now())
         };
         self.dispatch(forwards);
@@ -321,7 +409,7 @@ impl Hub {
     /// the peers that act on it.
     pub fn hello(&self) {
         let forwards = {
-            let mut n = lock(&self.node);
+            let mut n = hold(&self.node, self.id(), "node");
             n.build_hello(now())
         };
         self.dispatch(forwards);
@@ -335,7 +423,7 @@ impl Hub {
     /// arrive — see [`Node::tick`].
     pub fn tick(&self) {
         let forwards = {
-            let mut n = lock(&self.node);
+            let mut n = hold(&self.node, self.id(), "node");
             n.tick(now())
         };
         self.dispatch(forwards);
@@ -364,11 +452,11 @@ impl Hub {
         // is untouched and nesting `with_node` on two *different* hubs — which
         // tests do — stays legal.
         let _guard = ReentrancyGuard::enter(self);
-        f(&mut lock(&self.node))
+        f(&mut hold(&self.node, self.id(), "node"))
     }
 
     pub fn addr(&self) -> Addr {
-        lock(&self.node).addr
+        hold(&self.node, self.id(), "node").addr
     }
 
     // Flood -> every interface except the source; Directed -> the path's iface.
@@ -377,7 +465,7 @@ impl Hub {
             return;
         }
         let t = now();
-        let mut o = lock(&self.out);
+        let mut o = hold(&self.out, self.id(), "out");
         for f in forwards {
             // Classify once per forward, not once per interface — decoding is
             // the expensive part and the answer is the same for all of them.
@@ -516,6 +604,136 @@ mod tests {
     fn retiring_an_unknown_interface_is_still_a_no_op() {
         let hub = Hub::new(Node::new("relay", &[]));
         hub.unregister(99); // no slot, no cancels, no panic
+    }
+
+    #[test]
+    fn every_public_method_holds_at_most_one_of_this_hub_s_locks() {
+        // The lock-order invariant, checked against the whole surface rather than
+        // wherever other tests happen to go (#278).
+        //
+        // `hold` asserts that no *other* lock of the same hub is already held, so
+        // this test's only job is to make sure every entry point is actually
+        // walked. That distinction matters: the guard is only worth what the
+        // coverage is, and when it was first added it silently covered ten of the
+        // fifteen methods here, because nothing called the other five.
+        //
+        // Two hubs, because holding one hub's lock while taking another's is
+        // legitimate — a gateway bridging two of them must — and the guard has to
+        // keep allowing it.
+        let hub = Hub::new(Node::new("a", &["news"]));
+        let other = Hub::new(Node::new("b", &["news"]));
+
+        let (tx, _rx) = channel();
+        hub.set_delivery_sink(tx);
+
+        let (i0, _r0) = hub.register();
+        let (_i1, _r1) = hub.register_limited(1024);
+        let pull = hub.register_pull();
+        hub.set_bulk_budget(i0, Some(2048));
+        hub.set_bulk_budget(i0, None);
+
+        hub.send(ZERO_DEST, b"hello".to_vec()).expect("under the ceiling");
+        hub.beacon();
+        hub.hello();
+        hub.tick();
+        let _ = hub.addr();
+
+        // A frame in, including one from the other hub — the cross-hub path.
+        let wire = other.with_node(|n| {
+            let f = n.send(ZERO_DEST, b"from b".to_vec(), 1_700_000_000).expect("fits");
+            match &f[0] {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+            }
+        });
+        hub.on_rx(i0, &wire, None);
+
+        hub.originate(hub.with_node(|n| n.build_announce(1_700_000_000)));
+
+        // Nested across two hubs: allowed, and the guard must not object.
+        hub.with_node(|_| {
+            let _ = other.addr();
+            other.tick();
+        });
+
+        hub.unregister(i0);
+        hub.unregister(pull);
+        hub.unregister(9999); // unknown id
+
+        // If any of the above had nested two of one hub's locks, `hold` would
+        // have panicked naming both. Reaching here is the assertion.
+    }
+
+    #[test]
+    fn concurrent_traffic_does_not_deadlock_the_hub() {
+        // The invariant above is static: it says no single call path nests two of
+        // a hub's locks. This is the dynamic half — many threads driving the hub
+        // from every direction at once, which is how the daemon actually uses it
+        // and the only way an ordering problem would show up as the hang it
+        // really is.
+        //
+        // A hang is the hard failure to test for, because a deadlocked thread
+        // produces nothing at all: no panic, no log, no progress. So the workers
+        // report completion and the main thread gives up waiting rather than
+        // joining, which turns "hung forever" into a test failure with a count.
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        use std::sync::Arc;
+
+        let hub = Hub::new(Node::new("busy", &["news"]));
+        let (i0, _r0) = hub.register();
+        let (i1, _r1) = hub.register();
+        let done = Arc::new(AtomicUsize::new(0));
+
+        let wire = hub.with_node(|n| {
+            let f = n.send(ZERO_DEST, b"traffic".to_vec(), 1_700_000_000).expect("fits");
+            match &f[0] {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+            }
+        });
+
+        let mut workers = Vec::new();
+        for w in 0..6 {
+            let hub = hub.clone();
+            let done = done.clone();
+            let wire = wire.clone();
+            workers.push(std::thread::spawn(move || {
+                for _ in 0..200 {
+                    match w % 6 {
+                        0 => {
+                            let _ = hub.send(ZERO_DEST, b"x".to_vec());
+                        }
+                        1 => {
+                            hub.on_rx(i0, &wire, None);
+                        }
+                        2 => hub.tick(),
+                        3 => hub.beacon(),
+                        4 => {
+                            hub.with_node(|n| {
+                                let _ = n.store_len();
+                            });
+                        }
+                        _ => hub.set_bulk_budget(i1, Some(4096)),
+                    }
+                }
+                done.fetch_add(1, AtomicOrdering::SeqCst);
+            }));
+        }
+
+        // Wait on the counter, not on `join` — a join against a deadlocked thread
+        // hangs the test runner instead of failing it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while done.load(AtomicOrdering::SeqCst) < workers.len() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            done.load(AtomicOrdering::SeqCst),
+            workers.len(),
+            "only {} of {} workers finished within 30s — the hub deadlocked",
+            done.load(AtomicOrdering::SeqCst),
+            workers.len()
+        );
+        for w in workers {
+            w.join().expect("a worker panicked");
+        }
     }
 
     #[test]
