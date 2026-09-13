@@ -53,6 +53,14 @@ bytes = { version = "1", optional = true }
 tokio = { version = "1", optional = true, features = ["rt-multi-thread", "net", "io-util", "sync", "time"] }
 
 [features]
+# The application layer (M10): conversations, contacts, unread — the state every
+# host currently reimplements. Default on, and **off for ESP32**, which is a
+# headless relay with 320-512 KB of SRAM, no screen and no conversations; a
+# contact book there is dead weight. Excluded by design rather than by
+# limitation, which is why it is a feature and not a `cfg(target_arch)`.
+default = ["communicator"]
+communicator = []
+
 # QUIC peer-to-peer envelope bridge over iroh (hole punch + relay fallback). iroh's
 # default `tls-ring` feature selects the rustls `ring` crypto provider, which the
 # `Minimal`/`N0` presets install on the endpoint builder — no direct rustls dep here.

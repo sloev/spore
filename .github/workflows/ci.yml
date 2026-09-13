@@ -58,6 +58,13 @@ jobs:
           git diff --exit-code reference/versioned_vectors.json \
             || (echo "reference/versioned_vectors.json is stale — run: cargo run --example gen_versioned_vectors > reference/versioned_vectors.json"; exit 1)
           python3 reference/test_t1.py
+      # The shape ESP32 builds: kernel only, no application layer. The esp32 job
+      # proves it compiles for Xtensa, but that runs in Espressif's container and
+      # is slow to get a signal from — a feature-gating mistake should fail here,
+      # in seconds, on the same machine that found it.
+      - name: Kernel builds without the communicator (the ESP32 shape)
+        if: runner.os == 'Linux'
+        run: cargo build --no-default-features
       - name: Docs/code in sync — no documented value may drift from the code
         if: runner.os == 'Linux'
         run: python3 scripts/check_docs_sync.py
