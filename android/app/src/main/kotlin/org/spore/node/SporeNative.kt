@@ -272,4 +272,23 @@ object SporeNative {
      * null if it hasn't arrived. `from` is the reply's authenticated sender.
      */
     external fun nativeRpcTakeResponse(ptr: Long, reqId: Long): ByteArray?
+
+    /**
+     * Run one **application-layer** command and return the response bytes
+     * (M10-C).
+     *
+     * Conversations, contacts, topics and drafts live in the Rust core behind
+     * this one entry point, so this app and the browser node run the same store
+     * rather than two implementations that agree by coincidence. Commands and
+     * responses are length-prefixed byte strings, so a new application feature
+     * adds behaviour without adding an `external fun` here.
+     *
+     * A malformed command returns a one-byte error response rather than
+     * crashing: a Kotlin caller that has drifted from the core gets an answer
+     * instead of taking the process down. Null means the handle is dead.
+     *
+     * `Petnames` is the first thing this is meant to retire — it is 34 lines
+     * doing what `communicator::contact` now does for every host.
+     */
+    external fun nativeCommCall(ptr: Long, cmd: ByteArray): ByteArray?
 }
