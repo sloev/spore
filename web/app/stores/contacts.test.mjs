@@ -2,9 +2,28 @@
 //
 //   node web/app/stores/contacts.test.mjs
 
+import fs from 'node:fs';
 import assert from 'node:assert';
+import { Communicator } from '../communicator.mjs';
 import { ContactStore, contactRows } from './contacts.mjs';
 import { memoryAdapter } from '../spore-client.mjs';
+
+const wasmPath = new URL('../../../target/wasm32-unknown-unknown/release/spore.wasm', import.meta.url);
+let ex;
+const { instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), {
+  env: {
+    spore_fill_random: (ptr, len) => crypto.getRandomValues(new Uint8Array(ex.memory.buffer, ptr, len)),
+    spore_store_put: () => {}, spore_store_get: () => 0n,
+    spore_store_remove: () => {}, spore_store_ids: () => 0n,
+  },
+});
+ex = instance.exports;
+
+/** A store with its own communicator, so no test can see another's state. */
+function newStore(opts = {}) {
+  const c = new Communicator(ex);
+  return new ContactStore({ ...opts, comm: () => c });
+}
 
 let failures = 0;
 async function test(name, fn) {
@@ -22,7 +41,7 @@ const peer = (addrHex, claimedName, ageSecs = 10, hasPrekey = true) =>
 // ------------------------------------------------- the claim/label separation
 
 await test('a claimed name is never stored as if the user chose it', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setFollowing(ADA, true); // touching the row must not import any claim
   assert.strictEqual(s.labelFor(ADA), null, 'no label was typed, so there is none');
 });
@@ -30,7 +49,7 @@ await test('a claimed name is never stored as if the user chose it', async () =>
 await test('labelFor does not fall back to an announced name', async () => {
   // The fallback is the screen's job, and the screen has to mark it as a claim.
   // Doing it here would let an unauthenticated name become "the contact's name".
-  const s = new ContactStore();
+  const s = newStore();
   const rows = contactRows([peer(ADA, 'Ada Lovelace')], s, { view: 'seen' });
   assert.strictEqual(s.labelFor(ADA), null);
   assert.strictEqual(rows[0].name, 'Ada Lovelace');
@@ -38,7 +57,7 @@ await test('labelFor does not fall back to an announced name', async () => {
 });
 
 await test('a user label wins over a claim and stops being a claim', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setLabel(ADA, 'Ada (work)');
   const [row] = contactRows([peer(ADA, 'Ada Lovelace')], s, { view: 'contacts' });
   assert.strictEqual(row.name, 'Ada (work)');
@@ -47,7 +66,7 @@ await test('a user label wins over a claim and stops being a claim', async () =>
 });
 
 await test('an address with no label and no claim falls back to the address', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setFollowing(JO, true);
   const [row] = contactRows([], s, { view: 'contacts' });
   assert.strictEqual(row.name, null, 'the screen formats the address; the row does not invent a name');
@@ -57,7 +76,7 @@ await test('an address with no label and no claim falls back to the address', as
 // -------------------------------------------------------------------- writes
 
 await test('an empty label clears it without dropping the row', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setLabel(ADA, 'Ada');
   s.setBlocked(ADA, true);
   s.setLabel(ADA, '   ');
@@ -66,7 +85,7 @@ await test('an empty label clears it without dropping the row', async () => {
 });
 
 await test('following and blocking are independent', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setFollowing(ADA, true);
   s.setBlocked(ADA, true);
   assert.strictEqual(s.isFollowing(ADA), true);
@@ -76,7 +95,7 @@ await test('following and blocking are independent', async () => {
 });
 
 await test('following() is the Blogs subscription list', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setFollowing(ADA, true);
   s.setLabel(RAE, 'Rae');
   assert.deepStrictEqual(s.following().map((c) => c.addr), [ADA]);
@@ -85,7 +104,7 @@ await test('following() is the Blogs subscription list', async () => {
 // ----------------------------------------------------------------- the views
 
 await test('contacts and seen are different lists, not a filter of one', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setLabel(ADA, 'Ada');
   const peers = [peer(ADA, 'Ada Lovelace'), peer(RAE, 'Rae Kim')];
 
@@ -98,7 +117,7 @@ await test('contacts and seen are different lists, not a filter of one', async (
 
 await test('a contact never heard from still appears under contacts', async () => {
   // You can add an address before that node has ever announced to you.
-  const s = new ContactStore();
+  const s = newStore();
   s.setLabel(JO, 'Jo');
   const [row] = contactRows([], s, { view: 'contacts' });
   assert.strictEqual(row.addr, JO);
@@ -107,13 +126,13 @@ await test('a contact never heard from still appears under contacts', async () =
 });
 
 await test('seen is ordered freshest first', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   const peers = [peer(ADA, 'Ada', 300), peer(RAE, 'Rae', 5)];
   assert.deepStrictEqual(contactRows(peers, s, { view: 'seen' }).map((r) => r.addr), [RAE, ADA]);
 });
 
 await test('search matches label, claimed name and address', async () => {
-  const s = new ContactStore();
+  const s = newStore();
   s.setLabel(ADA, 'Ada (work)');
   s.setLabel(RAE, null);
   s.setFollowing(RAE, true);
@@ -132,12 +151,12 @@ await test('search matches label, claimed name and address', async () => {
 
 await test('labels survive a reload', async () => {
   const storage = memoryAdapter();
-  const a = new ContactStore({ storage });
+  const a = newStore({ storage });
   a.setLabel(ADA, 'Ada');
   a.setBlocked(RAE, true);
   await a.save();
 
-  const b = new ContactStore({ storage });
+  const b = newStore({ storage });
   await b.load();
   assert.strictEqual(b.labelFor(ADA), 'Ada');
   assert.strictEqual(b.isBlocked(RAE), true);
@@ -145,7 +164,7 @@ await test('labels survive a reload', async () => {
 
 await test('a corrupt blob starts empty rather than wiping the user\'s labels', async () => {
   const storage = memoryAdapter({ 'spore.contacts': 'not json at all' });
-  const s = new ContactStore({ storage });
+  const s = newStore({ storage });
   await s.load();
   assert.strictEqual(s.all().length, 0);
   assert.strictEqual(await storage.get('spore.contacts'), 'not json at all');

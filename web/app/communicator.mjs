@@ -32,6 +32,7 @@ export const CMD = {
   CONTACT_SET_BLOCKED: 0x12,
   CONTACT_REMOVE: 0x13,
   CONTACT_ROWS: 0x14,
+  CONTACT_GET: 0x15,
   TOPIC_REMEMBER: 0x20,
   TOPIC_FORGET: 0x21,
   TOPIC_RECEIVE: 0x22,
@@ -101,11 +102,9 @@ export class RespReader {
 export class Communicator {
   /**
    * @param {object} ex  the wasm instance's exports
-   * @param {number} nodePtr  the node whose peer table answers contact rows, or 0
    */
-  constructor(ex, nodePtr = 0) {
+  constructor(ex) {
     this.ex = ex;
-    this.nodePtr = nodePtr;
     this.ptr = ex.spore_comm_new();
   }
 
@@ -119,12 +118,12 @@ export class Communicator {
    * module survives, and on this side a bad command is a bug in *this file* —
    * something a caller could act on would imply it was expected.
    */
-  call(w, now = 0) {
+  call(w) {
     const cmd = w.out();
     const { ex } = this;
     const ptr = ex.spore_alloc(cmd.length);
     new Uint8Array(ex.memory.buffer, ptr, cmd.length).set(cmd);
-    const packed = ex.spore_comm_call(this.ptr, this.nodePtr, now, ptr, cmd.length);
+    const packed = ex.spore_comm_call(this.ptr, ptr, cmd.length);
     ex.spore_free(ptr, cmd.length);
 
     const u = BigInt.asUintN(64, BigInt(packed));
@@ -196,6 +195,118 @@ export class Communicator {
 
   threadUnauthenticatedCount() {
     return this.call(new CmdWriter(CMD.THREAD_UNAUTHENTICATED)).u32();
+  }
+
+  // ----------------------------------------------------------------- contacts
+
+  contactSetLabel(addrHex, label) {
+    this.call(new CmdWriter(CMD.CONTACT_SET_LABEL).bytes(commUnhex(addrHex)).str(label || ''));
+  }
+
+  contactSetFollowing(addrHex, v) {
+    this.call(new CmdWriter(CMD.CONTACT_SET_FOLLOWING).bytes(commUnhex(addrHex)).bool(v));
+  }
+
+  contactSetBlocked(addrHex, v) {
+    this.call(new CmdWriter(CMD.CONTACT_SET_BLOCKED).bytes(commUnhex(addrHex)).bool(v));
+  }
+
+  contactRemove(addrHex) {
+    return this.call(new CmdWriter(CMD.CONTACT_REMOVE).bytes(commUnhex(addrHex))).u8() === 1;
+  }
+
+  /** One contact's local state, or null when the user has never touched it. */
+  contactGet(addrHex) {
+    const r = this.call(new CmdWriter(CMD.CONTACT_GET).bytes(commUnhex(addrHex)));
+    if (!r.bool()) return null;
+    const following = r.bool();
+    const blocked = r.bool();
+    const label = r.str();
+    return { addr: addrHex, label: label || null, following, blocked };
+  }
+
+  /**
+   * Rows for the contacts or seen list.
+   *
+   * `peers` is what the caller has heard from — `client.peers()` in the browser.
+   * It travels with the command rather than being cached here, because a cached
+   * peer table is stale the moment anything arrives, and because not every host
+   * keeps its peers where this layer could reach them.
+   */
+  contactRows(peers = [], { view = 'contacts', query = '' } = {}) {
+    const w = new CmdWriter(CMD.CONTACT_ROWS).u8(view === 'seen' ? 1 : 0).str(query).u32(peers.length);
+    for (const p of peers) {
+      w.bytes(commUnhex(p.addrHex || p.addr)).u32(p.ageSecs || 0).bool(p.hasPrekey).str(p.claimedName || '');
+    }
+    const r = this.call(w);
+    const out = [];
+    const n = r.u32();
+    for (let i = 0; i < n; i++) {
+      const addr = r.hex(8);
+      const nameIsClaim = r.bool();
+      const following = r.bool();
+      const blocked = r.bool();
+      const isContact = r.bool();
+      const heard = r.bool();
+      const hasPrekey = r.bool();
+      const age = r.u32();
+      const hasAge = r.bool();
+      const label = r.str();
+      const claimedName = r.str();
+      const name = r.str();
+      out.push({
+        addr,
+        label: label || null,
+        claimedName: claimedName || null,
+        name: name || null,
+        nameIsClaim,
+        following,
+        blocked,
+        isContact,
+        heard,
+        ageSecs: hasAge ? age : null,
+        hasPrekey,
+      });
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------------- topics
+
+  topicRemember(topicHex, name) {
+    this.call(new CmdWriter(CMD.TOPIC_REMEMBER).bytes(commUnhex(topicHex)).str(name));
+  }
+
+  topicForget(topicHex) {
+    this.call(new CmdWriter(CMD.TOPIC_FORGET).bytes(commUnhex(topicHex)));
+  }
+
+  topicReceive({ topicHex, from, body, at }) {
+    this.call(new CmdWriter(CMD.TOPIC_RECEIVE).bytes(commUnhex(topicHex)).optAddrHex(from).str(body).u32(at || 0));
+  }
+
+  topicPosts(topicHex) {
+    const r = this.call(new CmdWriter(CMD.TOPIC_POSTS).bytes(commUnhex(topicHex)));
+    const out = [];
+    const n = r.u32();
+    for (let i = 0; i < n; i++) {
+      const from = r.optAddrHex();
+      const at = r.u32();
+      out.push({ from, body: r.str(), at });
+    }
+    return out;
+  }
+
+  /** `topicHex -> name`, for every topic the user has named. */
+  topicNames() {
+    const r = this.call(new CmdWriter(CMD.TOPIC_NAMED));
+    const out = new Map();
+    const n = r.u32();
+    for (let i = 0; i < n; i++) {
+      const topic = r.hex(8);
+      out.set(topic, r.str());
+    }
+    return out;
   }
 
   // -------------------------------------------------------------- persistence

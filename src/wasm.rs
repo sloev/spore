@@ -958,13 +958,15 @@ pub unsafe extern "C" fn spore_group_invite_decode(ptr: *const u8, len: usize) -
 // over IPC, which is what M10-F's desktop build needs — bytes do not know what
 // carried them, so the screens cannot tell a wasm node from a native daemon.
 //
-// `peers` is passed in on each call rather than held, because it is the kernel's
-// state: a cached copy would answer contact rows from a snapshot with no way to
-// say how old it was.
+// Peers travel inside the one command that needs them rather than being held
+// here: a cached copy goes stale the moment anything arrives, and not every host
+// keeps its peer list somewhere this layer could reach — Android has its own, a
+// browser has the node. `ContactStore::seen_from_node` builds the list for a
+// host that does have a node to hand.
 #[cfg(feature = "communicator")]
 mod comm_abi {
     use super::*;
-    use crate::communicator::{contact::PeerSeen, Communicator};
+    use crate::communicator::Communicator;
 
     /// A new communicator. Free it with [`spore_comm_free`].
     #[no_mangle]
@@ -981,8 +983,7 @@ mod comm_abi {
         }
     }
 
-    /// Run one command against the communicator, optionally with the node whose
-    /// peer table should answer contact rows.
+    /// Run one command against the communicator.
     ///
     /// Returns a packed `(ptr << 32) | len` buffer the caller frees with
     /// `spore_free`. A malformed command is a one-byte error response, never a
@@ -990,21 +991,10 @@ mod comm_abi {
     /// answer rather than a dead module.
     ///
     /// # Safety
-    /// `c` is live; `cmd`/`len` describe readable memory; `node` is null or live.
+    /// `c` is live and `cmd`/`len` describe readable memory.
     #[no_mangle]
-    pub unsafe extern "C" fn spore_comm_call(
-        c: *mut Communicator,
-        node: *mut Node,
-        now: u32,
-        cmd: *const u8,
-        len: usize,
-    ) -> i64 {
+    pub unsafe extern "C" fn spore_comm_call(c: *mut Communicator, cmd: *const u8, len: usize) -> i64 {
         let bytes = if cmd.is_null() { &[][..] } else { std::slice::from_raw_parts(cmd, len) };
-        let peers: Vec<PeerSeen> = if node.is_null() {
-            Vec::new()
-        } else {
-            crate::communicator::ContactStore::seen_from_node(&*node, now)
-        };
-        pack((*c).call(bytes, &peers))
+        pack((*c).call(bytes))
     }
 }

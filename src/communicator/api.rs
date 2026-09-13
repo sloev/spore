@@ -71,6 +71,12 @@ pub const CMD_CONTACT_SET_FOLLOWING: u8 = 0x11;
 pub const CMD_CONTACT_SET_BLOCKED: u8 = 0x12;
 pub const CMD_CONTACT_REMOVE: u8 = 0x13;
 pub const CMD_CONTACT_ROWS: u8 = 0x14;
+/// One contact's local state, without building the whole row list.
+///
+/// `contact_rows` answers "what should the list show"; this answers "what did
+/// the user set for this one address", which an edit form needs and a filtered,
+/// view-scoped row list cannot give it.
+pub const CMD_CONTACT_GET: u8 = 0x15;
 
 pub const CMD_TOPIC_REMEMBER: u8 = 0x20;
 pub const CMD_TOPIC_FORGET: u8 = 0x21;
@@ -99,12 +105,15 @@ impl Communicator {
     /// Run one command. Always returns bytes: `[OK]` then the payload, or
     /// `[ERR_BAD_COMMAND]` alone.
     ///
-    /// `peers` is passed per-call rather than held, because it is the kernel's
-    /// state and goes stale the moment anything arrives. A communicator that
-    /// cached it would answer contact rows from a snapshot and have no way to
-    /// know how old it was.
-    pub fn call(&mut self, cmd: &[u8], peers: &[contact::PeerSeen]) -> Vec<u8> {
-        match self.dispatch(cmd, peers) {
+    /// Peers are **carried by the command that needs them** rather than held on
+    /// this struct. Two reasons, and the second is the one that decided it:
+    /// a cached peer table goes stale the moment anything arrives, and not every
+    /// host keeps its peer list where this layer could reach it — Android has
+    /// its own, and a browser has the node. Putting them in the command lets
+    /// each host answer from whatever it actually has, and lets a test answer
+    /// from a list it wrote by hand.
+    pub fn call(&mut self, cmd: &[u8]) -> Vec<u8> {
+        match self.dispatch(cmd) {
             Some(payload) => {
                 let mut w = Writer::new();
                 w.u8(OK).bytes(&payload);
@@ -114,7 +123,7 @@ impl Communicator {
         }
     }
 
-    fn dispatch(&mut self, cmd: &[u8], peers: &[contact::PeerSeen]) -> Option<Vec<u8>> {
+    fn dispatch(&mut self, cmd: &[u8]) -> Option<Vec<u8>> {
         let mut c = Cursor::new(cmd);
         let tag = c.u8()?;
         let mut w = Writer::new();
@@ -213,6 +222,25 @@ impl Communicator {
                 end(&c)?;
                 w.bool(self.contacts.remove(&addr));
             }
+            CMD_CONTACT_GET => {
+                let addr = c.addr()?;
+                end(&c)?;
+                match self.contacts.get(&addr) {
+                    Some(ct) => {
+                        w.bool(true)
+                            .bool(ct.following)
+                            .bool(ct.blocked)
+                            .string(ct.label.as_deref().unwrap_or(""));
+                    }
+                    // Present as "no row" rather than as a row of defaults: an
+                    // address the user has never touched and one they touched and
+                    // cleared are different states, and an edit form opened on
+                    // the second must not silently discard what is still there.
+                    None => {
+                        w.bool(false);
+                    }
+                }
+            }
             CMD_CONTACT_ROWS => {
                 let view = match c.u8()? {
                     0 => contact::View::Contacts,
@@ -220,8 +248,27 @@ impl Communicator {
                     _ => return None,
                 };
                 let query = c.string()?;
+                // The peers the caller has heard from, as it knows them. Bounded
+                // against what is actually left, like every other count here.
+                let n = c.u32()? as usize;
+                if n > c.remaining() {
+                    return None;
+                }
+                let mut peers: Vec<contact::PeerSeen> = Vec::with_capacity(n.min(1024));
+                for _ in 0..n {
+                    let addr = c.addr()?;
+                    let age_secs = c.u32()?;
+                    let has_prekey = c.bool()?;
+                    let name = c.string()?;
+                    peers.push(contact::PeerSeen {
+                        addr,
+                        claimed_name: if name.is_empty() { None } else { Some(name) },
+                        age_secs,
+                        has_prekey,
+                    });
+                }
                 end(&c)?;
-                let rows = contact::contact_rows(peers, &self.contacts, view, &query);
+                let rows = contact::contact_rows(&peers, &self.contacts, view, &query);
                 w.u32(rows.len() as u32);
                 for r in rows {
                     w.bytes(&r.addr)
@@ -346,12 +393,12 @@ mod tests {
 
         let mut w = cmd(CMD_THREAD_RECEIVE);
         w.u8(1).bytes(&A).string("hello").bool(true).u32(10);
-        let r = c.call(&w.into_vec(), &[]);
+        let r = c.call(&w.into_vec());
         assert_eq!(ok(&r), &[&[1u8][..], &A[..]].concat()[..], "filed under the sender");
 
         let mut w = cmd(CMD_THREAD_MESSAGES);
         w.bytes(&A);
-        let r = c.call(&w.into_vec(), &[]);
+        let r = c.call(&w.into_vec());
         let body = ok(&r);
         let mut rd = Cursor::new(body);
         assert_eq!(rd.u32().unwrap(), 1, "one message");
@@ -369,10 +416,10 @@ mod tests {
         let mut c = Communicator::new();
         let mut w = cmd(CMD_THREAD_RECEIVE);
         w.u8(0).string("spoofed").bool(false).u32(10); // no sender
-        let r = c.call(&w.into_vec(), &[]);
+        let r = c.call(&w.into_vec());
         assert_eq!(ok(&r), &[0u8], "no address, because it was filed nowhere");
 
-        let r = c.call(&cmd(CMD_THREAD_CONVERSATIONS).into_vec(), &[]);
+        let r = c.call(&cmd(CMD_THREAD_CONVERSATIONS).into_vec());
         assert_eq!(Cursor::new(ok(&r)).u32().unwrap(), 0, "and no conversation exists");
     }
 
@@ -381,22 +428,22 @@ mod tests {
         // The host is a browser tab, an IPC peer or a binder call, and any of
         // them can send nonsense through a bug or a version skew.
         let mut c = Communicator::new();
-        assert_eq!(c.call(&[], &[]), vec![ERR_BAD_COMMAND], "empty");
-        assert_eq!(c.call(&[0xff], &[]), vec![ERR_BAD_COMMAND], "unknown tag");
+        assert_eq!(c.call(&[]), vec![ERR_BAD_COMMAND], "empty");
+        assert_eq!(c.call(&[0xff]), vec![ERR_BAD_COMMAND], "unknown tag");
 
         // Every truncation of a valid command.
         let mut w = cmd(CMD_THREAD_SEND);
         w.bytes(&A).bytes(&[9u8; 16]).string("hi").bool(false).u32(10);
         let good = w.into_vec();
         for cut in 0..good.len() {
-            assert_eq!(c.call(&good[..cut], &[]), vec![ERR_BAD_COMMAND], "truncated to {cut}");
+            assert_eq!(c.call(&good[..cut]), vec![ERR_BAD_COMMAND], "truncated to {cut}");
         }
         // And trailing bytes, which is the other half of the same mistake: a
         // command that decodes and leaves data behind is a different command.
         let mut extra = good.clone();
         extra.push(0);
-        assert_eq!(c.call(&extra, &[]), vec![ERR_BAD_COMMAND], "trailing");
-        assert_eq!(c.call(&good, &[])[0], OK, "and the unmangled one still works");
+        assert_eq!(c.call(&extra), vec![ERR_BAD_COMMAND], "trailing");
+        assert_eq!(c.call(&good)[0], OK, "and the unmangled one still works");
     }
 
     #[test]
@@ -404,7 +451,7 @@ mod tests {
         let mut c = Communicator::new();
         let mut w = cmd(CMD_TOPIC_REMEMBER);
         w.bytes(&A).u32(u32::MAX); // a name claiming to be 4 GB
-        assert_eq!(c.call(&w.into_vec(), &[]), vec![ERR_BAD_COMMAND]);
+        assert_eq!(c.call(&w.into_vec()), vec![ERR_BAD_COMMAND]);
     }
 
     #[test]
@@ -412,21 +459,21 @@ mod tests {
         let mut c = Communicator::new();
         let mut w = cmd(CMD_THREAD_RECEIVE);
         w.u8(1).bytes(&A).string("hi").bool(false).u32(10);
-        c.call(&w.into_vec(), &[]);
+        c.call(&w.into_vec());
         let mut w = cmd(CMD_CONTACT_SET_LABEL);
         w.bytes(&A).string("Ada");
-        c.call(&w.into_vec(), &[]);
+        c.call(&w.into_vec());
         let mut w = cmd(CMD_TOPIC_REMEMBER);
         w.bytes(&crate::topic_of("tides")).string("tides");
-        c.call(&w.into_vec(), &[]);
+        c.call(&w.into_vec());
 
-        let saved = c.call(&cmd(CMD_SAVE).into_vec(), &[]);
+        let saved = c.call(&cmd(CMD_SAVE).into_vec());
         let blob = ok(&saved).to_vec();
 
         let mut fresh = Communicator::new();
         let mut w = cmd(CMD_LOAD);
         w.bytes(&blob);
-        assert_eq!(fresh.call(&w.into_vec(), &[])[0], OK);
+        assert_eq!(fresh.call(&w.into_vec())[0], OK);
         assert_eq!(fresh.threads.messages(&A).len(), 1);
         assert_eq!(fresh.contacts.label_for(&A), Some("Ada"));
         assert_eq!(fresh.topics.name_for(&crate::topic_of("tides")), Some("tides"));
@@ -439,7 +486,7 @@ mod tests {
         let mut c = Communicator::new();
         let mut w = cmd(CMD_CONTACT_SET_LABEL);
         w.bytes(&A).string("Ada");
-        c.call(&w.into_vec(), &[]);
+        c.call(&w.into_vec());
 
         let mut w = cmd(CMD_LOAD);
         w.u32(1)
@@ -448,27 +495,23 @@ mod tests {
             .bytes(&[])
             .u32(0)
             .bytes(&[]);
-        assert_eq!(c.call(&w.into_vec(), &[]), vec![ERR_BAD_COMMAND]);
+        assert_eq!(c.call(&w.into_vec()), vec![ERR_BAD_COMMAND]);
         assert_eq!(c.contacts.label_for(&A), Some("Ada"), "the good store survived the bad load");
     }
 
     #[test]
-    fn contact_rows_reflect_peers_passed_at_call_time_not_a_cached_snapshot() {
-        // Peers are the kernel's state and go stale the moment anything arrives.
+    fn contact_rows_reflect_the_peers_the_command_carried() {
+        // Peers travel with the command, so the same store answers differently
+        // as the caller's view of the mesh changes — and a test can write that
+        // view by hand instead of needing live traffic.
         let mut c = Communicator::new();
         let mut w = cmd(CMD_CONTACT_SET_LABEL);
         w.bytes(&A).string("Ada");
-        c.call(&w.into_vec(), &[]);
+        c.call(&w.into_vec());
 
-        let peers = vec![contact::PeerSeen {
-            addr: A,
-            claimed_name: Some("Ada Lovelace".into()),
-            age_secs: 5,
-            has_prekey: true,
-        }];
         let mut w = cmd(CMD_CONTACT_ROWS);
-        w.u8(0).string("");
-        let r = c.call(&w.into_vec(), &peers);
+        w.u8(0).string("").u32(1).bytes(&A).u32(5).bool(true).string("Ada Lovelace");
+        let r = c.call(&w.into_vec());
         let mut rd = Cursor::new(ok(&r));
         assert_eq!(rd.u32().unwrap(), 1);
         let _addr = rd.addr().unwrap();
@@ -482,11 +525,11 @@ mod tests {
         assert_eq!(rd.string().unwrap(), "Ada Lovelace", "the claim travels too");
         assert_eq!(rd.string().unwrap(), "Ada");
 
-        // Same command, no peers: the claim is gone because the node has not
+        // Same command, no peers: the claim is gone because nothing has been
         // heard from them, and a cached snapshot would still be showing it.
         let mut w = cmd(CMD_CONTACT_ROWS);
-        w.u8(0).string("");
-        let r = c.call(&w.into_vec(), &[]);
+        w.u8(0).string("").u32(0); // no peers heard from
+        let r = c.call(&w.into_vec());
         let mut rd = Cursor::new(ok(&r));
         assert_eq!(rd.u32().unwrap(), 1);
         rd.addr().unwrap();
@@ -505,16 +548,16 @@ mod tests {
         let id = [7u8; 16];
         let mut w = cmd(CMD_THREAD_SEND);
         w.bytes(&B).bytes(&id).string("out").bool(false).u32(10);
-        c.call(&w.into_vec(), &[]);
+        c.call(&w.into_vec());
 
         let mut w = cmd(CMD_THREAD_SET_STATUS);
         w.bytes(&id).u8(thread::MessageStatus::Acked.code());
-        let r = c.call(&w.into_vec(), &[]);
+        let r = c.call(&w.into_vec());
         assert_eq!(ok(&r), &[1u8], "it moved");
 
         let mut w = cmd(CMD_THREAD_SET_STATUS);
         w.bytes(&[0u8; 16]).u8(thread::MessageStatus::Acked.code());
-        let r = c.call(&w.into_vec(), &[]);
+        let r = c.call(&w.into_vec());
         assert_eq!(ok(&r), &[0u8], "an id we never sent moves nothing");
     }
 
@@ -523,9 +566,38 @@ mod tests {
         let mut c = Communicator::new();
         let mut w = cmd(CMD_THREAD_RECEIVE);
         w.u8(0).string("spoofed").bool(false).u32(10);
-        c.call(&w.into_vec(), &[]);
-        let r = c.call(&cmd(CMD_THREAD_UNAUTHENTICATED).into_vec(), &[]);
+        c.call(&w.into_vec());
+        let r = c.call(&cmd(CMD_THREAD_UNAUTHENTICATED).into_vec());
         assert_eq!(Cursor::new(ok(&r)).u32().unwrap(), 1);
+    }
+
+    #[test]
+    fn getting_one_contact_distinguishes_untouched_from_cleared() {
+        let mut c = Communicator::new();
+        let r = c.call(&{
+            let mut w = cmd(CMD_CONTACT_GET);
+            w.bytes(&A);
+            w.into_vec()
+        });
+        assert_eq!(ok(&r), &[0u8], "never touched: no row");
+
+        let mut w = cmd(CMD_CONTACT_SET_BLOCKED);
+        w.bytes(&A).bool(true);
+        c.call(&w.into_vec());
+        let mut w = cmd(CMD_CONTACT_SET_LABEL);
+        w.bytes(&A).string("");
+        c.call(&w.into_vec());
+
+        let r = c.call(&{
+            let mut w = cmd(CMD_CONTACT_GET);
+            w.bytes(&A);
+            w.into_vec()
+        });
+        let mut rd = Cursor::new(ok(&r));
+        assert!(rd.bool().unwrap(), "cleared label, but the row is still there");
+        assert!(!rd.bool().unwrap(), "not following");
+        assert!(rd.bool().unwrap(), "still blocked");
+        assert_eq!(rd.string().unwrap(), "", "and the label really is empty");
     }
 
     #[test]
@@ -547,6 +619,7 @@ mod tests {
             CMD_CONTACT_SET_BLOCKED,
             CMD_CONTACT_REMOVE,
             CMD_CONTACT_ROWS,
+            CMD_CONTACT_GET,
             CMD_TOPIC_REMEMBER,
             CMD_TOPIC_FORGET,
             CMD_TOPIC_RECEIVE,
