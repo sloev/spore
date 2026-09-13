@@ -4,7 +4,7 @@
 # A new line here is a new place that can cause undefined behaviour. It is
 # meant to be reviewed, not re-blessed.
 #
-# totals: block=8, extern-decl=61, unsafe-fn=4
+# totals: block=8, extern-decl=63, unsafe-fn=4
 
 src/bridge/icmp.rs	block	run
 src/ffi.rs	block	ffi_message_and_seal_roundtrip
@@ -37,6 +37,8 @@ src/wasm.rs	block	ids
 src/wasm.rs	block	put
 src/wasm.rs	block	remove
 src/wasm.rs	block	wasm_getrandom
+src/wasm.rs	extern-decl	spore_comm_call
+src/wasm.rs	extern-decl	spore_comm_free
 src/wasm.rs	extern-decl	spore_env_flags
 src/wasm.rs	extern-decl	spore_env_payload
 src/wasm.rs	extern-decl	spore_env_src

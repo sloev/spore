@@ -73,4 +73,69 @@ impl<'a> Cursor<'a> {
         id.copy_from_slice(b);
         Some(id)
     }
+
+    /// A `u32`-prefixed byte slice, borrowed rather than copied.
+    ///
+    /// Used for nested blobs — a store's persisted bytes inside a load command —
+    /// where copying only to hand the copy straight to a decoder is waste.
+    pub(crate) fn string_bytes(&mut self) -> Option<&'a [u8]> {
+        let n = self.u32()? as usize;
+        self.take(n)
+    }
+
+    /// A `u32`-prefixed UTF-8 string.
+    ///
+    /// Invalid UTF-8 is a `None` rather than a lossy replacement: a body that
+    /// silently becomes `���` reads as a message someone sent, and this layer
+    /// has no way to tell the user it was not.
+    pub(crate) fn string(&mut self) -> Option<String> {
+        let n = self.u32()? as usize;
+        String::from_utf8(self.take(n)?.to_vec()).ok()
+    }
+}
+
+/// The matching writer. Length prefixes are `u32` throughout, so a reader never
+/// has to guess where a field ends.
+#[derive(Default)]
+pub(crate) struct Writer(pub(crate) Vec<u8>);
+
+impl Writer {
+    pub(crate) fn new() -> Writer {
+        Writer(Vec::new())
+    }
+
+    pub(crate) fn u8(&mut self, v: u8) -> &mut Writer {
+        self.0.push(v);
+        self
+    }
+
+    pub(crate) fn bool(&mut self, v: bool) -> &mut Writer {
+        self.u8(u8::from(v))
+    }
+
+    pub(crate) fn u32(&mut self, v: u32) -> &mut Writer {
+        self.0.extend_from_slice(&v.to_be_bytes());
+        self
+    }
+
+    pub(crate) fn bytes(&mut self, v: &[u8]) -> &mut Writer {
+        self.0.extend_from_slice(v);
+        self
+    }
+
+    pub(crate) fn string(&mut self, v: &str) -> &mut Writer {
+        self.u32(v.len() as u32).bytes(v.as_bytes())
+    }
+
+    /// An optional address, as a presence byte then the eight bytes.
+    pub(crate) fn opt_addr(&mut self, v: &Option<Addr>) -> &mut Writer {
+        match v {
+            Some(a) => self.u8(1).bytes(a),
+            None => self.u8(0),
+        }
+    }
+
+    pub(crate) fn into_vec(self) -> Vec<u8> {
+        self.0
+    }
 }
