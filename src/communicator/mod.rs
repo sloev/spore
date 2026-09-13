@@ -44,6 +44,7 @@
 
 pub mod api;
 pub mod contact;
+pub mod draft;
 pub mod thread;
 pub mod topic;
 
@@ -52,6 +53,7 @@ pub(crate) use cursor::{Cursor, Writer};
 
 pub use api::Communicator;
 pub use contact::{contact_rows, Contact, ContactRow, ContactStore, PeerSeen, View};
+pub use draft::{Draft, DraftStore, Scope};
 pub use thread::{MessageStatus, ThreadStore};
 pub use topic::{Post, TopicStore};
 

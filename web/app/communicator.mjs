@@ -38,9 +38,16 @@ export const CMD = {
   TOPIC_RECEIVE: 0x22,
   TOPIC_POSTS: 0x23,
   TOPIC_NAMED: 0x24,
+  DRAFT_SET: 0x40,
+  DRAFT_GET: 0x41,
+  DRAFT_CLEAR: 0x42,
+  DRAFT_ALL: 0x43,
   SAVE: 0x30,
   LOAD: 0x31,
 };
+
+/** Draft scopes, matching `Scope::code` in Rust. */
+export const SCOPE = { chat: 0, topic: 1 };
 
 /** Message status codes, matching `MessageStatus::code` in Rust. */
 export const STATUS = { queued: 0, sent: 1, acked: 2, expired: 3, received: 4 };
@@ -307,6 +314,28 @@ export class Communicator {
       out.set(topic, r.str());
     }
     return out;
+  }
+
+  // ------------------------------------------------------------------- drafts
+
+  /**
+   * Save what the user has typed. Empty text clears it, so an emptied composer
+   * leaves nothing to restore.
+   *
+   * `scope` keeps a conversation draft and a feed draft apart even when their
+   * addresses collide — both key spaces are truncated SHA-256.
+   */
+  draftSet(scope, addrHex, text, at) {
+    this.call(new CmdWriter(CMD.DRAFT_SET).u8(SCOPE[scope]).bytes(commUnhex(addrHex)).u32(at || 0).str(text || ''));
+  }
+
+  /** What the user had typed here, or '' if nothing. */
+  draftGet(scope, addrHex) {
+    return this.call(new CmdWriter(CMD.DRAFT_GET).u8(SCOPE[scope]).bytes(commUnhex(addrHex))).str();
+  }
+
+  draftClear(scope, addrHex) {
+    return this.call(new CmdWriter(CMD.DRAFT_CLEAR).u8(SCOPE[scope]).bytes(commUnhex(addrHex))).u8() === 1;
   }
 
   // -------------------------------------------------------------- persistence

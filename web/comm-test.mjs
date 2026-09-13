@@ -122,6 +122,16 @@ test('topics keep names the mesh cannot supply, and posts it can', () => {
   assert.strictEqual(post.body, 'high at 14:20');
 });
 
+test('a draft survives switching away, and a feed draft is not a chat draft', () => {
+  comm.draftSet('chat', ADA, 'half a thought', 100);
+  comm.draftSet('topic', ADA, 'to a feed', 100);
+  assert.strictEqual(comm.draftGet('chat', ADA), 'half a thought');
+  assert.strictEqual(comm.draftGet('topic', ADA), 'to a feed', 'same address, other scope');
+  comm.draftSet('chat', ADA, '', 101);
+  assert.strictEqual(comm.draftGet('chat', ADA), '', 'an emptied composer leaves nothing');
+  assert.strictEqual(comm.draftGet('topic', ADA), 'to a feed', 'and does not touch the other');
+});
+
 test('save and load round-trip every store through the host', () => {
   const blob = comm.save();
   const fresh = new Communicator(ex);
@@ -129,6 +139,7 @@ test('save and load round-trip every store through the host', () => {
   assert.strictEqual(fresh.threadMessages(ADA).length, 2);
   assert.strictEqual(fresh.contactRows([], { view: 'contacts' })[0].label, 'Ada');
   assert.strictEqual(fresh.topicNames().get('0202020202020202'), 'tides');
+  assert.strictEqual(fresh.draftGet('topic', ADA), 'to a feed', 'drafts travel in the blob too');
   fresh.free();
 });
 

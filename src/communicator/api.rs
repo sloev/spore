@@ -32,7 +32,7 @@
 //! bytes, and [`ERR_BAD_COMMAND`] is a legitimate answer. A decoder that
 //! `unwrap`s here takes the tab with it.
 
-use super::{contact, thread, topic, Cursor, Writer};
+use super::{contact, draft, thread, topic, Cursor, Writer};
 use crate::Addr;
 
 // -- response tags ----------------------------------------------------------
@@ -84,6 +84,11 @@ pub const CMD_TOPIC_RECEIVE: u8 = 0x22;
 pub const CMD_TOPIC_POSTS: u8 = 0x23;
 pub const CMD_TOPIC_NAMED: u8 = 0x24;
 
+pub const CMD_DRAFT_SET: u8 = 0x40;
+pub const CMD_DRAFT_GET: u8 = 0x41;
+pub const CMD_DRAFT_CLEAR: u8 = 0x42;
+pub const CMD_DRAFT_ALL: u8 = 0x43;
+
 /// Hand back everything, for the host to persist.
 pub const CMD_SAVE: u8 = 0x30;
 /// Replace everything from a blob the host kept.
@@ -95,6 +100,7 @@ pub struct Communicator {
     pub threads: thread::ThreadStore,
     pub contacts: contact::ContactStore,
     pub topics: topic::TopicStore,
+    pub drafts: draft::DraftStore,
 }
 
 impl Communicator {
@@ -324,10 +330,45 @@ impl Communicator {
                 }
             }
 
+            // -- drafts -----------------------------------------------------
+            CMD_DRAFT_SET => {
+                let scope = draft::Scope::from_code(c.u8()?)?;
+                let addr = c.addr()?;
+                let at = c.u32()?;
+                let text = c.string()?;
+                end(&c)?;
+                self.drafts.set(scope, addr, &text, at);
+            }
+            CMD_DRAFT_GET => {
+                let scope = draft::Scope::from_code(c.u8()?)?;
+                let addr = c.addr()?;
+                end(&c)?;
+                w.string(self.drafts.get(scope, &addr).unwrap_or(""));
+            }
+            CMD_DRAFT_CLEAR => {
+                let scope = draft::Scope::from_code(c.u8()?)?;
+                let addr = c.addr()?;
+                end(&c)?;
+                w.bool(self.drafts.clear(scope, &addr));
+            }
+            CMD_DRAFT_ALL => {
+                end(&c)?;
+                let all = self.drafts.all();
+                w.u32(all.len() as u32);
+                for d in all {
+                    w.u8(d.scope.code()).bytes(&d.addr).u32(d.at).string(&d.text);
+                }
+            }
+
             // -- persistence ------------------------------------------------
             CMD_SAVE => {
                 end(&c)?;
-                for part in [self.threads.encode(), self.contacts.encode(), self.topics.encode()] {
+                for part in [
+                    self.threads.encode(),
+                    self.contacts.encode(),
+                    self.topics.encode(),
+                    self.drafts.encode(),
+                ] {
                     w.u32(part.len() as u32).bytes(&part);
                 }
             }
@@ -335,17 +376,31 @@ impl Communicator {
                 let threads = c.string_bytes()?;
                 let contacts = c.string_bytes()?;
                 let topics = c.string_bytes()?;
+                // **Trailing sections are optional**, so a blob written before a
+                // store existed still loads. Drafts were added fourth, and
+                // without this every user with a saved blob would have had it
+                // refused — and because the load is all-or-nothing, refused
+                // means they lose their threads and contacts too, to gain a
+                // feature they did not ask for. A store that is absent is simply
+                // empty.
+                let drafts = if c.at_end() { None } else { Some(c.string_bytes()?) };
                 end(&c)?;
                 // **All or nothing.** A partial load would leave one store from
-                // this session and two from the last, and nothing downstream
-                // could tell: a conversation list would render against a contact
-                // book that had not caught up. Decode all three, then commit.
+                // this session and the rest from the last, and nothing
+                // downstream could tell: a conversation list would render
+                // against a contact book that had not caught up. Decode
+                // everything, then commit.
                 let t = thread::ThreadStore::decode(threads)?;
                 let ct = contact::ContactStore::decode(contacts)?;
                 let tp = topic::TopicStore::decode(topics)?;
+                let dr = match drafts {
+                    Some(b) => draft::DraftStore::decode(b)?,
+                    None => draft::DraftStore::new(),
+                };
                 self.threads = t;
                 self.contacts = ct;
                 self.topics = tp;
+                self.drafts = dr;
             }
 
             _ => return None,
@@ -477,6 +532,69 @@ mod tests {
         assert_eq!(fresh.threads.messages(&A).len(), 1);
         assert_eq!(fresh.contacts.label_for(&A), Some("Ada"));
         assert_eq!(fresh.topics.name_for(&crate::topic_of("tides")), Some("tides"));
+    }
+
+    #[test]
+    fn a_blob_written_before_drafts_existed_still_loads() {
+        // The migration that would otherwise have cost real users their data.
+        // Drafts were added as a fourth section; a blob with three would have
+        // been refused, and because the load is all-or-nothing, refused means
+        // losing threads and contacts as well — to gain a feature nobody asked
+        // for. Trailing sections are therefore optional.
+        let mut old = Communicator::new();
+        let mut w = cmd(CMD_THREAD_RECEIVE);
+        w.u8(1).bytes(&A).string("from last week").bool(false).u32(10);
+        old.call(&w.into_vec());
+        let mut w = cmd(CMD_CONTACT_SET_LABEL);
+        w.bytes(&A).string("Ada");
+        old.call(&w.into_vec());
+
+        // A three-section blob, exactly as the previous build wrote them.
+        let mut three = Writer::new();
+        for part in [old.threads.encode(), old.contacts.encode(), old.topics.encode()] {
+            three.u32(part.len() as u32).bytes(&part);
+        }
+
+        let mut fresh = Communicator::new();
+        let mut w = cmd(CMD_LOAD);
+        w.bytes(&three.into_vec());
+        assert_eq!(fresh.call(&w.into_vec())[0], OK, "an older blob must still load");
+        assert_eq!(fresh.threads.messages(&A).len(), 1, "and bring its threads");
+        assert_eq!(fresh.contacts.label_for(&A), Some("Ada"));
+        assert!(fresh.drafts.all().is_empty(), "with no drafts, which is simply empty");
+    }
+
+    #[test]
+    fn drafts_round_trip_through_save_and_load() {
+        let mut c = Communicator::new();
+        let mut w = cmd(CMD_DRAFT_SET);
+        w.u8(draft::Scope::Chat.code()).bytes(&A).u32(10).string("half a thought");
+        c.call(&w.into_vec());
+
+        let saved = c.call(&cmd(CMD_SAVE).into_vec());
+        let blob = ok(&saved).to_vec();
+        let mut fresh = Communicator::new();
+        let mut w = cmd(CMD_LOAD);
+        w.bytes(&blob);
+        assert_eq!(fresh.call(&w.into_vec())[0], OK);
+
+        let mut w = cmd(CMD_DRAFT_GET);
+        w.u8(draft::Scope::Chat.code()).bytes(&A);
+        let r = fresh.call(&w.into_vec());
+        assert_eq!(Cursor::new(ok(&r)).string().unwrap(), "half a thought");
+    }
+
+    #[test]
+    fn a_draft_for_a_feed_is_not_a_draft_for_a_person() {
+        let mut c = Communicator::new();
+        let mut w = cmd(CMD_DRAFT_SET);
+        w.u8(draft::Scope::Topic.code()).bytes(&A).u32(10).string("to a feed");
+        c.call(&w.into_vec());
+
+        let mut w = cmd(CMD_DRAFT_GET);
+        w.u8(draft::Scope::Chat.code()).bytes(&A);
+        let r = c.call(&w.into_vec());
+        assert_eq!(Cursor::new(ok(&r)).string().unwrap(), "", "the same address, the other scope");
     }
 
     #[test]
@@ -625,6 +743,10 @@ mod tests {
             CMD_TOPIC_RECEIVE,
             CMD_TOPIC_POSTS,
             CMD_TOPIC_NAMED,
+            CMD_DRAFT_SET,
+            CMD_DRAFT_GET,
+            CMD_DRAFT_CLEAR,
+            CMD_DRAFT_ALL,
             CMD_SAVE,
             CMD_LOAD,
         ];
