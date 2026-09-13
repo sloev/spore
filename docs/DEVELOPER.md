@@ -35,7 +35,6 @@ site. Pick a row.
 
 <div class="list-rows">
 <a class="list-row" href="security-policy.html"><div class="list-row-body"><span class="list-row-title">Reporting a vulnerability</span><span class="list-row-subtitle">How to report, and what happens next.</span></div></a>
-<a class="list-row" href="threat-model.html"><div class="list-row-body"><span class="list-row-title">Threat model</span><span class="list-row-subtitle">What is defended, how, and what is honestly still open.</span></div></a>
 <a class="list-row" href="simulations.html"><div class="list-row-body"><span class="list-row-title">Simulations</span><span class="list-row-subtitle">Every scenario the simulator runs, what each is for, and the numbers from the last run.</span></div></a>
 <a class="list-row" href="state-machines.html"><div class="list-row-body"><span class="list-row-title">State machines</span><span class="list-row-subtitle">The ratchet, the mix and the hub, drawn from the transitions they actually take.</span></div></a>
 <a class="list-row" href="threat-model.html"><div class="list-row-body"><span class="list-row-title">Threat model</span><span class="list-row-subtitle">Six chapters of adversary, what stops them, and the residual risk where nothing fully does.</span></div></a>

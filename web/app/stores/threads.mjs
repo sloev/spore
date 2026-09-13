@@ -1,35 +1,48 @@
-// ThreadStore (M10-D) — direct messages, keyed by peer address.
+// ThreadStore — direct messages, keyed by peer address.
 //
-// This is one of the six domain stores. It is written in JS *deliberately and
-// temporarily*: the M10 sequencing is contract-first, so screens are built
-// against SporeClient now and each store moves into Rust (M10-B) afterwards
-// without its callers changing. Everything here is therefore kept boring and
-// free of DOM or client references — it takes plain events in and answers plain
-// questions, which is exactly the shape a Rust port needs.
+// **This is now a shim.** The store itself is `src/communicator/thread.rs`; what
+// remains here is address translation and the host's storage, which is all a
+// browser can contribute. M10's sequencing was contract-first for exactly this
+// moment: the screens were built against `SporeClient`, this store's interface
+// has not changed, and the ~190 lines of duplicated conversation logic that used
+// to live here are gone rather than ported.
 //
-// Two rules it exists to enforce:
+// The two rules it enforced are unchanged, because they moved with it:
 //
-//   * A thread is keyed on the AUTHENTICATED sender only. `SporeClient` emits
-//     `from: null` for an unsigned envelope, a bad signature, or SRC8 — an
-//     address the envelope cannot prove. Those are counted, never filed into a
-//     conversation, because a thread list keyed on anything weaker is spoofable.
-//   * An optimistic send is a real row with the true envelope id, not a
-//     separate pending list merged at render. Acks reconcile by id.
+//   * A thread is keyed on the AUTHENTICATED sender only. `from: null` — an
+//     unsigned envelope, a bad signature, or SRC8 — is counted and never filed.
+//   * An optimistic send is a real row with the true envelope id, and acks
+//     reconcile by id rather than by position.
+//
+// Both now hold for every host that speaks the ABI, not just this one, which is
+// the whole point of moving them.
+//
+// `groupThread` stays here. It is a pure function over messages the screen has
+// already been handed, it needs a locale-aware day label the host computes, and
+// running it in Rust would mean crossing the boundary twice to format a date.
 
-const MAX_PER_THREAD = 500; // a tab is not an archive; oldest fall off first
-
-/** @typedef {'queued'|'sent'|'acked'|'expired'|'received'} MessageStatus */
+/** Posts retained per thread, mirrored from `thread::MAX_PER_THREAD`. */
+export const MAX_PER_THREAD = 500;
 
 export class ThreadStore {
-  constructor({ storage, key = 'spore.threads' } = {}) {
+  /**
+   * @param {object} opts
+   * @param {object} opts.storage  the host's key/value store, or null
+   * @param {() => import('../communicator.mjs').Communicator} opts.comm
+   *   A thunk, not a value: the communicator does not exist until the wasm
+   *   module has loaded, and this store is constructed before `boot` gets that
+   *   far. Resolving it lazily keeps the construction order the app already has.
+   */
+  constructor({ storage, comm, key = 'spore.threads' } = {}) {
     this.storage = storage || null;
     this.key = key;
-    /** @type {Map<string, Array>} addrHex -> messages, oldest first */
-    this.threads = new Map();
-    /** @type {Map<string, number>} addrHex -> unread count */
-    this.unread = new Map();
-    /** Envelopes that arrived without a provable sender. Surfaced, not filed. */
-    this.unauthenticatedCount = 0;
+    this._comm = comm || (() => null);
+  }
+
+  get comm() {
+    const c = this._comm();
+    if (!c) throw new Error('ThreadStore used before the communicator existed');
+    return c;
   }
 
   // ------------------------------------------------------------- persistence
@@ -38,90 +51,55 @@ export class ThreadStore {
     if (!this.storage) return;
     const raw = await this.storage.get(this.key);
     if (!raw) return;
-    try {
-      const data = JSON.parse(raw);
-      for (const [addr, msgs] of Object.entries(data.threads || {})) this.threads.set(addr, msgs);
-      for (const [addr, n] of Object.entries(data.unread || {})) this.unread.set(addr, n);
-    } catch {
-      // A corrupt blob is not worth crashing a node over, and silently wiping
-      // it would be worse. Leave it on disk and start empty this session.
-    }
+    // A corrupt blob is left on disk and the session starts empty, exactly as
+    // before. Wiping a user's history because one parse failed would be the
+    // worse failure, and a later build may know how to read what this one
+    // cannot. The Rust side is all-or-nothing, so a refused blob leaves every
+    // store untouched rather than half-loaded.
+    this.comm.load(fromBase64(raw));
   }
 
   async save() {
     if (!this.storage) return;
-    const data = {
-      threads: Object.fromEntries(this.threads),
-      unread: Object.fromEntries(this.unread),
-    };
-    await this.storage.set(this.key, JSON.stringify(data));
+    await this.storage.set(this.key, toBase64(this.comm.save()));
   }
 
   // ------------------------------------------------------------------ writes
 
-  /**
-   * A message arrived. Returns the conversation key it was filed under, or null
-   * when the sender could not be authenticated.
-   */
+  /** A message arrived. Returns the thread it was filed under, or null. */
   receive({ from, body, sealed, at }) {
-    if (!from) {
-      this.unauthenticatedCount++;
-      return null;
-    }
-    this._append(from, {
-      id: null,
-      self: false,
-      body,
-      at,
-      sealed: Boolean(sealed),
-      status: 'received',
-    });
-    this.unread.set(from, (this.unread.get(from) || 0) + 1);
-    return from;
+    return this.comm.threadReceive({ from, body, sealed, at });
   }
 
   /** Record a locally originated send. `envelope` is what sendDirect returned. */
   send(envelope) {
-    this._append(envelope.to, {
+    return this.comm.threadSend({
+      to: envelope.to,
       id: envelope.id,
-      self: true,
       body: envelope.body,
-      at: envelope.at,
       sealed: Boolean(envelope.sealed),
-      status: 'queued',
+      at: envelope.at,
     });
-    return envelope.to;
   }
 
   /** Reconcile by envelope id — never by position or by guessing. */
   setStatus(id, status) {
-    for (const msgs of this.threads.values()) {
-      for (const m of msgs) {
-        if (m.id && m.id === id) { m.status = status; return true; }
-      }
-    }
-    return false;
+    return this.comm.threadSetStatus(id, status);
   }
 
   markRead(addr) {
-    this.unread.set(addr, 0);
-  }
-
-  _append(addr, msg) {
-    const list = this.threads.get(addr) || [];
-    list.push(msg);
-    if (list.length > MAX_PER_THREAD) list.splice(0, list.length - MAX_PER_THREAD);
-    this.threads.set(addr, list);
+    this.comm.threadMarkRead(addr);
   }
 
   // ------------------------------------------------------------------- reads
 
   messages(addr) {
-    return this.threads.get(addr) || [];
+    return this.comm.threadMessages(addr);
   }
 
   unreadFor(addr) {
-    return this.unread.get(addr) || 0;
+    const row = this.conversations().find((c) => c.addr === addr);
+    return row ? row.unread : 0;
   }
 
   /**
@@ -130,25 +108,36 @@ export class ThreadStore {
    * the only name it could invent is one the envelope claimed rather than proved.
    */
   conversations() {
-    const rows = [];
-    for (const [addr, msgs] of this.threads) {
-      const last = msgs[msgs.length - 1];
-      rows.push({
-        addr,
-        lastBody: last ? last.body : '',
-        lastAt: last ? last.at : 0,
-        lastSelf: last ? last.self : false,
-        unread: this.unreadFor(addr),
-      });
-    }
-    rows.sort((a, b) => b.lastAt - a.lastAt);
-    return rows;
+    return this.comm.threadConversations();
   }
 
   totalUnread() {
-    let n = 0;
-    for (const v of this.unread.values()) n += v;
-    return n;
+    return this.comm.threadTotalUnread();
+  }
+
+  /** Envelopes that arrived without a provable sender. Surfaced, not filed. */
+  get unauthenticatedCount() {
+    return this.comm.threadUnauthenticatedCount();
+  }
+}
+
+// The blob is bytes and the storage port is strings, so it travels base64. Not
+// `JSON.stringify` of an array: that is ~6 characters per byte against base64's
+// 1.37, and localStorage is a few megabytes for everything the app owns.
+function toBase64(bytes) {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function fromBase64(s) {
+  try {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return new Uint8Array(0);
   }
 }
 
