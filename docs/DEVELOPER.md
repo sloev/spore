@@ -36,6 +36,7 @@ site. Pick a row.
 <div class="list-rows">
 <a class="list-row" href="security-policy.html"><div class="list-row-body"><span class="list-row-title">Reporting a vulnerability</span><span class="list-row-subtitle">How to report, and what happens next.</span></div></a>
 <a class="list-row" href="simulations.html"><div class="list-row-body"><span class="list-row-title">Simulations</span><span class="list-row-subtitle">Every scenario the simulator runs, what each is for, and the numbers from the last run.</span></div></a>
+<a class="list-row" href="kernel-flows.html"><div class="list-row-body"><span class="list-row-title">Kernel flows</span><span class="list-row-subtitle">A message moving — four scenarios, every arrow recorded from a real node call.</span></div></a>
 <a class="list-row" href="state-machines.html"><div class="list-row-body"><span class="list-row-title">State machines</span><span class="list-row-subtitle">The ratchet, the mix and the hub, drawn from the transitions they actually take.</span></div></a>
 <a class="list-row" href="threat-model.html"><div class="list-row-body"><span class="list-row-title">Threat model</span><span class="list-row-subtitle">Six chapters of adversary, what stops them, and the residual risk where nothing fully does.</span></div></a>
 <a class="list-row" href="security-matrix.html"><div class="list-row-body"><span class="list-row-title">Security maturity</span><span class="list-row-subtitle">What has actually been tested, per component — and the column that is empty for all of them.</span></div></a>

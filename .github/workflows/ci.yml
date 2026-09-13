@@ -104,6 +104,12 @@ jobs:
           cargo run --release --example state_machines > docs/STATE_MACHINES.md
           git diff --exit-code docs/STATE_MACHINES.md \
             || (echo "docs/STATE_MACHINES.md is stale — run: cargo run --release --example state_machines > docs/STATE_MACHINES.md"; exit 1)
+      - name: Kernel flow diagrams regenerate identically
+        if: runner.os == 'Linux'
+        run: |
+          cargo run --release --example kernel_flows > docs/KERNEL_FLOWS.md
+          git diff --exit-code docs/KERNEL_FLOWS.md \
+            || (echo "docs/KERNEL_FLOWS.md is stale — run: cargo run --release --example kernel_flows > docs/KERNEL_FLOWS.md"; exit 1)
       - name: Simulation results in sync
         if: runner.os == 'Linux'
         run: |
