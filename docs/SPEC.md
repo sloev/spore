@@ -76,7 +76,7 @@ could not tell whether an unpinned behaviour was extensible or merely undocument
 | | changes how? | what says so |
 |---|---|---|
 | **Frozen** — §1, §2, the file layer's content id | a `ver` bump, which is a hard fork | `reference/vectors.json`, and CI refuses to edit it |
-| **Normative but versioned** — §3 link framing, INV/WANT payloads, file-layer tags | may change with a minor release; both ends of one link, or one fetch, must agree | this document, and the tests named beside each |
+| **Normative but versioned** — §3 link framing, INV/WANT payloads, file-layer tags | may change with a minor release; both ends of one link, or one fetch, must agree | `reference/versioned_vectors.json`, regenerated and diff-checked by CI but *not* frozen |
 | **Local policy** — `max_relay_age`, push budget, repair sizing, interest lease, every `Limits` field | freely, per node, with no coordination at all | each node's own configuration |
 
 The third row is the one that keeps growing, and deliberately: every time a
@@ -93,11 +93,28 @@ that encoding with hops zeroed, the signature over it, armor, and that a tampere
 wire is detected. **That is §1 and §2.**
 
 It does **not** pin §3's fragment payload, the INV/WANT payload shapes, the file
-layer's tags, or link framing — none of which have ever appeared in the vectors.
-Those are wire in the sense that bytes cross a link, and they have changed:
-§3's index and count went from one byte to two, and a sealed root now names its
-header rather than carrying it. Both were deliberate and neither needed a
-major-version label, because the guard correctly did not consider them frozen.
+layer's tags, or link framing. Those are wire in the sense that bytes cross a
+link, and they have changed: §3's index and count went from one byte to two, and
+a sealed root now names its header rather than carrying it. Both were deliberate
+and neither needed a major-version label, because the guard correctly did not
+consider them frozen.
+
+**They are pinned, though — one tier down.** `reference/versioned_vectors.json`
+covers link framing (including KISS), the INV/WANT payload shapes with their two
+traps, the three manifest encodings, and the forwarding decisions. CI regenerates
+it and refuses a stale diff, exactly as it does for the frozen file; what differs
+is the promise. A minor release may change it. A minor release may not change
+`vectors.json`.
+
+The distinction is the point. Pinning both in one file would say the two have
+the same stability, and it would make every legitimate change to link framing
+carry the `allow-frozen-change` label — which is how a guard stops meaning
+anything. Build against both; know which is which.
+
+**Why the second file exists at all.** An envelope is where interop starts, not
+where it finishes. A node that reproduces every byte in `vectors.json` and cannot
+parse an INV, cannot reassemble a frame its link had to split, and cannot read a
+manifest is wire-compatible and unable to talk to anyone.
 
 Saying so matters more than it looks. A third-party T0 built against "Part I is
 frozen" would have assumed the fragment header was stable. It was not: §3's
