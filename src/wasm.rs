@@ -945,3 +945,66 @@ pub unsafe extern "C" fn spore_group_invite_decode(ptr: *const u8, len: usize) -
         None => pack(Vec::new()),
     }
 }
+
+// -- the application layer: one command ABI (M10-C) --------------------------
+//
+// Three exports, not forty. `src/wasm.rs` already has 34 exports, `src/ffi.rs`
+// 20, and `android/jni` 64 — three overlapping, divergent subsets of the same
+// kernel, with the communicator written again on top of each. A method-per-
+// function ABI for the M10-B stores would be a fourth of those.
+//
+// So the communicator crosses the boundary as bytes: `spore_comm_call` takes an
+// encoded command and returns an encoded response. The same call works unchanged
+// over IPC, which is what M10-F's desktop build needs — bytes do not know what
+// carried them, so the screens cannot tell a wasm node from a native daemon.
+//
+// `peers` is passed in on each call rather than held, because it is the kernel's
+// state: a cached copy would answer contact rows from a snapshot with no way to
+// say how old it was.
+#[cfg(feature = "communicator")]
+mod comm_abi {
+    use super::*;
+    use crate::communicator::{contact::PeerSeen, Communicator};
+
+    /// A new communicator. Free it with [`spore_comm_free`].
+    #[no_mangle]
+    pub extern "C" fn spore_comm_new() -> *mut Communicator {
+        Box::into_raw(Box::new(Communicator::new()))
+    }
+
+    /// # Safety
+    /// `c` came from [`spore_comm_new`] and is not used again.
+    #[no_mangle]
+    pub unsafe extern "C" fn spore_comm_free(c: *mut Communicator) {
+        if !c.is_null() {
+            drop(Box::from_raw(c));
+        }
+    }
+
+    /// Run one command against the communicator, optionally with the node whose
+    /// peer table should answer contact rows.
+    ///
+    /// Returns a packed `(ptr << 32) | len` buffer the caller frees with
+    /// `spore_free`. A malformed command is a one-byte error response, never a
+    /// trap: the caller is a page, and a page with a version skew must get an
+    /// answer rather than a dead module.
+    ///
+    /// # Safety
+    /// `c` is live; `cmd`/`len` describe readable memory; `node` is null or live.
+    #[no_mangle]
+    pub unsafe extern "C" fn spore_comm_call(
+        c: *mut Communicator,
+        node: *mut Node,
+        now: u32,
+        cmd: *const u8,
+        len: usize,
+    ) -> i64 {
+        let bytes = if cmd.is_null() { &[][..] } else { std::slice::from_raw_parts(cmd, len) };
+        let peers: Vec<PeerSeen> = if node.is_null() {
+            Vec::new()
+        } else {
+            crate::communicator::ContactStore::seen_from_node(&*node, now)
+        };
+        pack((*c).call(bytes, &peers))
+    }
+}

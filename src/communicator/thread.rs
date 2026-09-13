@@ -51,6 +51,20 @@ pub enum MessageStatus {
 }
 
 impl MessageStatus {
+    /// The numeric code this status crosses the ABI and the storage format as.
+    ///
+    /// One mapping for both, because two would be two chances to disagree: the
+    /// bytes a host is handed and the bytes it later hands back are the same
+    /// vocabulary.
+    pub fn code(&self) -> u8 {
+        status_code(*self)
+    }
+
+    /// The inverse of [`MessageStatus::code`].
+    pub fn from_str_code(c: u8) -> Option<MessageStatus> {
+        status_of(c)
+    }
+
     /// The wire name, which is also the name the JS store used. Kept identical so
     /// a persisted blob written by either side reads on the other.
     pub fn as_str(&self) -> &'static str {

@@ -164,6 +164,13 @@ jobs:
       - name: Web loopback end-to-end test
         run: node web/test.mjs
 
+      # The M10-C command ABI, driven from JS over the real module. A Rust unit
+      # test cannot check this: it never crosses the boundary, and the boundary
+      # is the entire claim — one entry point that a browser reaches over wasm
+      # and a desktop host will reach over IPC.
+      - name: Communicator command ABI, end to end from JS
+        run: node web/comm-test.mjs
+
       - name: Transport codec tests (kiss, meshtastic, audio wire formats)
         run: node web/codec-test.mjs
 
