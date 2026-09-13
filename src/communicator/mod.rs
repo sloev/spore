@@ -44,12 +44,14 @@
 
 pub mod contact;
 pub mod thread;
+pub mod topic;
 
 mod cursor;
 pub(crate) use cursor::Cursor;
 
 pub use contact::{contact_rows, Contact, ContactRow, ContactStore, PeerSeen, View};
 pub use thread::{MessageStatus, ThreadStore};
+pub use topic::{Post, TopicStore};
 
 #[cfg(test)]
 mod portability {
