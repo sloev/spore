@@ -12,12 +12,23 @@
 //! The scenarios here are the same ones the property tests drive, for the same
 //! reason: if a transition matters enough to test, it matters enough to draw.
 
+use spore::bridge::hub::Hub;
 use spore::mix::Batch;
 use spore::ratchet::{keypair, Ratchet};
 use std::collections::BTreeSet;
 
 const T0: u32 = 1_700_000_000;
 const TTL: u32 = 7 * 24 * 3600;
+
+/// A transition label mermaid will accept.
+///
+/// In `stateDiagram-v2` the label runs from the first `:` to end of line, and a
+/// second colon inside it is a parse error — `Hub::new` took the whole page down
+/// once. Sanitising here rather than at every call site means a future label
+/// cannot break the build by containing a path.
+fn sanitise(label: &str) -> String {
+    label.replace("::", " ").replace(':', " —").replace(';', ",")
+}
 
 /// One observed edge: `from --label--> to`.
 type Edge = (String, String, String);
@@ -35,7 +46,7 @@ impl Observed {
     fn mermaid(&self) -> String {
         let mut o = String::from("```mermaid\nstateDiagram-v2\n");
         for (from, label, to) in &self.edges {
-            o.push_str(&format!("  {from} --> {to}: {label}\n"));
+            o.push_str(&format!("  {from} --> {to}: {}\n", sanitise(label)));
         }
         o.push_str("```\n");
         o
@@ -162,9 +173,71 @@ fn mix_machine() -> (Observed, Vec<String>) {
     (o, notes)
 }
 
+/// A hub interface's life, observed from outside.
+///
+/// The locks themselves cannot be drawn from here — the tracker that enforces
+/// "one of a hub's locks at a time" is test-only and private, which is the right
+/// place for it. What *is* observable is what an interface does, and the part
+/// worth drawing is that a retired id is never reused.
+fn hub_machine() -> (Observed, Vec<String>) {
+    let mut o = Observed::default();
+    let mut notes = Vec::new();
+
+    let hub = Hub::new(spore::Node::new("gateway", &[]));
+    o.saw("[*]", "Hub::new", "NoInterfaces");
+
+    let (a, a_rx) = hub.register();
+    o.saw("NoInterfaces", "register", "Sending");
+    let pull = hub.register_pull();
+    o.saw("NoInterfaces", "register_pull (no sender)", "PullOnly");
+
+    hub.send(spore::ZERO_DEST, b"one".to_vec()).expect("fits");
+    let carried = a_rx.try_iter().count();
+    assert!(carried > 0);
+    o.saw("Sending", "a flood reaches it", "Sending");
+    o.saw("PullOnly", "nothing is pushed to it; it answers WANT from the store", "PullOnly");
+
+    hub.unregister(a);
+    o.saw("Sending", "unregister: sender dropped", "Retired");
+    hub.send(spore::ZERO_DEST, b"two".to_vec()).expect("fits");
+    assert_eq!(a_rx.try_iter().count(), 0);
+    o.saw("Retired", "a flood is not delivered to it", "Retired");
+
+    let (c, _c_rx) = hub.register();
+    assert_ne!(c, a, "a retired id is never reused");
+    o.saw("Retired", "a new register takes a fresh id, never this hole", "Sending");
+    hub.unregister(pull);
+    hub.unregister(9999);
+    o.saw("Retired", "unregister again, or on an unknown id: no-op", "Retired");
+
+    notes.push(
+        "A retired slot is emptied rather than removed, so **iface ids are never recycled within \
+         a process**. `Forward::Flood`'s `except` addresses interfaces by index, so reusing a hole \
+         would silently misroute the one thing that must not be misrouted."
+            .into(),
+    );
+    notes.push(
+        "Retiring an interface also retires the pulls it was the reason for (M11-K): anything this \
+         node adopted an interest in *on behalf of* a peer behind that link has lost its waiter, \
+         and hunting for it is now work for nobody."
+            .into(),
+    );
+    notes.push(
+        "Not drawn, because it is not observable from outside: a hub holds **one of its own locks \
+         at a time**. Every method that needs both the node and the outbound table scopes the \
+         first guard and lets it drop before taking the second — with at most one held there is no \
+         pair to invert, which is why there is no lock *order* to get wrong. That was a comment \
+         until #278; it is now asserted on every take, in test builds, across every public method."
+            .into(),
+    );
+
+    (o, notes)
+}
+
 fn main() {
     let (ratchet, ratchet_notes) = ratchet_machine();
     let (mix, mix_notes) = mix_machine();
+    let (hub, hub_notes) = hub_machine();
 
     for line in [
         "# State machines",
@@ -196,6 +269,13 @@ fn main() {
     print!("{}", mix.mermaid());
     println!();
     for n in &mix_notes {
+        println!("- {n}\n");
+    }
+
+    println!("## Hub — an interface's life\n");
+    print!("{}", hub.mermaid());
+    println!();
+    for n in &hub_notes {
         println!("- {n}\n");
     }
 }
