@@ -719,6 +719,40 @@ mod tests {
     }
 
     #[test]
+    fn the_contact_row_layout_is_pinned_byte_for_byte() {
+        // Three hand-written transcriptions of this codec now exist — Rust here,
+        // JavaScript in `web/app/communicator.mjs`, Kotlin in
+        // `android/app/.../Comm.kt` — and only the first two can be run against
+        // the core in CI. A field inserted or reordered here would leave the
+        // Kotlin reading a boolean as a string length and produce garbage on a
+        // device, so the layout is pinned rather than described.
+        //
+        // Order: addr[8], name_is_claim, following, blocked, is_contact, heard,
+        // has_prekey, age[4], has_age, label, claimed_name, name.
+        let mut c = Communicator::new();
+        let mut w = cmd(CMD_CONTACT_SET_LABEL);
+        w.bytes(&A).string("Ada");
+        c.call(&w.into_vec());
+
+        let mut w = cmd(CMD_CONTACT_ROWS);
+        w.u8(0).string("").u32(1).bytes(&A).u32(5).bool(true).string("Claimed");
+        let r = c.call(&w.into_vec());
+        let body = ok(&r);
+
+        let mut want: Vec<u8> = Vec::new();
+        want.extend_from_slice(&1u32.to_be_bytes()); // one row
+        want.extend_from_slice(&A); // addr
+        want.extend_from_slice(&[0, 0, 0, 1, 1, 1]); // claim?, following, blocked, contact, heard, prekey
+        want.extend_from_slice(&5u32.to_be_bytes()); // age
+        want.push(1); // has_age
+        for s in ["Ada", "Claimed", "Ada"] {
+            want.extend_from_slice(&(s.len() as u32).to_be_bytes());
+            want.extend_from_slice(s.as_bytes());
+        }
+        assert_eq!(body, &want[..], "the contact row layout moved");
+    }
+
+    #[test]
     fn command_tags_are_unique() {
         // These cross a version boundary: a page cached last week talks to a
         // module built today. Two commands sharing a tag would mean one silently
