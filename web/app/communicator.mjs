@@ -45,11 +45,16 @@ export const CMD = {
 export const STATUS = { queued: 0, sent: 1, acked: 2, expired: 3, received: 4 };
 const STATUS_NAME = ['queued', 'sent', 'acked', 'expired', 'received'];
 
-export function hex(bytes) {
+// Named `commHex`/`commUnhex` rather than `hex`/`unhex`, which `spore-client.mjs`
+// already owns. The standalone build flattens every module into one classic
+// script, so two top-level `hex` declarations are a duplicate-identifier error at
+// build time — module scoping hides the clash right up until the single-file node
+// is built, which is the artefact most people actually run.
+export function commHex(bytes) {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export function unhex(s) {
+export function commUnhex(s) {
   const out = new Uint8Array(s.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
   return out;
@@ -64,7 +69,7 @@ export class CmdWriter {
   bytes(a) { for (const x of a) this.b.push(x); return this; }
   str(s) { const e = new TextEncoder().encode(s || ''); return this.u32(e.length).bytes(e); }
   /** An address as a hex string, or null/undefined for "no address". */
-  optAddrHex(h) { return h ? this.u8(1).bytes(unhex(h)) : this.u8(0); }
+  optAddrHex(h) { return h ? this.u8(1).bytes(commUnhex(h)) : this.u8(0); }
   out() { return Uint8Array.from(this.b); }
 }
 
@@ -79,7 +84,7 @@ export class RespReader {
     return v;
   }
   bytes(n) { const v = this.b.slice(this.i, this.i + n); this.i += n; return v; }
-  hex(n) { return hex(this.bytes(n)); }
+  hex(n) { return commHex(this.bytes(n)); }
   str() { return new TextDecoder().decode(this.bytes(this.u32())); }
   /** A presence byte then an address; null when absent. */
   optAddrHex() { return this.u8() === 1 ? this.hex(8) : null; }
@@ -143,21 +148,21 @@ export class Communicator {
   }
 
   threadSend({ to, id, body, sealed, at }) {
-    this.call(new CmdWriter(CMD.THREAD_SEND).bytes(unhex(to)).bytes(unhex(id)).str(body).bool(sealed).u32(at || 0));
+    this.call(new CmdWriter(CMD.THREAD_SEND).bytes(commUnhex(to)).bytes(commUnhex(id)).str(body).bool(sealed).u32(at || 0));
     return to;
   }
 
   threadSetStatus(idHex, status) {
     if (!idHex || !(status in STATUS)) return false;
-    return this.call(new CmdWriter(CMD.THREAD_SET_STATUS).bytes(unhex(idHex)).u8(STATUS[status])).u8() === 1;
+    return this.call(new CmdWriter(CMD.THREAD_SET_STATUS).bytes(commUnhex(idHex)).u8(STATUS[status])).u8() === 1;
   }
 
   threadMarkRead(addrHex) {
-    this.call(new CmdWriter(CMD.THREAD_MARK_READ).bytes(unhex(addrHex)));
+    this.call(new CmdWriter(CMD.THREAD_MARK_READ).bytes(commUnhex(addrHex)));
   }
 
   threadMessages(addrHex) {
-    const r = this.call(new CmdWriter(CMD.THREAD_MESSAGES).bytes(unhex(addrHex)));
+    const r = this.call(new CmdWriter(CMD.THREAD_MESSAGES).bytes(commUnhex(addrHex)));
     const out = [];
     const n = r.u32();
     for (let i = 0; i < n; i++) {

@@ -501,7 +501,7 @@ structural one.
 | M10-C Collapse `wasm.rs` / `ffi.rs` / `android-jni` onto one app-level command+event ABI | 🟡 partial | **The command half exists** for the M10-B stores: `src/communicator/api.rs` is one `call(cmd_bytes) -> response_bytes` entry point behind **three** wasm exports rather than the forty a method-per-function ABI would need. Bytes in, bytes out, so the same call works unchanged over IPC — which is what M10-F needs, since the screens cannot tell a wasm node from a native daemon when bytes are all that cross. `web/comm-test.mjs` drives it from JS against the real module in CI, because a Rust test never crosses the boundary and the boundary is the whole claim. **The web thread store now delegates to it**: `web/app/stores/threads.mjs` is a shim over address translation and the host's storage, its ~190 lines of duplicated conversation logic deleted rather than ported, and the 13 assertions in `threads.test.mjs` pass unchanged against the Rust — which is what makes "behind an unchanged interface" a checked claim. Still owed: the **event** half, the kernel commands (only the app stores are behind it so far), the contact and topic shims, and re-pointing `ffi.rs`/`android-jni` at it — noting that **`bindings/spore.h` is frozen**, so that last step needs `allow-frozen-change` or an additive app-level ABI beside it |
 | M10-H Web node: the rest of the design comp | ⬜ | The IA and shell now match `Spore Web App.dc.html`; the screens behind it do not yet. Carried, in rough order of how much kernel work each needs: **groups** in Chat (members, invite armor, open vs keyed topic badge — `spore_topic_seal`/`spore_group_invite_encode` already exist, so this is mostly UI); **Blogs** channels with handles, reactions, comments and share (an app-layer convention over feed posts, no wire change); **Fileshare** peer counts, share sheet and per-contact public folders (the folder half is M4's W6 `spore://` resolver); **Contacts** avatars with fetch states (an avatar is a small published file, so the file layer already carries it) and QR meetup; **multiple identities**, which is the one that is genuinely blocked — a node is its seed and every store here is keyed by app rather than by identity, so it belongs with M10-B |
 | M10-E Re-point Android Kotlin + CLI at the shared layer; delete duplicated logic | ⬜ not started | Retires ~6130 lines of Kotlin app logic and the JS blob |
-| M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
+| M10-F Desktop (Tauri or equivalent): the web UI over a **native** node, with the eleven native bridges | ⬜ not started | [#291](https://github.com/sloev/spore/issues/291) specifies the shape: one binary that is a CLI when given arguments and opens a webview when double-clicked, with a tray icon and the UI bound to loopback only. Its build and packaging half is **M13**. Must follow M10-C, not precede it — desktop is that app-level ABI over IPC while the browser is the same ABI over wasm. `SporeClient` already takes a host-provided transport registry so this needs no UI change |
 | M10-G SDK packaging/release plan for the app-level ABI, once M10-C lands | ⬜ not started | [Prns](https://github.com/KenAKAFrosty/Prns) already ships "one core, many language bindings" at wider scope — Rust/TS/Python/.NET/Go/Swift/JVM/Julia/C via `prns-host/bindings/*`, with a staged qualify→promote pipeline per SDK. A concrete reference for how each UI shim's release process could work; M10 doesn't currently address packaging at all, only that the ABI exists |
 
 **Scope: the web node is not the landing site.** Two different products live in
@@ -864,6 +864,62 @@ a `spore-sim` scenario proving it; files push a measured number of chunks and
 pull the rest; the resource invariant is stated and has a test per path.
 
 ---
+
+## Milestone 13 — Distribution: a node a non-developer can install
+
+**Goal:** close the gap between "the protocol works" and "a person can run it".
+Today the only paths to a node are compiling it or using the browser build, which
+means the audience is people who already have a Rust toolchain.
+
+**From [#291](https://github.com/sloev/spore/issues/291).** The GUI half of that
+issue is **M10-F** and stays there — it must follow M10-C, since a webview over an
+app-level ABI is the whole point and building it against the current three ABIs
+would mean writing the IPC layer twice. What is new here is everything around it:
+producing binaries at all, and packaging them so they install.
+
+| Task | Status | Notes |
+|---|---|---|
+| M13-A Release workflow: build the daemon on a version tag | ⬜ | `.github/workflows/release.yml`, matrix over Windows x86_64, macOS x86_64 + arm64, Linux x86_64 + arm64, artefacts attached to the GitHub Release. The cross-compile matrix largely exists already — `android.yml` and `esp32.yml` prove the crate cross-builds — so this is packaging the pattern rather than discovering it |
+| M13-B Static linking where the platform allows | ⬜ | Linux musl in particular: a glibc-linked binary built on the CI runner will refuse to start on an older distro, which is the single most common "downloaded it, it does not work" report for Rust projects. Worth verifying on an actually-old image rather than assuming musl fixed it |
+| M13-C Installers per platform | ⬜ | `.msi`/`.exe` (WiX or NSIS) adding the daemon to `PATH`; `.dmg` with an `.app` bundle, unsigned at first and **saying so**, since an unsigned macOS binary shows the user a scary dialog and the docs should predict it rather than let it surprise them; `.deb`/`.rpm` or an AppImage for Linux. Each must create the config directory the daemon already expects |
+| M13-D Signing and notarisation | ⬜ | Deliberately separate from M13-C, because it needs an Apple Developer account and a Windows code-signing certificate — money and identity, not code. Until then the download page states plainly what the OS will say |
+| M13-E "First 60 seconds" on the Apps page | ⬜ | Download → install → open → see the node. Blocked on M13-A having something to link to; tracked here rather than in M14 so the docs change lands with the artefact it describes |
+
+**One constraint worth stating before anyone starts.** A downloadable binary is
+the first artefact this project would ship that a user cannot verify by reading
+the source they built it from, which is the opposite of how every other claim
+here works. The release must therefore publish a SHA-256 per artefact and the
+workflow that produced it, the way the offline bundle already does — otherwise
+"honest infrastructure" quietly becomes "trust our CI".
+
+## Milestone 14 — Docs: the bridge between the landing page and the spec
+
+**Goal:** a reader arriving from the homepage can reach the depth without falling
+off a cliff. **From [#290](https://github.com/sloev/spore/issues/290)**, an audit
+whose summary is worth repeating: the writing is strong and the honesty is the
+competitive advantage; the gap is navigational, between an inviting landing page
+and documents that open in protocol-engineer register.
+
+Each row below was checked against the tree, and two of the audit's findings did
+not survive that check — recorded as ✅ / ❌ rather than carried, because a
+roadmap that lists work already done or never needed is a roadmap nobody trusts.
+
+| Task | Status | Notes |
+|---|---|---|
+| M14-A Glossary | ⬜ | "envelope", "bridge", "fountain code", "damped flood", "custody", "watermark", one page. Currently these appear in body text with no definition anywhere a newcomer would look |
+| M14-B Concepts page | ⬜ | Translate the landing page's metaphors into protocol terms — what a "signed postcard" is in wire-format bytes — and link each into `SPEC.md`. The bridge the audit is really asking for; M14-A alone is a dictionary without a map |
+| M14-C `SPEC.md` opens with the problem, not the vocabulary | ⬜ | It currently begins in T0/T1 terms. A short "what this protocol is for" before Part I costs a paragraph and saves every first-time reader |
+| M14-D Client-side search | ⬜ | 20+ pages with no way to find "fountain code" except scanning. Lunr.js or equivalent — and it has to work in the offline bundle, which takes no external requests, so a CDN script is not an option |
+| M14-E Navigation aids in long normative docs | ⬜ | Sticky section nav or breadcrumbs for `SPEC.md` and the threat model |
+| M14-F Tables readable on a phone | ⬜ | The spec and threat model tables do not wrap or scroll cleanly on a small screen |
+| M14-G Rewrite the Developer hub intro | ⬜ | "Pick a row" is terse to the point of unhelpful for what is meant to be the central hub. One guiding sentence per section group would do it |
+| M14-H `DEV_GUIDE.md` / `DEVELOPER.md` naming | ⬜ | The audit called for merging them. **They should not be merged** — `DEVELOPER.md` (45 lines) is the site's index page and `DEV_GUIDE.md` (248) is the guide itself, so they are an index and its contents rather than a duplicate. The real defect is that the *names* do not say which is which. Rename rather than merge |
+| M14-I "What works today" summary | ⬜ | On the homepage or Apps page, linking into hardware verification and the simulations page. Both of those pages are generated from real runs, so this is surfacing evidence that already exists |
+| M14-J README → site bridge | ⬜ | The GitHub README opens with the origin story and never says the docs are rendered at the Pages site, or where to start |
+| M14-K Homepage depth, Apps page "which one should I pick?" | ⬜ | The strongest explanatory material is one click deeper than anything that tells you to click |
+| M14-L Microcopy on the web node | ⬜ | "Copied!" on code blocks, loading indicators — feedback for interactions that currently look like nothing happened |
+| Threat model listed twice on the Developer page | ✅ | Real, and fixed in the same commit that recorded this milestone: two `list-row`s pointed at `threat-model.html` with different blurbs. The second was the better description and is the one kept |
+| Broken `docs/*.html` links in `APPS.md` | ❌ not reproducible | `APPS.md` contains no `docs/*.html` links at all, and `site/build.mjs` has failed the build on an unresolvable internal href since the link checker landed — `links OK — every internal href and anchor resolves` runs on every build. Either already fixed or never true |
 
 ## A public library people opt into — pools, not a global catalogue
 

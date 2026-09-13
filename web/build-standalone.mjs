@@ -99,6 +99,9 @@ const MODULES = [
   'transports/meshtastic.mjs',
   'transports/reticulum.mjs',
   // app: helpers before the screens that use them
+  // the command codec, before `spore-client` constructs one and before the
+  // stores that delegate through it
+  'app/communicator.mjs',
   'app/ui/dom.mjs',
   'app/ui/icons.mjs',
   'app/ui/format.mjs',
