@@ -966,6 +966,12 @@ pub mod bridge;
 pub mod direct;
 
 // C ABI for the Python / Go / JS wrappers under `bindings/`.
+/// The application layer (M10): conversations, contacts, unread — the state
+/// every host currently reimplements. Default on; off for ESP32, which is a
+/// headless relay with no user.
+#[cfg(feature = "communicator")]
+pub mod communicator;
+
 pub mod ffi;
 
 // Browser node ABI (wasm32) for the JS transports under `web/`.

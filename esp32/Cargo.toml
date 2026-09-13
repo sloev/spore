@@ -11,7 +11,9 @@ publish = false
 [workspace]
 
 [dependencies]
-spore = { path = ".." }
+# `default-features = false` drops the communicator (M10): this board is a
+# headless relay, and the application layer is for targets with a user.
+spore = { path = "..", default-features = false }
 esp-idf-svc = "0.51"
 log = "0.4"
 
