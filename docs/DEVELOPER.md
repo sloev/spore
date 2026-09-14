@@ -36,6 +36,7 @@ site. Pick a row.
 <div class="list-rows">
 <a class="list-row" href="security-policy.html"><div class="list-row-body"><span class="list-row-title">Reporting a vulnerability</span><span class="list-row-subtitle">How to report, and what happens next.</span></div></a>
 <a class="list-row" href="simulations.html"><div class="list-row-body"><span class="list-row-title">Simulations</span><span class="list-row-subtitle">Every scenario the simulator runs, what each is for, and the numbers from the last run.</span></div></a>
+<a class="list-row" href="status.html"><div class="list-row-body"><span class="list-row-title">What works today</span><span class="list-row-subtitle">Counted from the tree — what is tested, what has never met an antenna, and what is not written yet.</span></div></a>
 <a class="list-row" href="concepts.html"><div class="list-row-body"><span class="list-row-title">Concepts</span><span class="list-row-subtitle">Each metaphor on the landing page, and the thing it is actually made of.</span></div></a>
 <a class="list-row" href="glossary.html"><div class="list-row-body"><span class="list-row-title">Glossary</span><span class="list-row-subtitle">Words this project uses in a particular way, each pointing at where it lives in the code.</span></div></a>
 <a class="list-row" href="kernel-flows.html"><div class="list-row-body"><span class="list-row-title">Kernel flows</span><span class="list-row-subtitle">A message moving — four scenarios, every arrow recorded from a real node call.</span></div></a>
