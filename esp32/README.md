@@ -2,9 +2,11 @@
 
 The embedded runtime from [Roadmap](../docs/ROADMAP.md) Milestone 8 — a headless
 board that relays envelopes over raw 802.11 and bridges to a phone over USB or
-BLE. This directory is currently **E1 only**: the toolchain scaffold and a
-bring-up binary that proves the core runs here. The radio, flash store, USB and
-BLE halves (E2–E5) are not written yet.
+BLE. **E1 is the only part verified on hardware** — a dated bring-up run, in
+[Hardware verification](../docs/HARDWARE.md) row 21. The radio (E2), flash store
+(E3) and USB tether (E4) are *written*, in `src/{radio,storage,tether}.rs`, and
+have never met the air; the BLE half (E5) is not written. Treat anything past E1
+as code that compiles, not as a working relay, until its row has a date.
 
 ## Why it is its own crate
 

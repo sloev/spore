@@ -45,9 +45,43 @@ fn main() {
     // that to ESP-IDF's hardware TRNG (`esp_fill_random`), so no shim is needed;
     // if that ever stopped being true this line is where it would show up.
     let heap_before = free_heap();
-    let node = Node::new("esp32-relay", &["news"]);
+
+    // --- Identity nutrient (M8/E3) -------------------------------------------
+    // The seed comes from NVS, so the board keeps its address across a power
+    // cycle. Until this existed `Node::new` ran every boot and the first
+    // hardware run recorded the consequence honestly: "the identity does not
+    // survive a reboot". A board that changes address every power cycle cannot
+    // be left in a field — nobody can reply to it, and every neighbour sees a
+    // stranger each time the lights flicker.
+    let (node, fresh_identity) = match storage::load_or_create_seed() {
+        Ok((seed, fresh)) => (Node::from_seed("esp32-relay", &["news"], &seed), fresh),
+        // A board with no usable NVS is still a relay; it just forgets who it is
+        // when the power goes. Same reasoning as a radio that will not start:
+        // say so and carry on, rather than refusing to boot.
+        Err(e) => {
+            log::error!("NVS unavailable ({e}) — identity will not survive a reboot");
+            (Node::new("esp32-relay", &["news"]), true)
+        }
+    };
+    let mut node = node;
+    // The ring, beside the seed and for the same reason. Restoring it is what
+    // keeps mail sealed to a rotated prekey openable after a power cycle.
+    let ring_restored = match storage::load_prekey_ring() {
+        Ok(Some(blob)) => node.restore_prekey_ring(&blob),
+        Ok(None) => false,
+        Err(e) => {
+            log::error!("prekey ring unreadable ({e}) — starting with a fresh one");
+            false
+        }
+    };
+    let node = node;
     let addr = node.addr;
-    log::info!("identity: addr={} (seed is not logged)", hex(&addr));
+    log::info!(
+        "identity: addr={} ({}) (seed is not logged)",
+        hex(&addr),
+        if fresh_identity { "new this boot" } else { "restored from NVS" }
+    );
+    log::info!("prekey ring: {}", if ring_restored { "restored from NVS" } else { "fresh" });
 
     // --- One real signature --------------------------------------------------
     // The heaviest crypto the core does, and the most likely thing to blow a
@@ -197,15 +231,9 @@ fn main() {
                     // limit of its own, so nothing here needs splitting. The
                     // radio is where this board meets a narrow link, and that
                     // path does its own.
-                    if let Err(e) = spore::bridge::stream_link::run_split(
-                        hub_for_tether,
-                        iface,
-                        None,
-                        rx,
-                        r,
-                        w,
-                        "tether",
-                    ) {
+                    if let Err(e) =
+                        spore::bridge::stream_link::run_split(hub_for_tether, iface, None, rx, r, w, "tether")
+                    {
                         log::error!("tether bridge stopped: {e}");
                     }
                 })
@@ -221,6 +249,15 @@ fn main() {
     // `Hub::tick` drives it and dispatches whatever falls due to every bridge.
     log::info!("entering tick loop — heap now {} bytes", free_heap());
     let mut ticks: u32 = 0;
+    // What is currently in NVS. The ring rotates inside `tick` (daily, §7), so
+    // writing it once at boot would persist only the ring the board started
+    // with — and the one that matters is the one it has when the power goes.
+    // Compared rather than written every time: NVS has finite erase cycles, and
+    // a 1 KB write every thirty seconds for a year is not what it is for.
+    let mut ring_in_nvs: Vec<u8> = hub.with_node(|n| n.prekey_ring());
+    if let Err(e) = storage::save_prekey_ring(&ring_in_nvs) {
+        log::error!("cannot write prekey ring ({e}) — sealed mail will not survive a reboot");
+    }
     loop {
         hub.tick();
         ticks += 1;
@@ -234,6 +271,14 @@ fn main() {
         // the time anything can listen, and resetting to catch it does not work
         // here either: an S2 ignores the DTR/RTS toggle that resets other chips.
         if ticks % 3 == 0 {
+            let ring_now = hub.with_node(|n| n.prekey_ring());
+            if ring_now != ring_in_nvs {
+                match storage::save_prekey_ring(&ring_now) {
+                    Ok(()) => log::info!("prekey ring rotated — {} bytes written", ring_now.len()),
+                    Err(e) => log::error!("prekey ring rotated but NVS write failed: {e}"),
+                }
+                ring_in_nvs = ring_now;
+            }
             log::info!(
                 "up {}s · addr={} · sig={} · probe={} · heap={} · budget={} · radio={} · rxdrop={} · tether={}",
                 now(),

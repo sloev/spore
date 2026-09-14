@@ -67,9 +67,18 @@ Free heap held at 226,368 bytes across all three readings — no drift, which is
 the only way a leak would have shown, and not something static section sizes
 can tell you.
 
-**Known and expected: the identity does not survive a reboot.** An earlier run
-on the same board reported `addr=8a82bcbd735aed52`. Nothing is wrong — the
-runtime supplies no storage nutrient yet, so the seed is generated fresh at every
-boot and nothing is written to flash. M8/E3 is what makes an address persist;
-until then a power cycle is a new node.
+**The identity did not survive a reboot when this run was made.** An earlier run
+on the same board reported `addr=8a82bcbd735aed52`: nothing was wrong, the
+runtime simply supplied no storage nutrient, so the seed was generated fresh
+every boot.
+
+The firmware now keeps the seed and the prekey ring in NVS, so this is a thing to
+**re-run rather than a known limitation**. The row passes when two boots in a row
+report the same `addr=` and the second says `restored from NVS`. Note both
+addresses and the date.
+
+NVS rather than the `spore` SPIFFS partition on purpose: that partition mounts
+with `format_if_mount_failed`, which is what makes a never-flashed board work
+out of the box and what would erase the identity along with a damaged store.
+Envelopes are a cache and can be asked for again; a seed cannot.
 
