@@ -364,10 +364,21 @@ fn custody() -> Trace {
     let held = m.nodes[1].store_len();
     t.fact(format!("Ben is holding {held} sealed envelope he cannot open, for a node he has never met"));
 
-    // Later, Cai arrives. Ben offers what he has.
+    // Later, Cai arrives. Ben offers what he has — on his own, from `tick`,
+    // which is the only thing a node does without being spoken to first.
+    //
+    // This used to call `build_inv` by hand, and the diagram was therefore a
+    // picture of something the daemon never did: nothing called that function
+    // outside the tests, so a carrier never offered what it held. Driving `tick`
+    // is what makes this a trace rather than an illustration.
     m.link(1, 2);
     let later = now + 3_600;
-    let inv = m.nodes[1].build_inv(&std::collections::HashSet::new());
+    m.nodes[1].tick(now); // starts the cadence, as a running node's first tick does
+    let offered = m.nodes[1].tick(later);
+    let inv = match offered.first().expect("a carrier with something to carry speaks") {
+        Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes.clone(),
+    };
+    t.note("Ben", "tick: the offer cadence comes round");
     t.msg("Ben", "Cai", &describe(&inv));
     let rx = m.nodes[2].on_rx(&inv, 0, None, later);
     for f in &rx.forwards {
@@ -391,6 +402,14 @@ fn custody() -> Trace {
     t.fact(
         "Nothing here is a route. Ana never knew where Cai was, Ben never learned, and the \
          message crossed an hour of Cai being switched off."
+            .into(),
+    );
+    t.fact(
+        "**Ben speaks first, and has to.** Cai cannot ask for an id she has never heard of, so \
+         custody only completes if the carrier offers. That offer comes from `tick` on a \
+         cadence rather than from an event, because \"a neighbour has arrived\" is not \
+         something a node can observe — an interface coming up does not mean anyone is \
+         listening, and on broadcast media there is no event at all."
             .into(),
     );
     t

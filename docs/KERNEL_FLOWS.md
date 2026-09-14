@@ -76,6 +76,7 @@ sequenceDiagram
   Note over Ana: send_direct to Cai, sealed to her prekey
   Ana->>Ben: DATA hops=16 signed sealed (179 B)
   Note over Ben: kept for later — nowhere onward to send it
+  Note over Ben: tick — the offer cadence comes round
   Ben->>Cai: INV hops=16 (34 B)
   Cai->>Ben: WANT hops=16 (34 B)
   Ben->>Cai: DATA hops=16 signed sealed (179 B)
@@ -85,6 +86,8 @@ sequenceDiagram
 - Ben is holding 1 sealed envelope he cannot open, for a node he has never met
 
 - Nothing here is a route. Ana never knew where Cai was, Ben never learned, and the message crossed an hour of Cai being switched off.
+
+- **Ben speaks first, and has to.** Cai cannot ask for an id she has never heard of, so custody only completes if the carrier offers. That offer comes from `tick` on a cadence rather than from an event, because "a neighbour has arrived" is not something a node can observe — an interface coming up does not mean anyone is listening, and on broadcast media there is no event at all.
 
 ## What the kernel refuses, and what it carries anyway
 

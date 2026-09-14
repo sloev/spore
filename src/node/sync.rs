@@ -32,6 +32,20 @@ impl Node {
             if relevant {
                 p.extend_from_slice(id);
             }
+            // **Bounded, like the side that reads it.** `on_inv` has always
+            // capped how many ids it will act on; this side capped nothing, so a
+            // node with a full store would have offered every id it held in one
+            // frame — 10 MB of envelopes is tens of thousands of ids, which is
+            // hundreds of kilobytes of INV on a medium where the whole point is
+            // that frames are small. It never mattered while nothing called
+            // this; it matters now that `tick` does.
+            //
+            // Newest first (the sort above), so the cap keeps what is most
+            // likely to still be wanted, and the rest is offered on a later
+            // sweep as the newest age out.
+            if p.len() >= MAX_IDS_PER_GOSSIP * 16 {
+                break;
+            }
         }
         Envelope::new(ty::INV, ZERO_DEST, 0, p).wire()
     }
@@ -500,4 +514,154 @@ impl Node {
     }
 
     // ---- datagram sessions (§ application layer, tag 0x04) ---------------
+}
+
+#[cfg(test)]
+mod custody_over_a_live_link {
+    //! Does a node ever *offer* what it is carrying?
+    //!
+    //! SPEC §6 says "On any meeting: ANNOUNCE, then **INV** …, peer replies
+    //! **WANT**, send those." Custody is the behaviour this protocol is named
+    //! for, and it only completes if the carrier speaks first — the recipient
+    //! cannot ask for an id it has never heard of.
+    use crate::*;
+    use std::collections::HashSet;
+
+    fn node(name: &str, seed: u8) -> Node {
+        Node::from_seed(name, &[], &[seed; 32])
+    }
+
+    /// Hand every forward to `to`, returning what it delivered.
+    fn deliver(to: &mut Node, forwards: &[Forward], now: u32) -> usize {
+        let mut n = 0;
+        for f in forwards {
+            let wire = match f {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            n += to.on_rx(wire, 0, None, now).delivered.len();
+        }
+        n
+    }
+
+    #[test]
+    fn a_carrier_offers_what_it_holds_when_it_ticks() {
+        let now = 1_700_000_000;
+        let mut ana = node("ana", 1);
+        let mut ben = node("ben", 2);
+        let mut cai = node("cai", 3);
+
+        // Ana sends to Cai, who is not here. Ben takes custody.
+        let (_id, fwd, _sealed) = ana.send_direct(cai.addr, b"meet at the ridge", now);
+        deliver(&mut ben, &fwd, now);
+        assert_eq!(ben.store_len(), 1, "Ben is carrying it");
+
+        // Later, Cai arrives. Ben ticks — the only thing a node does on its own.
+        let later = now + 3_600;
+        ben.tick(now); // start the cadence, as a running node's first tick does
+        let ticked = ben.tick(later);
+        let delivered = deliver(&mut cai, &ticked, later);
+
+        // Cai cannot ask for an id she has never heard of, so if Ben's tick says
+        // nothing about what he holds, the message stays in Ben's store forever.
+        assert!(
+            !ticked.is_empty(),
+            "a carrier that never speaks is a carrier that never delivers: \
+             tick produced nothing at all"
+        );
+
+        // Whatever Ben said, Cai must be able to get the message from it —
+        // either directly, or by asking for what she was offered.
+        let mut got = delivered;
+        for f in &ticked {
+            let wire = match f {
+                Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+            };
+            let rx = cai.on_rx(wire, 0, None, later);
+            for reply in &rx.forwards {
+                let w = match reply {
+                    Forward::Flood { bytes, .. } | Forward::Directed { bytes, .. } => bytes,
+                };
+                let served = ben.on_rx(w, 0, None, later);
+                got += deliver(&mut cai, &served.forwards, later);
+            }
+        }
+        assert_eq!(got, 1, "Cai never received the message Ben was holding for her");
+    }
+
+    #[test]
+    fn a_node_with_nothing_to_offer_stays_quiet() {
+        // An INV naming nothing asks the whole medium to wake up and read an
+        // empty list. On a shared radio that is the worst kind of frame: it
+        // costs everyone and tells them nothing.
+        let now = 1_700_000_000;
+        let mut empty = node("empty", 9);
+        assert!(
+            empty.tick(now + 3_600).is_empty(),
+            "a node holding nothing must not announce that it holds nothing"
+        );
+    }
+
+    #[test]
+    fn the_offer_is_paced_rather_than_sent_on_every_tick() {
+        let now = 1_700_000_000;
+        let mut ana = node("ana", 1);
+        let mut ben = node("ben", 2);
+        let cai = node("cai", 3);
+        let (_id, fwd, _) = ana.send_direct(cai.addr, b"carry me", now);
+        deliver(&mut ben, &fwd, now);
+
+        ben.tick(now); // first tick starts the cadence rather than firing it
+        assert!(!ben.tick(now + INV_OFFER_SECS).is_empty(), "due, so it speaks");
+        assert!(
+            ben.tick(now + INV_OFFER_SECS + 1).is_empty(),
+            "a tick a second later must not re-offer: this is a cadence, not a retry"
+        );
+        assert!(
+            !ben.tick(now + 2 * INV_OFFER_SECS + 1).is_empty(),
+            "and it speaks again when the cadence comes round"
+        );
+    }
+
+    #[test]
+    fn an_offer_is_bounded_however_much_the_node_is_carrying() {
+        // `on_inv` has always capped what it will act on. This side capped
+        // nothing, which did not matter while nothing called it — a node with a
+        // full store would have put every id it held into one frame.
+        let now = 1_700_000_000;
+        let mut ana = node("ana", 1);
+        let mut ben = node("ben", 2);
+        let cai = node("cai", 3);
+
+        for i in 0..(MAX_IDS_PER_GOSSIP + 40) {
+            let (_id, fwd, _) = ana.send_direct(cai.addr, format!("m{i}").as_bytes(), now + i as u32);
+            deliver(&mut ben, &fwd, now + i as u32);
+        }
+        assert!(ben.store_len() > MAX_IDS_PER_GOSSIP, "Ben is carrying more than one frame's worth");
+
+        let inv = ben.build_inv(&HashSet::new());
+        let (e, _) = Envelope::decode(&inv).unwrap();
+        assert_eq!(
+            e.payload.len(),
+            MAX_IDS_PER_GOSSIP * 16,
+            "an offer is one bounded frame, not the whole store"
+        );
+    }
+
+    #[test]
+    fn the_inv_a_carrier_builds_names_what_it_carries() {
+        // The building block the test above needs. This one passes today: the
+        // function works, nothing calls it.
+        let now = 1_700_000_000;
+        let mut ana = node("ana", 1);
+        let mut ben = node("ben", 2);
+        let cai = node("cai", 3);
+
+        let (_id, fwd, _) = ana.send_direct(cai.addr, b"hello", now);
+        deliver(&mut ben, &fwd, now);
+
+        let inv = ben.build_inv(&HashSet::new());
+        let (e, _) = Envelope::decode(&inv).expect("an INV is an envelope");
+        assert_eq!(e.typ, ty::INV);
+        assert_eq!(e.payload.len(), 16, "one id, for the one thing Ben holds");
+    }
 }
