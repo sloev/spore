@@ -105,6 +105,58 @@ linkMap.set('readme.md', 'index.html');
 const DESC_DEFAULT =
   'SPORE — a public-domain store-and-forward mesh: signed messages that travel ' +
   'over the internet, a shared folder, a USB stick, sound, paper, or radio.';
+// -- breadcrumbs ------------------------------------------------------------
+//
+// Built by reading `docs/DEVELOPER.md`, which is the hub a reader actually
+// navigates. One source of truth: a page moved between groups there moves in the
+// breadcrumb too, and a page added without a row gets no crumb rather than a
+// wrong one.
+//
+// This is the "docs-like IA" half of the nav. The top bar is for the five places
+// a first-time visitor might go; a crumb is for someone already deep in the
+// documentation who wants to know where they are and how to get back up.
+const crumbFor = new Map();
+{
+  const hub = fs.readFileSync(path.join(root, 'docs', 'DEVELOPER.md'), 'utf8');
+  let group = null;
+  for (const line of hub.split('\n')) {
+    const h = line.match(/^##\s+(.+?)\s*$/);
+    if (h) { group = h[1]; continue; }
+    const row = line.match(/<a class="list-row" href="([^"]+)"[\s\S]*?<span class="list-row-title">([^<]+)</);
+    if (row && group && !row[1].startsWith('http')) {
+      crumbFor.set(row[1], { group, groupId: slugify(group), title: row[2] });
+    }
+  }
+  if (!crumbFor.size) throw new Error('no breadcrumb rows parsed from docs/DEVELOPER.md');
+}
+
+function crumbs(self) {
+  // An ordered list, not a row of spans. The `\u203A` separators are CSS
+  // `::before` content, so a screen reader would otherwise read
+  // "SPOREDeveloperThreat model" as one word; `ol`/`li` gives it a list to
+  // announce and a position within it. `aria-current="page"` marks the last.
+  const items =
+    self === 'developer.html'
+      ? [['index.html', 'SPORE'], [null, 'Developer']]
+      : (() => {
+          const c = crumbFor.get(self);
+          return c && [
+            ['index.html', 'SPORE'],
+            ['developer.html', 'Developer'],
+            [`developer.html#${c.groupId}`, c.group],
+            [null, c.title],
+          ];
+        })();
+  if (!items) return '';
+  const li = items
+    .map(([href, label]) =>
+      href
+        ? `<li><a href="${attr(href)}">${esc(label)}</a></li>`
+        : `<li><span aria-current="page">${esc(label)}</span></li>`)
+    .join('');
+  return `<nav class="crumbs" aria-label="Breadcrumb"><ol>${li}</ol></nav>`;
+}
+
 // -- search -----------------------------------------------------------------
 //
 // The index is built from the rendered HTML, split at headings, so every entry
@@ -367,6 +419,13 @@ main.doc .code-copy {
   cursor: pointer; box-shadow: var(--shadow-sm);
 }
 main.doc pre { position: relative; }
+main.doc nav.crumbs { margin-bottom: var(--space); font-size: 0.8rem; color: var(--muted); }
+main.doc nav.crumbs ol {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-sm);
+  list-style: none; margin: 0; padding: 0;
+}
+main.doc nav.crumbs li + li::before { content: "\\203A"; margin-right: var(--space-sm); }
+main.doc nav.crumbs span[aria-current] { color: var(--ink); font-weight: 700; }
 main.doc nav.toc {
   border: var(--border); box-shadow: var(--shadow-sm);
   padding: var(--space-sm) var(--space); margin-bottom: var(--space);
@@ -438,7 +497,14 @@ function anchorHeadings(html) {
 
 // Pages long enough that a reader needs a map before they scan them — the bridge
 // reference alone is ~70 tables under one H1.
-const TOC_PAGES = new Set(['spec.html', 'bridges.html', 'roadmap.html']);
+// Long enough that a reader needs to see the shape before reading, and
+// structured enough that H2s are a real outline. The threat model is as long as
+// the spec and had no contents at all, which the #290 audit flagged: a reader
+// looking for one adversary had to scroll past five.
+const TOC_PAGES = new Set([
+  'spec.html', 'bridges.html', 'roadmap.html',
+  'threat-model.html', 'glossary.html', 'concepts.html', 'dev-guide.html',
+]);
 
 // Contents list built from the page's own top-level (H2) headings — no separate
 // outline to keep in sync, since it is generated from whatever anchorHeadings
@@ -500,6 +566,7 @@ ${siteAdapterCss}
   <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">◐</button>
 </nav>
 <main class="doc container" id="main-content">
+${crumbs(self)}
 <section class="section">
 ${bodyHtml}
 </section>
@@ -760,6 +827,18 @@ const INDEX = ${JSON.stringify(searchIndex)};
   }
   console.log(`search works — "custody" -> ${found.length} results, first is ${first}`);
   probe.window.close();
+}
+
+// Breadcrumbs are generated from docs/DEVELOPER.md, so a row renamed or moved
+// there silently changes them — and a parse that quietly returns nothing would
+// drop every crumb on the site without failing anything.
+{
+  const sample = ['threat-model.html', 'spec.html', 'glossary.html', 'developer.html'];
+  const without = sample.filter((f) => !fs.readFileSync(path.join(out, f), 'utf8').includes('nav class="crumbs"'));
+  if (without.length) {
+    throw new Error(`pages rendered without a breadcrumb: ${without.join(', ')}`);
+  }
+  console.log(`breadcrumbs on ${crumbFor.size} pages, from ${new Set([...crumbFor.values()].map((c) => c.group)).size} groups`);
 }
 
 // Ship the favicon/icon/social-preview assets — plain HARDBRUT swatches and a
