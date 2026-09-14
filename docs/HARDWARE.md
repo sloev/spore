@@ -19,6 +19,30 @@ State lives in `$SPORE_HOME` (default `~/.local/share/spore`); delete that
 directory to test as a fresh node, and set it per-shell to run two nodes on one
 laptop.
 
+**Demo A needs no hardware at all** — two processes on one laptop, which is why
+it is the first thing to run and the thing to reproduce before blaming a radio.
+
+```sh
+printf 'bridges:\n  - tcp\n'                  > /tmp/a.yaml   # listens on :7373
+printf 'bridges:\n  - tcp: 127.0.0.1:7373\n'  > /tmp/b.yaml   # connects to it
+
+SPORE_HOME=/tmp/na spore /tmp/a.yaml     # terminal 1
+SPORE_HOME=/tmp/nb spore /tmp/b.yaml     # terminal 2
+```
+
+Type into either. `/help` lists the commands; `/status` prints the address and
+how much is held. A message typed in one appears in the other as
+`[recv] <addr> (public) …`.
+
+For the store-and-forward half: stop node A, type a message into B, start A
+again, and type `/offer` into B. A receives a message it was never sent
+directly. `/offer` is the diagnostic form of the `INV_OFFER_SECS` cadence, which
+is five minutes — right in the field, far too slow to watch.
+
+Two `SPORE_HOME`s because the identity lives there. Sharing one would make both
+processes the same node, which fails in a way that looks like the network is
+broken.
+
 | # | Path | Setup | Pass looks like |
 |---|---|---|---|
 | 1 | **UDP LAN** (phone ⇄ desktop) | APK on a phone + `spore broadcast` on a laptop, same Wi-Fi | messages appear both ways in seconds; **both** addresses stable across restarts — stop and restart the laptop node too, and confirm it announces the same 16 hex digits |

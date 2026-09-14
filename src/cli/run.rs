@@ -55,6 +55,20 @@ pub(crate) fn run_config(cfg: Config) {
     };
 
     let hub = Hub::new(node);
+
+    // **One delivery sink, installed before any bridge**, so nothing delivered
+    // is missed and so the console sees mail whether or not Direct is on. It
+    // used to be installed only when Direct was configured, which meant a node
+    // running plain UDP received messages and showed nobody — the reason #303's
+    // Demo A could not be performed.
+    let (deliver_tx, deliver_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    hub.set_delivery_sink(deliver_tx);
+
+    // The shared application layer, so `/history` is the same store the browser
+    // and the phone use rather than a fourth copy of a conversation list.
+    #[cfg(feature = "communicator")]
+    let comm = std::sync::Arc::new(std::sync::Mutex::new(spore::communicator::Communicator::new()));
+
     println!(
         "SPORE node {} ({}) — {} bridge(s). Ctrl-C to stop.",
         hex8(&hub.addr()),
@@ -97,7 +111,8 @@ pub(crate) fn run_config(cfg: Config) {
     }
 
     // Direct: a second plane, off unless the config says where this node can be
-    // reached. Installed before the bridges so no delivered envelope is missed.
+    // reached.
+    let mut direct_tx: Option<std::sync::mpsc::Sender<Vec<u8>>> = None;
     match cfg.direct.as_deref().map(super::direct::locator) {
         None => {}
         Some(None) => eprintln!(
@@ -105,8 +120,10 @@ pub(crate) fn run_config(cfg: Config) {
              with a discoverable primary IPv4"
         ),
         Some(Some((advertise, bind_port))) => {
+            // Direct gets a *forwarded* copy. It used to own the sink outright,
+            // which is why installing a console meant choosing between the two.
             let (tx, rx) = std::sync::mpsc::channel();
-            hub.set_delivery_sink(tx);
+            direct_tx = Some(tx);
             println!("  [direct] reachable at {advertise} (UDP)");
             let mut d = super::direct::Direct::new(hub.addr(), advertise, bind_port, cfg.direct_also.clone());
             // Ask where we appear from outside, if an echo was named. Best
@@ -446,6 +463,35 @@ pub(crate) fn run_config(cfg: Config) {
             }
         });
     }
+
+    // The inbox. Prints what arrived, files it in the shared thread store, and
+    // hands Direct its copy if Direct is running.
+    //
+    // The sink itself is installed unconditionally, because Direct needs it even
+    // in a build with no application layer; what is gated is the half that has
+    // somewhere to put a conversation.
+    {
+        #[cfg(feature = "communicator")]
+        let c = comm.clone();
+        handles.push(thread::spawn(move || {
+            while let Ok(wire) = deliver_rx.recv() {
+                #[cfg(feature = "communicator")]
+                if let Ok(mut c) = c.lock() {
+                    super::console::on_delivered(&mut c, &wire);
+                }
+                if let Some(tx) = &direct_tx {
+                    // A dead Direct thread must not stop the console.
+                    let _ = tx.send(wire);
+                }
+            }
+        }));
+    }
+
+    // The console owns this thread from here. It returns if stdin closes — a
+    // service, a pipe, `< /dev/null` — and the node keeps relaying either way,
+    // which is why the bridge threads are joined after it rather than before.
+    #[cfg(feature = "communicator")]
+    super::console::run(hub.clone(), &comm, &home);
 
     for handle in handles {
         let _ = handle.join();
