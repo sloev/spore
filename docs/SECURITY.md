@@ -84,7 +84,7 @@ outside this repository has audited any of this.
   (per-hub, per-thread guard), which is a diagnosable failure rather than a hang,
   but the underlying call shape is still not supported.
 - **The remaining still-open items** are rows in
-  [Milestone 1 of the roadmap](ROADMAP.md). They are carried deliberately and are
+  [the roadmap's 1.0 backlog](ROADMAP.md). They are carried deliberately and are
   not secrets — an unfixed weakness that nobody has written down is the only kind
   worth hiding.
 

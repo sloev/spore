@@ -23,7 +23,7 @@ just what that adds up to.
 real board; the radio, storage and phone-link code is written but has not yet
 carried a real envelope over the air. The honest state of each part is in the
 table further down, and the
-[roadmap](roadmap.html#milestone-8--embedded-esp32-runtime-raw-80211-relay) tracks
+[ESP32 tracker (#149)](https://github.com/sloev/spore/issues/149) tracks
 the rest.
 
 ## What it is for
@@ -104,7 +104,7 @@ plan rather than a thing you can use:
 Two rows are checked against a real device — [Hardware
 verification](hardware.html) row 21 is where that run is recorded. Everything
 else marked 🧪 is real code that has not yet touched hardware, which is a
-different and much weaker thing than ✅; the [roadmap](roadmap.html#milestone-8--embedded-esp32-runtime-raw-80211-relay)
+different and much weaker thing than ✅; the [ESP32 tracker (#149)](https://github.com/sloev/spore/issues/149)
 tracks each remaining device-pair run.
 
 ## Building it yourself
@@ -123,4 +123,4 @@ including flashing and the footprint report, are in
 [`esp32/README.md`](https://github.com/sloev/spore/blob/master/esp32/README.md).
 
 <p><a class="btn" href="apps.html">Other ways to run a node</a>
-<a class="btn btn-cancel" href="roadmap.html#milestone-8--embedded-esp32-runtime-raw-80211-relay">Follow the work</a></p>
+<a class="btn btn-cancel" href="https://github.com/sloev/spore/issues/149">Follow the work</a></p>
