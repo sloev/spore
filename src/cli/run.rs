@@ -66,6 +66,7 @@ pub(crate) fn run_config(cfg: Config) {
 
     // The shared application layer, so `/history` is the same store the browser
     // and the phone use rather than a fourth copy of a conversation list.
+    #[cfg(feature = "communicator")]
     let comm = std::sync::Arc::new(std::sync::Mutex::new(spore::communicator::Communicator::new()));
 
     println!(
@@ -465,10 +466,16 @@ pub(crate) fn run_config(cfg: Config) {
 
     // The inbox. Prints what arrived, files it in the shared thread store, and
     // hands Direct its copy if Direct is running.
+    //
+    // The sink itself is installed unconditionally, because Direct needs it even
+    // in a build with no application layer; what is gated is the half that has
+    // somewhere to put a conversation.
     {
+        #[cfg(feature = "communicator")]
         let c = comm.clone();
         handles.push(thread::spawn(move || {
             while let Ok(wire) = deliver_rx.recv() {
+                #[cfg(feature = "communicator")]
                 if let Ok(mut c) = c.lock() {
                     super::console::on_delivered(&mut c, &wire);
                 }
@@ -483,6 +490,7 @@ pub(crate) fn run_config(cfg: Config) {
     // The console owns this thread from here. It returns if stdin closes — a
     // service, a pipe, `< /dev/null` — and the node keeps relaying either way,
     // which is why the bridge threads are joined after it rather than before.
+    #[cfg(feature = "communicator")]
     super::console::run(hub.clone(), &comm, &home);
 
     for handle in handles {
