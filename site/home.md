@@ -20,7 +20,7 @@ and it keeps working after you go offline.</p>
 
 <div class="col-4"><div class="card"><div class="card-body">
 <h3 class="text-h5">A signed postcard</h3>
-<p class="text-muted">To, from, expiry, payload — devices pass copies when they meet, until it arrives.</p>
+<p class="text-muted">To, from, when it was written, payload — devices pass copies when they meet, until it arrives.</p>
 </div></div></div>
 
 <div class="col-4"><div class="card"><div class="card-body">
@@ -41,4 +41,5 @@ everything needed to regrow the whole thing from one copy — and every device i
 lands in is **soil**.
 
 <p><a class="btn" href="how-it-works.html">How it works</a>
+<a class="btn btn-cancel" href="concepts.html">Concepts</a>
 <a class="btn btn-cancel" href="developer.html">Developer docs</a></p>
