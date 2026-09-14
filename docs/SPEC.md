@@ -414,7 +414,15 @@ def on_rx(e, iface, nbr):
 ## 6. Sync & custody (T1/T2)
 
 On any meeting: ANNOUNCE, then **INV** (concatenated IDs, newest first, filtered
-by peer's topics + carriable unicast), peer replies **WANT**, send those.
+by peer's topics + carriable unicast, and capped at `MAX_IDS_PER_GOSSIP`), peer
+replies **WANT**, send those.
+
+**"On any meeting" is a cadence, not an event.** A node cannot observe that a
+neighbour has arrived — an interface coming up does not mean anyone is
+listening, and on broadcast media there is no event at all — so a node offers
+what it holds every `INV_OFFER_SECS` from its own `tick`, which covers arrival,
+reconnection and a neighbour that rebooted with one mechanism. A node holding
+nothing stays quiet.
 
 > **Corrected.** This paragraph used to say the INV was also filtered by a
 > "per-neighbour watermark". Nothing implements one: `build_inv` filters by

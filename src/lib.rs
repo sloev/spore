@@ -338,6 +338,22 @@ pub const MAX_INTEREST_LEASE_SECS: u32 = DEFAULT_MAX_RELAY_AGE_SECS;
 /// neighbour that rebooted.
 pub const INTEREST_RESUME_SECS: u32 = 300;
 
+/// How often a node **offers what it is carrying** — the INV half of §6.
+///
+/// Custody is the behaviour this protocol is named for and it only completes if
+/// the carrier speaks first: a recipient cannot ask for an id it has never heard
+/// of. Until this existed, `build_inv` had no caller outside the tests, so a node
+/// answered an INV it received and never sent one — and a message handed to a
+/// courier reached its destination only if the courier happened to be the
+/// original sender, whose own unacked traffic `resend_unacked` re-floods.
+///
+/// Paced for the same reason the interest resume is: "we have arrived somewhere
+/// new" is not a thing a node can observe. An interface coming up does not mean
+/// anyone is listening, and on broadcast media there is no event at all. One
+/// small frame every five minutes covers arrival, reconnection and a neighbour
+/// that rebooted, with one mechanism.
+pub const INV_OFFER_SECS: u32 = 300;
+
 /// How far a WANT may be re-asked. Decremented at each adopting hop.
 pub const DEFAULT_WANT_DEPTH: u8 = 8;
 
@@ -774,6 +790,7 @@ pub struct Node {
     interests: HashMap<Id, Interest>,
     /// When `tick` last re-stated them (M11-P).
     last_interest_resume: u32,
+    last_inv_offer: u32,
     pending: HashMap<Id, Pending>, // ACKREQ messages awaiting a receipt (§8)
     acked: HashSet<Id>,            // orig ids we've received receipts for
     rpc_pending: HashSet<u64>,     // request ids awaiting a response (L4)

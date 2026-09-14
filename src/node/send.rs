@@ -354,6 +354,34 @@ impl Node {
             self.last_interest_resume = now;
             out.append(&mut self.resume_interests(now));
         }
+        // §6's other half: say what we *hold*, not just what we want.
+        //
+        // The peer's topics are not known here — an ANNOUNCE carries them and
+        // nothing keeps them — so this offers what an empty topic set selects:
+        // public traffic, and everything being carried for somebody else. That
+        // is exactly custody, which is the gap this closes. Traffic on a topic
+        // this node follows itself is not offered, because the filter reads it
+        // as "mine, not carried"; catching a follower up on a topic they missed
+        // is a separate question with its own airtime cost.
+        // A fresh node has `last_inv_offer == 0`, which is *always* overdue, so
+        // without this the first tick after boot speaks immediately — before the
+        // node has heard a single neighbour, and on a shared radio at the exact
+        // moment every other node that just came up is doing the same. Starting
+        // the clock on first sight makes the first offer one full period in.
+        if self.last_inv_offer == 0 {
+            self.last_inv_offer = now;
+        }
+        if now.saturating_sub(self.last_inv_offer) >= INV_OFFER_SECS {
+            self.last_inv_offer = now;
+            let inv = self.build_inv(&std::collections::HashSet::new());
+            // An INV naming nothing is a frame that asks the whole medium to
+            // wake up and read an empty list.
+            if let Ok((e, _)) = Envelope::decode(&inv) {
+                if !e.payload.is_empty() {
+                    out.push(Forward::Flood { except: NO_IFACE, bytes: inv });
+                }
+            }
+        }
         out
     }
 
