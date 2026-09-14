@@ -190,6 +190,9 @@ jobs:
       - name: Communicator command ABI, end to end from JS
         run: node web/comm-test.mjs
 
+      - name: Docs search ranking
+        run: node site/search-core.test.mjs
+
       - name: Transport codec tests (kiss, meshtastic, audio wire formats)
         run: node web/codec-test.mjs
 
