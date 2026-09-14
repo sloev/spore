@@ -12,9 +12,16 @@ the tree runs on loopback, where there is no NAT to traverse and a punch that
 never happened is indistinguishable from one that worked. Only two boxes behind
 two different consumer routers can tell you whether the ladder actually reaches.
 
+**The desktop node keeps its identity now.** It was not able to before: the
+daemon called `Node::new` every start, so a restart produced a new address and an
+empty store, and any row asking for a stable desktop address was unrunnable.
+State lives in `$SPORE_HOME` (default `~/.local/share/spore`); delete that
+directory to test as a fresh node, and set it per-shell to run two nodes on one
+laptop.
+
 | # | Path | Setup | Pass looks like |
 |---|---|---|---|
-| 1 | **UDP LAN** (phone ⇄ desktop) | APK on a phone + `spore broadcast` on a laptop, same Wi-Fi | messages appear both ways in seconds; addresses stable across app restarts |
+| 1 | **UDP LAN** (phone ⇄ desktop) | APK on a phone + `spore broadcast` on a laptop, same Wi-Fi | messages appear both ways in seconds; **both** addresses stable across restarts — stop and restart the laptop node too, and confirm it announces the same 16 hex digits |
 | 2 | **Audio modem** (phone ⇄ desktop) | Enable audio modem in the app; on the laptop `sox -d -t f32 -r 48000 -c 1 - \| spore audio \| sox -t f32 -r 48000 -c 1 - -d`; devices ~30 cm apart, moderate volume | a short public message crosses by sound alone (expect ~1 s/25 bytes); sig OK on arrival |
 | 3 | **Audio modem** (tab ⇄ phone) | Web node in a desktop browser with the audio bridge + the app's audio modem | same as #2, browser ⇄ phone |
 | 4 | **Web Serial → board** | Chrome/Edge **desktop**, web node → "Web Serial — generic KISS TNC"; a board running the KISS echo/firmware | frames echo; ↑/↓ counters advance; unplug flips the row to closed |

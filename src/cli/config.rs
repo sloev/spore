@@ -204,6 +204,28 @@ pub(crate) fn parse_config(text: &str) -> Result<Config, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+/// A config holding exactly one bridge, from a spec given on the command line.
+///
+/// The same parser the `bridges:` list uses, so `spore broadcast` and a config
+/// naming `broadcast` stand up the identical node. Anything the file can
+/// configure and a single spec cannot — topics, Direct, a second bridge — is
+/// what the file is still for.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn one_bridge(spec: &str) -> Result<Config, String> {
+    let bridge = parse_bridge(spec.trim())?;
+    Ok(Config {
+        petname: "spore".to_string(),
+        topics: Vec::new(),
+        bridges: vec![bridge],
+        direct: None,
+        direct_to: None,
+        direct_also: Vec::new(),
+        direct_iroh: None,
+        direct_stun: None,
+        stun: None,
+    })
+}
+
 fn parse_bridge(s: &str) -> Result<Spec, String> {
     if let Some((k, v)) = s.split_once(':') {
         let (k, v) = (k.trim(), v.trim());
@@ -288,5 +310,112 @@ fn strip_comment(line: &str) -> &str {
     match line.find('#') {
         Some(p) if p == 0 || line[..p].ends_with(char::is_whitespace) => &line[..p],
         _ => line,
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod documented_commands {
+    //! Every `spore <something>` printed in the documentation must actually run.
+    //!
+    //! `docs/HARDWARE.md` is a checklist a person works through with a radio in
+    //! their hand. Until #303, seven of its commands did not exist: the binary
+    //! took its first argument as a file path, so `spore broadcast` answered
+    //! "cannot read config `broadcast`". A procedure naming a command that does
+    //! not exist cannot be followed, and nothing noticed for as long as nobody
+    //! tried.
+    //!
+    //! This scans the documentation and parses each one the way the binary does.
+    //! It is a grep, and that is the right size of tool: the failure it prevents
+    //! is a command being renamed or removed while the prose keeps printing it.
+    use super::*;
+
+    /// Docs that instruct a reader to type something.
+    const SOURCES: &[&str] = &[
+        "docs/HARDWARE.md",
+        "docs/BRIDGES.md",
+        "docs/APPS.md",
+        "docs/DEV_GUIDE.md",
+        "android/README.md",
+        "README.md",
+    ];
+
+    /// Words that follow `spore` in prose rather than in a shell, e.g. "spore is
+    /// a relay", "spore as a courier". Listed explicitly so a *new* English word
+    /// has to be added here deliberately rather than silently excusing a typo in
+    /// a real command.
+    const PROSE: &[&str] = &["as", "is", "here", "prefs", "node", "nodes", "and", "or", "to", "on"];
+
+    fn root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
+    }
+
+    #[test]
+    fn every_spore_command_in_the_docs_parses() {
+        let mut checked = 0;
+        let mut bad: Vec<String> = Vec::new();
+
+        for rel in SOURCES {
+            let path = root().join(rel);
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                panic!("{rel} is missing — has the documentation moved?");
+            };
+            for line in text.lines() {
+                let mut rest = line;
+                while let Some(i) = rest.find("spore ") {
+                    rest = &rest[i + "spore ".len()..];
+                    let word: String =
+                        rest.chars().take_while(|c| !c.is_whitespace() && !"`|)\"'".contains(*c)).collect();
+                    // Prose ends in punctuation and shell commands do not, so
+                    // strip it before deciding. "spore here." is a sentence.
+                    let word = word.trim_end_matches(['.', ',', ';', ':', '!', '?']).to_string();
+                    if word.is_empty() || PROSE.contains(&word.as_str()) {
+                        continue;
+                    }
+                    // Config files and flags are the binary's other two modes.
+                    if word.ends_with(".yaml") || word.starts_with('-') || word.starts_with('<') {
+                        continue;
+                    }
+                    checked += 1;
+                    // Placeholders are what a reader substitutes; parse the shape
+                    // with something plausible in their place.
+                    let probe = word
+                        .replace("<b32>.b32.i2p", "abc.b32.i2p")
+                        .replace("<other-ip>", "192.168.1.42")
+                        .replace("<hostname>.onion", "abcxyz.onion")
+                        .replace("<host>", "127.0.0.1");
+                    if probe.contains('<') {
+                        continue; // a placeholder this test does not know how to fill
+                    }
+                    if let Err(e) = one_bridge(&probe) {
+                        bad.push(format!("{rel}: `spore {word}` -> {e}"));
+                    }
+                }
+            }
+        }
+
+        assert!(checked > 5, "found only {checked} documented commands — did the scan break?");
+        assert!(
+            bad.is_empty(),
+            "the documentation tells people to run commands that do not parse:\n  {}",
+            bad.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn a_bridge_spec_and_a_config_naming_it_stand_up_the_same_node() {
+        // The promise of the one-shot form: it is the same parser, not a second
+        // one that happens to agree today.
+        let from_spec = one_bridge("broadcast").expect("a bare bridge name is a spec");
+        let from_file = parse_config("bridges:\n  - broadcast\n").expect("and a config may name it");
+        assert_eq!(from_spec.bridges.len(), from_file.bridges.len());
+        assert!(matches!(from_spec.bridges[0], Spec::Broadcast(None)));
+        assert!(matches!(from_file.bridges[0], Spec::Broadcast(None)));
+    }
+
+    #[test]
+    fn an_unknown_bridge_is_refused_rather_than_guessed() {
+        assert!(one_bridge("definitely-not-a-bridge").is_err());
+        assert!(one_bridge("").is_err());
     }
 }

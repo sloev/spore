@@ -5,5 +5,7 @@ pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod direct;
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod home;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod run;
 pub(crate) mod sim;

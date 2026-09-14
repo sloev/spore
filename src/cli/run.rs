@@ -18,13 +18,55 @@ pub(crate) fn run_config(cfg: Config) {
     use std::thread;
 
     let topic_refs: Vec<&str> = cfg.topics.iter().map(|s| s.as_str()).collect();
-    let node = Node::new(&cfg.petname, &topic_refs);
+
+    // Identity, prekey ring and store, in that order — the same three nutrients
+    // Android and ESP32 supply, and the same order they depend on each other in.
+    // Until this existed the daemon called `Node::new` and nothing else, so a
+    // restart produced a new address and an empty store: the reference node was
+    // the one runtime that could not be left running.
+    let home = super::home::dir();
+    let (seed, fresh) = match super::home::load_or_create_seed(&home) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cannot open {}: {e}", home.display());
+            return;
+        }
+    };
+    let mut node = Node::from_seed(&cfg.petname, &topic_refs, &seed);
+
+    // The seed restores the address; the ring restores what can still be opened.
+    // A node that keeps one and loses the other keeps its name and silently
+    // drops inbound mail sealed to any prekey it had rotated to — which, with
+    // daily rotation, is most of it.
+    let ring_path = super::home::prekey_path(&home);
+    let restored_ring =
+        std::fs::read(&ring_path).ok().map(|blob| node.restore_prekey_ring(&blob)).unwrap_or(false);
+    if let Err(e) = std::fs::write(&ring_path, node.prekey_ring()) {
+        eprintln!("  [warn] cannot write {}: {e}", ring_path.display());
+    }
+
+    let store = super::home::store_dir(&home);
+    let adopted = match node.set_spill_dir(&store, now()) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("  [warn] no spill directory at {}: {e}", store.display());
+            0
+        }
+    };
+
     let hub = Hub::new(node);
     println!(
         "SPORE node {} ({}) — {} bridge(s). Ctrl-C to stop.",
         hex8(&hub.addr()),
         cfg.petname,
         cfg.bridges.len()
+    );
+    println!(
+        "  [home] {}  identity: {}{}  store: {} adopted",
+        home.display(),
+        if fresh { "new" } else { "restored" },
+        if restored_ring { ", prekey ring restored" } else { "" },
+        adopted
     );
 
     let mut handles = Vec::new();
