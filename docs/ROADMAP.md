@@ -91,7 +91,7 @@ devices.
 | 1 | Finish the application layer: Android chat and feed onto the shared ABI, and the CLI with it | [#306](https://github.com/sloev/spore/issues/306) |
 | 2 | Desktop ⇄ Android over UDP, both directions, surviving restarts on both sides | [#307](https://github.com/sloev/spore/issues/307) |
 | 3 | ESP32: identity re-run, power-cycle store, solo TX-shape, two-board air, tether | [#149](https://github.com/sloev/spore/issues/149) |
-| 4 | Desktop binaries on a version tag, checksums, and the Wry webview over a native node | [#291](https://github.com/sloev/spore/issues/291) |
+| 4 | Desktop binaries on a version tag, checksums, and the Wry webview over a native node | [#334](https://github.com/sloev/spore/issues/334) |
 | 5 | Demos A–D green and recorded | [#303](https://github.com/sloev/spore/issues/303) |
 | 6 | Release checklist: artefacts, evidence, honesty | [#308](https://github.com/sloev/spore/issues/308) |
 
@@ -113,76 +113,57 @@ and the four demos work end to end.
 ## Backlog
 
 Deliberately unscheduled. After 0.8.0 ships, the next release is chosen from
-here. **Anything promoted into a release section must already have a detailed
-issue**; the roadmap carries only the link.
+here. Every item is an issue — the reasoning lives there, where the work is done,
+and this list is only the shape of what is ahead.
 
 ### Candidates for 0.9 — richer bridges and radio
 
-- Meshtastic / RNode / LoRa: the first real sub-GHz path. The part choice is
-  settled (E22-900M30S, SX1262); listen-before-talk is worth more than the chip.
-- **Listen-before-talk** (ETSI EN 300 220). The largest practical airtime win
-  available on the same hardware: LBT+AFA replaces the 10% duty cycle, which is a
-  10× multiplier for the cost of code rather than money.
-- Audio modem: measure the symbol error rate before adding coding.
-- A **companion profile** — a node that carries its own traffic and relays
-  nothing, for a phone on battery or a metered link. Local policy, never a
-  protocol role.
-- SNR-weighted contention window on shared media: the weakest signal rebroadcasts
-  first, because it is the one that reaches nodes nobody else can.
-- More bridges off the 🧪 list, each with a dated run.
-- **Per-neighbour INV memory.** Two nodes that meet repeatedly re-offer each other
-  the same ids and are re-declined every time. Bounded by `MAX_IDS_PER_GOSSIP`, so
-  it is waste rather than a vulnerability. The hard part is bounding the
-  remembering — a table keyed by neighbour is a table a stranger can grow — and
-  expiring it, since a peer that evicted its copy must be offered it again.
+| | Issue |
+|---|---|
+| Sub-GHz LoRa bridge — the first path where a node can be kilometres from anything | [#310](https://github.com/sloev/spore/issues/310) |
+| Listen-before-talk (ETSI EN 300 220) — a 10× airtime multiplier on hardware already bought | [#311](https://github.com/sloev/spore/issues/311) |
+| Audio modem: measure the symbol error rate *before* choosing a code | [#312](https://github.com/sloev/spore/issues/312) |
+| A companion profile — carries its own traffic, relays nothing. Local policy, never a role | [#313](https://github.com/sloev/spore/issues/313) |
+| SNR-weighted contention window — the weakest signal rebroadcasts first | [#314](https://github.com/sloev/spore/issues/314) |
+| Per-neighbour INV memory — stop re-offering what a neighbour already declined | [#315](https://github.com/sloev/spore/issues/315) |
+| Take bridges off the 🧪 list, one dated hardware run at a time | [#316](https://github.com/sloev/spore/issues/316) |
 
 ### Candidates for 1.0 — daily-driver depth
 
-- Chat attachments: ExoPlayer preview, edit-after-send, public-file single bubble.
-- Web node parity with the shared communicator, on the single ABI.
-- Private-group `key_id` divergence badge. Honest about disagreement; never
-  claims roster consensus.
-- Export polish, with the filesystem warning.
-- The hardware matrix actually exercised: the seven-day window, backup exclusion
-  and migration, beacon cadence on real radio, two-real-NATs Direct punch.
-- Remaining security items:
-  - **Identity compromise: decide, do not drift.** A stolen seed signs as that
-    address forever. Either scope it out in the spec with the reasoning, or design
-    the successor statement. Group keys have `rotate`/`rekey_seal`/`contribute`;
-    identity has nothing, and the asymmetry should be deliberate.
-  - **Encrypted groups have no roster.** Membership — and so who a contribution is
-    sealed to — is the application's problem, and in a partition two halves
-    diverge onto different keys. Solving it properly is distributed agreement
-    rather than cryptography, and it is the largest honest gap between a SPORE
-    group and a messenger's.
-  - **A stolen prekey secret is a decryption oracle for its window.** Healing
-    survives it for at most seven days, because contributions are sealed to
-    prekeys and those expire. Shortening the window is a knob, not a fix.
-  - **Move retired designs out of the normative spec.** §3 still spends most of
-    its length on the end-to-end fountain, which nothing emits and nothing parses.
-    A reimplementer reading Part I should meet only rules that bind them.
-  - **An independent review.** [The security matrix](SECURITY_MATRIX.md) has an
-    empty column for all twelve components, and that is the most important cell
-    in it.
-- `with_node` reentrancy: a closure that calls back into its own hub panics naming
-  the bug rather than deadlocking silently, but the call shape still cannot
-  succeed. Making it work needs a reentrant path or a documented queue, not a
-  better error.
-- Benchmark suite: throughput and memory, reproducible, tracked per platform.
+| | Issue |
+|---|---|
+| Chat attachments: preview, edit-after-send, one bubble per public file | [#324](https://github.com/sloev/spore/issues/324) |
+| Web node parity on the shared communicator | [#325](https://github.com/sloev/spore/issues/325) |
+| Private-group `key_id` divergence badge — reports a split, never claims consensus | [#326](https://github.com/sloev/spore/issues/326) |
+| Export polish, with the filesystem warning | [#327](https://github.com/sloev/spore/issues/327) |
+| The hardware matrix rows deferred to device QA | [#328](https://github.com/sloev/spore/issues/328) |
+| `with_node` reentrancy is unsupported, not merely guarded | [#322](https://github.com/sloev/spore/issues/322) |
+| Benchmark suite: throughput and memory, per platform | [#323](https://github.com/sloev/spore/issues/323) |
+
+**Security items still open.** These are decisions as much as tasks, and each
+issue carries the reasoning rather than a checklist:
+
+| | Issue |
+|---|---|
+| Identity compromise: decide, do not drift | [#317](https://github.com/sloev/spore/issues/317) |
+| Encrypted groups have no roster — the largest honest gap versus a messenger | [#318](https://github.com/sloev/spore/issues/318) |
+| A stolen prekey secret is a decryption oracle for its window | [#319](https://github.com/sloev/spore/issues/319) |
+| Move the retired end-to-end fountain out of the normative spec | [#320](https://github.com/sloev/spore/issues/320) |
+| **An independent security review** — the empty column in [the matrix](SECURITY_MATRIX.md) | [#321](https://github.com/sloev/spore/issues/321) |
 
 ### Undecided, or later
 
-- Native WebTransport / QUIC. The spike validated it; iroh's QUIC is not HTTP/3
-  WebTransport, so this is its own piece of work.
-- Multi-device identity, and identity rotation.
-- Boot receiver; sound and particles behind a setting, default off.
-- `spore-sim` at real scale: 1k/10k nodes, mobility, adversaries.
-- Documentation: [`SPEC.md`](SPEC.md) opening with the problem rather than the
-  vocabulary, mobile-readable tables, the `DEV_GUIDE`/`DEVELOPER` rename, a
-  README→site bridge, homepage depth, an Apps comparison, web-node microcopy.
-- Anything requiring a wire-format change.
+| | Issue |
+|---|---|
+| Native WebTransport / QUIC — iroh's QUIC is not HTTP/3 WebTransport | [#329](https://github.com/sloev/spore/issues/329) |
+| Multi-device identity, and identity rotation | [#330](https://github.com/sloev/spore/issues/330) |
+| Boot receiver; sound and particles behind a setting, default off | [#331](https://github.com/sloev/spore/issues/331) |
+| `spore-sim` at real scale: 1k/10k nodes, mobility, adversaries | [#332](https://github.com/sloev/spore/issues/332) |
+| Documentation backlog from the #290 audit | [#333](https://github.com/sloev/spore/issues/333) |
 
----
+**Anything requiring a wire-format change** is not on this list and does not get
+one without a `ver` bump, which is a hard fork. That is the point of the freeze,
+not an obstacle to be worked around.
 
 ## Post-release workflow
 
