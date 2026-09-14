@@ -53,6 +53,8 @@ const pages = [
   ['docs/DIRECT.md', 'direct.html', null],
   ['docs/ROADMAP.md', 'roadmap.html', null],
   ['docs/SIMULATIONS.md', 'simulations.html', null],
+  ['docs/CONCEPTS.md', 'concepts.html', null],
+  ['docs/GLOSSARY.md', 'glossary.html', null],
   ['docs/KERNEL_FLOWS.md', 'kernel-flows.html', null],
   ['docs/STATE_MACHINES.md', 'state-machines.html', null],
   ['docs/SECURITY_MATRIX.md', 'security-matrix.html', null],

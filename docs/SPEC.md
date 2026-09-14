@@ -42,7 +42,7 @@ flowchart TB
     A["parse"] --> B["dedup"] --> C["store"] --> D["deliver"] --> E["damped flood"]
   end
   subgraph T1["T1 sync — plus about 80"]
-    F["ANNOUNCE"] --> G["INV / WANT"] --> H["watermarks"]
+    F["ANNOUNCE"] --> G["INV / WANT"]
   end
   subgraph T2["T2 route — plus about 100"]
     I["paths"] --> J["directed unicast"] --> K["custody"]
@@ -53,7 +53,7 @@ flowchart TB
 ```
 
 **Tiers** (all interoperate): **T0 carry** ≈60 lines: parse, dedup, store,
-deliver, damped flood · **T1 sync** +≈80: ANNOUNCE/INV/WANT, watermarks ·
+deliver, damped flood · **T1 sync** +≈80: ANNOUNCE/INV/WANT ·
 **T2 route** +≈100: paths, directed unicast, custody. Endpoint extras (ratchet,
 mix) never change relays. Link fragmentation sits under all three: it is a
 property of a *link*, not of the router, and a node that never meets a narrow
@@ -414,8 +414,15 @@ def on_rx(e, iface, nbr):
 ## 6. Sync & custody (T1/T2)
 
 On any meeting: ANNOUNCE, then **INV** (concatenated IDs, newest first, filtered
-by peer's topics + carriable unicast + per-neighbor watermark), peer replies
-**WANT**, send those. INV/WANT: hops=0, unsigned, consumed, never stored or
+by peer's topics + carriable unicast), peer replies **WANT**, send those.
+
+> **Corrected.** This paragraph used to say the INV was also filtered by a
+> "per-neighbour watermark". Nothing implements one: `build_inv` filters by
+> topic and by custody, and the term appears nowhere in the code. It was found by
+> writing [the glossary](GLOSSARY.md) and trying to define it. A watermark is a
+> good idea — re-offering a neighbour ids it has already declined is real waste —
+> so it is now a roadmap row rather than a sentence describing something that
+> does not exist. INV/WANT: hops=0, unsigned, consumed, never stored or
 relayed. Serving WANT is budgeted per interface, or it is a reflection amplifier.
 
 A WANT payload is concatenated 16-byte ids, optionally followed by **one trailing
