@@ -3,8 +3,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) mod direct;
+pub(crate) mod console;
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod direct;
 pub(crate) mod home;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod run;
