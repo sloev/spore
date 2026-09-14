@@ -4,6 +4,7 @@
 //
 //   npm ci && node build.mjs      # writes ../_site
 import { marked } from 'marked';
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,6 +105,47 @@ linkMap.set('readme.md', 'index.html');
 const DESC_DEFAULT =
   'SPORE — a public-domain store-and-forward mesh: signed messages that travel ' +
   'over the internet, a shared folder, a USB stick, sound, paper, or radio.';
+// -- search -----------------------------------------------------------------
+//
+// The index is built from the rendered HTML, split at headings, so every entry
+// is a section a reader can be sent to rather than a whole page they then have
+// to scan. It is **inlined** into search.html rather than fetched: the site has
+// to work opened from disk, where `fetch` of a sibling JSON file is blocked.
+//
+// Snippets are capped, which is what keeps the whole index a few hundred KB
+// instead of a copy of the documentation.
+const SNIPPET = 320;
+const searchIndex = [];
+
+function textOf(html) {
+  return html
+    .replace(/<pre[\s\S]*?<\/pre>/g, ' ')   // code blocks are noise in a prose search
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z]+;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function indexPage(dst, title, html) {
+  // Split on headings that carry an id, which anchorHeadings() has just added.
+  const parts = html.split(/(?=<h[2-6][^>]*\bid=")/);
+  let any = false;
+  for (const part of parts) {
+    const m = part.match(/<h[2-6][^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/h[2-6]>/);
+    const heading = m ? textOf(m[2]) : null;
+    const body = textOf(m ? part.slice(m[0].length) : part);
+    if (!heading && !body) continue;
+    searchIndex.push({
+      p: dst,
+      a: m ? '#' + m[1] : '',
+      t: heading || title.replace(/^SPORE — /, ''),
+      s: body.slice(0, SNIPPET),
+    });
+    any = true;
+  }
+  if (!any) searchIndex.push({ p: dst, a: '', t: title.replace(/^SPORE — /, ''), s: '' });
+}
+
 // Titles for pages the nav does not name. Without these the tab reads "SPORE —
 // readme" for three different pages, which is no help to anyone with a dozen tabs
 // open.
@@ -160,6 +202,9 @@ const navLinks = pages
   .filter(([, , label]) => label)
   .map(([, dst, label]) => ({ dst, label }));
 navLinks.splice(navLinks.length - 1, 0, { dst: 'demo/', label: 'Try the web node' });
+// Search goes last, after Developer: it is a tool for people already reading,
+// not a destination to send a first-time visitor to.
+navLinks.push({ dst: 'search.html', label: 'Search' });
 
 const GITHUB_BLOB = 'https://github.com/sloev/spore/blob/master/';
 
@@ -633,8 +678,88 @@ for (const [src, dst, label] of pages) {
   // Rendered as its own sibling section, not appended into bodyHtml — nesting it
   // inside page()'s own <section> put one <section> inside another.
   const extra = dst === 'index.html' ? shareBar() : '';
+  indexPage(dst, title, anchored);
   fs.writeFileSync(path.join(out, dst), page(title, anchored, dst, extra, usedMermaid));
   console.log(`rendered ${src} -> _site/${dst}`);
+}
+
+// The search page. Written after every other page, because it carries the index
+// built while rendering them.
+//
+// The ranking is `site/search-core.mjs`, inlined here rather than reimplemented:
+// `site/search-core.test.mjs` runs that same file, so what ships is what is
+// tested. Stripping the `export` keywords is the whole of the transformation.
+{
+  const core = fs.readFileSync(path.join(root, 'site', 'search-core.mjs'), 'utf8')
+    .replace(/^export /gm, '');
+  const body = `
+<h1>Search</h1>
+<p class="text-muted">Every heading in every page on this site. Results are sections,
+not pages, so a hit takes you to the paragraph rather than to the top of a long
+document.</p>
+<p><input id="q" type="search" placeholder="envelope, custody, fountain code&hellip;"
+   autocomplete="off" autofocus aria-label="Search the documentation"
+   style="width:100%;padding:.6rem;font:inherit" /></p>
+<p id="count" class="text-muted" aria-live="polite"></p>
+<div id="results"></div>
+<noscript><p><strong>Search needs JavaScript.</strong> Everything it would find is
+in <a href="developer.html">the developer index</a>, which is a plain list of every
+page.</p></noscript>`;
+  const script = `<script>
+${core}
+const INDEX = ${JSON.stringify(searchIndex)};
+(function () {
+  const q = document.getElementById('q');
+  const results = document.getElementById('results');
+  const count = document.getElementById('count');
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function show() {
+    const hits = rank(INDEX, q.value);
+    if (!q.value.trim()) { count.textContent = ''; results.innerHTML = ''; return; }
+    count.textContent = hits.length ? hits.length + (hits.length === 1 ? ' result' : ' results') : 'No results';
+    results.innerHTML = hits.map((h) =>
+      '<div class="list-row"><div class="list-row-body">' +
+      '<a class="list-row-title" href="' + esc(h.p + h.a) + '">' + esc(h.t) + '</a>' +
+      '<span class="list-row-subtitle">' + esc(h.s.slice(0, 180)) + '</span>' +
+      '</div></div>').join('');
+  }
+
+  q.addEventListener('input', show);
+  // A ?q= in the URL runs the search on load, so a result can be linked to.
+  const pre = new URLSearchParams(location.search).get('q');
+  if (pre) { q.value = pre; show(); }
+})();
+</script>`;
+  fs.writeFileSync(path.join(out, 'search.html'), page('SPORE — Search', body, 'search.html', script));
+  console.log(`wrote search.html — ${searchIndex.length} sections indexed, ` +
+    `${Math.round(JSON.stringify(searchIndex).length / 1024)} KB inline`);
+
+  // Drive the page we just wrote, the same way the mermaid check parses the
+  // diagrams we just emitted. A ranking test proves the function; this proves
+  // the *page* — that the index was inlined, the script runs, and a query
+  // produces links that go somewhere. The first version of this file shipped an
+  // index of 0 sections and a ranking test that passed perfectly.
+  const { JSDOM } = await import('jsdom');
+  const probe = new JSDOM(fs.readFileSync(path.join(out, 'search.html'), 'utf8'), {
+    runScripts: 'dangerously',
+    url: 'https://spore.test/search.html?q=custody',
+    // The site's theme script asks for it and jsdom has none. Unrelated to
+    // search, but an uncaught error would stop the script that follows it.
+    beforeParse(w) {
+      w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    },
+  });
+  const found = probe.window.document.querySelectorAll('#results a');
+  if (!found.length) {
+    throw new Error('search.html produced no results for a term that is definitely in the docs');
+  }
+  const first = found[0].getAttribute('href');
+  if (!first || !first.includes('#')) {
+    throw new Error(`search.html result does not link to a section: ${first}`);
+  }
+  console.log(`search works — "custody" -> ${found.length} results, first is ${first}`);
+  probe.window.close();
 }
 
 // Ship the favicon/icon/social-preview assets — plain HARDBRUT swatches and a
